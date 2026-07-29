@@ -1,0 +1,78 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Workflow customization surface for bmad-dev-tdd. Mirrors the
+# agent customization shape under the [workflow] namespace.
+
+[workflow]
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+# Steps to run before the standard activation (config load, greet).
+# Overrides append. Use for pre-flight loads, compliance checks, etc.
+
+activation_steps_prepend = []
+
+# Steps to run after greet but before the workflow begins.
+# Overrides append. Use for context-heavy setup that should happen
+# once the user has been acknowledged.
+
+activation_steps_append = []
+
+# Persistent facts the workflow keeps in mind for the whole run
+# (standards, compliance constraints, stylistic guardrails).
+# Distinct from the runtime memory sidecar — these are static context
+# loaded on activation. Overrides append.
+#
+# Each entry is either:
+#   - a literal sentence, e.g. "All stories must include testable acceptance criteria."
+#   - a file reference prefixed with `file:`, e.g. "file:{project-root}/docs/standards.md"
+#     (glob patterns are supported; the file's contents are loaded and treated as facts).
+
+persistent_facts = [
+  "file:{project-root}/**/project-context.md",
+  "New code is guilty until proven innocent — no production code without a failing test that demanded it.",
+  "A test that passes before the implementation exists is a broken test, not a passing one.",
+  "Never weaken, skip, or delete a test to make the suite green.",
+  "Every guard, null check, and boundary clamp in production code must be justified by a test that forces it.",
+  "Never add epic or story references as inline code comments (e.g. # Epic: X, # Story: PROJ-42).",
+  "Code comments explain why, not what — no AI workflow metadata, planning refs, or story tracking in source code.",
+  "Generated code must be production-ready: clean, minimal, and free of AI-generated noise.",
+]
+
+# Scalar: executed when the workflow reaches its final step,
+# after the story implementation is complete and status is updated. Override wins.
+# Leave empty for no custom post-completion behavior.
+
+on_complete = ""
+
+# TDD rigor knobs. Table values deep-merge; scalars override.
+# Must stay LAST — in TOML every key after a table header belongs to that table.
+
+[workflow.tdd]
+
+# Minimum failure modes to enumerate per behavior in the Step 5 analysis
+# before any test or code is written. Raise for safety-critical work;
+# lower only for genuinely trivial code.
+
+min_failure_modes_per_behavior = 3
+
+# Require every data-transforming or persisting behavior to carry at least
+# one reverse-it or cross-check test, or a written justification for why
+# neither applies. Set false to make these optional.
+
+require_inverse_or_crosscheck = true
+
+# Step 9 sensitivity check: temporarily break the production code path the
+# task's most important assertion covers, confirm the test fails, restore.
+# Proves the test actually pins the behavior down. Set false to skip.
+
+verify_test_sensitivity = true
+
+# Preferred shape for defensive code once a test justifies it.
+# Suggested values: "guard-clauses" | "type-narrowing" | "result-types"
+# Whatever the value, the Step 8 preference order still applies:
+# unrepresentable > boundary validation > fail fast > no partial state.
+
+defensive_style = "guard-clauses"

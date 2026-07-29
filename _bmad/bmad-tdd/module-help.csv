@@ -1,0 +1,2 @@
+module,skill,display-name,menu-code,description,action,args,phase,preceded-by,followed-by,required,output-location,outputs
+Dev TDD,bmad-dev-tdd,Dev TDD,DT,"Story cycle alternative to DS: Implement the story strictly test-first — enumerate failure modes per behavior, derive a test list, then red-green-refactor and harden the code defensively. Use when correctness matters more than speed.",,,4-implementation,bmad-create-story:validate,bmad-code-review,false,,
