@@ -222,3 +222,49 @@ describe('describeViolations', () => {
     expect(describeViolations([])).toBe('')
   })
 })
+
+/**
+ * Prefixing an environment variable by stage or scope is the most common
+ * multi-environment convention there is — this project already uses it for
+ * NEXT_PUBLIC_SUPABASE_*. A detector anchored to the start of the name is
+ * disabled by the first team that adopts the convention.
+ */
+const PREFIXED_FORBIDDEN_NAMES = [
+  'PROD_PLAID_SECRET',
+  'NEXT_PUBLIC_PLAID_CLIENT_ID',
+  'MY_STRIPE_SECRET_KEY',
+  'HOA_QUICKBOOKS_REFRESH_TOKEN',
+  'APP_APPFOLIO_API_SECRET',
+  'STAGING_DWOLLA_APP_SECRET',
+  'PROD_BANK_API_TOKEN',
+]
+
+/**
+ * Names built from this product's own vocabulary that sit close to the
+ * forbidden shapes. Square footage, payment due dates and wire tokenisation
+ * notes are condominium-management words, not credentials.
+ */
+const NEAR_MISS_PERMITTED_NAMES = [
+  'SQUARE_FOOTAGE_KEY',
+  'UNIT_SQUARE_FOOTAGE',
+  'PAYMENT_KEYS_ORDER',
+  'WIRE_TOKENIZED_DISPLAY',
+  'BANK_TOKENIZATION_NOTES',
+  'ACH_ACCESSIBILITY_LABEL',
+]
+
+describe('findForbiddenCredentials — reach', () => {
+  it.each(PREFIXED_FORBIDDEN_NAMES)('flags %s despite the leading prefix', (name) => {
+    expect(findForbiddenCredentials([at(name, 'redacted')]).length).toBeGreaterThan(0)
+  })
+
+  it.each(NEAR_MISS_PERMITTED_NAMES)('does not flag the domain term %s', (name) => {
+    expect(findForbiddenCredentials([at(name, 'some-value')])).toEqual([])
+  })
+
+  it('flags an uppercased processor key, since name matching is already case-insensitive', () => {
+    expect(
+      findForbiddenCredentials([at('MISC', processorKeyLike('live').toUpperCase())]).length,
+    ).toBeGreaterThan(0)
+  })
+})

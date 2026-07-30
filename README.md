@@ -48,21 +48,34 @@ This project holds **no credential for any external financial rail** — no bank
 payment processor, no external accounting or property-management system. That is not a policy
 someone remembers to follow; it is a property the build checks.
 
-[`core/security/nfr2-guard.test.ts`](core/security/nfr2-guard.test.ts) runs as part of `npm test`.
-It reads the environment of the process running it plus the repository's tracked configuration
-files, and fails if anything matching a forbidden credential shape is present. The shapes it looks
-for, and the reason each one is forbidden, are in
+[`core/security/nfr2-guard.test.ts`](core/security/nfr2-guard.test.ts) runs as part of `npm test`
+and fails if anything matching a forbidden credential shape is present. The shapes it looks for, and
+the reason each one is forbidden, are in
 [`core/security/forbidden-credentials.ts`](core/security/forbidden-credentials.ts).
 
-Two things follow from that, and both are deliberate:
+It reads four surfaces:
+
+1. the environment of the process running it;
+2. every `.env*` file on disk, **including git-ignored ones** — `.env` is git-ignored by design and
+   is still loaded into the environment by `next build` and `next dev`, which makes it the most
+   likely way a credential ever reaches a deploy unit;
+3. tracked CI and example config, parsed both for assignments and for `${{ secrets.NAME }}`
+   references, so renaming the variable a secret is mapped onto does not hide which secret is being
+   reached for;
+4. JSON config such as `vercel.json`, whose quoted keys no line-oriented parser can see.
+
+Two things follow, and both are deliberate:
 
 - **If the guard fails, remove the credential.** Do not add an exemption, and do not delete the
   test. Its removal is an architecture change requiring a new decision record, not a cleanup. The
   air-gap this product's safety claim rests on *is* the absence of these credentials — see AD-2 in
   the architecture spine.
-- **The guard is scoped honestly.** It cannot see a secret that exists only in a hosting dashboard
-  and is never injected into a build. CI is where deploy-unit secrets are injected in order to build
-  and test, so the check has real reach there, but that limit is stated rather than papered over.
+- **The guard's limit is stated, not papered over.** It cannot see a secret that exists only in a
+  hosting dashboard or in GitHub's secret store and is never referenced by tracked config nor mapped
+  into this process's environment. GitHub Actions does not place repository secrets in a step's
+  environment unless a workflow maps them, so surface 3 above — not the environment scan — is what
+  gives the check reach over CI secrets: a secret no tracked workflow references cannot be used by
+  one. Neither deploy unit's *runtime* environment is inspected.
 
 The system does write to its own database — uploaded documents, extracted records, alerts and the
 provenance log. NFR-2 constrains outbound writes to third-party systems of record, nothing else.

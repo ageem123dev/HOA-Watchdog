@@ -131,7 +131,7 @@ removing it is not a cleanup
   - [x] Locally: temporarily invert one assertion, confirm `npm test` exits non-zero, revert.
         Record the observed exit code / output in the Dev Agent Record. Do **not** commit the
         inverted test.
-  - [x] After the epic branch is pushed, confirm the CI run is green and record the run URL.
+  - [ ] After the epic branch is pushed, confirm the CI run is green and record the run URL.
 
 - [x] **Task 9 — Documentation** (AC: 5)
   - [x] `README.md` with: what the project is (one paragraph), prerequisites (Node 24), the three
@@ -218,6 +218,8 @@ HOA-Treasurer-Assistant/
     page.tsx                     # NEW
   core/
     security/
+      config-entries.ts          # NEW — pure; normalises env, text and JSON config into ConfigEntry
+      config-entries.test.ts
       forbidden-credentials.ts   # NEW — pure, no I/O
       forbidden-credentials.test.ts
       nfr2-guard.test.ts         # NEW — the CI assertion for NFR-2 / AD-2
@@ -242,7 +244,8 @@ Verified against the npm registry on 2026-07-30.
 | `react` / `react-dom` | `19.2.8` | Next 16 peer range is `^19.0.0`. |
 | `typescript` | `~5.9.3` | **Spine binds TypeScript 5.x.** See the note below. |
 | `@types/node` | `^26.1.2` | Node 24 runtime. |
-| `@types/react` / `@types/react-dom` | `^19.2.17` | Matches React 19.2.x. |
+| `@types/react` | `^19.2.17` | Matches React 19.2.x. |
+| `@types/react-dom` | `^19.2.3` | Its published versions lag `@types/react`; `19.2.3` is the latest. |
 | `eslint` | `^10.8.0` | `eslint-config-next` peer is `>=9.0.0`. |
 | `eslint-config-next` | `16.2.12` | Must track the `next` version. Brings `typescript-eslint`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-jsx-a11y` transitively — **do not install those separately**. |
 | `vitest` | `^4.1.10` | Depends on `vite` itself; `@types/node` peer is `>=24.0.0`, satisfied. |
@@ -269,8 +272,9 @@ later reviewer has to justify.
 - **Vitest 4** lists `vite` in its own `dependencies`, so a separate `vite` devDependency is
   redundant.
 - **Node 24.14.1** is the local runtime; pin CI to `node-version: '24'` so local and CI agree.
-- `actions/checkout@v5` and `actions/setup-node@v5` are the current major versions. Using an older
-  major will produce the Node-20 deprecation annotation in the run log.
+- `actions/checkout@v7` and `actions/setup-node@v7` are the current major versions (verified against
+  the GitHub releases API on 2026-07-30). Using an older major will produce a runtime deprecation
+  annotation in the run log.
 
 ## References
 
@@ -473,8 +477,107 @@ to report.
 - `_bmad-output/implementation-artifacts/1-1-project-scaffold-with-a-verified-build.md` (new)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified)
 
+### Local Code Review (AI) — 2026-07-30
+
+Three adversarial layers ran against `9d0a695..4cd8858`: Blind Hunter, Edge Case Hunter, and an
+Acceptance Auditor against this story and the architecture spine. They converged independently on
+one theme, and it was the right one: **the guard's reach was materially narrower than this story and
+the README claimed for it.** Every finding below was reproduced against the real modules before
+being accepted, and every fix was driven by a test written first and observed failing.
+
+**Fixed — reach (the guard could not see credentials that genuinely reach a deploy unit):**
+
+- [x] **A git-ignored `.env` at the repository root passed the guard green.** The most likely way a
+      credential ever enters this project was the one path the guard could not see: `git ls-files`
+      cannot return an ignored file, yet `next build` and `next dev` load `.env` into the
+      environment. The scan now walks `.env*` files **on disk**, ignored ones included, bounded by
+      depth and an explicit skip list. Verified: `.env` holding `PLAID_SECRET` now fails the suite.
+- [x] **A nested `.env` was invisible** — the `.env*` pathspec was root-anchored. The disk walk is
+      recursive to depth 4. Verified with `infra/.env`.
+- [x] **`vercel.json` was declared as a scan source that the parser was structurally incapable of
+      reading.** Every JSON key begins with `"`, which the line parser can never match, so the
+      pathspec entry created the appearance of coverage where there was none. Added
+      `entriesFromJson`, which walks parsed JSON and reports every leaf under the key naming it, and
+      throws rather than reporting a clean scan of a file it could not parse. Verified.
+- [x] **`MISC_TOKEN: ${{ secrets.PLAID_SECRET }}` was undetected** — renaming the variable a secret
+      is mapped onto defeated the check entirely, and this is the canonical way a deploy-unit secret
+      appears in a tracked workflow. Added `secretReferencesFromText`, which reports the secret being
+      *reached for* rather than the name it lands on. Verified.
+- [x] **Every name pattern was `^`-anchored, so `PROD_PLAID_SECRET` and `NEXT_PUBLIC_PLAID_CLIENT_ID`
+      escaped.** Stage prefixing is the ordinary multi-environment convention and this project
+      already uses `NEXT_PUBLIC_*`, so adopting it would have silently disabled the detector. Vendor
+      tokens now match at a name-segment boundary.
+- [x] **YAML sequence items (`- PLAID_SECRET=abc`) were dropped** by the line parser — the shape
+      docker-compose and action step files use.
+- [x] **Lone-CR line endings collapsed a file to one unparseable line.**
+
+**Fixed — the check could report compliance while inspecting nothing:**
+
+- [x] **The anti-vacuity test could not detect the failure it was named for.** It asserted
+      `collectConfigEntries().length > 0`, but `process.env` alone contributes 87 entries on this
+      machine, so the file half could return zero and the test stayed green. It now asserts on the
+      *files inspected*, and a third test asserts the CI workflow specifically is among them.
+- [x] **The scan depended on `process.cwd()`.** `git ls-files` pathspecs and the subsequent
+      `readFileSync` calls both resolved relative to the launch directory, so running from a
+      subdirectory silently scanned nothing — which, before the fix above, read as compliance. The
+      repository root is now resolved from `import.meta.url`.
+
+**Fixed — false positives, the failure mode that gets a guard deleted:**
+
+- [x] `PAYMENT_KEYS_ORDER` and `WIRE_TOKENIZED_DISPLAY` were flagged: `KEY` and `TOKEN` matched as
+      bare prefixes of the following word. Added a `(?:_|$)` terminator.
+- [x] `SQUARE_FOOTAGE_KEY` was flagged. Square footage is condominium vocabulary before Square is a
+      payment processor — precisely the C3 shape. Square now requires a credential-shaped suffix and
+      has its own pattern entry. Six near-miss domain terms are now in the permitted-name suite.
+- [x] `stripMatchingQuotes` mangled `A="a" and "b"` into an unbalanced value; it now strips only
+      genuinely wrapping quotes.
+
+**Fixed — accuracy of claims:**
+
+- [x] **`.gitignore` did not ignore `.env.production`, `.env.development` or `.env.test`,** all of
+      which Next.js loads. Replaced with `.env` / `.env.*` / `!.env.example`. Verified with
+      `git check-ignore` across all six variants.
+- [x] **`actions/checkout@v5` and `actions/setup-node@v5` were two majors stale** — v7 is current
+      for both (confirmed against the GitHub releases API). This story's own "Latest Technical
+      Information" asserted v5 was current; corrected there too.
+- [x] **The README overstated the check's reach.** It claimed "CI is where deploy-unit secrets are
+      injected… so the check has real reach there", but this workflow maps no secrets into any step's
+      environment, and GitHub does not inject them automatically. The README now states plainly that
+      the workflow-file scan — not the environment scan — is what gives the check reach over the CI
+      secret store, and that neither deploy unit's runtime environment is inspected.
+- [x] **This story's Project Structure Notes omitted `config-entries.ts`,** contradicting its own
+      File List. Corrected.
+- [x] **`@types/react-dom` was pinned `^19.2.3` against a table saying `^19.2.17`** — that version
+      does not exist (`ETARGET` on install); the `@types/react-dom` line lags `@types/react`. Table
+      corrected rather than left as a silent deviation.
+- [x] **Task 8's "confirm the CI run is green and record the run URL" was checked before any push
+      had occurred,** so no CI run existed. Unchecked; it is completed after the epic branch is
+      pushed and the run URL is recorded below.
+- [x] **`concurrency.cancel-in-progress` cancelled push runs**, leaving an epic-branch commit with
+      no verdict rather than a failing one. Now conditional on `pull_request`.
+
+**Accepted, not fixed — with reasons:**
+
+- **GitHub Actions secrets are not present in a step's environment unless a workflow maps them.**
+  This is structural to GitHub, not a defect here. The mitigation is the `${{ secrets.* }}` scan: a
+  secret that no tracked workflow references cannot be used by one. Stated explicitly in the README
+  and the guard header rather than papered over.
+- **Neither deploy unit's runtime environment is inspected.** A CI check cannot reach a Vercel or
+  container-host runtime. NFR-2 binds "any deploy unit"; the check proves the property for the
+  repository and the build, and now says so precisely instead of implying more.
+- **Value matching covers only Stripe.** Stripe keys carry a distinctive `sk_live_`/`rk_test_`
+  prefix; Plaid and QuickBooks secrets are undistinguished hex and cannot be matched by shape without
+  false positives on every hash in the repository. The general mechanism for name-independent
+  detection is the secret-reference scan, not value guessing.
+- **The unfiltered `push` trigger double-runs same-repo PR branches.** Both triggers are wanted —
+  push CI is the epic branch's integration gate, PR CI is the merge gate — and the duplication costs
+  a runner minute rather than correctness.
+
+Final state after review fixes: **106 tests passing**, `npm run lint` and `npm run build` clean.
+
 ### Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-07-30 | Scaffolded Next.js 16.2.12 + TypeScript 5.9 + Vitest 4 with ESLint flat config; added the NFR-2 forbidden-credential detector and its CI guard test; added the CI workflow running lint, build and test on every push. |
+| 2026-07-30 | Local adversarial review: widened the NFR-2 guard to see git-ignored and nested `.env` files, JSON config, and `${{ secrets.* }}` references; made detection survive name prefixing; removed false positives on condominium vocabulary; made the scan cwd-independent and genuinely non-vacuous; corrected `.gitignore`, action majors, and overstated claims in the README and this story. |

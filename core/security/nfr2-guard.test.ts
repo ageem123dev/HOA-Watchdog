@@ -16,53 +16,147 @@
  * a credential for an external financial rail has entered the project and the
  * correct response is to remove the credential — never to widen the exemption.
  *
- * What this check can and cannot see: it reads the environment of the process
- * running it and the repository's own tracked configuration. It cannot read a
- * secret that lives only in a hosting dashboard and is never injected into a
- * build. CI is where deploy-unit secrets are injected to build and test, so the
- * check has real reach there — but the limit is real and is stated rather than
- * papered over.
+ * ## What this check sees, and what it does not
+ *
+ * It reads four surfaces:
+ *
+ *  1. the environment of the process running it;
+ *  2. every `.env*` file on disk beneath the repository root — **including
+ *     untracked and git-ignored ones**, because `.env` is git-ignored by design
+ *     and is still loaded into the environment by `next build` and `next dev`,
+ *     which makes it the most likely way a credential ever reaches a deploy unit;
+ *  3. tracked CI and example config, parsed both for assignments and for
+ *     `${{ secrets.NAME }}` references — renaming the variable a secret is mapped
+ *     onto does not hide which secret is being reached for;
+ *  4. JSON config such as `vercel.json`, whose quoted keys no line parser sees.
+ *
+ * It cannot see a secret that exists only in a hosting dashboard or in GitHub's
+ * secret store and is never referenced by tracked config nor mapped into the
+ * environment of this process. That is a real limit and it is stated rather than
+ * papered over: surface 3 is what gives the check reach over CI secrets, because
+ * a secret that is never referenced in a tracked workflow cannot be used by one.
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { entriesFromEnv, entriesFromText, type ConfigEntry } from './config-entries'
+import {
+  entriesFromEnv,
+  entriesFromJson,
+  entriesFromText,
+  secretReferencesFromText,
+  type ConfigEntry,
+} from './config-entries'
 import { describeViolations, findForbiddenCredentials } from './forbidden-credentials'
 
 /**
- * Config files worth reading in full. Deliberately a narrow list rather than a
- * repository walk: a walk would descend into vendored tooling and into this
- * module's own test fixtures, and would report those instead of real findings.
+ * Resolved from this file rather than from `process.cwd()`. A guard whose reach
+ * depends on which directory the runner was launched from can silently inspect
+ * nothing and still report compliance.
  */
-const CONFIG_PATHSPECS = [
-  '.env*',
-  '*.env.example',
+const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+  cwd: dirname(fileURLToPath(import.meta.url)),
+  encoding: 'utf8',
+}).trim()
+
+/** Tracked config worth reading in full, as git pathspecs relative to the root. */
+const TRACKED_CONFIG_PATHSPECS = [
+  '**/.env*',
+  '**/*.env.example',
   '.github/workflows/*.yml',
   '.github/workflows/*.yaml',
-  'vercel.json',
 ]
 
-function trackedConfigFiles(): string[] {
-  const output = execFileSync('git', ['ls-files', '-z', '--', ...CONFIG_PATHSPECS], {
-    encoding: 'utf8',
-  })
-  return output.split('\0').filter((path) => path.length > 0)
+const JSON_CONFIG_FILES = ['vercel.json']
+
+/** Never descended into: vendored code, build output, and BMad's own tooling. */
+const SKIPPED_DIRECTORIES = new Set([
+  'node_modules',
+  '.next',
+  '.git',
+  '.agents',
+  '.claude',
+  '_bmad',
+  '_bmad-output',
+  'coverage',
+  'out',
+])
+
+const MAX_WALK_DEPTH = 4
+
+/**
+ * Finds `.env*` files on disk, git-ignored ones included. Bounded by depth and
+ * by an explicit skip list so this never becomes a full-repository walk.
+ */
+function dotEnvFilesOnDisk(directory: string = REPO_ROOT, depth = 0): string[] {
+  if (depth > MAX_WALK_DEPTH) return []
+
+  const found: string[] = []
+  for (const item of readdirSync(directory, { withFileTypes: true })) {
+    if (item.isDirectory()) {
+      if (SKIPPED_DIRECTORIES.has(item.name)) continue
+      found.push(...dotEnvFilesOnDisk(join(directory, item.name), depth + 1))
+    } else if (item.name.startsWith('.env')) {
+      found.push(join(directory, item.name))
+    }
+  }
+  return found
 }
 
-function collectConfigEntries(): ConfigEntry[] {
-  const entries = entriesFromEnv('process.env', process.env)
+function trackedConfigFiles(): string[] {
+  const output = execFileSync(
+    'git',
+    ['ls-files', '-z', '--', ...TRACKED_CONFIG_PATHSPECS],
+    { cwd: REPO_ROOT, encoding: 'utf8' },
+  )
+  return output
+    .split('\0')
+    .filter((path) => path.length > 0)
+    .map((path) => join(REPO_ROOT, path))
+}
 
-  for (const path of trackedConfigFiles()) {
-    entries.push(...entriesFromText(path, readFileSync(path, 'utf8')))
+function jsonConfigFilesOnDisk(): string[] {
+  const present = new Set(readdirSync(REPO_ROOT))
+  return JSON_CONFIG_FILES.filter((name) => present.has(name)).map((name) => join(REPO_ROOT, name))
+}
+
+function label(absolutePath: string): string {
+  return relative(REPO_ROOT, absolutePath).split(sep).join('/')
+}
+
+interface Scan {
+  readonly entries: ConfigEntry[]
+  readonly filesInspected: string[]
+}
+
+function scanDeployUnit(): Scan {
+  const entries = entriesFromEnv('process.env', process.env)
+  const filesInspected = new Set<string>()
+
+  const textFiles = [...dotEnvFilesOnDisk(), ...trackedConfigFiles()]
+  for (const path of textFiles) {
+    const name = label(path)
+    if (filesInspected.has(name)) continue
+    filesInspected.add(name)
+
+    const content = readFileSync(path, 'utf8')
+    entries.push(...entriesFromText(name, content), ...secretReferencesFromText(name, content))
   }
 
-  return entries
+  for (const path of jsonConfigFilesOnDisk()) {
+    const name = label(path)
+    filesInspected.add(name)
+    entries.push(...entriesFromJson(name, readFileSync(path, 'utf8')))
+  }
+
+  return { entries, filesInspected: [...filesInspected] }
 }
 
 describe('NFR-2: no external write credentials in this deploy unit', () => {
   it('holds no credential for a banking platform, payment processor, or external accounting system', () => {
-    const violations = findForbiddenCredentials(collectConfigEntries())
+    const violations = findForbiddenCredentials(scanDeployUnit().entries)
 
     expect(
       violations,
@@ -72,7 +166,14 @@ describe('NFR-2: no external write credentials in this deploy unit', () => {
     ).toEqual([])
   })
 
-  it('actually inspected something, so a silent collection failure cannot pass as compliance', () => {
-    expect(collectConfigEntries().length).toBeGreaterThan(0)
+  it('read at least one configuration file, so a collection failure cannot pass as compliance', () => {
+    // Asserted on the files specifically. process.env alone always yields dozens
+    // of entries, so a check on the total would stay green with every file
+    // silently unread — which is the failure this test exists to catch.
+    expect(scanDeployUnit().filesInspected).not.toHaveLength(0)
+  })
+
+  it('inspects the CI workflow, whose secret references are its reach over the CI secret store', () => {
+    expect(scanDeployUnit().filesInspected).toContain('.github/workflows/ci.yml')
   })
 })
