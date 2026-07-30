@@ -4,7 +4,7 @@ baseline_commit: 9d0a6951e72699dfe7fbdb749b636656cfd80fc4
 
 # Story 1.1: Project scaffold with a verified build
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -131,7 +131,15 @@ removing it is not a cleanup
   - [x] Locally: temporarily invert one assertion, confirm `npm test` exits non-zero, revert.
         Record the observed exit code / output in the Dev Agent Record. Do **not** commit the
         inverted test.
-  - [ ] After the epic branch is pushed, confirm the CI run is green and record the run URL.
+  - [ ] **BLOCKED — not satisfiable from this repository yet.** After the epic branch is pushed,
+        confirm the CI run is green and record the run URL. `epic-1` was pushed
+        (`27c7c75`) and draft PR #1 was opened against `main`; GitHub dispatched **no run for
+        either event**. Verified: `ci.yml` is present and valid on the pushed head (1466 bytes,
+        LF, parses), repo is public and not archived or disabled, `/actions/permissions` reports
+        `enabled: true` with `allowed_actions: "all"`, and yet `/actions/runs` total is `0` and
+        the head commit has `0` check-runs. This is repository- or account-level Actions
+        enablement, not a defect in this story's workflow file. **AC3 and AC4 are therefore
+        proven locally but not yet observed in CI.** Re-verify once Actions dispatches.
 
 - [x] **Task 9 — Documentation** (AC: 5)
   - [x] `README.md` with: what the project is (one paragraph), prerequisites (Node 24), the three
