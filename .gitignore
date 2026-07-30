@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Test and type-check output
+coverage/
+*.tsbuildinfo
+
+# Local secrets — never committed (see NFR-2 / AD-2)
+.env
+.env*.local
+
+# OS noise
+.DS_Store
+Thumbs.db
