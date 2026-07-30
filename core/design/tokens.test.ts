@@ -1,6 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -15,87 +14,144 @@ import {
   typography,
 } from './tokens'
 
-const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-  cwd: dirname(fileURLToPath(import.meta.url)),
-  encoding: 'utf8',
-}).trim()
+function repoRoot(): string {
+  let directory = dirname(fileURLToPath(import.meta.url))
+  for (let depth = 0; depth < 10; depth += 1) {
+    try {
+      readFileSync(join(directory, 'package.json'), 'utf8')
+      return directory
+    } catch {
+      directory = resolve(directory, '..')
+    }
+  }
+  throw new Error('Could not locate the repository root from this test file')
+}
 
+const REPO_ROOT = repoRoot()
 const DESIGN_MD = join(
   REPO_ROOT,
   '_bmad-output/planning-artifacts/ux-designs/ux-HOA-Treasurer-Assistant-2026-07-30/DESIGN.md',
 )
 
+/** The lines between the opening and closing `---` fences, and nothing else. */
+function frontmatterLines(): string[] {
+  const lines = readFileSync(DESIGN_MD, 'utf8').split(/\r?\n/)
+
+  if (lines[0] !== '---') throw new Error('DESIGN.md does not open with a frontmatter fence')
+  const close = lines.indexOf('---', 1)
+  if (close === -1) throw new Error('DESIGN.md frontmatter is not closed')
+
+  return lines.slice(1, close)
+}
+
 /**
- * Reads one block of the DESIGN.md frontmatter — `colors:`, `rounded:` and so
- * on — as `token -> value`. Deliberately a small local parser rather than a YAML
- * dependency: the frontmatter is a flat map of quoted scalars, and adding a
- * parser to the project to read one file it already owns is not a trade worth
- * making.
+ * Reads one block of the DESIGN.md frontmatter as `token -> value`.
+ *
+ * Bounded to the frontmatter deliberately: an unbounded search would happily
+ * parse a ```yaml sample in the prose — an entirely ordinary edit to a design
+ * document — and the anti-vacuity guard below would pass on it.
+ *
+ * A small local parser rather than a YAML dependency: the block is a flat map of
+ * quoted scalars, and adding a parser to read one file the project already owns
+ * is not a trade worth making. It is strict about what it does not understand.
  */
 function designBlock(name: string): Record<string, string> {
-  const source = readFileSync(DESIGN_MD, 'utf8')
-  const lines = source.split(/\r?\n/)
+  const lines = frontmatterLines()
 
   const start = lines.findIndex((line) => line === `${name}:`)
-  if (start === -1) throw new Error(`DESIGN.md has no "${name}:" block`)
+  if (start === -1) throw new Error(`DESIGN.md frontmatter has no "${name}:" block`)
 
   const entries: Record<string, string> = {}
   for (const line of lines.slice(start + 1)) {
-    // A non-indented line ends the block.
+    if (line.trim() === '') continue
+    // A non-indented line starts the next top-level key.
     if (!/^\s/.test(line)) break
-    const match = /^\s+([A-Za-z0-9-]+):\s*(.*)$/.exec(line)
-    if (match === null) continue
+
+    const match = /^\s+([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
+    if (match === null) {
+      throw new Error(`DESIGN.md "${name}:" block has a line this parser does not understand: ${line}`)
+    }
 
     const [, token, rawValue = ''] = match
     if (token === undefined) continue
-    entries[token] = rawValue.trim().replace(/^'(.*)'$/, '$1')
+
+    if (rawValue.trim() === '') {
+      throw new Error(`DESIGN.md "${name}.${token}" is a nested map, which this parser cannot read`)
+    }
+
+    entries[token] = unquote(rawValue)
   }
 
   return entries
 }
 
-describe('parity with DESIGN.md', () => {
-  it('reads the DESIGN.md frontmatter at all, so this suite cannot pass vacuously', () => {
+/** Strips a trailing comment and either quote style. */
+function unquote(rawValue: string): string {
+  const value = rawValue.trim()
+
+  const quoted = /^(['"])(.*)\1(?:\s+#.*)?$/.exec(value)
+  if (quoted) return quoted[2] as string
+
+  return value.replace(/\s+#.*$/, '')
+}
+
+describe('the DESIGN.md reader', () => {
+  it('reads the frontmatter at all, so this suite cannot pass vacuously', () => {
     expect(Object.keys(designBlock('colors')).length).toBeGreaterThan(0)
   })
 
-  it('carries exactly the colour tokens DESIGN.md declares, with the same values', () => {
-    expect(colors).toEqual(designBlock('colors'))
+  it('reads only the frontmatter, not a YAML sample in the prose', () => {
+    const body = readFileSync(DESIGN_MD, 'utf8').split(/\r?\n/).slice(frontmatterLines().length + 2)
+
+    expect(body.join('\n')).not.toBe('')
+    expect(frontmatterLines().some((line) => line.startsWith('# '))).toBe(false)
   })
 
-  it('carries exactly the typography tokens DESIGN.md declares', () => {
-    expect(typography).toEqual(designBlock('typography'))
+  it('rejects a block it does not understand rather than returning a partial map', () => {
+    expect(() => designBlock('not-a-block')).toThrow(/no "not-a-block:" block/)
   })
+})
 
-  it('carries exactly the corner radii DESIGN.md declares', () => {
-    expect(rounded).toEqual(designBlock('rounded'))
-  })
-
-  it('carries exactly the spacing steps DESIGN.md declares', () => {
-    expect(spacing).toEqual(designBlock('spacing'))
+describe('parity with DESIGN.md', () => {
+  it.each([
+    ['colors', colors],
+    ['typography', typography],
+    ['rounded', rounded],
+    ['spacing', spacing],
+  ])('carries exactly the %s tokens DESIGN.md declares, with the same values', (block, actual) => {
+    expect(actual).toEqual(designBlock(block))
   })
 
   /**
-   * The component block is the one place the module deliberately differs:
-   * DESIGN.md writes the focus ring as one descriptive string
-   * (`'2px solid #14213D, 2px offset'`) because it is prose for a designer, while
-   * the code needs the width and offset separately and takes its colour from the
-   * `ink` token. Everything else must match exactly.
+   * The one block where the code deliberately differs: DESIGN.md writes the
+   * focus ring as a single descriptive string for a designer, while the code
+   * needs width and offset separately and takes the colour from the ink token.
+   * Compared in both directions anyway — this is precisely the block where a
+   * one-directional check would let DESIGN.md grow a token the code never gets.
    */
-  it('carries the measurable component tokens DESIGN.md declares', () => {
+  it('carries every measurable component token DESIGN.md declares', () => {
     const design = designBlock('components')
+    const derived = ['focus-ring']
 
-    expect(components['margin-tick-width']).toBe(design['margin-tick-width'])
-    expect(components['rule-hairline']).toBe(design['rule-hairline'])
-    expect(components['rule-heading']).toBe(design['rule-heading'])
+    expect(Object.keys(design).sort()).toEqual(
+      [...Object.keys(components).filter((key) => !key.startsWith('focus-ring')), ...derived].sort(),
+    )
+
+    for (const [token, value] of Object.entries(design)) {
+      if (derived.includes(token)) continue
+      expect(components, token).toHaveProperty(token, value)
+    }
   })
 
-  it('derives the focus ring from the same values DESIGN.md states in prose', () => {
+  it('derives the focus ring from the values DESIGN.md states in prose', () => {
     const stated = designBlock('components')['focus-ring'] ?? ''
 
-    expect(stated).toContain(components['focus-ring-width'])
-    expect(stated).toContain(components['focus-ring-offset'])
-    expect(stated.toUpperCase()).toContain(colors.ink)
+    // Asserted positionally, not by containment: while width and offset are both
+    // "2px", two `toContain` checks are indistinguishable and would not notice
+    // them being swapped or one being wrong-but-equal to the other.
+    expect(stated).toMatch(
+      new RegExp(`^${components['focus-ring-width']} solid ${colors.ink}, ${components['focus-ring-offset']} offset$`, 'i'),
+    )
   })
 })
 
@@ -111,23 +167,29 @@ describe('theme', () => {
     expect(source).toContain('This is a decision, not an omission')
   })
 
-  it('introduces no prefers-color-scheme handling anywhere in the application', () => {
-    // `git grep` exits 1 when it matches nothing, which is the passing case
-    // here, and non-zero exits throw. Anything other than "no matches" is a real
-    // failure and must not be swallowed into a green test.
-    let matches = ''
-    try {
-      matches = execFileSync(
-        'git',
-        ['grep', '-l', '--', 'prefers-color-scheme', 'app', 'core', 'adapters'],
-        { cwd: REPO_ROOT, encoding: 'utf8' },
-      ).trim()
-    } catch (error) {
-      const { status } = error as { status?: number }
-      if (status !== 1) throw error
+  /**
+   * Scans the shipped surfaces for actual theme handling. Scoped to `app/` and
+   * `adapters/`, which is where CSS and runtime behaviour live — an earlier
+   * version also scanned `core/` and matched this project's own prose about the
+   * decision, turning the guard red against its own documentation.
+   */
+  it('ships no prefers-color-scheme handling in any surface', () => {
+    const offenders: string[] = []
+
+    const walk = (directory: string): void => {
+      for (const item of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, item.name)
+        if (item.isDirectory()) walk(path)
+        else if (/\.(tsx?|css)$/.test(item.name) && readFileSync(path, 'utf8').includes('prefers-color-scheme')) {
+          offenders.push(path)
+        }
+      }
     }
 
-    expect(matches).toBe('')
+    walk(join(REPO_ROOT, 'app'))
+    walk(join(REPO_ROOT, 'adapters'))
+
+    expect(offenders).toEqual([])
   })
 })
 
@@ -154,13 +216,7 @@ describe('custom properties', () => {
     expect(names).toContain('--component-rule-hairline')
   })
 
-  it('gives every custom property a unique name', () => {
-    const names = tokenCustomProperties().map(([name]) => name)
-
-    expect(new Set(names).size).toBe(names.length)
-  })
-
-  it('renders a :root block containing every token, so none can fail to reach the DOM', () => {
+  it('renders a :root block containing every token', () => {
     const css = rootCustomPropertiesCss()
 
     expect(css.startsWith(':root {')).toBe(true)

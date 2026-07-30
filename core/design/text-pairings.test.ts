@@ -8,10 +8,16 @@
  * token set and that outcome.
  */
 
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { contrastRatio } from './contrast'
 import {
+  KNOWN_NON_TEXT_GAPS,
+  MINIMUM_NON_TEXT_CONTRAST,
   MINIMUM_TEXT_CONTRAST,
+  NON_TEXT_PAIRINGS,
   REJECTED_TEXT_COLORS,
   TEXT_PAIRINGS,
   type TextPairing,
@@ -20,6 +26,42 @@ import { colors, type ColorToken } from './tokens'
 
 const describePairing = (pairing: TextPairing) =>
   `${pairing.foreground} on ${pairing.ground}`
+
+function repoRoot(): string {
+  let directory = dirname(fileURLToPath(import.meta.url))
+  for (let depth = 0; depth < 10; depth += 1) {
+    try {
+      readFileSync(join(directory, 'package.json'), 'utf8')
+      return directory
+    } catch {
+      directory = resolve(directory, '..')
+    }
+  }
+  throw new Error('Could not locate the repository root from this test file')
+}
+
+/** Every `--color-*` token actually referenced by an application surface. */
+function colorTokensUsedInSurfaces(): Set<string> {
+  const used = new Set<string>()
+
+  const walk = (directory: string): void => {
+    for (const item of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, item.name)
+      if (item.isDirectory()) {
+        walk(path)
+        continue
+      }
+      if (!/\.(tsx?|css)$/.test(item.name)) continue
+
+      for (const match of readFileSync(path, 'utf8').matchAll(/var\(--color-([a-z-]+)\)/g)) {
+        if (match[1] !== undefined) used.add(match[1])
+      }
+    }
+  }
+
+  walk(join(repoRoot(), 'app'))
+  return used
+}
 
 describe('declared text pairings', () => {
   it('is not empty — an empty list would make this gate vacuous', () => {
@@ -58,6 +100,34 @@ describe('declared text pairings', () => {
       expect(declared, `${token} is used for text but has no declared pairing`).toContain(token)
     }
   })
+
+  /**
+   * The gate measures what is *declared*; the screens render what is *used*.
+   * Nothing connected the two until this test, which is how `ink on on-ink` —
+   * live on the only interactive surface in the product — went unmeasured.
+   *
+   * It is a coarse link: it proves every colour a surface references appears
+   * somewhere in the list, not that each rendered foreground/ground combination
+   * was measured. That would need a style graph. It does catch the case that
+   * matters most: a colour reaching a screen without the gate knowing it exists.
+   */
+  it('declares every colour token the application surfaces actually reference', () => {
+    const used = colorTokensUsedInSurfaces()
+    const declared = new Set(
+      [...TEXT_PAIRINGS, ...NON_TEXT_PAIRINGS].flatMap(
+        (pairing) => [pairing.foreground, pairing.ground] as string[],
+      ),
+    )
+
+    expect(used.size, 'no --color-* references found; the scan is looking in the wrong place').toBeGreaterThan(0)
+
+    for (const token of used) {
+      expect(
+        declared,
+        `--color-${token} is used by a surface but appears in no declared pairing, so its contrast is measured by nothing`,
+      ).toContain(token)
+    }
+  })
 })
 
 describe('contrast floor', () => {
@@ -94,6 +164,75 @@ describe('contrast floor', () => {
     expect(contrastRatio(colors.ink, colors.stone)).toBeCloseTo(12.64, 1)
     expect(contrastRatio(colors.flag, colors.stone)).toBeCloseTo(6.54, 1)
     expect(contrastRatio(colors.brass, colors.stone)).toBeCloseTo(5.62, 1)
+  })
+
+  /**
+   * The gate is binary at 4.5, so the tightest pairing is where the build goes
+   * from green to red with no warning. Pinning it makes any narrowing visible as
+   * a deliberate change rather than a surprise — and names which pairing is
+   * carrying the least headroom.
+   *
+   * It is `ink-muted` on `stone` at 4.71:1, used by every label and eyebrow —
+   * and notably the one pairing DESIGN.md's own "Contrast obligations"
+   * paragraph does not measure.
+   */
+  it('pins the pairing with the least headroom, so narrowing it is a visible decision', () => {
+    const measured = TEXT_PAIRINGS.map((pairing) => ({
+      pairing: describePairing(pairing),
+      ratio: contrastRatio(colors[pairing.foreground], colors[pairing.ground]),
+    })).sort((a, b) => a.ratio - b.ratio)
+
+    const tightest = measured[0]
+
+    expect(tightest?.pairing).toBe('ink-muted on stone')
+    expect(tightest?.ratio).toBeCloseTo(4.71, 1)
+  })
+})
+
+describe('non-text contrast (SC 1.4.11)', () => {
+  const isKnownGap = (pairing: TextPairing) =>
+    KNOWN_NON_TEXT_GAPS.some(
+      (gap) => gap.foreground === pairing.foreground && gap.ground === pairing.ground,
+    )
+
+  it.each(NON_TEXT_PAIRINGS.map((pairing) => [describePairing(pairing), pairing] as const))(
+    '%s meets the 3:1 boundary minimum, or is a recorded gap',
+    (_label, pairing) => {
+      if (isKnownGap(pairing)) return
+
+      const ratio = contrastRatio(colors[pairing.foreground], colors[pairing.ground])
+      expect(
+        ratio,
+        `${describePairing(pairing)} (${pairing.usage}) measures ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(MINIMUM_NON_TEXT_CONTRAST)
+    },
+  )
+
+  /**
+   * Pins each recorded gap at its measured value. If the palette changes, this
+   * fails and whoever changed it must come back and delete the exception — an
+   * exception nobody is forced to revisit becomes permanent.
+   */
+  it.each(KNOWN_NON_TEXT_GAPS.map((gap) => [`${gap.foreground} on ${gap.ground}`, gap] as const))(
+    '%s is still the recorded shortfall, not silently resolved or silently worsened',
+    (_label, gap) => {
+      const ratio = contrastRatio(colors[gap.foreground], colors[gap.ground])
+
+      expect(ratio).toBeCloseTo(gap.measured, 1)
+      expect(ratio).toBeLessThan(MINIMUM_NON_TEXT_CONTRAST)
+      expect(gap.reason.length).toBeGreaterThan(0)
+    },
+  )
+
+  it('records every gap it exempts, so none is exempted without a reason', () => {
+    for (const gap of KNOWN_NON_TEXT_GAPS) {
+      expect(
+        NON_TEXT_PAIRINGS.some(
+          (pairing) => pairing.foreground === gap.foreground && pairing.ground === gap.ground,
+        ),
+        `${gap.foreground} on ${gap.ground} is exempted but never declared`,
+      ).toBe(true)
+    }
   })
 })
 

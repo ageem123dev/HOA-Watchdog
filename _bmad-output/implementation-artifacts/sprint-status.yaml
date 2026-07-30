@@ -55,7 +55,7 @@ development_status:
   epic-1: in-progress
   1-1-project-scaffold-with-a-verified-build: done
   1-2-board-member-sign-in: done
-  1-3-visual-foundation: review
+  1-3-visual-foundation: done
   1-4-upload-a-document-and-see-it-accepted-or-rejected: backlog
   1-5-read-a-document-into-structured-records: backlog
   1-6-hold-unknown-vendors-for-a-human: backlog

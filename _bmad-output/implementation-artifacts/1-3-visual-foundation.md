@@ -4,7 +4,7 @@ baseline_commit: 137aea96f73c50cee6b48bcc39a8d3bcde7844ae
 
 # Story 1.3: Visual foundation
 
-Status: review
+Status: done
 
 ## Story
 
@@ -313,6 +313,8 @@ Restating the reasoning elsewhere would create something that can drift.
 ### File List
 
 - `core/design/tokens.ts` (new)
+- `core/design/stylesheet.ts` (new)
+- `core/design/stylesheet.test.ts` (new)
 - `core/design/tokens.test.ts` (new)
 - `core/design/contrast.ts` (new)
 - `core/design/contrast.test.ts` (new)
@@ -325,8 +327,131 @@ Restating the reasoning elsewhere would create something that can drift.
 - `_bmad-output/implementation-artifacts/1-3-visual-foundation.md` (new)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified)
 
+### Local Code Review (AI) — 2026-07-30
+
+Two adversarial layers ran against `137aea9..a947de2`. Both independently confirmed the contrast
+mathematics is correct — one re-derived WCAG luminance from the specification and reproduced every
+figure — and both then found that **the gates built on top of it were vacuous in four places**. The
+story's own thesis is that vacuity is the failure mode to design against, so this was the right
+finding to get.
+
+**Fixed — critical:**
+
+- [x] **The commit was red, and the story claimed 312 passing.** The "no `prefers-color-scheme`
+      handling" guard ran `git grep` over `core/`, and `core/design/tokens.ts` contains a docstring
+      saying the absence of that handling *is* the decision — so the guard matched its own
+      documentation. It passed while the files were untracked (git grep only searches tracked
+      files) and went red the instant they were committed. **My claim of a clean gate was verified
+      before the commit and not re-verified after it, which is exactly the check that mattered.**
+      Replaced with a filesystem walk scoped to `app/` and `adapters/`, where CSS and runtime
+      behaviour actually live. Verified green with the files tracked.
+
+**Fixed — the gates that were not gating:**
+
+- [x] **The AC1 scanner never opened `app/layout.tsx`** — the one file holding every CSS rule this
+      story added. The `app/**/*.tsx` git pathspec, without `:(glob)` magic, requires a literal
+      directory segment, so it matched only nested files. `git ls-files -- 'app/**/*.tsx'` returned
+      2 of 4 files. The "scans at least one file" guard was satisfied by the two it did see, and my
+      own sensitivity check happened to use a nested file, so neither caught it. Replaced with a
+      directory walk, and a test now asserts `app/layout.tsx` and `app/page.tsx` are among the
+      scanned files by name. Verified by injecting a hex into `layout.tsx` — previously invisible,
+      now reported.
+- [x] **The scanner enforced "no hex, rgb, hsl" while AC1 says "no color".** `background: 'white'`,
+      `rebeccapurple`, `oklch()`, `lab()`, `hwb()`, `ButtonText` and the `font:` shorthand all sailed
+      through. The seven positive fixtures tested exactly what the pattern was written to catch,
+      which is self-fulfilling rather than adversarial. Now covers named and system colours, every
+      modern colour function, and the shorthand — 18 detection fixtures against 11 no-false-positive
+      fixtures.
+- [x] **The scanner also cried wolf**, flagging `// see issue #1234`, `href="#section"` and CSS id
+      selectors as colours. Hex matching is now anchored to value position (after a `:`), which is
+      what distinguishes a colour from a fragment identifier.
+- [x] **No test asserted the tokens reach the DOM**, despite a test named for exactly that — it
+      asserted on the string a generator returns, and nothing imported `app/layout.tsx`. Deleting
+      the `<style>` element would have left all 312 tests green and every screen unstyled, since the
+      migration moved background, colour and font onto `body`. The stylesheet moved to a pure
+      `core/design/stylesheet.ts`, and `stylesheet.test.ts` asserts both its content and that the
+      layout renders it.
+- [x] **AC2 had no test of any kind.** Now covered: the ink ring is built from the token width and
+      offset, `.on-ink` inverts it, the outline is never removed, and a regression test asserts the
+      selector is *not* a descendant selector.
+- [x] **The AC3 gate measured a hand-written list disconnected from what the screens render.**
+      `ink` on `on-ink` — live on the only interactive surface in the product — was absent from it.
+      Added, and a new test extracts every `--color-*` the surfaces reference and asserts each one
+      appears in a declared pairing. It is a coarse link rather than a style graph, and says so.
+
+**Fixed — correctness and honesty:**
+
+- [x] **A code comment cited a hand-verification of `flag` that was not in the tree.** The
+      conclusion was right (6.54, recomputed) but the citation pointed at a test that did not exist,
+      which is the more dangerous combination — a reader follows the pointer, finds nothing, and
+      cannot tell which half to distrust. `contrast.test.ts` now carries the pairing with the full
+      arithmetic worked through in the comment.
+- [x] **`.on-ink :focus-visible` was a descendant selector**, so it would have painted a white ring
+      on any nested stone panel — 1.26:1, invisible — which is the precise failure the rule exists
+      to prevent. Narrowed to the element itself and its direct children, with a `.on-stone` reset
+      for nested grounds.
+- [x] **The migration shrank the sign-in footnote from 13px to 11px.** The token set has no 13px
+      step and the value was snapped to `scale-label`, which is DESIGN.md's *uppercase tracked
+      label* size — applied to running prose, in a story about legibility. Moved to `scale-body`.
+- [x] **`components` parity was one-directional**, the one block where the code deliberately
+      diverges and therefore the one place the weakest assertion should not have been. Now
+      bidirectional, and the focus-ring derivation is matched positionally rather than by two
+      `toContain` checks that are indistinguishable while width and offset are both `2px`.
+- [x] **The DESIGN.md reader was unbounded by the frontmatter fences**, so a ```yaml sample in the
+      prose — an ordinary edit to a design document — would have been parsed as the token source,
+      satisfying the anti-vacuity guard on prose. Now bounded, and strict: double quotes, trailing
+      comments and blank lines are handled, and a nested map throws rather than flattening.
+- [x] **Both gates shelled out to `git rev-parse` at module scope**, so they failed to import
+      wherever git or `.git` is absent — a Docker stage that copies only source, a tarball. Replaced
+      with a walk up to `package.json`.
+- [x] **The scanner reported one offence per line**, hiding a font violation behind a colour one
+      until the first was fixed. Both are reported now.
+- [x] Removed `.figure`, which had no consumer — the Completion Notes argued against speculative
+      components and then shipped one.
+- [x] The `<style>` element now carries `href` and `precedence` so React 19 hoists it into `<head>`;
+      it was rendering inside `<body>`, an HTML conformance error that also inverted the cascade
+      order the token layer assumes.
+
+**Found by the new gate, and needing a decision — a second DESIGN.md problem:**
+
+The moment the "every used colour is measured" test existed, it caught `--color-rule-strong`, used
+for input and button borders and measured by nothing. Measuring it:
+
+| Boundary pairing | Measured | SC 1.4.11 floor |
+| --- | --- | --- |
+| `rule-strong` on `stone` | **2.13:1** | 3:1 |
+| `rule-strong` on `stone-raised` | **2.40:1** | 3:1 |
+
+DESIGN.md §Components specifies `rule-strong` as the hairline border for controls, and at those
+values it **fails WCAG 2.2 SC 1.4.11**, which governs the visual information that identifies a user
+interface component. The white field ground does not rescue it: white against stone-raised is about
+1.07:1, so the border is doing essentially all the work of saying "this is an input".
+
+This cannot be fixed from code without either changing a token (breaking parity with DESIGN.md) or
+ignoring the component specification, so it is **recorded as a pinned exception rather than silently
+tolerated or unilaterally patched**. `KNOWN_NON_TEXT_GAPS` holds both pairings with their measured
+values; if the palette changes, the pin fails and whoever changed it must delete the exception. An
+exception nobody is forced to revisit becomes permanent.
+
+**Accepted, not fixed:**
+
+- **`on-ink` is used as the input background.** The token names a foreground — the colour text takes
+  *on* an ink ground — and the migration reached for it because it equalled the `#FFFFFF` literal
+  being replaced. The palette has no `paper`/`field` token, and inventing one would break DESIGN.md
+  parity. The pairing is now measured (15.97:1). Recorded as a token-vocabulary gap for the designer.
+- **The used-colour test is coarse.** It proves every referenced colour appears in some pairing, not
+  that each rendered foreground/ground combination was measured. A precise version needs a style
+  graph. The comment says so rather than implying more.
+- **`ink-muted` on `stone` has 0.21 of headroom** (4.71:1) and is the tightest pairing in the set —
+  and the one DESIGN.md's own "Contrast obligations" paragraph does not measure. Pinned by name and
+  value so any narrowing is a visible decision rather than a surprise red build.
+
+Final state after review fixes: **352 tests passing** across 12 files; `npm run lint`,
+`npx tsc --noEmit` and `npm run build` all clean, verified with the files tracked.
+
 ### Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-07-30 | Local adversarial review: the committed suite was red (a guard matching its own documentation once tracked); the AC1 scanner was blind to app/layout.tsx and to every non-hex colour form; no test asserted the tokens reach the DOM; AC2 had no test at all; the AC3 gate was disconnected from what the surfaces render. All fixed. The new used-colour gate then caught rule-strong control borders failing SC 1.4.11 at 2.13:1 -- recorded as a pinned exception for a design decision. |
 | 2026-07-30 | Visual foundation: the DESIGN.md token set as pure data with a parity test against the document itself; WCAG contrast measurement verified against known values; an automated gate over every declared text pairing; focus ring on both stone and ink grounds; a scanner forbidding raw colour and font literals in application surfaces; both existing surfaces migrated off literals. |

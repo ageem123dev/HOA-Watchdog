@@ -111,6 +111,30 @@ describe('contrastRatio', () => {
     expect(contrastRatio('#777777', '#FFFFFF')).toBeLessThan(4.5)
   })
 
+  /**
+   * Hand-computed cross-check for the project's own `flag` on `stone`, because
+   * DESIGN.md publishes ≈7.9:1 for this pairing and this module measures 6.54.
+   * Worked through by hand from the specification:
+   *
+   *   #8C2F1E -> channels 140/47/30 -> all above the 0.03928 threshold
+   *     r ((0.5490+0.055)/1.055)^2.4 = 0.26225
+   *     g ((0.1843+0.055)/1.055)^2.4 = 0.02843
+   *     b ((0.1176+0.055)/1.055)^2.4 = 0.01300
+   *     L = 0.2126(0.26225) + 0.7152(0.02843) + 0.0722(0.01300) = 0.07702
+   *
+   *   #E5E5E0 -> channels 229/229/224
+   *     L = 0.2126(0.78337) + 0.7152(0.78337) + 0.0722(0.74537) = 0.78063
+   *
+   *   ratio = (0.78063 + 0.05) / (0.07702 + 0.05) = 6.539
+   *
+   * The published figure is the one that is wrong. Nothing is out of
+   * conformance — 6.54 clears the 4.5:1 floor — but the document should be
+   * corrected, and this is the arithmetic that says so.
+   */
+  it('cross-check: flag on stone measures 6.54:1, not the 7.9:1 DESIGN.md publishes', () => {
+    expect(contrastRatio('#8C2F1E', '#E5E5E0')).toBeCloseTo(6.539, 2)
+  })
+
   it('never reports less than 1', () => {
     for (const hex of ['#000000', '#FFFFFF', '#14213D', '#6E5426']) {
       expect(contrastRatio(hex, hex)).toBeGreaterThanOrEqual(1)

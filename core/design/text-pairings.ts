@@ -26,6 +26,11 @@ export const TEXT_PAIRINGS: readonly TextPairing[] = [
   { foreground: 'ink-muted', ground: 'stone', usage: 'Labels and evidence sub-lines' },
   { foreground: 'ink-muted', ground: 'stone-raised', usage: 'Labels on a raised plane' },
   { foreground: 'on-ink', ground: 'ink', usage: 'Text on the masthead and inverted surfaces' },
+  {
+    foreground: 'ink',
+    ground: 'on-ink',
+    usage: 'Typed text in a form field, whose ground is white rather than the sheet',
+  },
   { foreground: 'flag', ground: 'stone', usage: 'Error text and high-severity labels' },
   { foreground: 'flag', ground: 'stone-raised', usage: 'Error text on a raised plane' },
   { foreground: 'flag', ground: 'flag-tint', usage: 'Error text within a flag-tinted block' },
@@ -34,6 +39,63 @@ export const TEXT_PAIRINGS: readonly TextPairing[] = [
   { foreground: 'brass', ground: 'brass-tint', usage: 'Text within a brass-tinted block' },
   { foreground: 'affirm', ground: 'stone', usage: 'Reconciled and resolved state text' },
   { foreground: 'affirm', ground: 'stone-raised', usage: 'Reconciled state text on a raised plane' },
+]
+
+/** WCAG 2.2 SC 1.4.11 Non-text Contrast — user-interface component boundaries. */
+export const MINIMUM_NON_TEXT_CONTRAST = 3
+
+/**
+ * Colours used to draw a control's boundary rather than its text. These identify
+ * a component, so they answer to 1.4.11's 3:1 rather than 1.4.3's 4.5:1.
+ */
+export const NON_TEXT_PAIRINGS: readonly TextPairing[] = [
+  {
+    foreground: 'rule-strong',
+    ground: 'stone-raised',
+    usage: 'Input and control boundaries on a raised sheet',
+  },
+  { foreground: 'rule-strong', ground: 'stone', usage: 'Control boundaries on the page ground' },
+]
+
+/**
+ * A conformance gap in the palette itself, recorded rather than silently
+ * tolerated or unilaterally "fixed".
+ *
+ * DESIGN.md §Components specifies `rule-strong` as the hairline border for
+ * controls. Measured, it is **2.13:1 on stone and 2.40:1 on stone-raised** —
+ * below SC 1.4.11's 3:1 floor for the visual information that identifies a user
+ * interface component. The white field ground does not rescue it either: white
+ * against stone-raised is about 1.07:1, so the border is doing essentially all
+ * the work of saying "this is an input".
+ *
+ * This cannot be fixed from code without either changing a token (which would
+ * break parity with DESIGN.md) or ignoring the component specification. It is a
+ * design decision and is flagged for one.
+ *
+ * The measured values are pinned below. If the palette changes, the pin fails
+ * and whoever changed it must come back here and delete the exception — which is
+ * the point: an exception nobody is forced to revisit becomes permanent.
+ */
+export const KNOWN_NON_TEXT_GAPS: readonly {
+  foreground: ColorToken
+  ground: ColorToken
+  measured: number
+  reason: string
+}[] = [
+  {
+    foreground: 'rule-strong',
+    ground: 'stone',
+    measured: 2.13,
+    reason:
+      'DESIGN.md specifies rule-strong for control boundaries; it falls short of SC 1.4.11. Needs a design decision, not a code change.',
+  },
+  {
+    foreground: 'rule-strong',
+    ground: 'stone-raised',
+    measured: 2.4,
+    reason:
+      'As above, on a raised sheet — the ground the sign-in form actually uses.',
+  },
 ]
 
 /**

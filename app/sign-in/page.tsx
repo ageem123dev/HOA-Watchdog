@@ -202,5 +202,9 @@ const styles: Record<string, CSSProperties> = {
     minHeight: '44px',
     cursor: 'pointer',
   },
-  footnote: { margin: 0, color: 'var(--color-ink-muted)', fontSize: 'var(--type-scale-label)' },
+  // Body scale, not label scale. The pre-token value was 13px and the token set
+  // has no 13px step; snapping to `scale-label` (11px) would have shrunk running
+  // prose to the size reserved for uppercase tracked labels, which is a
+  // legibility regression in a story about legibility.
+  footnote: { margin: 0, color: 'var(--color-ink-muted)', fontSize: 'var(--type-scale-body)' },
 }
