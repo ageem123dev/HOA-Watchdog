@@ -1,0 +1,459 @@
+<title>Treasury Watchdog — Security &amp; Control Posture</title>
+
+<style>
+  :root {
+    --paper: #F1F3EE;
+    --paper-2: #E8ECE4;
+    --paper-3: #DFE4DA;
+    --ink: #17201B;
+    --ink-2: #3D4A43;
+    --ink-3: #6B776F;
+    --rule: #C9D1C7;
+    --rule-strong: #A9B4A7;
+    --accent: #2C5D4F;
+    --flag: #9C3521;
+    --seal: #8A6F3C;
+
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+    --measure: 36rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131714; --paper-2: #1A201C; --paper-3: #222925;
+      --ink: #E4EAE4; --ink-2: #AFBBB3; --ink-3: #7F8C84;
+      --rule: #2C352F; --rule-strong: #3E4A43;
+      --accent: #6FBFA5; --flag: #D9705A; --seal: #C2A570;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131714; --paper-2: #1A201C; --paper-3: #222925;
+    --ink: #E4EAE4; --ink-2: #AFBBB3; --ink-3: #7F8C84;
+    --rule: #2C352F; --rule-strong: #3E4A43;
+    --accent: #6FBFA5; --flag: #D9705A; --seal: #C2A570;
+  }
+  :root[data-theme="light"] {
+    --paper: #F1F3EE; --paper-2: #E8ECE4; --paper-3: #DFE4DA;
+    --ink: #17201B; --ink-2: #3D4A43; --ink-3: #6B776F;
+    --rule: #C9D1C7; --rule-strong: #A9B4A7;
+    --accent: #2C5D4F; --flag: #9C3521; --seal: #8A6F3C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 58rem; margin: 0 auto; }
+
+  header.masthead {
+    padding: 4rem 0 1.5rem;
+    border-bottom: 2px solid var(--ink);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1.5rem 2rem;
+    align-items: end;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 1.25rem;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(1.6rem, 4.2vw, 2.4rem);
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .docmeta {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    line-height: 1.8;
+    color: var(--ink-3);
+    text-align: right;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .docmeta b { color: var(--ink-2); font-weight: 600; }
+
+  @media (max-width: 44rem) {
+    header.masthead { grid-template-columns: 1fr; align-items: start; }
+    .docmeta { text-align: left; }
+  }
+
+  section { padding: 3rem 0 0; }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.25rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+  h2 .num { color: var(--ink-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+
+  h3 {
+    font-family: var(--serif);
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 1.9rem 0 0.5rem;
+    text-wrap: balance;
+  }
+
+  p { max-width: var(--measure); margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.8125em;
+    background: var(--paper-3);
+    padding: 0.1em 0.36em;
+    border-radius: 2px;
+  }
+
+  .tablewrap { overflow-x: auto; margin: 1.5rem 0 0; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 46rem;
+    font-size: 0.875rem;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    text-align: left;
+    padding: 0 0.9rem 0.6rem 0;
+    border-bottom: 1px solid var(--rule-strong);
+    vertical-align: bottom;
+  }
+
+  td {
+    padding: 0.8rem 0.9rem 0.8rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    line-height: 1.5;
+  }
+
+  td:last-child, th:last-child { padding-right: 0; }
+
+  .ctl {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mech { color: var(--ink); }
+  .evid { color: var(--ink-2); font-size: 0.8125rem; }
+
+  .kind {
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+    display: inline-block;
+  }
+  .kind.struct { color: var(--accent); }
+  .kind.enforce { color: var(--seal); }
+  .kind.proc { color: var(--ink-3); }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    padding: 0.1rem 0 0.1rem 1.35rem;
+    margin: 1.75rem 0;
+    max-width: var(--measure);
+  }
+  .callout p {
+    font-family: var(--mono);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    letter-spacing: -0.015em;
+  }
+
+  .limits { border-top: 1px solid var(--rule-strong); margin-top: 1.5rem; }
+  .limit { padding: 1.1rem 0; border-bottom: 1px solid var(--rule); }
+  .limit h4 {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--flag);
+    margin: 0 0 0.45rem;
+  }
+  .limit p { font-size: 0.9375rem; color: var(--ink-2); margin: 0; }
+
+  .attn {
+    background: var(--paper-2);
+    border: 1px solid var(--rule-strong);
+    padding: 1.4rem 1.5rem;
+    margin: 1.75rem 0 0;
+  }
+  .attn .label {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--flag);
+    display: block;
+    margin-bottom: 0.6rem;
+  }
+  .attn p { max-width: none; font-size: 0.9375rem; }
+  .attn ul { max-width: var(--measure); margin: 0.75rem 0 0; padding-left: 1.1rem; }
+  .attn li { font-size: 0.9375rem; color: var(--ink-2); margin-bottom: 0.45rem; }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 2px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    line-height: 1.7;
+    color: var(--ink-3);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem 2rem;
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Internal · Architecture-derived</p>
+      <h1>Security &amp; control posture</h1>
+    </div>
+    <div class="docmeta">
+      <div>Status <b>Draft</b></div>
+      <div>Scope <b>Pilot, one association</b></div>
+      <div>Source <b>ARCHITECTURE-SPINE.md</b></div>
+    </div>
+  </header>
+
+  <section>
+    <h2><span>What this document is for</span><span class="num">01</span></h2>
+    <p>
+      This records the controls the Watchdog's architecture actually enforces, the mechanism behind
+      each one, and what a reviewer could inspect to confirm it. It is written to be checked, not
+      to reassure — every claim below either names a structural property or is marked as something
+      weaker.
+    </p>
+    <p>
+      Controls are typed. A <span class="kind struct">structural</span> control cannot be violated
+      without changing the architecture. An <span class="kind enforce">enforced</span> control is
+      checked at runtime and fails closed. A <span class="kind proc">procedural</span> control
+      depends on people following it, and should be read with appropriate skepticism.
+    </p>
+  </section>
+
+  <section>
+    <h2><span>Control register</span><span class="num">02</span></h2>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:5.5rem">Control</th>
+            <th style="width:6.5rem">Type</th>
+            <th>Mechanism</th>
+            <th>What a reviewer inspects</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ctl">AD-2</td>
+            <td><span class="kind struct">Structural</span></td>
+            <td class="mech">No banking or payment-rail credential exists in any environment, secret store, or CI configuration. The air-gap is an absence, not a scope.</td>
+            <td class="evid">Secret inventory across all deploy units; CI check asserting no matching key names. There is no rail to write to.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-3</td>
+            <td><span class="kind struct">Structural</span></td>
+            <td class="mech">The LLM-adjacent runtime holds exactly one secret — the model API key — and no database credential, connection string, or storage key.</td>
+            <td class="evid">Environment manifest of the agent service; absence of any DB driver dependency in its lockfile.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-4</td>
+            <td><span class="kind enforce">Enforced</span></td>
+            <td class="mech">Two database roles. <code>watchdog_writer</code> is used only by ingestion; <code>watchdog_reader</code> is SELECT-only and is the only role a model-initiated query executes under.</td>
+            <td class="evid">Postgres <code>GRANT</code> statements; a negative test asserting the reader role's INSERT fails.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-5</td>
+            <td><span class="kind struct">Structural</span></td>
+            <td class="mech">The model never authors SQL. It selects a reviewed catalog entry and supplies typed parameters, validated at the API layer via strict tool use.</td>
+            <td class="evid">Tool definitions carry <code>strict: true</code> and <code>additionalProperties: false</code>; the catalog is version-controlled and reviewable as ordinary code.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-7</td>
+            <td><span class="kind enforce">Enforced</span></td>
+            <td class="mech">Every numeric token in a rendered answer must appear in that turn's tool result set. Unreferenced numerals are rejected pre-render and the turn retries.</td>
+            <td class="evid">Validator unit tests, including the negative case: a fabricated figure must fail. This is what makes the 100% delegation metric assertable.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-8</td>
+            <td><span class="kind struct">Structural</span></td>
+            <td class="mech">Extracted strings are never interpolated into a prompt. Prompts carry row identifiers; tools resolve values; the renderer escapes on output.</td>
+            <td class="evid">Prompt-assembly code contains no interpolation of extraction output. Vendor identity resolves against a table, never a free string.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-9</td>
+            <td><span class="kind enforce">Enforced</span></td>
+            <td class="mech">Extraction is invoked with a machine-enforced output schema. Schema-invalid output halts the pipeline; no partial extraction proceeds.</td>
+            <td class="evid">The extractor call sets <code>responseSchema</code>; the halt path returns a structured error rather than a best-effort record.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-10</td>
+            <td><span class="kind struct">Structural</span></td>
+            <td class="mech">Extraction and reasoning are different vendors, different keys, different deploy units. Raw bytes and raw extracted text never enter the reasoning context.</td>
+            <td class="evid">Two provider SDKs, two credentials, no shared client. The trust boundary is a vendor boundary and cannot be collapsed by configuration.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-12</td>
+            <td><span class="kind enforce">Enforced</span></td>
+            <td class="mech">Each query execution appends user, timestamp, catalog entry and version, bound parameters, and exact SQL — before returning results. Append-only.</td>
+            <td class="evid">No application role holds UPDATE or DELETE on the log table; a query path that bypasses the write is a failing test.</td>
+          </tr>
+          <tr>
+            <td class="ctl">AD-14</td>
+            <td><span class="kind enforce">Enforced</span></td>
+            <td class="mech">A catalog entry version, once used in production, is frozen. Changing SQL or the parameter schema mints a new version.</td>
+            <td class="evid">CI diff check on published catalog versions. Without this the audit trail cannot be replayed and AD-12's records become unverifiable.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span>The injection path, specifically</span><span class="num">03</span></h2>
+
+    <p>
+      The realistic attack is not someone breaking into the database. It is a vendor sending an
+      invoice whose text is written to be read by a language model — a description field containing
+      instructions rather than a description. The document arrives through the association's own
+      front door, looking exactly like the documents the system exists to process.
+    </p>
+
+    <p>
+      Isolating extraction from reasoning (the dual-LLM pattern) blocks the crude version of this:
+      the reasoning model never sees the raw document. But schema validation alone would not stop a
+      payload that fits the schema — <code>vendor_name</code> is a string, and a malicious string is
+      still a string. Three controls compound against that:
+    </p>
+
+    <div class="callout">
+      <p>
+        Values are bounded, never interpolated into prompts, and the model's entire capability
+        surface is a fixed list of reviewed queries. A successful injection would still be talking
+        to something that can only ask permitted questions.
+      </p>
+    </div>
+
+    <p>
+      That is the substantive point about the query catalog. Its value is not primarily SQL-injection
+      prevention — parameterization handles that. It is that the blast radius of a fully successful
+      prompt injection is bounded by what the catalog can express, and the catalog is a reviewed,
+      version-controlled artifact rather than something the model composes at runtime.
+    </p>
+  </section>
+
+  <section>
+    <h2><span>What this posture does not cover</span><span class="num">04</span></h2>
+
+    <p>
+      Stating these plainly is part of the diligence claim. A control register that lists only
+      strengths is not evidence of anything.
+    </p>
+
+    <div class="limits">
+      <div class="limit">
+        <h4>Extraction accuracy is not a security control</h4>
+        <p>Schema conformance guarantees shape, not truth. A misread amount produces a well-formed, confidently-presented wrong figure. Nothing in this register detects that; it is a model-quality problem addressed by review, not by architecture.</p>
+      </div>
+      <div class="limit">
+        <h4>Garbage in, audited garbage out</h4>
+        <p>Under the uploads-only data plane the system's view of reality is whatever the board uploaded. It cannot detect an invoice that was never uploaded, and a complete-looking answer may rest on incomplete records.</p>
+      </div>
+      <div class="limit">
+        <h4>Third-party data residency</h4>
+        <p>Association financial records reside on managed cloud infrastructure and are processed by two external model providers. That is a deliberate trade-off for a pilot, not an oversight — but it is a real one and belongs in any disclosure to the board.</p>
+      </div>
+      <div class="limit">
+        <h4>No multi-tenant isolation yet</h4>
+        <p>The pilot is a single association. Row-level security and tenant scoping in the catalog do not exist. Onboarding a second association without revisiting AD-4 and AD-5 would be a serious defect, not a scaling task.</p>
+      </div>
+      <div class="limit">
+        <h4>Retention and deletion are undecided</h4>
+        <p>How long documents, extractions, and the provenance log persist is unresolved, and interacts with record-keeping obligations the product's requirements reference but do not specify.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span>Open before pilot</span><span class="num">05</span></h2>
+
+    <div class="attn">
+      <span class="label">Unresolved — required before handling real association data</span>
+      <p>These are gaps in the current architecture, not deferred niceties:</p>
+      <ul>
+        <li><b>Service-to-service authentication</b> on the gateway's tool endpoints. Those endpoints are the only data path in the system; the requirement is fixed, the mechanism (mTLS, signed service token, private networking) is not yet chosen.</li>
+        <li><b>Backup and recovery posture</b> for the Watchdog store, including whether the provenance log has a separate retention guarantee from the operational data.</li>
+        <li><b>Retention and deletion policy</b>, per the limitation above.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2><span>Standing of this document</span><span class="num">06</span></h2>
+    <p>
+      This is a description of an architecture, produced during design and before implementation.
+      It is not an audit, not a penetration-test result, and not a legal opinion about any board's
+      obligations. Controls marked structural or enforced describe what the architecture requires;
+      confirming that the built system matches is the job of implementation review and testing,
+      which have not yet happened.
+    </p>
+  </section>
+
+  <footer>
+    <span>Treasury Watchdog — security &amp; control posture</span>
+    <span>Traceable to AD-2 · 3 · 4 · 5 · 7 · 8 · 9 · 10 · 12 · 14</span>
+  </footer>
+
+</div>

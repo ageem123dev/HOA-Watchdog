@@ -1,0 +1,536 @@
+<title>What the Treasury Watchdog Can and Cannot Do — A Note for the Board</title>
+
+<style>
+  :root {
+    --paper: #F1F3EE;
+    --paper-2: #E8ECE4;
+    --paper-3: #DFE4DA;
+    --ink: #17201B;
+    --ink-2: #3D4A43;
+    --ink-3: #6B776F;
+    --rule: #C9D1C7;
+    --rule-strong: #A9B4A7;
+    --accent: #2C5D4F;
+    --flag: #9C3521;
+    --seal: #8A6F3C;
+
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+
+    --measure: 34rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131714;
+      --paper-2: #1A201C;
+      --paper-3: #222925;
+      --ink: #E4EAE4;
+      --ink-2: #AFBBB3;
+      --ink-3: #7F8C84;
+      --rule: #2C352F;
+      --rule-strong: #3E4A43;
+      --accent: #6FBFA5;
+      --flag: #D9705A;
+      --seal: #C2A570;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #131714;
+    --paper-2: #1A201C;
+    --paper-3: #222925;
+    --ink: #E4EAE4;
+    --ink-2: #AFBBB3;
+    --ink-3: #7F8C84;
+    --rule: #2C352F;
+    --rule-strong: #3E4A43;
+    --accent: #6FBFA5;
+    --flag: #D9705A;
+    --seal: #C2A570;
+  }
+
+  :root[data-theme="light"] {
+    --paper: #F1F3EE;
+    --paper-2: #E8ECE4;
+    --paper-3: #DFE4DA;
+    --ink: #17201B;
+    --ink-2: #3D4A43;
+    --ink-3: #6B776F;
+    --rule: #C9D1C7;
+    --rule-strong: #A9B4A7;
+    --accent: #2C5D4F;
+    --flag: #9C3521;
+    --seal: #8A6F3C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 46rem;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  /* the ledger margin rule */
+  @media (min-width: 60rem) {
+    .sheet::before {
+      content: "";
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: calc(50% - 23rem - 2.5rem);
+      width: 1px;
+      background: var(--flag);
+      opacity: 0.32;
+    }
+  }
+
+  header.masthead {
+    padding: 4.5rem 0 2rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 1.75rem;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(1.85rem, 5.2vw, 3.05rem);
+    line-height: 1.06;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+    margin: 0 0 1.25rem;
+  }
+
+  h1 .quiet { color: var(--ink-3); }
+
+  .lede {
+    font-size: 1.1875rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  section { padding: 3.25rem 0 0; }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.5rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  h2 .num {
+    color: var(--ink-3);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+
+  h3 {
+    font-family: var(--serif);
+    font-size: 1.1875rem;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 2rem 0 0.5rem;
+    text-wrap: balance;
+  }
+
+  p { max-width: var(--measure); margin: 0 0 1.05rem; }
+  p:last-child { margin-bottom: 0; }
+
+  strong { font-weight: 600; }
+
+  .pull {
+    font-family: var(--mono);
+    font-size: clamp(1.05rem, 2.6vw, 1.3rem);
+    line-height: 1.42;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    border-left: 3px solid var(--accent);
+    padding: 0.15rem 0 0.15rem 1.4rem;
+    margin: 2rem 0;
+    max-width: var(--measure);
+    text-wrap: balance;
+  }
+
+  /* the two-column ledger */
+  .ledger {
+    border-top: 1px solid var(--rule-strong);
+    margin: 1.75rem 0 0;
+  }
+
+  .ledger-head, .ledger-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 2rem;
+  }
+
+  .ledger-head > * {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .ledger-head .can { color: var(--accent); }
+  .ledger-head .cannot { color: var(--flag); }
+
+  .ledger-row > * {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.9688rem;
+    line-height: 1.5;
+  }
+
+  .ledger-row .cannot {
+    color: var(--ink-2);
+  }
+
+  .ledger-row .cannot::before {
+    content: "—";
+    color: var(--flag);
+    margin-right: 0.5rem;
+  }
+
+  .ledger-row .can::before {
+    content: "+";
+    color: var(--accent);
+    margin-right: 0.5rem;
+    font-family: var(--mono);
+  }
+
+  @media (max-width: 38rem) {
+    .ledger-head { display: none; }
+    .ledger-row { grid-template-columns: 1fr; gap: 0; }
+    .ledger-row > * { padding: 0.7rem 0; }
+  }
+
+  figure {
+    margin: 2rem 0;
+    padding: 0;
+  }
+
+  .diagram {
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    padding: 1.75rem 1.25rem 1.25rem;
+    overflow-x: auto;
+  }
+
+  .diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+  figcaption {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--ink-3);
+    margin-top: 0.75rem;
+    max-width: var(--measure);
+  }
+
+  .qa {
+    border-top: 1px solid var(--rule-strong);
+    margin-top: 1.75rem;
+  }
+
+  .qa-item { border-bottom: 1px solid var(--rule); padding: 1.15rem 0; }
+
+  .qa-q {
+    font-family: var(--mono);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 0.5rem;
+    max-width: var(--measure);
+  }
+
+  .qa-a { font-size: 0.9688rem; color: var(--ink-2); margin: 0; }
+
+  .seal-note {
+    margin-top: 3.5rem;
+    padding: 1.25rem 1.4rem;
+    border: 1px solid var(--seal);
+    background: color-mix(in srgb, var(--seal) 7%, transparent);
+  }
+
+  .seal-note p {
+    font-size: 0.875rem;
+    color: var(--ink-2);
+    margin: 0;
+    max-width: none;
+  }
+
+  .seal-note .label {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--seal);
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 2px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+    color: var(--ink-3);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem 2rem;
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <p class="eyebrow">A note for the board · Treasury Watchdog pilot</p>
+    <h1>It cannot move<br>your money.<br><span class="quiet">Not "will not." Cannot.</span></h1>
+    <p class="lede">
+      This is the one thing worth understanding about the Treasury Watchdog before it starts
+      reviewing the association's records — and it is a claim about how the system is built,
+      not a promise about how it will behave.
+    </p>
+  </header>
+
+  <section>
+    <h2><span>The distinction that matters</span><span class="num">01</span></h2>
+
+    <p>
+      Most software that touches money is restricted by <em>permissions</em>. Someone decides the
+      program may look but not touch, and writes that decision down in a settings page. Permissions
+      are a good thing. They are also a setting, and settings can be changed — by a mistake, by a
+      well-meaning administrator, or by someone who should not have had the chance.
+    </p>
+
+    <p>
+      The Watchdog is restricted differently. It holds <strong>no banking credentials at all.</strong>
+      There is no account it can sign into, no payment rail it can reach, no stored key that
+      corresponds to the association's money. The restriction is not a rule the system follows.
+      It is a capability the system was never given.
+    </p>
+
+    <p class="pull">
+      You cannot misuse a key you do not have. The safety claim here is an absence, and an absence
+      cannot be widened by accident.
+    </p>
+
+    <p>
+      Adding that capability later would not be a configuration change or a checkbox. It would require
+      deliberately building a connection that does not currently exist, in code, reviewed and released —
+      the kind of change that leaves a trail and cannot happen quietly.
+    </p>
+  </section>
+
+  <section>
+    <h2><span>Where the money isn't</span><span class="num">02</span></h2>
+
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 640 250" role="img" aria-label="Diagram showing documents flowing into the Watchdog, findings flowing out to the board, and no connection at all to the bank.">
+          <defs>
+            <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+              <path d="M0,1 L7,4.5 L0,8 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <g font-family="ui-monospace, monospace" font-size="11">
+
+            <!-- Board -->
+            <g color="var(--accent)">
+              <rect x="8" y="86" width="118" height="58" fill="none" stroke="var(--rule-strong)" stroke-width="1"/>
+              <text x="67" y="110" text-anchor="middle" fill="var(--ink)" font-size="12">The board</text>
+              <text x="67" y="127" text-anchor="middle" fill="var(--ink-3)" font-size="10">uploads records</text>
+            </g>
+
+            <!-- arrow in -->
+            <g color="var(--accent)">
+              <line x1="130" y1="102" x2="196" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+              <text x="163" y="94" text-anchor="middle" fill="var(--ink-3)" font-size="9.5">PDFs, CSVs</text>
+            </g>
+
+            <!-- arrow out -->
+            <g color="var(--accent)">
+              <line x1="196" y1="130" x2="130" y2="130" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+              <text x="163" y="146" text-anchor="middle" fill="var(--ink-3)" font-size="9.5">findings</text>
+            </g>
+
+            <!-- Watchdog -->
+            <rect x="200" y="70" width="150" height="90" fill="var(--paper-3)" stroke="var(--rule-strong)" stroke-width="1"/>
+            <text x="275" y="98" text-anchor="middle" fill="var(--ink)" font-size="12">Watchdog</text>
+            <text x="275" y="116" text-anchor="middle" fill="var(--ink-3)" font-size="10">reads · compares</text>
+            <text x="275" y="131" text-anchor="middle" fill="var(--ink-3)" font-size="10">flags · explains</text>
+            <text x="275" y="150" text-anchor="middle" fill="var(--seal)" font-size="9.5">writes its own notes</text>
+
+            <!-- severed path to bank -->
+            <line x1="356" y1="115" x2="432" y2="115" stroke="var(--flag)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.5"/>
+            <g stroke="var(--flag)" stroke-width="2">
+              <line x1="386" y1="103" x2="402" y2="127"/>
+              <line x1="402" y1="103" x2="386" y2="127"/>
+            </g>
+            <text x="394" y="147" text-anchor="middle" fill="var(--flag)" font-size="9.5">no credential exists</text>
+
+            <!-- Bank -->
+            <rect x="436" y="70" width="150" height="90" fill="none" stroke="var(--rule)" stroke-width="1" stroke-dasharray="3 4"/>
+            <text x="511" y="104" text-anchor="middle" fill="var(--ink-3)" font-size="12">Bank &amp; payments</text>
+            <text x="511" y="124" text-anchor="middle" fill="var(--ink-3)" font-size="10">you, in your own</text>
+            <text x="511" y="138" text-anchor="middle" fill="var(--ink-3)" font-size="10">banking portal</text>
+
+            <text x="320" y="212" text-anchor="middle" fill="var(--ink-3)" font-size="10">Every payment decision stays where it is today — with a human, in the bank's own system.</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        The dashed box is not a system the Watchdog connects to weakly. It is a system it does
+        not connect to at all.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span>What it does, and what it doesn't</span><span class="num">03</span></h2>
+
+    <p>
+      It is worth being precise about the boundary, because "read-only" is often used loosely and
+      overstates the case in one direction while understating it in another.
+    </p>
+
+    <div class="ledger">
+      <div class="ledger-head">
+        <div class="can">It does</div>
+        <div class="cannot">It does not</div>
+      </div>
+
+      <div class="ledger-row">
+        <div class="can">Read the invoices, statements, and rolls you upload</div>
+        <div class="cannot">Connect to the association's bank account</div>
+      </div>
+      <div class="ledger-row">
+        <div class="can">Keep its own records of what it found and when</div>
+        <div class="cannot">Send, approve, or schedule a payment</div>
+      </div>
+      <div class="ledger-row">
+        <div class="can">Flag a likely duplicate invoice before you pay it</div>
+        <div class="cannot">Alter a record in QuickBooks or a management platform</div>
+      </div>
+      <div class="ledger-row">
+        <div class="can">Show you which months a unit missed, with the figures</div>
+        <div class="cannot">Change a resident's balance or forgive a debt</div>
+      </div>
+      <div class="ledger-row">
+        <div class="can">Log every question asked and every answer's source</div>
+        <div class="cannot">Give legal or tax advice, or interpret statute</div>
+      </div>
+    </div>
+
+    <h3>One clarification, because it is often gotten wrong</h3>
+    <p>
+      The Watchdog <em>does</em> write — to its own database. It has to. It stores the documents you
+      upload, the figures it reads out of them, the alerts it raises, and a permanent log of every
+      question the board asks. What it never does is write <em>outward</em>: into a bank, a payment
+      processor, or the association's accounting platform. Those remain yours alone.
+    </p>
+  </section>
+
+  <section>
+    <h2><span>Why the answers can be trusted</span><span class="num">04</span></h2>
+
+    <p>
+      A tool that confidently states a wrong number is worse than no tool, particularly in a meeting.
+      So the Watchdog is built so that it structurally cannot produce a figure it made up.
+    </p>
+
+    <p>
+      It does not calculate. Every number in an answer comes from a reviewed query run against the
+      association's records, and before an answer is shown to you it is checked: any figure that does
+      not appear in those results is rejected and the answer is regenerated. If the system cannot
+      support a number with a record, you do not see the number.
+    </p>
+
+    <p>
+      Alongside each answer you can open the exact query that produced it, and the rows it returned.
+      When a resident disputes a balance in a meeting, that is what you read from — the record, not
+      the software's opinion of the record.
+    </p>
+  </section>
+
+  <section>
+    <h2><span>Questions you may be asked</span><span class="num">05</span></h2>
+
+    <div class="qa">
+      <div class="qa-item">
+        <p class="qa-q">"So an AI has access to our bank account?"</p>
+        <p class="qa-a">No. It has never been given banking credentials, and there is no setting that would grant them. It sees the documents the board chooses to upload and nothing else.</p>
+      </div>
+      <div class="qa-item">
+        <p class="qa-q">"What if it makes a mistake and pays the wrong vendor?"</p>
+        <p class="qa-a">It cannot pay anyone. Payment still happens the way it happens today — a board member, signed into the bank, authorizing it. The Watchdog's role ends at telling you something looks wrong before you do that.</p>
+      </div>
+      <div class="qa-item">
+        <p class="qa-q">"Who can see our financial records?"</p>
+        <p class="qa-a">The board members you authorize. Every query run against the records is logged permanently with who asked and what was returned, so access itself is auditable.</p>
+      </div>
+      <div class="qa-item">
+        <p class="qa-q">"Can it change my balance?"</p>
+        <p class="qa-a">No. It reads the assessment roll and payment records the board uploads and reports what they show. Correcting a balance is a board action taken in the association's own books.</p>
+      </div>
+      <div class="qa-item">
+        <p class="qa-q">"Is our data sitting on someone else's computers?"</p>
+        <p class="qa-a">Yes — the pilot runs on managed cloud infrastructure rather than a server in the clubhouse. That is a real and deliberate trade-off, and the board should weigh it knowingly rather than discover it later.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="seal-note">
+    <span class="label">Scope of this note</span>
+    <p>
+      This describes how the pilot system is built. It is not legal advice and makes no claim about
+      whether any particular practice satisfies a board's obligations under Florida law or the
+      association's governing documents. Directors should take those questions to the association's
+      counsel.
+    </p>
+  </div>
+
+  <footer>
+    <span>Treasury Watchdog — early-adopter pilot</span>
+    <span>Derived from architecture spine AD-1 · AD-2 · AD-4 · AD-7 · AD-12</span>
+  </footer>
+
+</div>

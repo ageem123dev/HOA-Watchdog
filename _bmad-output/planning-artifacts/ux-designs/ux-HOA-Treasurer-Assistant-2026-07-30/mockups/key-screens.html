@@ -1,0 +1,261 @@
+<title>Key screens — Fiduciary Watchdog</title>
+
+<style>
+  :root {
+    --ink: #14213D; --ink-muted: #5A6478;
+    --stone: #E5E5E0; --stone-raised: #F2F2EE;
+    --rule: #C7C7C0; --rule-strong: #9E9E96;
+    --brass: #6E5426; --brass-tint: #EDE3CE;
+    --flag: #8C2F1E; --flag-tint: #F6E4DF;
+    --affirm: #2C5233; --on-ink: #FFFFFF;
+    --serif: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #6E7370; font-family: var(--sans); padding: 2rem 1.25rem 5rem; color: #fff; }
+  .page { max-width: 60rem; margin: 0 auto; }
+  .page > header { max-width: 44rem; margin-bottom: 2.25rem; }
+  .page > header h1 { font-size: 1.35rem; margin: 0 0 .5rem; font-weight: 650; letter-spacing: -.02em; }
+  .page > header p { margin: 0; font-size: .9375rem; line-height: 1.55; color: #E2E5E1; }
+
+  .shot { margin-bottom: 2.5rem; }
+  .shot > h2 { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 .3rem; }
+  .shot > p.note { font-size: .875rem; line-height: 1.5; color: #E2E5E1; margin: 0 0 .85rem; max-width: 40rem; }
+  .frame { border-radius: 7px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,.34); }
+  .chrome { background: #3A3F3C; padding: .45rem .7rem; display: flex; gap: .35rem; align-items: center; }
+  .chrome i { width: 9px; height: 9px; border-radius: 50%; background: #6E7370; display: block; }
+  .chrome span { margin-left: .6rem; font-size: .6875rem; color: #B9BEBA; font-family: var(--mono); }
+
+  .ui { background: var(--stone); color: var(--ink); }
+  .masthead { background: var(--ink); color: var(--on-ink); padding: .8rem 1.5rem; display: flex; justify-content: space-between; align-items: baseline; }
+  .masthead b { font-family: var(--serif); font-size: .9375rem; font-weight: 600; }
+  .masthead .nav { display: flex; gap: 1.35rem; font-size: .6875rem; letter-spacing: .1em; text-transform: uppercase; color: #A9B2C9; }
+  .masthead .nav .on { color: var(--on-ink); }
+  .body { padding: 1.5rem; }
+
+  .lbl { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-muted); }
+  .sect { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-muted); border-bottom: 2px solid var(--ink); padding-bottom: .35rem; margin: 0 0 .2rem; display: flex; justify-content: space-between; align-items: baseline; }
+
+  .figs { display: flex; gap: 3rem; margin-bottom: 1.6rem; }
+  .fig .amt { font-family: var(--serif); font-size: 1.55rem; font-variant-numeric: tabular-nums; letter-spacing: -.02em; margin-top: .15rem; }
+  .fig .asof { font-size: .625rem; color: var(--ink-muted); margin-top: .1rem; }
+
+  .ask { background: var(--stone-raised); border: 0; border-bottom: 2px solid var(--rule-strong); padding: .8rem .9rem; margin-bottom: 1.6rem; display: flex; align-items: center; gap: .7rem; }
+  .ask .ph { color: var(--ink-muted); font-size: .9375rem; flex: 1; }
+  .ask .k { font-family: var(--mono); font-size: .625rem; color: var(--ink-muted); border: 1px solid var(--rule-strong); padding: .1rem .3rem; }
+
+  .row { display: grid; grid-template-columns: 3px 1fr auto; gap: .9rem; padding: .85rem 0; border-bottom: 1px solid var(--rule); align-items: start; }
+  .row .tick { width: 3px; align-self: stretch; background: var(--flag); }
+  .row .tick.b { background: var(--brass); }
+  .row .sev { font-size: .625rem; letter-spacing: .1em; text-transform: uppercase; margin-bottom: .22rem; }
+  .row .sev.f { color: var(--flag); }
+  .row .sev.b { color: var(--brass); }
+  .row .t { font-family: var(--serif); font-size: 1.125rem; font-weight: 600; line-height: 1.25; }
+  .row .ev { font-size: .8125rem; color: var(--ink-muted); margin-top: .25rem; line-height: 1.45; }
+  .row .amt { font-family: var(--serif); font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
+
+  .foot { margin-top: 1.1rem; padding-top: .7rem; border-top: 1px solid var(--rule); font-size: .8125rem; color: var(--ink-muted); display: flex; justify-content: space-between; }
+  .foot a { color: var(--ink); }
+
+  /* oracle */
+  .q { font-family: var(--serif); font-size: 1.2rem; line-height: 1.3; margin: 0 0 1.1rem; padding-bottom: .8rem; border-bottom: 2px solid var(--ink); }
+  .ans { font-size: 1rem; line-height: 1.6; margin: 0 0 1.35rem; max-width: 38rem; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  caption { text-align: left; font-size: .6875rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-muted); padding-bottom: .5rem; }
+  th { text-align: left; font-size: .625rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-muted); font-weight: 500; padding: 0 .8rem .45rem 0; border-bottom: 1px solid var(--rule-strong); }
+  th.r, td.r { text-align: right; padding-right: 0; }
+  td { font-size: .9375rem; padding: .58rem .8rem .58rem 0; border-bottom: 1px solid var(--rule); }
+  td.amt { font-family: var(--serif); }
+  td .ok { color: var(--affirm); font-size: .75rem; }
+  td .no { color: var(--flag); font-size: .75rem; }
+  .disc { margin-top: 1rem; border: 1px solid var(--rule-strong); padding: .6rem .8rem; font-size: .8125rem; color: var(--ink); display: flex; justify-content: space-between; align-items: center; }
+  .disc .cat { font-family: var(--mono); font-size: .75rem; color: var(--ink-muted); }
+
+  /* upload states */
+  .states { display: grid; gap: 1px; background: var(--rule); }
+  .st { background: var(--stone); padding: 1.05rem 1.25rem; }
+  .st .hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .5rem; }
+  .st .fn { font-family: var(--mono); font-size: .8125rem; }
+  .st .tag { font-size: .625rem; letter-spacing: .1em; text-transform: uppercase; }
+  .st .tag.run { color: var(--ink-muted); }
+  .st .tag.ok { color: var(--affirm); }
+  .st .tag.err { color: var(--flag); }
+  .st .tag.q { color: var(--brass); }
+  .st p { margin: 0; font-size: .875rem; line-height: 1.5; color: var(--ink-muted); max-width: 40rem; }
+  .st .act { display: inline-block; margin-top: .6rem; font-size: .8125rem; border: 1px solid var(--rule-strong); padding: .34rem .7rem; color: var(--ink); }
+  .bar { height: 3px; background: var(--rule); margin-top: .5rem; }
+  .bar i { display: block; height: 3px; background: var(--ink); width: 62%; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Key screens — direction A applied</h1>
+    <p>
+      Built to the corrected tokens: brass darkened to <code>#6E5426</code> for AA, severity
+      carried as margin tick <em>plus</em> plain-language text, no shadows, square corners,
+      evidence table never collapsed. Spines win over anything here.
+    </p>
+  </header>
+
+  <!-- DASHBOARD -->
+  <div class="shot">
+    <h2>Dashboard — front door, with persistent ask field</h2>
+    <p class="note">
+      Two unreviewed findings. Severity reads as "Needs review" / "Worth checking", never
+      HIGH/MED. The ask field sits above the findings so a keyboard user reaches it without
+      traversing the list.
+    </p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>watchdog · dashboard</span></div>
+      <div class="ui">
+        <div class="masthead">
+          <b>Sunrise Point Condominium Association</b>
+          <div class="nav"><span class="on">Dashboard</span><span>Register</span><span>Upload</span><span>Access log</span></div>
+        </div>
+        <div class="body">
+          <div class="figs">
+            <div class="fig"><div class="lbl">Operating</div><div class="amt">$84,120.55</div><div class="asof">as of 28 Jul 2026</div></div>
+            <div class="fig"><div class="lbl">Reserve</div><div class="amt">$211,900.00</div><div class="asof">as of 28 Jul 2026</div></div>
+            <div class="fig"><div class="lbl">Unreviewed</div><div class="amt">2</div></div>
+          </div>
+
+          <div class="ask">
+            <span class="ph">Ask about dues, payments, vendors, or an invoice…</span>
+            <span class="k">↵</span>
+          </div>
+
+          <div class="sect"><span>Needs your attention</span><span>2</span></div>
+
+          <div class="row">
+            <div class="tick"></div>
+            <div>
+              <div class="sev f">Needs review</div>
+              <div class="t">You may have already paid Coastal Landscaping</div>
+              <div class="ev">Same amount and service period as invoice #8814, which cleared 21 days ago. The invoice number differs by one character.</div>
+            </div>
+            <div class="amt">$2,340.00</div>
+          </div>
+
+          <div class="row">
+            <div class="tick b"></div>
+            <div>
+              <div class="sev b">Worth checking</div>
+              <div class="t">Unit 304 has three months with no matching deposit</div>
+              <div class="ev">February, April and May show no deposit matching the expected assessment in the statements you uploaded.</div>
+            </div>
+            <div class="amt">$1,240.00</div>
+          </div>
+
+          <div class="foot">
+            <span>Reviewed findings move to the <a href="#">register</a>. Nothing is deleted.</span>
+            <span>1 vendor waiting in <a href="#">quarantine</a></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ORACLE -->
+  <div class="shot">
+    <h2>Oracle — answer with evidence always visible</h2>
+    <p class="note">
+      The trust surface. The question stays on screen. Every figure in the prose is findable in
+      the table beneath it. The query is the only thing behind a disclosure — and David never
+      opens it, which is fine; its being there is the point.
+    </p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>watchdog · oracle</span></div>
+      <div class="ui">
+        <div class="masthead">
+          <b>Sunrise Point Condominium Association</b>
+          <div class="nav"><span>Dashboard</span><span class="on">Oracle</span><span>Register</span><span>Access log</span></div>
+        </div>
+        <div class="body">
+          <p class="q">What is the dues status and payment history for Unit 304 over the last 6 months?</p>
+
+          <p class="ans">
+            Unit 304 is <strong>$1,240.00</strong> behind. Of the last six months, two were paid
+            in full, one was partially paid, and three have no matching deposit. The most recent
+            payment was <strong>$413.33</strong> on 3 June 2026.
+          </p>
+
+          <table>
+            <caption>Assessments and deposits · Unit 304 · Feb–Jul 2026</caption>
+            <thead>
+              <tr><th>Period</th><th>Expected</th><th>Received</th><th class="r">Balance</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Feb 2026</td><td class="amt">413.33</td><td class="amt">—</td><td class="amt r">413.33</td><td><span class="no">No deposit</span></td></tr>
+              <tr><td>Mar 2026</td><td class="amt">413.33</td><td class="amt">413.33</td><td class="amt r">0.00</td><td><span class="ok">Reconciled</span></td></tr>
+              <tr><td>Apr 2026</td><td class="amt">413.33</td><td class="amt">—</td><td class="amt r">413.33</td><td><span class="no">No deposit</span></td></tr>
+              <tr><td>May 2026</td><td class="amt">413.33</td><td class="amt">—</td><td class="amt r">413.33</td><td><span class="no">No deposit</span></td></tr>
+              <tr><td>Jun 2026</td><td class="amt">413.33</td><td class="amt">413.33</td><td class="amt r">0.00</td><td><span class="ok">Reconciled</span></td></tr>
+              <tr><td>Jul 2026</td><td class="amt">413.33</td><td class="amt">413.33</td><td class="amt r">0.00</td><td><span class="ok">Reconciled</span></td></tr>
+            </tbody>
+          </table>
+
+          <div class="disc">
+            <span>▸ Show the query that produced this</span>
+            <span class="cat">dues_status@3</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- UPLOAD -->
+  <div class="shot">
+    <h2>Upload — the states, including the ones that must never show partial data</h2>
+    <p class="note">
+      Five states in one view. The schema-failure row is the important one: a document that
+      couldn't be read reliably shows <em>nothing</em> extracted, because a half-read invoice
+      presented as a record is the exact failure this product exists to catch.
+    </p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>watchdog · upload</span></div>
+      <div class="ui">
+        <div class="masthead">
+          <b>Sunrise Point Condominium Association</b>
+          <div class="nav"><span>Dashboard</span><span>Oracle</span><span class="on">Upload</span><span>Register</span></div>
+        </div>
+        <div class="body">
+          <div class="sect" style="margin-bottom:1rem"><span>This batch · 5 documents</span><span>2 need you</span></div>
+          <div class="states">
+
+            <div class="st">
+              <div class="hd"><span class="fn">coastal-landscaping-jul.pdf</span><span class="tag run">Reading</span></div>
+              <p>Reading document, then checking it against your records.</p>
+              <div class="bar"><i></i></div>
+            </div>
+
+            <div class="st">
+              <div class="hd"><span class="fn">operating-statement-jun.csv</span><span class="tag ok">Added</span></div>
+              <p>44 deposits recorded. Three matched against outstanding assessments.</p>
+            </div>
+
+            <div class="st">
+              <div class="hd"><span class="fn">invoice-photo-8821.jpg</span><span class="tag err">Couldn't read this</span></div>
+              <p>We couldn't read this reliably enough to use, so nothing from it was recorded. It looks like a photo taken at an angle. Upload a flatter scan or a clearer photo.</p>
+              <span class="act">Replace this file</span>
+            </div>
+
+            <div class="st">
+              <div class="hd"><span class="fn">reserve-statement-q2.pdf</span><span class="tag err">Locked</span></div>
+              <p>This file is password-protected. Upload an unlocked copy.</p>
+              <span class="act">Replace this file</span>
+            </div>
+
+            <div class="st">
+              <div class="hd"><span class="fn">gulfside-pool-svc-0714.pdf</span><span class="tag q">Waiting on you</span></div>
+              <p>We read this invoice, but "Gulfside Pool Service" isn't a vendor we've seen before. Confirm who this is so we can check it against the right history.</p>
+              <span class="act">Confirm vendor</span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

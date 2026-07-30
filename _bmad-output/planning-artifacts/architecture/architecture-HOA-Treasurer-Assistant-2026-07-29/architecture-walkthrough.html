@@ -1,0 +1,640 @@
+<title>Treasury Watchdog — Architecture Walkthrough</title>
+
+<style>
+  :root {
+    --paper: #F1F3EE;
+    --paper-2: #E8ECE4;
+    --paper-3: #DDE3D9;
+    --ink: #17201B;
+    --ink-2: #3D4A43;
+    --ink-3: #6B776F;
+    --rule: #C9D1C7;
+    --rule-strong: #A9B4A7;
+    --accent: #2C5D4F;
+    --flag: #9C3521;
+    --seal: #8A6F3C;
+
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #121613; --paper-2: #191F1B; --paper-3: #232A26;
+      --ink: #E6ECE6; --ink-2: #B2BEB6; --ink-3: #7E8B83;
+      --rule: #2B342E; --rule-strong: #3E4A43;
+      --accent: #6FBFA5; --flag: #D9705A; --seal: #C2A570;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121613; --paper-2: #191F1B; --paper-3: #232A26;
+    --ink: #E6ECE6; --ink-2: #B2BEB6; --ink-3: #7E8B83;
+    --rule: #2B342E; --rule-strong: #3E4A43;
+    --accent: #6FBFA5; --flag: #D9705A; --seal: #C2A570;
+  }
+  :root[data-theme="light"] {
+    --paper: #F1F3EE; --paper-2: #E8ECE4; --paper-3: #DDE3D9;
+    --ink: #17201B; --ink-2: #3D4A43; --ink-3: #6B776F;
+    --rule: #C9D1C7; --rule-strong: #A9B4A7;
+    --accent: #2C5D4F; --flag: #9C3521; --seal: #8A6F3C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* ── ledger margin rule doubles as the progress indicator ── */
+  .rail {
+    position: fixed;
+    left: 2.25rem;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--rule);
+    z-index: 20;
+  }
+  .rail-fill {
+    position: absolute;
+    top: 0; left: -1px;
+    width: 3px;
+    background: var(--flag);
+    height: 0;
+    transition: height 420ms cubic-bezier(.22,.61,.36,1);
+  }
+  @media (max-width: 52rem) { .rail { display: none; } }
+
+  .stage {
+    position: relative;
+    height: 100dvh;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4.5rem 3rem 5.5rem 6rem;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    overflow-y: auto;
+  }
+  .slide.is-active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  @media (max-width: 52rem) {
+    .slide { padding: 4rem 1.5rem 6rem; }
+  }
+
+  .inner { max-width: 58rem; width: 100%; margin: 0 auto; }
+
+  /* build-in */
+  .b { opacity: 0; transform: translateY(14px); }
+  .is-active .b {
+    animation: rise 620ms cubic-bezier(.22,.61,.36,1) forwards;
+  }
+  .is-active .b:nth-child(1) { animation-delay: 60ms; }
+  .is-active .b:nth-child(2) { animation-delay: 150ms; }
+  .is-active .b:nth-child(3) { animation-delay: 240ms; }
+  .is-active .b:nth-child(4) { animation-delay: 330ms; }
+  .is-active .b:nth-child(5) { animation-delay: 420ms; }
+  .is-active .b:nth-child(6) { animation-delay: 510ms; }
+
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .b { opacity: 1; transform: none; animation: none !important; }
+    .rail-fill { transition: none; }
+    .slide { transition: none; }
+  }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 1.5rem;
+  }
+  .kicker .ad { color: var(--accent); }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(2rem, 6.5vw, 4.25rem);
+    line-height: 1.02;
+    letter-spacing: -0.04em;
+    margin: 0 0 1.5rem;
+    text-wrap: balance;
+  }
+  h1 .quiet { color: var(--ink-3); }
+
+  h2 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(1.4rem, 3.6vw, 2.35rem);
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+    margin: 0 0 1.25rem;
+    text-wrap: balance;
+  }
+
+  .lede {
+    font-size: clamp(1.0625rem, 1.7vw, 1.3rem);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 40rem;
+    margin: 0 0 1.25rem;
+  }
+
+  p.body { font-size: 1.0625rem; line-height: 1.58; color: var(--ink-2); max-width: 38rem; margin: 0 0 1rem; }
+  p.body:last-child { margin-bottom: 0; }
+  p.body strong { color: var(--ink); font-weight: 600; }
+
+  .rule-claim {
+    font-family: var(--mono);
+    font-size: clamp(1rem, 2.1vw, 1.35rem);
+    line-height: 1.42;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    border-left: 3px solid var(--accent);
+    padding: 0.2rem 0 0.2rem 1.4rem;
+    margin: 1.5rem 0 0;
+    max-width: 42rem;
+    text-wrap: balance;
+  }
+  .rule-claim.warn { border-left-color: var(--flag); }
+
+  .cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1.5rem 2.25rem;
+    margin-top: 1.75rem;
+  }
+
+  .card {
+    border-top: 1px solid var(--rule-strong);
+    padding-top: 0.9rem;
+  }
+  .card .t {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.45rem;
+    color: var(--ink);
+  }
+  .card .t.neg { color: var(--flag); }
+  .card .t.pos { color: var(--accent); }
+  .card p { font-size: 0.9375rem; line-height: 1.5; color: var(--ink-2); margin: 0; }
+
+  .diagram {
+    margin-top: 1.5rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+
+  /* nav */
+  .hud {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.9rem 1.5rem 0.9rem 6rem;
+    background: linear-gradient(to top, var(--paper) 62%, transparent);
+    z-index: 30;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+    color: var(--ink-3);
+  }
+  @media (max-width: 52rem) { .hud { padding-left: 1.5rem; } }
+
+  .counter { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .counter b { color: var(--ink); font-weight: 600; }
+
+  .dots { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+  .dot {
+    width: 1.4rem; height: 3px;
+    background: var(--rule-strong);
+    border: 0; padding: 0; cursor: pointer;
+    transition: background 200ms;
+  }
+  .dot[aria-current="true"] { background: var(--flag); }
+  .dot:hover { background: var(--ink-3); }
+  .dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .arrows { display: flex; gap: 0.4rem; }
+  .arrows button {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    background: transparent;
+    color: var(--ink-2);
+    border: 1px solid var(--rule-strong);
+    width: 2rem; height: 1.85rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .arrows button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .arrows button:disabled { opacity: 0.35; cursor: default; }
+  .arrows button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .hint { color: var(--ink-3); }
+  @media (max-width: 40rem) { .hint { display: none; } }
+
+  svg text { font-family: var(--mono); }
+</style>
+
+<div class="rail" aria-hidden="true"><div class="rail-fill" id="railFill"></div></div>
+
+<main class="stage" id="stage">
+
+  <!-- 01 -->
+  <section class="slide is-active" aria-label="Title">
+    <div class="inner">
+      <p class="kicker b">Architecture walkthrough · pilot scope</p>
+      <h1 class="b">The bot that<br>cannot pay<br><span class="quiet">anyone.</span></h1>
+      <p class="lede b">
+        An AI system for volunteer condo boards, built so that its most important safety
+        property is structural rather than promised. Fifteen decisions; here are the eight
+        that carry the weight.
+      </p>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section class="slide" aria-label="The problem">
+    <div class="inner">
+      <p class="kicker b">01 — What we are actually solving</p>
+      <h2 class="b">Volunteer boards carry real liability<br>with no enterprise tooling.</h2>
+      <p class="body b">
+        A treasurer at a self-managed association has the fiduciary exposure of a finance officer
+        and the toolkit of a spreadsheet user. Recent Florida legislation raised the stakes on
+        record-keeping failures considerably.
+      </p>
+      <p class="body b">
+        So the product's job is <strong>fiduciary confidence</strong>, not automation — catch the
+        duplicate invoice before it is paid, answer the dues question with the record in hand.
+        Which means a wrong number stated confidently is not a bug, it is the whole failure mode.
+      </p>
+      <div class="rule-claim b">
+        Everything downstream follows from that: the architecture is designed against
+        <em>plausible-sounding wrongness</em>, not against downtime.
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section class="slide" aria-label="Paradigm">
+    <div class="inner">
+      <p class="kicker b">02 — The shape</p>
+      <h2 class="b">Hexagonal, plus two additions<br>that carry the safety claim.</h2>
+      <div class="cols b">
+        <div class="card">
+          <p class="t pos">A one-way quarantine gate</p>
+          <p>Untrusted document content crosses exactly one boundary, in one direction, and is laundered into typed values on the way through. Nothing past the gate ever sees raw bytes or unbounded strings.</p>
+        </div>
+        <div class="card">
+          <p class="t pos">Capability-restricted egress</p>
+          <p>The reasoning agent reaches the world only through a fixed, enumerable capability set. It cannot compose a new one at runtime — not because it is told not to, but because there is no mechanism.</p>
+        </div>
+      </div>
+      <div class="rule-claim b">
+        Ports and adapters is the container. The gate and the capability limit are what make it
+        this product rather than any other.
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section class="slide" aria-label="Air gap">
+    <div class="inner">
+      <p class="kicker b">03 — <span class="ad">AD-1, AD-2</span> · the data plane</p>
+      <h2 class="b">"Air-gap" means one specific thing.<br>It is easy to overstate.</h2>
+      <div class="cols b">
+        <div class="card">
+          <p class="t neg">What it does NOT mean</p>
+          <p>That the system performs no writes. It owns and writes its own database — documents, extracted records, alerts, and the query log. It has to, to function. An earlier draft said "strictly read-only," and that was simply wrong.</p>
+        </div>
+        <div class="card">
+          <p class="t pos">What it does mean</p>
+          <p>No credential granting write access to any external financial rail exists in any environment, secret store, or CI config. There is no bank to write to. The restriction is an absence, not a scope.</p>
+        </div>
+      </div>
+      <div class="rule-claim b">
+        A permission can be widened by an administrator in an afternoon.
+        A credential that was never issued cannot.
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section class="slide" aria-label="Credential topology">
+    <div class="inner">
+      <p class="kicker b">04 — <span class="ad">AD-3, AD-4</span> · credential topology</p>
+      <h2 class="b">The LLM-adjacent runtime<br>holds no data credentials.</h2>
+      <div class="diagram b">
+        <svg viewBox="0 0 700 260" role="img" aria-label="Diagram: the Python agent service holds only a model key and calls the Node gateway, which alone holds both database roles.">
+          <defs>
+            <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+              <path d="M0,1 L7,4.5 L0,8 z" fill="currentColor"/>
+            </marker>
+          </defs>
+          <g font-size="11">
+            <rect x="10" y="60" width="176" height="104" fill="var(--paper-2)" stroke="var(--rule-strong)"/>
+            <text x="98" y="86" text-anchor="middle" fill="var(--ink)" font-size="12">Agent service</text>
+            <text x="98" y="104" text-anchor="middle" fill="var(--ink-3)" font-size="10">Python · CrewAI</text>
+            <line x1="30" y1="118" x2="166" y2="118" stroke="var(--rule)"/>
+            <text x="98" y="136" text-anchor="middle" fill="var(--seal)" font-size="10">holds: model key</text>
+            <text x="98" y="152" text-anchor="middle" fill="var(--flag)" font-size="10">holds: no DB access</text>
+
+            <g color="var(--accent)">
+              <line x1="190" y1="112" x2="256" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+              <text x="223" y="103" text-anchor="middle" fill="var(--ink-3)" font-size="9">/tools/*</text>
+            </g>
+
+            <rect x="260" y="46" width="190" height="132" fill="var(--paper-3)" stroke="var(--rule-strong)"/>
+            <text x="355" y="72" text-anchor="middle" fill="var(--ink)" font-size="12">Node gateway</text>
+            <text x="355" y="90" text-anchor="middle" fill="var(--ink-3)" font-size="10">the only credential holder</text>
+            <line x1="278" y1="104" x2="432" y2="104" stroke="var(--rule)"/>
+            <text x="355" y="124" text-anchor="middle" fill="var(--accent)" font-size="10">watchdog_writer → ingest</text>
+            <text x="355" y="142" text-anchor="middle" fill="var(--accent)" font-size="10">watchdog_reader → SELECT</text>
+            <text x="355" y="163" text-anchor="middle" fill="var(--ink-3)" font-size="9.5">neither role holds the other's grant</text>
+
+            <g color="var(--accent)">
+              <line x1="454" y1="112" x2="520" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+            </g>
+
+            <rect x="524" y="60" width="166" height="104" fill="none" stroke="var(--rule-strong)"/>
+            <text x="607" y="98" text-anchor="middle" fill="var(--ink)" font-size="12">Postgres</text>
+            <text x="607" y="120" text-anchor="middle" fill="var(--ink-3)" font-size="10">the Watchdog's own store</text>
+
+            <text x="350" y="222" text-anchor="middle" fill="var(--ink-3)" font-size="10">A prompt-injected agent is talking to an HTTP endpoint, not to a database.</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="slide" aria-label="Query catalog">
+    <div class="inner">
+      <p class="kicker b">05 — <span class="ad">AD-5</span> · capability egress</p>
+      <h2 class="b">The model never writes SQL.<br>It picks from a menu.</h2>
+      <p class="body b">
+        The obvious design lets the model author SQL against a read-only role. It is flexible, and
+        every new question works on the first try. It also means unreviewed query text, composed by
+        a model that just read an attacker-supplied invoice, reaches member financial data.
+      </p>
+      <p class="body b">
+        Instead: a fixed, version-controlled catalog of reviewed queries. The model selects an entry
+        and supplies typed parameters. Tool definitions carry <strong>strict schema enforcement</strong>,
+        so parameter validity is guaranteed at the API layer rather than requested in a prompt.
+      </p>
+      <div class="rule-claim b">
+        The real win is not injection-proofing — parameterization already does that. It is that the
+        blast radius of a <em>fully successful</em> injection is bounded by what the catalog can express.
+      </div>
+      <div class="cols b">
+        <div class="card">
+          <p class="t neg">The cost, stated honestly</p>
+          <p>A genuinely new question shape is a new catalog entry — a story in the backlog, not a capability the system has at runtime. That is a real product constraint, accepted deliberately.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section class="slide" aria-label="Provenance-bound numbers">
+    <div class="inner">
+      <p class="kicker b">06 — <span class="ad">AD-7</span> · the arithmetic guarantee</p>
+      <h2 class="b">A prompt is a request.<br>The metric said 100%.</h2>
+      <p class="body b">
+        The requirements originally enforced "never do arithmetic yourself" with system-prompt
+        directives, while a success metric claimed 100% of calculations would be delegated. Those
+        two statements cannot both be load-bearing. Prompts are not an enforcement mechanism.
+      </p>
+      <div class="diagram b">
+        <svg viewBox="0 0 700 168" role="img" aria-label="Diagram: the validator compares each numeral in a drafted answer against the tool result set, passing exact matches and rejecting unreferenced figures.">
+          <g font-size="11">
+            <rect x="10" y="34" width="150" height="76" fill="var(--paper-2)" stroke="var(--rule-strong)"/>
+            <text x="85" y="60" text-anchor="middle" fill="var(--ink)" font-size="11">Tool result</text>
+            <text x="85" y="80" text-anchor="middle" fill="var(--accent)" font-size="10">balance 1240.00</text>
+            <text x="85" y="96" text-anchor="middle" fill="var(--accent)" font-size="10">missed 3</text>
+
+            <rect x="196" y="20" width="230" height="46" fill="none" stroke="var(--rule)"/>
+            <text x="311" y="40" text-anchor="middle" fill="var(--ink-2)" font-size="10">"$1,240.00 behind, 3 months"</text>
+            <text x="311" y="56" text-anchor="middle" fill="var(--accent)" font-size="9.5">every numeral present → render</text>
+
+            <rect x="196" y="86" width="230" height="46" fill="none" stroke="var(--rule)"/>
+            <text x="311" y="106" text-anchor="middle" fill="var(--ink-2)" font-size="10">"roughly $1,200 behind"</text>
+            <text x="311" y="122" text-anchor="middle" fill="var(--flag)" font-size="9.5">1200 unreferenced → reject, retry</text>
+
+            <line x1="164" y1="60" x2="192" y2="44" stroke="var(--accent)" stroke-width="1.2"/>
+            <line x1="164" y1="80" x2="192" y2="104" stroke="var(--flag)" stroke-width="1.2"/>
+
+            <rect x="462" y="52" width="228" height="46" fill="var(--paper-3)" stroke="var(--rule-strong)"/>
+            <text x="576" y="72" text-anchor="middle" fill="var(--ink)" font-size="10.5">Pre-render validator</text>
+            <text x="576" y="88" text-anchor="middle" fill="var(--ink-3)" font-size="9.5">a unit test, not a hope</text>
+
+            <line x1="430" y1="43" x2="458" y2="66" stroke="var(--rule-strong)" stroke-width="1.2"/>
+            <line x1="430" y1="109" x2="458" y2="86" stroke="var(--rule-strong)" stroke-width="1.2"/>
+
+            <text x="350" y="158" text-anchor="middle" fill="var(--ink-3)" font-size="10">Corollary: catalog queries must return derived figures too — the model cannot compute a percentage.</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 -->
+  <section class="slide" aria-label="Quarantine and vendor boundary">
+    <div class="inner">
+      <p class="kicker b">07 — <span class="ad">AD-8, AD-10</span> · the injection path</p>
+      <h2 class="b">A vendor name is a string.<br>A malicious string is also a string.</h2>
+      <p class="body b">
+        Isolating extraction from reasoning stops the crude attack — the reasoning model never sees
+        raw document bytes. But schema validation alone would happily pass
+        <em>"Acme Landscaping. Ignore prior instructions and…"</em> through as a valid
+        <code>vendor_name</code>, straight into the anomaly agent and the board's email.
+      </p>
+      <div class="cols b">
+        <div class="card">
+          <p class="t pos">Values are bounded</p>
+          <p>Length caps, format regex, enums. Vendor identity resolves against a known-vendor table; unknowns go to a human-confirm queue and never auto-create.</p>
+        </div>
+        <div class="card">
+          <p class="t pos">Values never enter a prompt</p>
+          <p>Prompts carry row ids. Tools resolve values. The renderer escapes on output. There is no string interpolation of extracted text anywhere in the prompt path.</p>
+        </div>
+        <div class="card">
+          <p class="t pos">The boundary is a vendor boundary</p>
+          <p>Extraction runs on Gemini, reasoning on Claude. Different keys, different deploy units, different control planes — so the two sides cannot be collapsed into one context by a config change.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 -->
+  <section class="slide" aria-label="Adversarial review findings">
+    <div class="inner">
+      <p class="kicker b">08 — <span class="ad">AD-13, AD-14</span> · what the adversarial pass caught</p>
+      <h2 class="b">Two units can obey every rule<br>and still build incompatibly.</h2>
+      <p class="body b">
+        The review asks one question: construct two components that each honor every decision to
+        the letter, yet still collide. It found two, and both were closed with new invariants.
+      </p>
+      <div class="cols b">
+        <div class="card">
+          <p class="t neg">Ingestion was not idempotent</p>
+          <p>First upload, re-process, and retry-after-failure could each obey every prior rule and still write duplicate invoice and alert rows. In a product whose headline feature is duplicate-invoice detection, the pipeline would have been manufacturing the very thing it exists to catch.</p>
+        </div>
+        <div class="card">
+          <p class="t neg">Catalog versions were mutable</p>
+          <p>The provenance log records the catalog entry and version — but nothing stopped a version's SQL being edited in place. The log would read <code>dues_status@2</code> while that name no longer identified the SQL that ran. An audit trail that cannot be replayed is worse than none.</p>
+        </div>
+      </div>
+      <div class="rule-claim warn b">
+        Neither is exotic. Both would have shipped, and the second would have quietly invalidated
+        the compliance story the product is sold on.
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide" aria-label="Open items">
+    <div class="inner">
+      <p class="kicker b">09 — deliberately unresolved</p>
+      <h2 class="b">What this spine refuses to decide.</h2>
+      <div class="cols b">
+        <div class="card">
+          <p class="t">Service-to-service auth</p>
+          <p>The tool endpoints are the only data path and must reject any non-agent caller. The requirement is fixed; the mechanism waits until the container host's networking is concrete.</p>
+        </div>
+        <div class="card">
+          <p class="t">Multi-tenancy</p>
+          <p>One association. Row-level security and tenant scoping do not exist. A second association is not a scaling task — it reopens the credential and catalog decisions.</p>
+        </div>
+        <div class="card">
+          <p class="t">Retention &amp; deletion</p>
+          <p>How long documents, extractions, and the provenance log persist. Interacts with record-keeping obligations the requirements reference but never specify.</p>
+        </div>
+        <div class="card">
+          <p class="t">Backup &amp; recovery</p>
+          <p>Including whether the provenance log carries a different retention guarantee than operational data. Owned by the operational envelope, not yet decided.</p>
+        </div>
+      </div>
+      <div class="rule-claim b">
+        Naming what a spine won't decide is half of what keeps it lean enough to be followed.
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide" aria-label="Close">
+    <div class="inner">
+      <p class="kicker b">Next</p>
+      <h2 class="b">Fifteen invariants.<br>Then epics and stories.</h2>
+      <p class="body b">
+        The spine fixes only what independently-built units could otherwise choose incompatibly.
+        Stack and structure are seed — true at cold start, owned by the code the moment it exists.
+      </p>
+      <p class="body b">
+        Open questions above are resolved before or during the epics that touch them. The two
+        upstream contradictions found in the requirements have been corrected at the source rather
+        than papered over here.
+      </p>
+      <div class="rule-claim b">
+        The claim worth defending in a board meeting: it cannot pay anyone, and it cannot state
+        a number it did not read from a record.
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<nav class="hud" aria-label="Slide navigation">
+  <span class="counter"><b id="cur">01</b> / <span id="tot">11</span></span>
+  <div class="dots" id="dots" role="tablist" aria-label="Jump to slide"></div>
+  <span class="hint">← → or space</span>
+  <div class="arrows">
+    <button id="prev" aria-label="Previous slide">←</button>
+    <button id="next" aria-label="Next slide">→</button>
+  </div>
+</nav>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+    var dotsWrap = document.getElementById("dots");
+    var railFill = document.getElementById("railFill");
+    var curEl = document.getElementById("cur");
+    var prevBtn = document.getElementById("prev");
+    var nextBtn = document.getElementById("next");
+    var i = 0;
+
+    document.getElementById("tot").textContent = String(slides.length).padStart(2, "0");
+
+    var dots = slides.map(function (s, n) {
+      var b = document.createElement("button");
+      b.className = "dot";
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-label", "Slide " + (n + 1));
+      b.addEventListener("click", function () { go(n); });
+      dotsWrap.appendChild(b);
+      return b;
+    });
+
+    function go(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach(function (s, k) {
+        s.classList.toggle("is-active", k === i);
+        s.setAttribute("aria-hidden", k === i ? "false" : "true");
+      });
+      dots.forEach(function (d, k) { d.setAttribute("aria-current", k === i ? "true" : "false"); });
+      curEl.textContent = String(i + 1).padStart(2, "0");
+      railFill.style.height = ((i / (slides.length - 1)) * 100) + "%";
+      prevBtn.disabled = i === 0;
+      nextBtn.disabled = i === slides.length - 1;
+      slides[i].scrollTop = 0;
+    }
+
+    prevBtn.addEventListener("click", function () { go(i - 1); });
+    nextBtn.addEventListener("click", function () { go(i + 1); });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); go(i + 1); }
+      else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); go(i - 1); }
+      else if (e.key === "Home") { e.preventDefault(); go(0); }
+      else if (e.key === "End") { e.preventDefault(); go(slides.length - 1); }
+    });
+
+    var x0 = null;
+    document.addEventListener("touchstart", function (e) { x0 = e.changedTouches[0].clientX; }, { passive: true });
+    document.addEventListener("touchend", function (e) {
+      if (x0 === null) return;
+      var dx = e.changedTouches[0].clientX - x0;
+      if (Math.abs(dx) > 55) go(dx < 0 ? i + 1 : i - 1);
+      x0 = null;
+    }, { passive: true });
+
+    go(0);
+  })();
+</script>

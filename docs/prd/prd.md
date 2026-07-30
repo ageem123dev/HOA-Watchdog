@@ -54,7 +54,7 @@ The AI Condo Treasury Bot acts as a read-only "Fiduciary Watchdog." It ingests u
 
 ## **3\. Glossary**
 
-* **Air-Gap:** The non-negotiable architectural constraint where the AI system operates with strictly read-only scopes. It has no write endpoints, no ledger-mutation capabilities, and no payment-rail credentials.  
+* **Air-Gap:** The non-negotiable architectural constraint that the system holds **no payment-rail or banking credentials of any kind** and therefore cannot move money, initiate or approve a payment, or alter any record in an external banking or accounting system. It is defined as an *absence* — there is no outbound write path to a financial institution — rather than as a permission setting that could later be widened. The air-gap does **not** restrict the system from writing to its own data store: the Watchdog owns and maintains its own database (uploaded documents, extracted records, alerts, and the query-provenance log), and must write to it to function.  
 * **Conversational Oracle (or Oracle):** The primary multi-turn chat interface where users interact with the Fiduciary Watchdog.  
 * **Deterministic Tooling:** Python or Node.js code/SQL scripts that execute financial math or database queries. The LLM is strictly prohibited from performing mathematical calculations itself.  
 * **Dual-LLM Pattern:** The security architecture separating untrusted document extraction (using specialized Document AI) from privileged reasoning and tool execution.  
@@ -136,8 +136,8 @@ When an anomaly is detected (FR-6 or FR-7), the system must proactively notify t
 
 ## **5\. Explicit Non-Goals**
 
-* **Write-Access to Banking API:** The system will never execute, initiate, or approve payments on any banking rail.  
-* **Ledger Mutation:** The system will not have the ability to write to, alter, or delete records in the underlying accounting database. It is strictly a read-only intelligence layer.  
+* **Write-Access to Banking API:** The system will never execute, initiate, or approve payments on any banking rail, and holds no credential that would make this possible.  
+* **External Ledger Mutation:** The system will not write to, alter, or delete records in any *external* system of record — a bank, QuickBooks, AppFolio, or a property-management platform. It reads what the board uploads and maintains its own analysis store; it never pushes changes back out. *(This is not a claim that the system performs no writes at all — it owns and writes its own database. See the Air-Gap glossary entry.)*  
 * **Resident-Facing Portal:** The system will not provide any interface, chat bot, or login for standard condo residents to check their own dues.  
 * **Tax/Legal Advice:** The Conversational Oracle will explicitly refuse to generate binding legal opinions, issue tax advice, or interpret state condo statutes (e.g., Florida HB 1021\) beyond retrieving saved board documents.
 
@@ -145,13 +145,14 @@ When an anomaly is detected (FR-6 or FR-7), the system must proactively notify t
 
 ### **6.1 Structural Air-Gap & Database Security**
 
-* **NFR-1 (Read-Only DB Roles):** The Node.js gateway and the CrewAI Python microservice must authenticate to the database using dedicated, strictly read-only user roles.  
-* **NFR-2 (No External Write Tokens):** No API keys with write permissions for external accounting software (e.g., QuickBooks, AppFolio) or banking platforms may exist in the environment variables of the worker agents.
+* **NFR-1 (Role Separation by Pipeline Stage):** The system owns and writes its own database, but that capability is partitioned by stage rather than granted wholesale. The ingestion pipeline authenticates with a writer role; the LLM-driven query path authenticates with a dedicated **SELECT-only** role and can therefore never mutate data, regardless of what the model is induced to attempt. Neither role may be granted the other's capability. *(Revised from an earlier draft that described read-only roles against an external accounting database — under the uploads-only data plane no such database is connected. See ADR AD-4.)*  
+* **NFR-1a (No Data Credentials in the LLM Runtime):** The Python agent service holds exactly one secret — the reasoning model's API key — and never a database credential, connection string, or storage key. It obtains every fact by calling the gateway's tool endpoints. *(See AD-3.)*  
+* **NFR-2 (No External Write Tokens):** No API key with write permissions for a banking platform, payment processor, or external accounting system (e.g., QuickBooks, AppFolio) may exist in the environment variables, secret store, or CI configuration of any deploy unit. The air-gap is enforced by the absence of the credential, not by a scope setting.
 
 ### **6.2 LLM Routing & Prompt Guardrails**
 
-* **NFR-3 (Zero-LLM Token Arithmetic):** The system prompt for reasoning agents must contain strict directives to never perform financial calculations, delegating all math to Deterministic Tooling.  
-* **NFR-4 (Model Restrictions):** As established in architecture guidelines, tool-calling worker agents must utilize Claude 3.5 Sonnet or equivalent high-precision models. DeepSeek-R1 and similar models with known function-calling loop instabilities are explicitly banned from orchestration roles.
+* **NFR-3 (Zero-LLM Token Arithmetic):** Enforced structurally, not by instruction. Every numeric token in a rendered answer must match a value present in the tool result set for that turn; a pre-render validator rejects any unreferenced numeral and forces a retry. System-prompt directives may remain as defence in depth but carry no enforcement weight — a prompt is a request, and SM-1 claims 100%. *(Revised from a prompt-directive mechanism. See AD-7.)*  
+* **NFR-4 (Model Requirements):** The reasoning model is bound by **capability, not by name**: it must support strict tool use and schema-validated structured outputs, because the parameterized query catalog's enforcement depends on both. A model lacking either is disqualified regardless of benchmark standing. The current binding is `claude-sonnet-5`; the model id is replaceable, the capability bar is not. *(Revised from a pin on Claude 3.5 Sonnet, which was retired in October 2025, and from a named-competitor exclusion that stated a vendor rather than a property. See AD-11.)*
 
 ### **6.3 Audit & Egress**
 

@@ -1,0 +1,296 @@
+<title>Visual directions — Watchdog dashboard</title>
+
+<!--
+  Four complete visual personalities applied to the same hero screen (the Dashboard).
+  Not palette swaps: they differ on density, type weight, hierarchy and brand register.
+
+  A — INSTITUTIONAL    ink #14213D · stone #E5E5E0 · brass #A47E3B   · flag #8C2F1E
+  B — PLAINSPOKEN      slate #2A3B45 · warm #F5F2ED · teal #0E7C6B  · flag #B4472E
+  C — CONSOLE          slate #0F1720 · panel #1A2430 · cyan #35C6D4 · flag #E5484D
+  D — DOCUMENTARY      ink #191817 · paper #FBFAF7 · blue #1F4FA8   · flag #C4241C
+-->
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #6E7370;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 2rem 1.25rem 5rem;
+    color: #fff;
+  }
+  .page { max-width: 96rem; margin: 0 auto; }
+  .page > header { margin-bottom: 2rem; max-width: 44rem; }
+  .page > header h1 { font-size: 1.35rem; margin: 0 0 0.5rem; font-weight: 650; letter-spacing: -0.02em; }
+  .page > header p { margin: 0; font-size: 0.9375rem; line-height: 1.55; color: #E2E5E1; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr)); gap: 2rem; }
+  @media (max-width: 64rem) { .grid { grid-template-columns: 1fr; } }
+
+  .dir > h2 { font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 0.35rem; color: #fff; }
+  .dir > p.why { font-size: 0.875rem; line-height: 1.5; color: #E2E5E1; margin: 0 0 0.85rem; max-width: 34rem; }
+
+  .frame { border-radius: 7px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,.34); }
+  .chrome { background: #3A3F3C; padding: 0.45rem 0.7rem; display: flex; gap: 0.35rem; align-items: center; }
+  .chrome i { width: 9px; height: 9px; border-radius: 50%; background: #6E7370; display: block; }
+  .chrome span { margin-left: 0.6rem; font-size: 0.6875rem; color: #B9BEBA; font-family: ui-monospace, monospace; }
+  .screen { height: 34rem; overflow: hidden; position: relative; }
+
+  /* ============ A · INSTITUTIONAL ============ */
+  .a { background: #E5E5E0; color: #14213D; font-family: ui-serif, Georgia, "Times New Roman", serif; }
+  .a .bar { background: #14213D; color: #fff; padding: 0.85rem 1.4rem; display: flex; justify-content: space-between; align-items: baseline; }
+  .a .bar b { font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.01em; }
+  .a .bar em { font-style: normal; font-size: 0.6875rem; color: #A9B2C9; font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.09em; text-transform: uppercase; }
+  .a .body { padding: 1.4rem; }
+  .a h3 { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.625rem; letter-spacing: 0.16em; text-transform: uppercase; color: #5A6478; margin: 0 0 0.7rem; border-bottom: 2px solid #14213D; padding-bottom: 0.35rem; }
+  .a .figs { display: flex; gap: 2.5rem; margin-bottom: 1.5rem; }
+  .a .fig .lbl { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.625rem; letter-spacing: 0.11em; text-transform: uppercase; color: #5A6478; margin-bottom: 0.2rem; }
+  .a .fig .amt { font-size: 1.55rem; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .a .row { border-bottom: 1px solid #C7C7C0; padding: 0.75rem 0; display: grid; grid-template-columns: 3px 1fr auto; gap: 0.85rem; align-items: start; }
+  .a .row .tick { width: 3px; height: 100%; background: #8C2F1E; }
+  .a .row .tick.b { background: #A47E3B; }
+  .a .row .t { font-size: 0.9375rem; line-height: 1.35; }
+  .a .row .s { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; color: #5A6478; margin-top: 0.2rem; }
+  .a .row .amt { font-variant-numeric: tabular-nums; font-size: 0.9375rem; }
+  .a .foot { margin-top: 1.1rem; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; color: #5A6478; border-top: 1px solid #C7C7C0; padding-top: 0.7rem; }
+  .a .foot a { color: #14213D; }
+
+  /* ============ B · PLAINSPOKEN ============ */
+  .b { background: #F5F2ED; color: #2A3B45; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .b .bar { padding: 1.15rem 1.5rem 0; display: flex; justify-content: space-between; align-items: center; }
+  .b .bar b { font-size: 0.9375rem; font-weight: 600; }
+  .b .bar .who { width: 1.9rem; height: 1.9rem; border-radius: 50%; background: #0E7C6B; color: #fff; display: grid; place-items: center; font-size: 0.75rem; font-weight: 600; }
+  .b .body { padding: 1.5rem; }
+  .b .lead { font-size: 1.5rem; font-weight: 640; letter-spacing: -0.025em; line-height: 1.22; margin: 0.5rem 0 0.4rem; max-width: 22rem; }
+  .b .sub { font-size: 0.9375rem; color: #64757E; margin: 0 0 1.4rem; }
+  .b .card { background: #fff; border-radius: 11px; padding: 1.05rem 1.15rem; margin-bottom: 0.75rem; border: 1px solid #E4DFD7; }
+  .b .card .tag { display: inline-block; font-size: 0.6875rem; font-weight: 640; letter-spacing: 0.04em; padding: 0.18rem 0.5rem; border-radius: 20px; margin-bottom: 0.55rem; }
+  .b .card .tag.warn { background: #FBEAE4; color: #B4472E; }
+  .b .card .tag.due { background: #E3F1EE; color: #0E7C6B; }
+  .b .card .t { font-size: 1.0625rem; font-weight: 600; margin: 0 0 0.28rem; letter-spacing: -0.01em; }
+  .b .card .s { font-size: 0.875rem; color: #64757E; line-height: 1.45; margin: 0; }
+  .b .btn { margin-top: 0.85rem; display: inline-block; background: #0E7C6B; color: #fff; font-size: 0.8125rem; font-weight: 600; padding: 0.5rem 0.95rem; border-radius: 7px; }
+  .b .quiet { text-align: center; color: #8A9AA2; font-size: 0.875rem; padding: 1.4rem 0 0; }
+
+  /* ============ C · CONSOLE ============ */
+  .c { background: #0F1720; color: #D6DEE7; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 0.8125rem; }
+  .c .bar { background: #0B1119; border-bottom: 1px solid #22303F; padding: 0.6rem 0.95rem; display: flex; justify-content: space-between; align-items: center; }
+  .c .bar b { font-size: 0.8125rem; font-weight: 600; color: #EAF1F7; }
+  .c .bar .st { font-family: ui-monospace, monospace; font-size: 0.6875rem; color: #35C6D4; }
+  .c .strip { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid #22303F; }
+  .c .kpi { padding: 0.8rem 0.95rem; border-right: 1px solid #22303F; }
+  .c .kpi:last-child { border-right: 0; }
+  .c .kpi .l { font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: #6C8298; margin-bottom: 0.28rem; }
+  .c .kpi .v { font-family: ui-monospace, monospace; font-size: 1.05rem; color: #EAF1F7; font-variant-numeric: tabular-nums; }
+  .c .kpi .v.hot { color: #E5484D; }
+  .c .body { padding: 0.95rem; }
+  .c table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .c th { text-align: left; font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: #6C8298; padding: 0 0.6rem 0.5rem 0; font-weight: 500; border-bottom: 1px solid #22303F; }
+  .c td { padding: 0.62rem 0.6rem 0.62rem 0; border-bottom: 1px solid #1A242F; font-size: 0.8125rem; }
+  .c .sev { display: inline-block; width: 100%; text-align: center; font-family: ui-monospace, monospace; font-size: 0.625rem; letter-spacing: 0.06em; padding: 0.16rem 0; border: 1px solid currentColor; border-radius: 2px; }
+  .c .sev.hi { color: #E5484D; }
+  .c .sev.md { color: #E5A23D; }
+  .c .mono { font-family: ui-monospace, monospace; color: #9FB2C4; }
+  .c .empty { margin-top: 0.95rem; border: 1px dashed #22303F; border-radius: 4px; padding: 1.05rem; text-align: center; color: #6C8298; font-size: 0.75rem; }
+
+  /* ============ D · DOCUMENTARY ============ */
+  .d { background: #FBFAF7; color: #191817; font-family: ui-sans-serif, system-ui, "Helvetica Neue", sans-serif; }
+  .d .bar { border-bottom: 3px solid #191817; padding: 1rem 1.5rem 0.7rem; display: flex; justify-content: space-between; align-items: baseline; }
+  .d .bar b { font-size: 1.0625rem; font-weight: 700; letter-spacing: -0.03em; }
+  .d .bar span { font-size: 0.6875rem; color: #6B6862; letter-spacing: 0.06em; }
+  .d .body { padding: 1.35rem 1.5rem; }
+  .d .hd { display: grid; grid-template-columns: 1fr auto; align-items: end; border-bottom: 1px solid #D8D4CC; padding-bottom: 0.5rem; margin-bottom: 1.1rem; }
+  .d .hd h3 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.035em; margin: 0; }
+  .d .hd .n { font-size: 0.6875rem; color: #6B6862; letter-spacing: 0.1em; text-transform: uppercase; }
+  .d .item { display: grid; grid-template-columns: 2.6rem 1fr auto; gap: 0.9rem; padding: 0.85rem 0; border-bottom: 1px solid #E6E2DA; }
+  .d .item .idx { font-size: 0.6875rem; color: #C4241C; font-weight: 700; letter-spacing: 0.04em; padding-top: 0.16rem; }
+  .d .item .idx.q { color: #6B6862; }
+  .d .item h4 { font-size: 0.9375rem; font-weight: 650; margin: 0 0 0.22rem; letter-spacing: -0.012em; }
+  .d .item p { font-size: 0.8125rem; color: #56534E; margin: 0; line-height: 1.45; }
+  .d .item .amt { font-size: 0.9375rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .d .cite { font-size: 0.6875rem; color: #6B6862; margin-top: 0.3rem; border-left: 2px solid #1F4FA8; padding-left: 0.5rem; }
+  .d .ledger { margin-top: 1.2rem; display: flex; gap: 2rem; border-top: 1px solid #D8D4CC; padding-top: 0.8rem; }
+  .d .ledger div .l { font-size: 0.625rem; letter-spacing: 0.11em; text-transform: uppercase; color: #6B6862; }
+  .d .ledger div .v { font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Four visual directions — the Watchdog dashboard</h1>
+    <p>
+      The same screen, four complete personalities. Same content, same information architecture,
+      same alert lifecycle. What differs is density, typographic register, and how status is encoded.
+      Pick one, or name what you'd take from each.
+    </p>
+  </header>
+
+  <div class="grid">
+
+    <!-- A -->
+    <div class="dir">
+      <h2>A · Institutional</h2>
+      <p class="why">
+        The register of record. Serif figures, hard rules, navy and brass — reads like something
+        produced by an institution rather than an app. Status is a margin tick, not a colored pill.
+        Most formal; risks feeling austere to a volunteer who isn't a finance person.
+      </p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span>watchdog · dashboard</span></div>
+        <div class="screen a">
+          <div class="bar"><b>Sunrise Point Condominium Association</b><em>Treasurer</em></div>
+          <div class="body">
+            <div class="figs">
+              <div class="fig"><div class="lbl">Operating</div><div class="amt">$84,120.55</div></div>
+              <div class="fig"><div class="lbl">Reserve</div><div class="amt">$211,900.00</div></div>
+              <div class="fig"><div class="lbl">Unreviewed</div><div class="amt">2</div></div>
+            </div>
+            <h3>Requiring review</h3>
+            <div class="row">
+              <div class="tick"></div>
+              <div>
+                <div class="t">Possible duplicate invoice — Coastal Landscaping</div>
+                <div class="s">Same amount and service period as invoice #8814, cleared 21 days ago. Invoice number differs by one character.</div>
+              </div>
+              <div class="amt">$2,340.00</div>
+            </div>
+            <div class="row">
+              <div class="tick b"></div>
+              <div>
+                <div class="t">Unit 304 — three assessments unmatched</div>
+                <div class="s">February, April and May show no corresponding deposit in the uploaded statements.</div>
+              </div>
+              <div class="amt">$1,240.00</div>
+            </div>
+            <div class="foot">Reviewed items move to the <a href="#">register</a>. Nothing is deleted.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="dir">
+      <h2>B · Plainspoken</h2>
+      <p class="why">
+        Built for a volunteer, not an accountant. Large type, one idea per card, generous space,
+        a single calm accent with warning reserved for genuine warnings. Lowest density here —
+        it says two things need you, and what to do about them.
+      </p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span>watchdog · dashboard</span></div>
+        <div class="screen b">
+          <div class="bar"><b>Sunrise Point</b><div class="who">SM</div></div>
+          <div class="body">
+            <div class="lead">Two things need your attention.</div>
+            <p class="sub">Everything else looks consistent with your records.</p>
+
+            <div class="card">
+              <span class="tag warn">Possible duplicate</span>
+              <p class="t">Coastal Landscaping — $2,340.00</p>
+              <p class="s">You already paid this amount for the same service period three weeks ago. The invoice number is slightly different.</p>
+              <span class="btn">Review before paying</span>
+            </div>
+
+            <div class="card">
+              <span class="tag due">Dues gap</span>
+              <p class="t">Unit 304 is $1,240.00 behind</p>
+              <p class="s">Three months with no matching deposit: February, April, May.</p>
+            </div>
+
+            <p class="quiet">Reviewed items stay in your register</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="dir">
+      <h2>C · Console</h2>
+      <p class="why">
+        A monitoring tool. Dark, dense, tabular figures, severity carried in a coded chip.
+        Scans fastest once learned and handles many rows without redesign — but reads as
+        professional software, which may be wrong for a volunteer board.
+      </p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span>watchdog · dashboard</span></div>
+        <div class="screen c">
+          <div class="bar"><b>SUNRISE POINT</b><span class="st">● watching · 14 docs</span></div>
+          <div class="strip">
+            <div class="kpi"><div class="l">Operating</div><div class="v">84,120.55</div></div>
+            <div class="kpi"><div class="l">Reserve</div><div class="v">211,900.00</div></div>
+            <div class="kpi"><div class="l">Unreviewed</div><div class="v hot">2</div></div>
+            <div class="kpi"><div class="l">Delinquent</div><div class="v">1</div></div>
+          </div>
+          <div class="body">
+            <table>
+              <thead><tr><th style="width:3.4rem">Sev</th><th>Finding</th><th>Subject</th><th style="text-align:right">Amount</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><span class="sev hi">HIGH</span></td>
+                  <td>Duplicate invoice<div class="mono" style="font-size:.6875rem">match: amount + period</div></td>
+                  <td class="mono">Coastal Landscaping</td>
+                  <td style="text-align:right">2,340.00</td>
+                </tr>
+                <tr>
+                  <td><span class="sev md">MED</span></td>
+                  <td>Assessments unmatched<div class="mono" style="font-size:.6875rem">3 periods</div></td>
+                  <td class="mono">Unit 304</td>
+                  <td style="text-align:right">1,240.00</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="empty">No items in quarantine — all vendors on uploaded invoices resolved to known records.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- D -->
+    <div class="dir">
+      <h2>D · Documentary</h2>
+      <p class="why">
+        Shaped like the board packet it will end up inside. Strong type hierarchy, numbered
+        findings, an evidence line under each. Anticipates the printed and exported artifact
+        as much as the screen — findings read as citable items.
+      </p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span>watchdog · dashboard</span></div>
+        <div class="screen d">
+          <div class="bar"><b>Watchdog</b><span>Sunrise Point · 30 Jul 2026</span></div>
+          <div class="body">
+            <div class="hd">
+              <h3>Findings requiring review</h3>
+              <span class="n">2 open</span>
+            </div>
+
+            <div class="item">
+              <div class="idx">F—01</div>
+              <div>
+                <h4>Probable duplicate payment</h4>
+                <p>Coastal Landscaping, same amount and service period as an invoice cleared 21 days ago.</p>
+                <div class="cite">Invoice #8B14 vs #8814 · both $2,340.00 · service period Jun 1–30</div>
+              </div>
+              <div class="amt">$2,340.00</div>
+            </div>
+
+            <div class="item">
+              <div class="idx q">F—02</div>
+              <div>
+                <h4>Assessments without matching deposits</h4>
+                <p>Unit 304, three periods unreconciled against uploaded bank statements.</p>
+                <div class="cite">Feb, Apr, May 2026 · roll expects $413.33/mo</div>
+              </div>
+              <div class="amt">$1,240.00</div>
+            </div>
+
+            <div class="ledger">
+              <div><div class="l">Operating</div><div class="v">$84,120.55</div></div>
+              <div><div class="l">Reserve</div><div class="v">$211,900.00</div></div>
+              <div><div class="l">In register</div><div class="v">17</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
