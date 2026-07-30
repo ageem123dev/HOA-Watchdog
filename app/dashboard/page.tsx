@@ -17,8 +17,8 @@ async function signOut() {
 /**
  * A placeholder that proves one thing and claims nothing else: the signed-in
  * member's identity is available server-side on an ordinary request. The real
- * dashboard — figure blocks, the ask field, the findings list — is Story 1.3
- * onward, and inventing it here would be building against an unbuilt token layer.
+ * dashboard — figure blocks, the ask field, the findings list — is Epic 3 and
+ * later stories.
  */
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient()
@@ -26,9 +26,9 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // The middleware already redirects unauthenticated visitors. This is the
-  // second lock: a page that reads member data must never render because a
-  // matcher pattern was edited carelessly.
+  // The proxy already redirects unauthenticated visitors. This is the second
+  // lock: a page that reads member data must never render because a matcher
+  // pattern was edited carelessly.
   if (user === null) redirect(SIGN_IN_ROUTE)
 
   return (
@@ -39,7 +39,7 @@ export default async function DashboardPage() {
         Signed in as <strong>{user.email}</strong>.
       </p>
       <form action={signOut}>
-        <button type="submit" style={styles.submit}>
+        <button type="submit" style={styles.control}>
           Sign out
         </button>
       </form>
@@ -47,47 +47,37 @@ export default async function DashboardPage() {
   )
 }
 
-const INK = '#14213D'
-const INK_MUTED = '#5A6478'
-const STONE = '#E5E5E0'
-const RULE_STRONG = '#9E9E96'
-const SANS = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
-
 const styles = {
   main: {
     minHeight: '100dvh',
-    background: STONE,
-    color: INK,
-    fontFamily: SANS,
-    fontSize: '0.9375rem',
-    lineHeight: 1.5,
-    padding: '40px',
+    padding: 'var(--space-section)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '24px',
+    gap: 'var(--space-block)',
     alignItems: 'flex-start',
   },
   eyebrow: {
-    fontSize: '0.6875rem',
-    letterSpacing: '0.14em',
+    fontSize: 'var(--type-scale-label)',
+    letterSpacing: 'var(--type-tracking-label)',
     textTransform: 'uppercase',
-    color: INK_MUTED,
+    color: 'var(--color-ink-muted)',
     margin: 0,
   },
   heading: {
-    fontFamily: 'ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif',
-    fontSize: '1.55rem',
+    fontFamily: 'var(--type-serif)',
+    fontSize: 'var(--type-scale-figure)',
     fontWeight: 600,
     margin: 0,
   },
   body: { margin: 0 },
-  submit: {
+  // Records action, not a call to action — never a filled button.
+  control: {
     font: 'inherit',
-    color: INK,
+    color: 'var(--color-ink)',
     background: 'transparent',
-    border: `1px solid ${RULE_STRONG}`,
-    borderRadius: 0,
-    padding: '12px',
+    border: 'var(--component-rule-hairline) solid var(--color-rule-strong)',
+    borderRadius: 'var(--radius-none)',
+    padding: 'var(--space-row)',
     minHeight: '44px',
     cursor: 'pointer',
   },

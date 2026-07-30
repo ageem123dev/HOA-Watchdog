@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
+import { applicationStylesheet } from '@/core/design/stylesheet'
 
 export const metadata: Metadata = {
   title: 'Fiduciary Watchdog',
@@ -16,18 +17,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         {/*
-          The focus ring lives here rather than on one surface, so every
-          focusable element in the product carries it. DESIGN.md: 2px solid ink
-          with a 2px offset on stone grounds; the inverse ring for ink grounds
-          arrives with the masthead in Story 1.3, which also moves these literals
-          into the token layer.
+          `href` + `precedence` let React 19 hoist this into <head>. Without them
+          a <style> stays where it is written, which is an HTML conformance error
+          inside <body> and puts the token definitions after anything Next injects
+          into <head> — inverting the cascade order the token layer assumes.
         */}
-        <style>{`
-          :focus-visible {
-            outline: 2px solid #14213D;
-            outline-offset: 2px;
-          }
-        `}</style>
+        <style href="watchdog-tokens" precedence="default">
+          {applicationStylesheet()}
+        </style>
         {children}
       </body>
     </html>
