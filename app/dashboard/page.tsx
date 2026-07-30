@@ -7,7 +7,9 @@ export const metadata = { title: 'Dashboard — Fiduciary Watchdog' }
 async function signOut() {
   'use server'
 
-  const supabase = await createSupabaseServerClient()
+  // `required`: a swallowed failure here leaves a member believing they signed
+  // out on a shared computer while the session cookie is still live.
+  const supabase = await createSupabaseServerClient({ cookieWrites: 'required' })
   await supabase.auth.signOut()
   redirect(SIGN_IN_ROUTE)
 }

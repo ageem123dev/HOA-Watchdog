@@ -47,19 +47,40 @@ export async function proxy(request: NextRequest) {
   const decision = routeDecision({ pathname: request.nextUrl.pathname, isAuthenticated })
 
   if (decision.kind === 'redirect') {
-    return NextResponse.redirect(new URL(decision.to, request.url))
+    const redirected = NextResponse.redirect(new URL(decision.to, request.url))
+
+    // Session cookies written during getUser() live on `response`, and a redirect
+    // is a different object. Dropping them loses a rotated refresh token — the
+    // member is signed out on some later navigation with nothing to point at —
+    // and loses Supabase's *clearing* cookies too, so a dead session is never
+    // evicted and every request keeps paying a failed round trip.
+    for (const cookie of response.cookies.getAll()) redirected.cookies.set(cookie)
+
+    return redirected
   }
 
   return response
 }
 
+/*
+ * Every route except Next.js internals and a short list of well-known root
+ * files. Written as an exclusion so a surface added later is guarded by default.
+ *
+ * The exclusion is anchored to *prefixes and whole filenames*, never to a
+ * suffix. An earlier version ended in `.*\.(svg|png|…)$`, which excluded any
+ * route whose path merely ended in an image suffix — a document preview at
+ * `/api/documents/42/preview.png` would have served association records to
+ * anyone with the link, and no test would have failed.
+ *
+ * The consequence is that files under `/public` are guarded too. That is the
+ * intended trade: the only unauthenticated surface is sign-in, and it needs no
+ * assets. Anything genuinely public must be added here deliberately.
+ */
 export const config = {
+  // Written as a literal because Next.js parses this statically at build time —
+  // a reference to a constant fails the build. `proxy.test.ts` reads it back
+  // from here, so the pattern under test is the pattern that ships.
   matcher: [
-    /*
-     * Every route except Next.js internals and static assets. Written as an
-     * exclusion so a surface added later is guarded by default — an allow-list
-     * here would silently leave new routes unprotected.
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
   ],
 }

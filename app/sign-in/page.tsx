@@ -3,26 +3,19 @@ import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/adapters/auth/supabase-server'
 import { MissingSupabaseConfigError } from '@/adapters/auth/env'
 import { DEFAULT_SIGNED_IN_ROUTE, SIGN_IN_ROUTE, safeRedirectTarget } from '@/core/auth/route-policy'
+import { signInMessage, type SignInReason } from '@/core/auth/sign-in-feedback'
 
 export const metadata = { title: 'Sign in — Fiduciary Watchdog' }
 
 /**
- * Failure reasons the surface can report. The credentials case is deliberately
- * one reason rather than two: telling a visitor that an address exists but the
- * password was wrong confirms who is on the board, and the board roster is not
- * something an unauthenticated visitor gets to enumerate.
+ * A failure Supabase could not complete, as opposed to one it completed with a
+ * verdict of "no". Reporting an outage as a wrong password sends directors off
+ * to reset credentials that were never the problem.
  */
-const MESSAGES = {
-  credentials: "That email and password don't match an account.",
-  unconfigured: 'This installation is not connected to its account service yet.',
-  missing: 'Enter your email address and password.',
-} as const
-
-type Reason = keyof typeof MESSAGES
-
-function messageFor(raw: string | undefined): string | null {
-  if (raw === undefined) return null
-  return raw in MESSAGES ? MESSAGES[raw as Reason] : MESSAGES.credentials
+function isProviderUnavailable(error: { name?: string; status?: number }): boolean {
+  if (error.name === 'AuthRetryableFetchError') return true
+  const { status } = error
+  return status === undefined || status === 0 || status >= 500
 }
 
 async function signIn(formData: FormData) {
@@ -32,16 +25,16 @@ async function signIn(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim()
   const password = String(formData.get('password') ?? '')
 
-  const back = (reason: Reason) =>
+  const back = (reason: SignInReason) =>
     `${SIGN_IN_ROUTE}?reason=${reason}&next=${encodeURIComponent(next)}`
 
   if (email === '' || password === '') redirect(back('missing'))
 
-  let failed: Reason | null = null
+  let failed: SignInReason | null = null
   try {
-    const supabase = await createSupabaseServerClient()
+    const supabase = await createSupabaseServerClient({ cookieWrites: 'required' })
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) failed = 'credentials'
+    if (error) failed = isProviderUnavailable(error) ? 'unavailable' : 'credentials'
   } catch (error) {
     if (!(error instanceof MissingSupabaseConfigError)) throw error
     failed = 'unconfigured'
@@ -62,23 +55,11 @@ export default async function SignInPage({
   const rawReason = Array.isArray(params.reason) ? params.reason[0] : params.reason
 
   const next = safeRedirectTarget(rawNext, DEFAULT_SIGNED_IN_ROUTE)
-  const message = messageFor(rawReason)
+  const message = signInMessage(rawReason)
 
   return (
     <main style={styles.main}>
-      {/*
-        The focus ring cannot be expressed as an inline style — `:focus-visible`
-        is a pseudo-class — and WCAG 2.2 requires it here, so it ships as a style
-        element rather than being quietly omitted. DESIGN.md: 2px solid ink with a
-        2px offset, on stone grounds. Story 1.3 moves this into the token layer.
-      */}
-      <style>{`
-        .watchdog-sheet :focus-visible {
-          outline: 2px solid ${INK};
-          outline-offset: 2px;
-        }
-      `}</style>
-      <div className="watchdog-sheet" style={styles.sheet}>
+      <div style={styles.sheet}>
         <p style={styles.eyebrow}>Fiduciary Watchdog</p>
         <h1 style={styles.heading}>Sign in</h1>
         <p style={styles.intro}>
@@ -98,12 +79,21 @@ export default async function SignInPage({
             <label htmlFor="email" style={styles.label}>
               Email address
             </label>
+            {/*
+              After a failure the page arrives as a fresh document, and a live
+              region that is already present when the document loads is not
+              announced — announcement requires the region to change after it
+              exists. Focusing the first field instead makes a screen reader read
+              its `aria-describedby` target, so the error is spoken on arrival.
+              `autoFocus` is the HTML attribute here, so it works without script.
+            */}
             <input
               id="email"
               name="email"
               type="email"
               autoComplete="username"
               required
+              autoFocus={message !== null}
               aria-describedby={message === null ? undefined : 'sign-in-error'}
               style={styles.input}
             />

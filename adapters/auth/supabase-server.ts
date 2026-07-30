@@ -3,13 +3,23 @@ import { cookies } from 'next/headers'
 import { readSupabaseConfig } from './env'
 
 /**
- * A request-scoped Supabase client for server components and server actions.
+ * Whether this caller is allowed to write cookies.
  *
- * Created per request, never memoised at module scope: one client shared across
- * requests would carry one visitor's session into another's response, which on a
- * financial surface is the worst defect this codebase could ship.
+ * `best-effort` is for server components, where Next.js forbids cookie writes
+ * and throwing is the expected outcome — the proxy performs the session refresh,
+ * so nothing is lost by ignoring it.
+ *
+ * `required` is for server actions and route handlers, where a write is
+ * permitted and a failure means something is genuinely wrong. Swallowing it
+ * there produces the worst kind of bug: sign-in reports success, no session
+ * cookie is set, the proxy bounces the member back to a blank form, and it
+ * happens again on every attempt with nothing explaining why.
  */
-export async function createSupabaseServerClient() {
+export type CookieWritePolicy = 'best-effort' | 'required'
+
+export async function createSupabaseServerClient(
+  { cookieWrites }: { cookieWrites: CookieWritePolicy } = { cookieWrites: 'best-effort' },
+) {
   const cookieStore = await cookies()
   const { url, anonKey } = readSupabaseConfig()
 
@@ -21,10 +31,8 @@ export async function createSupabaseServerClient() {
           for (const { name, value, options } of cookiesToSet) {
             cookieStore.set(name, value, options)
           }
-        } catch {
-          // Server components cannot write cookies. This is expected and safe:
-          // the middleware performs the session refresh and writes the cookies
-          // on the response, so nothing is lost by ignoring it here.
+        } catch (error) {
+          if (cookieWrites === 'required') throw error
         }
       },
     },

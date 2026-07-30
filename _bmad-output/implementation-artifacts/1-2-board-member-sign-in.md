@@ -4,7 +4,7 @@ baseline_commit: 3a07ee467c2f18e7873342a74afa9b9066091279
 
 # Story 1.2: Board member sign-in
 
-Status: review
+Status: done
 
 ## Story
 
@@ -72,7 +72,7 @@ action is attributable to me.
         Design Paradigm layer table).
 
 - [x] **Task 4 — Middleware enforcing the policy** (AC: 1) — shipped as `proxy.ts`, see Completion Notes
-  - [x] `middleware.ts` at the repository root. It resolves the session, calls `routeDecision`,
+  - [x] `proxy.ts` at the repository root (Next.js 16 renamed the convention). It resolves the session, calls `routeDecision`,
         and redirects. It contains **no policy of its own** — all decisions come from `core/auth`,
         so the policy is testable without a running server.
   - [x] `config.matcher` must exclude `_next/static`, `_next/image` and `favicon.ico` while
@@ -110,8 +110,10 @@ action is attributable to me.
         ignore.
   - [x] README: a short "Environment" section explaining that the app builds without these but
         cannot sign anyone in without them.
-  - [x] Confirm the NFR-2 guard still passes and still does **not** flag the Supabase names — they
-        are already in its permitted list, and `.env.example` is now a file it reads.
+  - [x] Confirm the NFR-2 guard still passes and still does **not** flag the Supabase names, and
+        that `.env.example` is now a file it reads. (The detector is a deny-list only — the names
+        pass because nothing matches them, not because an allow-list names them. The story's
+        original wording said otherwise and was wrong.)
 
 - [x] **Task 8 — Gates** (AC: 1, 2, 3)
   - [x] `npm run lint`, `npm run build` (**without** any Supabase env var set — this must pass),
@@ -185,7 +187,6 @@ These are the two behaviors to write failure-mode analyses for first.
 adapters/auth/
   env.ts                    # NEW — lazy env reading, named error
   supabase-server.ts        # NEW
-  supabase-browser.ts       # NEW
 app/
   page.tsx                  # UPDATE — redirect to /dashboard
   sign-in/page.tsx          # NEW
@@ -193,12 +194,15 @@ app/
 core/auth/
   route-policy.ts           # NEW — pure
   route-policy.test.ts      # NEW
-middleware.ts               # NEW — repository root, required by Next.js
+  sign-in-feedback.ts       # NEW — pure; failure copy and reason validation
+  sign-in-feedback.test.ts  # NEW
+proxy.ts                    # NEW — repository root; Next.js 16 renamed middleware -> proxy
+proxy.test.ts               # NEW
 .env.example                # NEW — names only
 ```
 
-`middleware.ts` at the repository root is a Next.js requirement and a variance from the spine's
-source tree, in the same category as `.github/` — record it, no AD change needed.
+`proxy.ts` at the repository root is a Next.js requirement and a variance from the spine's source
+tree, in the same category as `.github/` — record it, no AD change needed.
 
 ## Library & Framework Requirements
 
@@ -384,14 +388,119 @@ exists in the codebase yet.
 - `core/auth/route-policy.ts` (new)
 - `core/auth/route-policy.test.ts` (new)
 - `proxy.ts` (new)
+- `proxy.test.ts` (new)
+- `core/auth/sign-in-feedback.ts` (new)
+- `core/auth/sign-in-feedback.test.ts` (new)
+- `app/layout.tsx` (modified — product-wide focus ring)
 - `package.json`, `package-lock.json` (modified — `@supabase/supabase-js`, `@supabase/ssr`)
 - `tsconfig.json` (modified — `adapters/**/*.ts` added to `include`)
 - `_bmad-output/implementation-artifacts/1-2-board-member-sign-in.md` (new)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified)
 
+### Local Code Review (AI) — 2026-07-30
+
+Two adversarial layers ran against `3a07ee4..75b3c87` (a third was interrupted). Both independently
+found the same two serious defects, and both were in **`proxy.ts` — the one new module with no
+tests**. That is the lesson of this review, not an incidental detail: the Test Design section
+argued the proxy was "integration glue" and demoted it, but the glue is where `isAuthenticated` is
+derived, where the matcher decides what is even seen, and where the response object is chosen. A
+`proxy.test.ts` now exists with 24 tests, and both defects were driven from red.
+
+**Fixed — High:**
+
+- [x] **The proxy discarded refreshed session cookies on every redirect.** `setAll` carefully
+      reassigns `response` so rotated cookies ride out; the redirect branch then returned a brand
+      new `NextResponse.redirect(...)` carrying none of them — the exact bug the Completion Notes
+      claimed to have avoided. Failure: a director with an expired access token opens `/sign-in`
+      from a bookmark, Supabase silently refreshes and *rotates* the refresh token, the redirect
+      drops the `Set-Cookie`, and the browser keeps a token that has already been consumed. They
+      are signed out on some later navigation with nothing to point at. The inverse is as bad —
+      Supabase's session-*clearing* cookies were dropped too, so a dead cookie was never evicted and
+      every later request paid a failed round trip. Cookies are now copied onto the redirect;
+      two tests cover the rotate and clear cases.
+- [x] **The matcher unguarded any route path ending in an image extension.** The exclusion ended in
+      `.*\.(svg|png|…)$`, which matches route pathnames, not just files under `/public`. A document
+      preview at `/api/documents/42/preview.png` — an entirely ordinary next step once Story 1.4
+      lands uploads — would have served association records to anyone with the link, with no test
+      failing and no reviewer signal. Verified live: `/anything/not/a/route.png` returned 404 with
+      no `Location` header, meaning the proxy never ran. The exclusion is now anchored to prefixes
+      and whole filenames (`_next/`, `favicon.ico`, `robots.txt`, `sitemap.xml`,
+      `manifest.webmanifest`, `.well-known/`). Four tests assert image-suffixed *routes* are
+      guarded. The trade — files under `/public` are guarded too — is deliberate and documented in
+      the code: sign-in is the only unauthenticated surface and it needs no assets.
+
+**Fixed — Medium:**
+
+- [x] **`?reason=constructor` returned a 500 on the product's only public page.** `raw in MESSAGES`
+      walks the prototype chain, so `toString`, `valueOf`, `__proto__` and friends bypassed the
+      unknown-reason fallback and returned a *function* from something typed as returning a string.
+      React then threw rendering it. Trivially weaponisable: send a director a link, they get an
+      error page instead of sign-in. The copy and its lookup moved to a pure module,
+      `core/auth/sign-in-feedback.ts`, where membership is an explicit test over a frozen list —
+      the bug is now unrepresentable rather than merely fixed. Seven prototype members are tested.
+- [x] **A Supabase outage was reported to the member as a wrong password.** Transport failures come
+      back as an `error` object rather than a throw, and everything non-`MissingSupabaseConfigError`
+      landed in `credentials`. Directors would have reset passwords that were never the problem. A
+      fourth reason, `unavailable`, now distinguishes a provider that could not answer from a
+      provider that answered "no".
+- [x] **`role="alert"` could not announce.** The error arrives via a full-page redirect, and a live
+      region present in the initial DOM is not announced — announcement requires the region to
+      change after it exists. The email field now takes `autoFocus` when a message is present, so a
+      screen reader reads its `aria-describedby` target on arrival. This works without JavaScript,
+      which the previous claim did not.
+- [x] **A blanket `catch {}` around cookie writes could swallow a real failure.** Legitimate in a
+      server component, where writes always throw; wrong in the sign-in action and `signOut`, where
+      a swallowed failure means sign-in reports success with no session cookie (member bounced back
+      to a blank form forever) or sign-out leaves a live session on a shared computer.
+      `createSupabaseServerClient` now takes an explicit `cookieWrites: 'best-effort' | 'required'`.
+- [x] **The dashboard had no design-system focus ring.** The rule was scoped to `.watchdog-sheet`,
+      which exists only on sign-in, so the dashboard's sign-out button fell back to the UA default —
+      while the Completion Notes claimed both surfaces carried it. The rule moved to
+      `app/layout.tsx` and now applies product-wide.
+- [x] **A test that could not fail.** `expect(PUBLIC_ROUTES.length).toBeLessThanOrEqual(2)` would
+      have allowed the public surface to double without turning red. Pinned to exact contents.
+
+**Fixed — documentation accuracy:**
+
+- [x] Task 4's subtask was ticked against `middleware.ts`, a file that does not exist, and the
+      Project Structure Notes still listed both it and the unbuilt `supabase-browser.ts`. Both
+      corrected; the structure block now matches the File List.
+- [x] Task 7 claimed the Supabase names are "already in [the guard's] permitted list". There is no
+      permitted list — `forbidden-credentials.ts` is a deny-list, and the names pass because nothing
+      matches them. Corrected. (The substantive obligation holds: the guard is green with
+      `.env.example` present, verified.)
+
+**Accepted, not fixed — with reasons:**
+
+- **Brute-force throttling is delegated to Supabase's own auth rate limits, and that is now a
+  recorded decision rather than a silent inheritance.** WCAG 3.3.8 rules out a CAPTCHA, which makes
+  the absence of any other control worth naming. HOA board rosters are public record, so an attacker
+  can obtain a director's email. **Follow-up for the deployment story: verify the project's auth
+  rate-limit settings are adequate and record the numbers.** Building an application-level lockout
+  here would need a database table that Story 1.4 has not created yet.
+- **WCAG 3.3.7 Redundant Entry — the email is not repopulated after a failed attempt.** Putting the
+  address in a query string to survive the redirect would write a board member's email into server
+  logs and browser history, which is a worse outcome than retyping it. `autoComplete="username"`
+  means a password manager refills it, which is the criterion's "available to select" allowance.
+  Revisit if the form ever becomes a client component holding its own state.
+- **`app/` imports `adapters/` directly; `core/ports/` does not exist yet.** The spine's layer table
+  routes both through ports. Introducing a port interface for a single auth adapter with one
+  implementation would be ceremony, not structure. The direction that actually matters is intact and
+  verified: `core/` imports nothing from `adapters/`, `app/`, or `next`. Revisit when a second
+  adapter for the same port appears — the extraction adapter in Story 1.5 is the likely trigger.
+- **`getUser()` runs on every guarded request, including `/robots.txt`.** It is a network call to
+  Supabase, not a local JWT verification. Well-known root files are now excluded from the matcher,
+  which removes the crawler-facing cases. The per-navigation cost on real surfaces is inherent to
+  verifying a session rather than trusting a cookie, and verifying is the correct choice on a
+  financial surface.
+
+Final state after review fixes: **236 tests passing** across 7 files; `npm run lint`,
+`npx tsc --noEmit` and `npm run build` (with no Supabase environment set) all clean.
+
 ### Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-07-30 | Local adversarial review: fixed the proxy discarding refreshed and cleared session cookies on redirect, and a matcher that unguarded any route path ending in an image suffix; both defects were in the one module without tests, which now has 24. Fixed a prototype-chain lookup that 500'd the only public page, an outage reported as a wrong password, an unannounceable live region, an over-broad cookie-write catch, and a focus ring that covered one surface of two. |
 | 2026-07-30 | Board member sign-in: deny-by-default route policy and hostile-input-tested redirect handling as pure domain logic; Supabase session plumbing with lazy environment reading so the build never requires credentials; hand-built sign-in surface satisfying WCAG 2.2 SC 3.3.8; protected dashboard placeholder and sign-out. |
 

@@ -30,8 +30,13 @@ describe('PUBLIC_ROUTES', () => {
     expect(PUBLIC_ROUTES).toContain(SIGN_IN_ROUTE)
   })
 
-  it('is small enough to read — every entry here is a hole in the fence', () => {
-    expect(PUBLIC_ROUTES.length).toBeLessThanOrEqual(2)
+  /**
+   * Pinned to exact contents, not a size bound. Every entry here is a hole in
+   * the fence, and a test that merely counts them would let the public surface
+   * grow without ever turning red.
+   */
+  it('contains exactly the routes intended to be public', () => {
+    expect([...PUBLIC_ROUTES]).toEqual([SIGN_IN_ROUTE])
   })
 })
 
