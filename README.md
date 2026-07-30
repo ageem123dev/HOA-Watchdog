@@ -19,6 +19,23 @@ npm install
 npm run dev
 ```
 
+## Environment
+
+Copy [`.env.example`](.env.example) to `.env.local` and fill in the two values from the Supabase
+project's API settings:
+
+```bash
+cp .env.example .env.local
+```
+
+The application **builds and tests without them** — `npm run build` must never require credentials,
+or the build gate stops being runnable by anyone who lacks a populated environment. What it cannot
+do without them is sign anyone in: the sign-in surface reports that the installation is not
+connected to its account service yet.
+
+Board members are provisioned in the Supabase dashboard. There is deliberately no sign-up, password
+reset, or invitation surface in the pilot — one association, a handful of directors.
+
 ## The three gates
 
 Every change must pass all three, locally and in CI:

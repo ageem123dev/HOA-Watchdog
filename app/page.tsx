@@ -1,8 +1,11 @@
-export default function HomePage() {
-  return (
-    <main>
-      <h1>Fiduciary Watchdog</h1>
-      <p>The application scaffold is in place. Surfaces arrive with the stories that need them.</p>
-    </main>
-  )
+import { redirect } from 'next/navigation'
+import { DEFAULT_SIGNED_IN_ROUTE } from '@/core/auth/route-policy'
+
+/**
+ * The root has nothing of its own to show. Sending it to the dashboard lets the
+ * middleware make the one decision that matters — signed in or not — in a single
+ * place rather than duplicating the judgement here.
+ */
+export default function RootPage() {
+  redirect(DEFAULT_SIGNED_IN_ROUTE)
 }
