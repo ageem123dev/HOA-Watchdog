@@ -36,6 +36,7 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "core/**/*.ts",
+    "adapters/**/*.ts",
     "*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
