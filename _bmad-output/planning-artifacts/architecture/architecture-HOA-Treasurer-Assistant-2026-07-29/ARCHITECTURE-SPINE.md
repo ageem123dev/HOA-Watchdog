@@ -170,7 +170,7 @@ Verified current 2026-07-29. The code owns these once it exists.
 | --- | --- | --- |
 | Next.js | 16.2.x | 16.2.12 in the code |
 | TypeScript | 5.x | 5.9.3 pinned; TS 7 is a spine amendment, not a scaffold choice |
-| **Postgres (Railway)** | 16.x | Replaced Supabase 2026-07-31 |
+| **Postgres (Railway)** | 18.4 | Replaced Supabase 2026-07-31; uuidv7() is native, no extension needed |
 | **Auth.js (NextAuth)** | v5 (`5.0.0-beta.32`) | Credentials provider, **JWT sessions** — see the correction below |
 | **Object storage** | S3-compatible (Cloudflare R2) | Behind `adapters/storage`, per AD-16 |
 | Python (agent service) | 3.13 | CrewAI `requires_python` is `<3.14,>=3.10` |
