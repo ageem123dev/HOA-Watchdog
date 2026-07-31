@@ -55,7 +55,7 @@ NFR-5: Query provenance. Every catalog execution permanently logs user id, times
 **No starter template is specified.** The repository is greenfield — no `package.json`, no source, no CI. The architecture names the stack but not a scaffold, so project initialisation is Epic 1 Story 1.
 
 - Two deploy units: a Next.js gateway (Vercel) and a Python agent service (container host). Node holds all database credentials; Python holds none. (AD-3)
-- Supabase provides Postgres, auth, and object storage. Two DB roles required: `watchdog_writer` (ingestion only) and `watchdog_reader` (SELECT-only, catalog execution only). (AD-4)
+- **Amended 2026-07-31.** Railway-hosted Postgres provides the database; Auth.js (NextAuth v5) provides sign-in with sessions in Postgres; an S3-compatible object store holds document bytes. Gateway, agent service and Postgres run on one Railway private network, so the database is not publicly reachable. Two DB roles required: `watchdog_writer` (ingestion only) and `watchdog_reader` (SELECT-only, catalog execution only), created as ordinary Postgres roles in a migration. (AD-3, AD-4, AD-16) *Supersedes the original Supabase binding, which was blocked for this project; Supabase had been carrying Postgres, auth and storage as one vendor, and only the first had a drop-in replacement.*
 - Uploads-only data plane. No connection to any external accounting system, bank, or property-management API. (AD-1)
 - The air-gap is enforced by absence of credentials, asserted by a CI check rather than by convention. (AD-2)
 - A version-controlled parameterized query catalog. Tool definitions declare `strict: true` and `additionalProperties: false`. The model never authors SQL. (AD-5)
