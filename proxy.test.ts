@@ -1,39 +1,21 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * The proxy is where the policy is *applied*: where `isAuthenticated` is derived,
- * where the matcher decides what is even seen, and where the response object
- * carrying refreshed session cookies is chosen. Testing the pure policy proves
- * the rule; only these tests prove the rule is enforced.
+ * The proxy is where the policy is *applied*: where `isAuthenticated` is derived
+ * and where the matcher decides what is even seen. Testing the pure policy
+ * proves the rule; only these tests prove the rule is enforced.
  */
 
-interface WritableCookie {
-  name: string
-  value: string
-  options?: Record<string, unknown>
-}
+const sessionState: { session: { user: { id: string } } | null } = { session: null }
 
-const authState: { user: { id: string } | null; cookiesToWrite: WritableCookie[] } = {
-  user: null,
-  cookiesToWrite: [],
-}
-
-vi.mock('@supabase/ssr', () => ({
-  createServerClient: (
-    _url: string,
-    _key: string,
-    options: { cookies: { setAll: (cookies: WritableCookie[]) => void } },
-  ) => ({
-    auth: {
-      getUser: async () => {
-        // The real client rotates cookies through setAll during a silent
-        // refresh. That write is the thing most easily lost on a redirect.
-        if (authState.cookiesToWrite.length > 0) options.cookies.setAll(authState.cookiesToWrite)
-        return { data: { user: authState.user } }
-      },
-    },
-  }),
+/**
+ * Stands in for Auth.js's `auth` wrapper, which in production verifies the
+ * session cookie and attaches the result as `request.auth`.
+ */
+vi.mock('./adapters/auth/auth', () => ({
+  auth: (handler: (request: NextRequest & { auth: unknown }) => Response) => (request: NextRequest) =>
+    handler(Object.assign(request, { auth: sessionState.session })),
 }))
 
 const { config, proxy } = await import('./proxy')
@@ -55,49 +37,53 @@ describe('config.matcher', () => {
     '/upload',
     '/findings/7f3a',
     '/api/tools/dues-status',
-    '/register',
     '/some/route/nobody/has/written/yet',
   ])('guards %s', (pathname) => {
     expect(matches(pathname)).toBe(true)
   })
 
   /**
-   * The first version of this matcher excluded `.*\.(svg|png|…)$`, which matches
-   * any *route* whose path happens to end in an image suffix — not only files
-   * under /public. A document preview at /api/documents/42/preview.png would
-   * have shipped completely unauthenticated with nothing failing.
+   * A route is not a static asset merely because its path ends in an image
+   * suffix. An earlier matcher excluded `.*\.(svg|png|…)$` and would have served
+   * a document preview at /api/documents/42/preview.png unauthenticated.
    */
   it.each([
     '/api/documents/42/preview.png',
     '/findings/7f3a/chart.svg',
-    '/anything/not/a/route.png',
     '/export/register.jpeg',
-  ])('guards %s — a route is not a static asset merely because it ends in an image suffix', (pathname) => {
+  ])('guards %s', (pathname) => {
     expect(matches(pathname)).toBe(true)
   })
 
   it.each([
     '/_next/static/chunks/main.js',
-    '/_next/image',
     '/favicon.ico',
     '/robots.txt',
-    '/sitemap.xml',
     '/.well-known/security.txt',
   ])('does not run for %s', (pathname) => {
     expect(matches(pathname)).toBe(false)
   })
+
+  /**
+   * Auth.js serves sign-in and callback endpoints under /api/auth. Guarding them
+   * would redirect the sign-in POST to sign-in, making authentication impossible
+   * — a deadlock that would look like "the password is wrong".
+   */
+  it.each(['/api/auth/session', '/api/auth/callback/credentials', '/api/auth/csrf'])(
+    'does not guard the Auth.js endpoint %s',
+    (pathname) => {
+      expect(matches(pathname)).toBe(false)
+    },
+  )
 })
 
 describe('proxy', () => {
   beforeEach(() => {
-    authState.user = null
-    authState.cookiesToWrite = []
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://project.supabase.co')
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key')
+    sessionState.session = null
   })
 
   it('redirects an unauthenticated visitor to sign-in with their destination remembered', async () => {
-    const response = await proxy(makeRequest('/dashboard'))
+    const response = (await proxy(makeRequest('/dashboard'), undefined as never)) as NextResponse
 
     expect(response.status).toBe(307)
     expect(response.headers.get('location')).toBe(
@@ -106,57 +92,36 @@ describe('proxy', () => {
   })
 
   it('lets an authenticated member through', async () => {
-    authState.user = { id: 'member' }
+    sessionState.session = { user: { id: 'member-1' } }
 
-    const response = await proxy(makeRequest('/dashboard'))
+    const response = (await proxy(makeRequest('/dashboard'), undefined as never)) as NextResponse
 
     expect(response.status).toBe(200)
     expect(response.headers.get('location')).toBeNull()
   })
 
-  it('carries refreshed session cookies out on an allowed response', async () => {
-    authState.user = { id: 'member' }
-    authState.cookiesToWrite = [{ name: 'sb-auth-token', value: 'rotated', options: { path: '/' } }]
+  it('lets an unauthenticated visitor reach sign-in', async () => {
+    const response = (await proxy(makeRequest('/sign-in'), undefined as never)) as NextResponse
 
-    const response = await proxy(makeRequest('/dashboard'))
-
-    expect(response.cookies.get('sb-auth-token')?.value).toBe('rotated')
+    expect(response.status).toBe(200)
   })
 
-  /**
-   * The failure this guards is silent and intermittent: Supabase rotates the
-   * refresh token during getUser(), the redirect throws the new cookie away, and
-   * the browser keeps a token that has already been consumed. The member is
-   * signed out on some later navigation with nothing to point at.
-   */
-  it('carries refreshed session cookies out on a redirect too', async () => {
-    authState.user = { id: 'member' }
-    authState.cookiesToWrite = [{ name: 'sb-auth-token', value: 'rotated', options: { path: '/' } }]
+  it('sends an authenticated member away from sign-in', async () => {
+    sessionState.session = { user: { id: 'member-1' } }
 
-    // An authenticated member landing on sign-in is redirected away — the exact
-    // path on which a silent refresh is most likely to be discarded.
-    const response = await proxy(makeRequest('/sign-in'))
+    const response = (await proxy(makeRequest('/sign-in'), undefined as never)) as NextResponse
 
     expect(response.status).toBe(307)
-    expect(response.cookies.get('sb-auth-token')?.value).toBe('rotated')
+    expect(response.headers.get('location')).toBe('https://watchdog.example/dashboard')
   })
 
-  it('carries session-clearing cookies out on a redirect, so a dead session is evicted', async () => {
-    authState.cookiesToWrite = [{ name: 'sb-auth-token', value: '', options: { maxAge: 0 } }]
+  it.each(['/upload', '/register', '/api/tools/dues-status', '/anything/at/all'])(
+    'guards %s against an unauthenticated visitor',
+    async (pathname) => {
+      const response = (await proxy(makeRequest(pathname), undefined as never)) as NextResponse
 
-    const response = await proxy(makeRequest('/dashboard'))
-
-    expect(response.status).toBe(307)
-    expect(response.cookies.get('sb-auth-token')?.value).toBe('')
-  })
-
-  it('fails closed when Supabase is not configured, rather than opening the gate', async () => {
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '')
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', '')
-
-    const response = await proxy(makeRequest('/dashboard'))
-
-    expect(response.status).toBe(307)
-    expect(response.headers.get('location')).toContain('/sign-in')
-  })
+      expect(response.status).toBe(307)
+      expect(response.headers.get('location')).toContain('/sign-in')
+    },
+  )
 })

@@ -226,7 +226,7 @@ describe('describeViolations', () => {
 /**
  * Prefixing an environment variable by stage or scope is the most common
  * multi-environment convention there is — this project already uses it for
- * NEXT_PUBLIC_SUPABASE_*. A detector anchored to the start of the name is
+ * NEXT_PUBLIC_*. A detector anchored to the start of the name is
  * disabled by the first team that adopts the convention.
  */
 const PREFIXED_FORBIDDEN_NAMES = [
