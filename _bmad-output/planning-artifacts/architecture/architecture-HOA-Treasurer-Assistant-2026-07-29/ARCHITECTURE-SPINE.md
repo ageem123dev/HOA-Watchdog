@@ -171,7 +171,7 @@ Verified current 2026-07-29. The code owns these once it exists.
 | Next.js | 16.2.x | 16.2.12 in the code |
 | TypeScript | 5.x | 5.9.3 pinned; TS 7 is a spine amendment, not a scaffold choice |
 | **Postgres (Railway)** | 16.x | Replaced Supabase 2026-07-31 |
-| **Auth.js (NextAuth)** | v5 | Credentials provider, sessions in Postgres |
+| **Auth.js (NextAuth)** | v5 (`5.0.0-beta.32`) | Credentials provider, **JWT sessions** — see the correction below |
 | **Object storage** | S3-compatible (Cloudflare R2) | Behind `adapters/storage`, per AD-16 |
 | Python (agent service) | 3.13 | CrewAI `requires_python` is `<3.14,>=3.10` |
 | CrewAI | 1.15.8 | |
@@ -182,6 +182,20 @@ Verified current 2026-07-29. The code owns these once it exists.
 
 **Hosting.** The Next.js gateway, the Python agent service, and Postgres all run on **Railway**, on
 one private network. Object storage is the single external dependency in the data plane.
+
+**Correction — sessions are JWT, not database rows (2026-07-31).** The decision was recorded as
+"sessions in Postgres". That is **not achievable with the Credentials provider**: Auth.js supports
+database sessions only with providers that perform their own redirect flow, and the two are mutually
+exclusive by design. The consequence is real and is stated rather than discovered later — **a session
+cannot be revoked server-side before it expires.** Disabling a departed director stops them signing
+in again but does not immediately kill a session they already hold. `maxAge` is set to 8 hours to
+bound that window. Genuine revocation would mean moving to an email magic-link provider, which needs
+a mail sender this project does not build until Epic 3 — so it is a deliberate pilot-scope
+acceptance, revisited when `adapters/mail` exists.
+
+**Auth.js v5 is pinned at a beta.** `5.0.0-beta.32`; the stable line is v4, which predates the App
+Router. "Use the stable one" is the more dangerous choice here, not the safer one. Recorded so the
+pin reads as a decision rather than an accident.
 
 **Why Supabase left (2026-07-31).** Access to Supabase was blocked for this project. It had been
 carrying three jobs — Postgres, auth, and object storage — and only the first has a drop-in

@@ -1,21 +1,25 @@
 import type { CSSProperties } from 'react'
 import { redirect } from 'next/navigation'
-import { createSupabaseServerClient } from '@/adapters/auth/supabase-server'
-import { MissingSupabaseConfigError } from '@/adapters/auth/env'
+import { signIn as authSignIn } from '@/adapters/auth/auth'
+import { MissingAuthConfigError } from '@/adapters/auth/env'
 import { DEFAULT_SIGNED_IN_ROUTE, SIGN_IN_ROUTE, safeRedirectTarget } from '@/core/auth/route-policy'
 import { signInMessage, type SignInReason } from '@/core/auth/sign-in-feedback'
 
 export const metadata = { title: 'Sign in — Fiduciary Watchdog' }
 
 /**
- * A failure Supabase could not complete, as opposed to one it completed with a
- * verdict of "no". Reporting an outage as a wrong password sends directors off
- * to reset credentials that were never the problem.
+ * Auth.js reports a rejected credential as `CredentialsSignin`. Anything else —
+ * a database that will not answer, a misconfiguration — is a failure the system
+ * could not complete, not a verdict of "no". Reporting an outage as a wrong
+ * password sends directors off to reset credentials that were never the problem.
  */
-function isProviderUnavailable(error: { name?: string; status?: number }): boolean {
-  if (error.name === 'AuthRetryableFetchError') return true
-  const { status } = error
-  return status === undefined || status === 0 || status >= 500
+function isRejectedCredential(error: unknown): boolean {
+  return (error as { type?: string })?.type === 'CredentialsSignin'
+}
+
+/** `redirect()` signals by throwing; that throw must not be caught as a failure. */
+function isRedirect(error: unknown): boolean {
+  return (error as { digest?: string })?.digest?.startsWith('NEXT_REDIRECT') === true
 }
 
 async function signIn(formData: FormData) {
@@ -32,12 +36,13 @@ async function signIn(formData: FormData) {
 
   let failed: SignInReason | null = null
   try {
-    const supabase = await createSupabaseServerClient({ cookieWrites: 'required' })
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) failed = isProviderUnavailable(error) ? 'unavailable' : 'credentials'
+    // `redirect: false` keeps the navigation decision here rather than inside
+    // Auth.js, so a failure returns to this surface with a reason it can explain.
+    await authSignIn('credentials', { email, password, redirect: false })
   } catch (error) {
-    if (!(error instanceof MissingSupabaseConfigError)) throw error
-    failed = 'unconfigured'
+    if (isRedirect(error)) throw error
+    if (error instanceof MissingAuthConfigError) failed = 'unconfigured'
+    else failed = isRejectedCredential(error) ? 'credentials' : 'unavailable'
   }
 
   // Outside the try: `redirect` signals by throwing, and catching it here would

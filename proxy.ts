@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
-import { MissingSupabaseConfigError, readSupabaseConfig } from './adapters/auth/env'
+import { NextResponse } from 'next/server'
+import { auth } from './adapters/auth/auth'
 import { routeDecision } from './core/auth/route-policy'
 
 /**
@@ -10,77 +9,39 @@ import { routeDecision } from './core/auth/route-policy'
  *
  * Named `proxy` in `proxy.ts`: Next.js 16 renamed the middleware file convention
  * and warns on the old one.
+ *
+ * Auth.js owns its own session cookie, so unlike the previous Supabase wiring
+ * there is no refresh-and-reattach dance here — and with it goes the "the
+ * redirect dropped the rotated cookie" defect the last review found.
  */
-export async function proxy(request: NextRequest) {
-  // `response` is reassigned by setAll below so refreshed session cookies ride
-  // out on the response. Returning a different response object drops them and
-  // signs the member out on their next navigation.
-  let response = NextResponse.next({ request })
-  let isAuthenticated = false
-
-  try {
-    const { url, anonKey } = readSupabaseConfig()
-    const supabase = createServerClient(url, anonKey, {
-      cookies: {
-        getAll: () => request.cookies.getAll(),
-        setAll: (cookiesToSet) => {
-          for (const { name, value } of cookiesToSet) request.cookies.set(name, value)
-          response = NextResponse.next({ request })
-          for (const { name, value, options } of cookiesToSet) {
-            response.cookies.set(name, value, options)
-          }
-        },
-      },
-    })
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    isAuthenticated = user !== null
-  } catch (error) {
-    // An unconfigured or unreachable auth provider must not open the gate. The
-    // visitor is treated as unauthenticated and sent to sign-in, which explains
-    // the missing configuration; no association data is served either way.
-    if (!(error instanceof MissingSupabaseConfigError)) throw error
-  }
-
-  const decision = routeDecision({ pathname: request.nextUrl.pathname, isAuthenticated })
+export const proxy = auth((request) => {
+  const decision = routeDecision({
+    pathname: request.nextUrl.pathname,
+    // A token that fails verification arrives as null, so an unreadable or
+    // tampered session falls through to unauthenticated rather than opening the gate.
+    isAuthenticated: request.auth !== null,
+  })
 
   if (decision.kind === 'redirect') {
-    const redirected = NextResponse.redirect(new URL(decision.to, request.url))
-
-    // Session cookies written during getUser() live on `response`, and a redirect
-    // is a different object. Dropping them loses a rotated refresh token — the
-    // member is signed out on some later navigation with nothing to point at —
-    // and loses Supabase's *clearing* cookies too, so a dead session is never
-    // evicted and every request keeps paying a failed round trip.
-    for (const cookie of response.cookies.getAll()) redirected.cookies.set(cookie)
-
-    return redirected
+    return NextResponse.redirect(new URL(decision.to, request.url))
   }
 
-  return response
-}
+  return NextResponse.next()
+})
 
-/*
- * Every route except Next.js internals and a short list of well-known root
- * files. Written as an exclusion so a surface added later is guarded by default.
- *
- * The exclusion is anchored to *prefixes and whole filenames*, never to a
- * suffix. An earlier version ended in `.*\.(svg|png|…)$`, which excluded any
- * route whose path merely ended in an image suffix — a document preview at
- * `/api/documents/42/preview.png` would have served association records to
- * anyone with the link, and no test would have failed.
- *
- * The consequence is that files under `/public` are guarded too. That is the
- * intended trade: the only unauthenticated surface is sign-in, and it needs no
- * assets. Anything genuinely public must be added here deliberately.
- */
 export const config = {
   // Written as a literal because Next.js parses this statically at build time —
   // a reference to a constant fails the build. `proxy.test.ts` reads it back
   // from here, so the pattern under test is the pattern that ships.
+  //
+  // Anchored to prefixes and whole filenames, never to a suffix: an earlier
+  // version excluded `.*\.(svg|png|…)$`, which unguarded any *route* whose path
+  // merely ended in an image suffix.
+  //
+  // `api/auth/` is excluded because Auth.js must serve its own sign-in and
+  // callback endpoints to unauthenticated visitors — guarding them would make
+  // signing in impossible.
   matcher: [
-    '/((?!_next/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
+    '/((?!_next/|api/auth/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
   ],
 }

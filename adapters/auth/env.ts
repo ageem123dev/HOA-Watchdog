@@ -1,59 +1,52 @@
 /**
- * Supabase configuration, read at call time rather than at module load.
+ * Auth and database configuration, read at call time rather than at module load.
  *
  * The distinction is not stylistic. Next.js evaluates modules during
  * `next build`, so a module-scope read that throws would make the build itself
- * require real credentials — turning Story 1.1's build gate into something only
- * a developer with a populated `.env` can run. Reading inside the function keeps
- * `npm run build` working for everyone and fails loudly at the moment a client
- * is actually needed.
+ * require real credentials — turning the build gate into something only a
+ * developer with a populated environment can run.
  */
 
-export class MissingSupabaseConfigError extends Error {
-  override readonly name = 'MissingSupabaseConfigError'
+export class MissingAuthConfigError extends Error {
+  override readonly name = 'MissingAuthConfigError'
 
   constructor(readonly missing: readonly string[]) {
     super(
-      `Supabase is not configured: ${missing.join(', ')} ${
+      `The application is not configured: ${missing.join(', ')} ${
         missing.length === 1 ? 'is' : 'are'
-      } missing. Copy .env.example to .env.local and fill in the values from the Supabase project settings.`,
+      } missing. Copy .env.example to .env.local and fill in the values.`,
     )
   }
 }
 
-export interface SupabaseConfig {
-  readonly url: string
-  readonly anonKey: string
+export const DATABASE_URL_VAR = 'WATCHDOG_WRITER_DATABASE_URL'
+export const AUTH_SECRET_VAR = 'AUTH_SECRET'
+
+export interface AuthConfig {
+  readonly databaseUrl: string
+  readonly authSecret: string
 }
 
-export const SUPABASE_URL_VAR = 'NEXT_PUBLIC_SUPABASE_URL'
-export const SUPABASE_ANON_KEY_VAR = 'NEXT_PUBLIC_SUPABASE_ANON_KEY'
-
-/**
- * Next.js inlines `process.env.NEXT_PUBLIC_*` into the client bundle only when
- * the property is accessed statically, which is why these are written out rather
- * than looked up through a variable key.
- */
 function readFromProcess(): Record<string, string | undefined> {
   return {
-    [SUPABASE_URL_VAR]: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    [SUPABASE_ANON_KEY_VAR]: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    [DATABASE_URL_VAR]: process.env.WATCHDOG_WRITER_DATABASE_URL,
+    [AUTH_SECRET_VAR]: process.env.AUTH_SECRET,
   }
 }
 
-export function readSupabaseConfig(
+export function readAuthConfig(
   env: Readonly<Record<string, string | undefined>> = readFromProcess(),
-): SupabaseConfig {
-  const url = env[SUPABASE_URL_VAR]?.trim()
-  const anonKey = env[SUPABASE_ANON_KEY_VAR]?.trim()
+): AuthConfig {
+  const databaseUrl = env[DATABASE_URL_VAR]?.trim()
+  const authSecret = env[AUTH_SECRET_VAR]?.trim()
 
   const missing: string[] = []
-  if (!url) missing.push(SUPABASE_URL_VAR)
-  if (!anonKey) missing.push(SUPABASE_ANON_KEY_VAR)
+  if (!databaseUrl) missing.push(DATABASE_URL_VAR)
+  if (!authSecret) missing.push(AUTH_SECRET_VAR)
 
-  // Reported together rather than one at a time: a developer setting this up for
-  // the first time should learn everything that is wrong in one pass.
-  if (missing.length > 0) throw new MissingSupabaseConfigError(missing)
+  // Reported together: a developer setting this up for the first time should
+  // learn everything that is wrong in one pass.
+  if (missing.length > 0) throw new MissingAuthConfigError(missing)
 
-  return { url: url as string, anonKey: anonKey as string }
+  return { databaseUrl: databaseUrl as string, authSecret: authSecret as string }
 }

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createSupabaseServerClient } from '@/adapters/auth/supabase-server'
+import { auth, signOut as authSignOut } from '@/adapters/auth/auth'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 
 export const metadata = { title: 'Dashboard — Fiduciary Watchdog' }
@@ -7,11 +7,10 @@ export const metadata = { title: 'Dashboard — Fiduciary Watchdog' }
 async function signOut() {
   'use server'
 
-  // `required`: a swallowed failure here leaves a member believing they signed
-  // out on a shared computer while the session cookie is still live.
-  const supabase = await createSupabaseServerClient({ cookieWrites: 'required' })
-  await supabase.auth.signOut()
-  redirect(SIGN_IN_ROUTE)
+  // Auth.js clears its own session cookie and performs the navigation. A failure
+  // here propagates rather than being swallowed: a member who is told they signed
+  // out on a shared computer must actually have done so.
+  await authSignOut({ redirectTo: SIGN_IN_ROUTE })
 }
 
 /**
@@ -21,10 +20,8 @@ async function signOut() {
  * later stories.
  */
 export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const session = await auth()
+  const user = session?.user ?? null
 
   // The proxy already redirects unauthenticated visitors. This is the second
   // lock: a page that reads member data must never render because a matcher
