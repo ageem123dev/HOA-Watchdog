@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Superseding a pull-request run is free; superseding a branch run is not. Each
+  # push to an epic branch is an integration gate for that commit, and a cancelled
+  # run leaves the commit with no verdict rather than a failing one.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Lint, build, test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # The suite includes core/security/nfr2-guard.test.ts, which asserts that no
+      # banking, payment-processor, or external-accounting credential exists in this
+      # deploy unit's environment or tracked configuration. That assertion enforces
+      # NFR-2 by way of AD-2 ("the air-gap is an absence, not a permission"), which
+      # names a CI check as its mechanism. If it fails, remove the credential —
+      # removing the check is an architecture change, not a fix.
+      - name: Test (includes the NFR-2 no-write-credential assertion)
+        run: npm test
