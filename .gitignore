@@ -18,6 +18,12 @@ coverage/
 .env.*
 !.env.example
 
+# Local diagnostic scratch — throwaway probes written while debugging, never product code.
+# Also excluded from eslint and vitest: left in the working tree these are collected by
+# both, which turns a green gate red for reasons that have nothing to do with the product.
+.probe/
+envprobe
+
 # OS noise
 .DS_Store
 Thumbs.db

@@ -13,6 +13,10 @@ const config = [
       '.claude/**',
       '_bmad/**',
       '_bmad-output/**',
+      // Untracked local diagnostic scratch (also in .gitignore). Without this the
+      // lint gate reports errors in throwaway probe files, which both masks real
+      // findings and makes a passing build look broken.
+      '.probe/**',
     ],
   },
   ...nextCoreWebVitals,
