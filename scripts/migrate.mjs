@@ -10,7 +10,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { accessSync, constants as fsConstants, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
@@ -98,13 +98,61 @@ async function main() {
       }
     }
 
-    // Role passwords: set only when the corresponding URL is not already recorded,
-    // so re-running does not rotate credentials out from under a running service.
+    /**
+     * Role passwords live in the database; the URLs that carry them live in
+     * .env.local. Nothing keeps the two in step, and skipping on the file alone
+     * gets both directions wrong. A fresh database with a stale .env.local skips
+     * every role and leaves them with no password at all, and the failure surfaces
+     * later as an authentication error against a URL that looks fine.
+     *
+     * So the recorded URL is *tried* rather than trusted. If it connects, the
+     * password behind it is real and rotating would be the destructive move. If it
+     * does not, the record is stale whatever the file says.
+     */
+    const recordedUrlWorks = async (url) => {
+      const probe = new pg.Client({ connectionString: url, connectionTimeoutMillis: 5000 })
+      try {
+        await probe.connect()
+        await probe.query('select 1')
+        return true
+      } catch {
+        return false
+      } finally {
+        try {
+          await probe.end()
+        } catch {
+          // Already failed to connect; nothing to close.
+        }
+      }
+    }
+
+    /**
+     * The other half of the same problem: ALTER ROLE succeeds, the file write then
+     * fails, and the new password exists nowhere but in the database. Checked here,
+     * before the first ALTER ROLE, so that failure happens while it is still
+     * harmless.
+     */
+    try {
+      accessSync(ENV_FILE, fsConstants.W_OK)
+    } catch (cause) {
+      throw new Error(
+        `${ENV_FILE} is not writable, so a new role password could not be recorded; ` +
+          'refusing to change one that would then exist only in the database',
+        { cause },
+      )
+    }
+
     for (const role of ROLES) {
       const key = `${role.toUpperCase()}_DATABASE_URL`
-      if ((process.env[key] ?? '').trim() !== '') {
-        console.log(`skip  ${key} (already set)`)
+      const recorded = (process.env[key] ?? '').trim()
+
+      if (recorded !== '' && (await recordedUrlWorks(recorded))) {
+        console.log(`skip  ${key} (recorded URL connects)`)
         continue
+      }
+
+      if (recorded !== '') {
+        console.log(`reset ${key} (recorded URL does not connect)`)
       }
 
       const password = generatePassword()

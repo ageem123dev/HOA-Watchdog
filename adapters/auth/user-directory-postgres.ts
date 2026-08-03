@@ -19,7 +19,39 @@ let pool: Pool | null = null
  */
 function getPool(): Pool {
   if (pool === null) {
-    pool = new Pool({ connectionString: readWriterDatabaseUrl(), max: 5 })
+    pool = new Pool({
+      connectionString: readWriterDatabaseUrl(),
+      max: 5,
+      /**
+       * Bounds on the sign-in path, which is unauthenticated and therefore the
+       * one an attacker can reach for free.
+       *
+       * Without `connectionTimeoutMillis` a request waits indefinitely for a free
+       * client, so a stalled database turns every sign-in attempt into a held
+       * connection and the pool never recovers. `statement_timeout` is the
+       * server-side counterpart: it bounds the query itself rather than the wait
+       * for a client, and it is enforced by Postgres, so it survives a request
+       * this process has stopped tracking.
+       */
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      statement_timeout: 10_000,
+    })
+
+    /**
+     * `pg` emits `error` on the pool when an *idle* client fails — a database
+     * restart, an idle-session timeout, a dropped network path. That event has no
+     * request to reject, so with no listener attached Node treats it as an
+     * unhandled `error` and terminates the process. A board member's sign-in
+     * should not take the gateway down because the database recycled a connection
+     * nobody was using.
+     *
+     * The pool discards the client and carries on; this listener exists to keep
+     * the failure observable rather than fatal.
+     */
+    pool.on('error', (error) => {
+      console.error('[user-directory] idle client error; the pool will discard it', error)
+    })
   }
   return pool
 }

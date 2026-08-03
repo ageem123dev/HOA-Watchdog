@@ -77,16 +77,53 @@ await step('confirm it is gone', async () => {
   throw new Error('object still present after delete')
 })
 
-// The token was scoped to one bucket. Prove the scoping is real rather than
-// assumed: reaching a bucket we did not name must be refused.
-await step('token is scoped — a different bucket is refused', async () => {
-  try {
-    await client.send(new HeadBucketCommand({ Bucket: `${bucket}-not-ours` }))
-  } catch (error) {
-    return `refused with ${error.name}`
-  }
-  throw new Error('token could reach a bucket it was not scoped to')
-})
+/**
+ * Whether the token is scoped to this bucket alone.
+ *
+ * The obvious version of this check asks for `${bucket}-not-ours` and treats any
+ * error as proof. It proves nothing: that bucket almost certainly does not exist,
+ * so the request 404s for every token including an account-wide one. It confirms a
+ * name is unused, then reports the token is scoped.
+ *
+ * A real check needs a bucket that *exists* and sits outside the token's scope,
+ * and needs to distinguish the two refusals. Access denied means the bucket is
+ * there and the token cannot reach it — scoping proven. Not found means the token
+ * cannot see it either way, which tells us nothing.
+ *
+ * That target cannot be guessed, so it is named explicitly. Without it the check
+ * reports SKIP. A check that cannot run must not print PASS.
+ */
+const outOfScopeBucket = (process.env.R2_OUT_OF_SCOPE_BUCKET ?? '').trim()
+
+if (outOfScopeBucket === '') {
+  console.log(
+    '  SKIP  token is scoped — set R2_OUT_OF_SCOPE_BUCKET to a bucket that exists in this\n' +
+      '        account but outside the token scope. Unset, this cannot be distinguished from\n' +
+      '        a bucket that simply does not exist, so it is not asserted.',
+  )
+} else if (outOfScopeBucket === bucket) {
+  console.log(`  FAIL  token is scoped — R2_OUT_OF_SCOPE_BUCKET names the bucket under test`)
+  failed = true
+} else {
+  await step(`token is scoped — ${outOfScopeBucket} is refused`, async () => {
+    try {
+      await client.send(new HeadBucketCommand({ Bucket: outOfScopeBucket }))
+    } catch (error) {
+      const status = error.$metadata?.httpStatusCode
+      if (status === 403 || error.name === 'AccessDenied' || error.name === 'Forbidden') {
+        return `refused with ${error.name} (${status ?? 'no status'})`
+      }
+      if (status === 404 || error.name === 'NotFound' || error.name === 'NoSuchBucket') {
+        throw new Error(
+          `${outOfScopeBucket} was not found, so this proves nothing about scoping — ` +
+            'name a bucket that exists in the account',
+        )
+      }
+      throw error
+    }
+    throw new Error(`token reached ${outOfScopeBucket}, which is outside the scope it should have`)
+  })
+}
 
 console.log(failed ? '\nSOME CHECKS FAILED\n' : '\nR2 is ready.\n')
 process.exit(failed ? 1 : 0)
