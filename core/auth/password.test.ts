@@ -125,15 +125,45 @@ describe('verifyPassword', () => {
   })
 
   /**
-   * A cost factor large enough to exhaust maxmem makes scrypt throw. A stored
-   * hash is attacker-influenced only via a database compromise, but failing
-   * closed costs nothing and a propagated error would be a 500 on the sign-in
-   * path.
+   * Absurd stored parameters must be rejected by a bounds check, *before* scrypt
+   * is invoked — not by hoping scrypt throws.
+   *
+   * `maxmem` is derived from the stored parameters themselves, so it scales up to
+   * accommodate whatever cost the row claims instead of capping it. At N=2^30, r=8
+   * that ceiling is ~2.2TB and scrypt does not fail fast — it attempts the work,
+   * turning one corrupt row into a CPU and memory denial of service on an
+   * unauthenticated sign-in path.
+   *
+   * The one-second budget is the assertion. A bounds check returns in microseconds;
+   * an N=2^30 derivation cannot finish in a second on any machine, so this test
+   * cannot pass unless the parameters are rejected without deriving.
    */
-  it('fails closed rather than throwing on absurd stored parameters', async () => {
-    const absurd = `scrypt$${2 ** 30}$8$1$c2FsdA$aGFzaA`
+  it(
+    'rejects absurd stored parameters without invoking scrypt',
+    async () => {
+      const absurd = `scrypt$${2 ** 30}$8$1$c2FsdA$aGFzaA`
 
-    await expect(verifyPassword('anything', absurd)).resolves.toBe(false)
+      await expect(verifyPassword('anything', absurd)).resolves.toBe(false)
+    },
+    1000,
+  )
+
+  it('rejects a cost above the supported ceiling', async () => {
+    const tooCostly = `scrypt$${2 ** 21}$8$1$c2FsdA$aGFzaA`
+
+    await expect(verifyPassword('anything', tooCostly)).resolves.toBe(false)
+  })
+
+  it('rejects a block size above the supported ceiling', async () => {
+    const tooWide = `scrypt$${2 ** 17}$64$1$c2FsdA$aGFzaA`
+
+    await expect(verifyPassword('anything', tooWide)).resolves.toBe(false)
+  })
+
+  it('rejects a parallelization above the supported ceiling', async () => {
+    const tooParallel = `scrypt$${2 ** 17}$8$32$c2FsdA$aGFzaA`
+
+    await expect(verifyPassword('anything', tooParallel)).resolves.toBe(false)
   })
 
   it('verifies against the parameters stored with the hash, not the current defaults', async () => {

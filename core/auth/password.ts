@@ -34,6 +34,29 @@ const SALT_BYTES = 16
 const KEY_BYTES = 64
 const SCHEME = 'scrypt'
 
+/**
+ * Upper bounds on the parameters read back out of a stored hash.
+ *
+ * These are a denial-of-service guard, not a strength guard. `maxmemFor` derives
+ * scrypt's memory ceiling from the stored parameters themselves, so it scales up
+ * to accommodate whatever the row claims rather than capping it — a row asserting
+ * an inflated cost is therefore attempted rather than rejected, and scrypt only
+ * errors quickly at values absurd enough to trip an internal limit. In between
+ * sits the dangerous range: `cost` of 2^21 is a mere 16x the default and takes
+ * long enough to turn one bad row into a CPU and memory denial of service on an
+ * unauthenticated sign-in path.
+ *
+ * Bounding at parse time means such a row reads as "this password does not
+ * match" in microseconds, without scrypt ever being invoked.
+ *
+ * `MAX_COST` leaves headroom of three doublings above the current default, which
+ * `needsRehash` migrates hashes toward on each successful sign-in. Raising the
+ * default beyond this ceiling means raising the ceiling in the same change.
+ */
+const MAX_COST = 2 ** 20
+const MAX_BLOCK_SIZE = 16
+const MAX_PARALLELIZATION = 4
+
 /** scrypt needs maxmem above roughly 128 * N * r; give it headroom. */
 function maxmemFor({ cost, blockSize }: ScryptParameters): number {
   return 256 * cost * blockSize
@@ -104,6 +127,14 @@ function parseStoredHash(stored: string): ParsedHash | null {
 
   if (!Object.values(parameters).every((value) => Number.isInteger(value) && value > 0)) return null
 
+  if (
+    parameters.cost > MAX_COST ||
+    parameters.blockSize > MAX_BLOCK_SIZE ||
+    parameters.parallelization > MAX_PARALLELIZATION
+  ) {
+    return null
+  }
+
   return {
     parameters,
     salt: Buffer.from(salt as string, 'base64url'),
@@ -131,8 +162,9 @@ export async function verifyPassword(password: string, stored: string): Promise<
   try {
     derived = await derive(password, parsed.salt, parsed.parameters)
   } catch {
-    // Absurd parameters in a stored hash (a cost value that exhausts maxmem) must
-    // fail closed rather than propagate.
+    // Belt and braces. Parameters are bounded at parse time, so scrypt should not
+    // be reachable with values that make it throw — but a throw here must still
+    // fail closed rather than propagate as a 500 on the sign-in path.
     return false
   }
 
