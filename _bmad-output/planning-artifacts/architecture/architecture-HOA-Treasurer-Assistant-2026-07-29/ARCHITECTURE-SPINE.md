@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports & adapters) with a unidirectional quarantine gate an
 scope: 'Early-adopter pilot: document ingestion, the Conversational Oracle, and passive anomaly detection'
 status: final
 created: '2026-07-29'
-updated: '2026-07-30'
+updated: '2026-07-31'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5]
 sources:
   - docs/prd/prd.md
@@ -51,13 +51,15 @@ Layer → namespace mapping:
 
 - **Binds:** NFR-1, NFR-2, FR-4, the agent service
 - **Prevents:** A prompt-injected or misbehaving agent reaching data directly; credential sprawl across two runtimes.
-- **Rule:** The Node gateway holds every database credential. The Python agent service holds exactly one secret — the model API key — and never a database credential, connection string, or storage key. It obtains every fact by calling Node's tool endpoints. A code path that gives the agent service data access is a violation, not an optimization.
+- **Rule:** The Node gateway holds every database credential and the object-storage key. The Python agent service holds exactly one secret — the model API key — and never a database credential, connection string, or storage key. It obtains every fact by calling Node's tool endpoints. A code path that gives the agent service data access is a violation, not an optimization.
+- **Realization (2026-07-31):** both runtimes and Postgres sit on one Railway private network. The database is not reachable from the public internet at all, so this rule is enforced by network topology as well as by credential distribution — a misconfigured agent service cannot reach the database even if it somehow acquired a connection string.
 
 ### AD-4 — Roles separate by pipeline stage, not by service
 
 - **Binds:** NFR-1, ingestion, Oracle query path
 - **Prevents:** The LLM-driven read path acquiring the ability to mutate; a single omnipotent role used everywhere.
 - **Rule:** Two database roles. `watchdog_writer` may INSERT/UPDATE and is used *only* by the ingestion pipeline. `watchdog_reader` is SELECT-only and is the *only* role any catalog query executes under. Neither role may be granted the other's capability. This is the pilot's realization of NFR-1's intent — read-only enforcement scoped to the LLM-driven path.
+- **Realization (2026-07-31):** on a plain Postgres these are ordinary `CREATE ROLE` statements in a migration, with grants written explicitly and reviewable in the diff. The separation is proven by a test that connects as `watchdog_reader` and asserts an INSERT fails. A migration that grants the reader anything beyond SELECT is a violation the test must catch, not a judgement call at review time.
 
 ### AD-5 — The reasoning model never authors SQL
 
@@ -124,6 +126,14 @@ Layer → namespace mapping:
 - **Binds:** all cross-service calls
 - **Prevents:** Ad-hoc endpoints accumulating between the gateway and the agent service; an unauthenticated data path.
 - **Rule:** The Python agent service reaches Node only through versioned `/tools/*` endpoints, which are the sole data path in the system and must reject any caller that is not the agent service. The Python service pins **Python 3.13** — CrewAI's `requires_python` is `<3.14,>=3.10`, so the ambient 3.14 interpreter cannot host it.
+- **Mechanism (decided 2026-07-31, previously deferred):** the `/tools/*` endpoints are bound to the Railway private network and are not published on any public domain. Caller identity is asserted by a shared service token held only by the agent service and the gateway. This was deferred pending a concrete deployment topology; co-locating both runtimes on one private network makes private networking the answer, and network reachability now carries most of the weight the token would otherwise carry alone.
+
+### AD-16 — Document bytes live in object storage; the database holds their identity
+
+- **Binds:** FR-1, FR-2, AD-8, AD-13, all ingestion
+- **Prevents:** Document bytes leaking into query results and from there toward the reasoning side; a database whose backup size is dominated by PDFs; two components disagreeing about where a document actually is.
+- **Rule:** An uploaded document's bytes are written to object storage and nowhere else. The database stores its **identity and metadata only** — content hash, storage key, filename, size, media type, upload time, and the typed rows extraction produced. No table holds document bytes, and no catalog entry may return a storage key to the agent. Exactly one adapter (`adapters/storage`) may construct a storage client; the port it implements is deliberately narrow — put, get, delete by key — so the provider is swappable and no caller can reach for provider-specific behaviour.
+- **Why it is stated now:** Supabase bundled storage and database behind one vendor, which made the boundary implicit. Splitting them (Railway Postgres + S3-compatible object storage) makes it a decision someone could get wrong, so it becomes a rule.
 
 Dependency direction — an arrow means "may depend on"; the absence of a reverse arrow is the rule:
 
@@ -156,17 +166,43 @@ graph LR
 
 Verified current 2026-07-29. The code owns these once it exists.
 
-| Name | Version |
-| --- | --- |
-| Next.js | 16.2.x (16.2.11 Active LTS) |
-| TypeScript | 5.x |
-| Supabase (Postgres, auth, storage) | current hosted |
-| Python (agent service) | 3.13 |
-| CrewAI | 1.15.8 |
-| Reasoning model | `claude-sonnet-5` |
-| Extraction model | `gemini-3.1-flash-lite` |
-| Vitest | current |
-| pytest | current |
+| Name | Version | Note |
+| --- | --- | --- |
+| Next.js | 16.2.x | 16.2.12 in the code |
+| TypeScript | 5.x | 5.9.3 pinned; TS 7 is a spine amendment, not a scaffold choice |
+| **Postgres (Railway)** | 18.4 | Replaced Supabase 2026-07-31; uuidv7() is native, no extension needed |
+| **Auth.js (NextAuth)** | v5 (`5.0.0-beta.32`) | Credentials provider, **JWT sessions** — see the correction below |
+| **Object storage** | S3-compatible (Cloudflare R2) | Behind `adapters/storage`, per AD-16 |
+| Python (agent service) | 3.13 | CrewAI `requires_python` is `<3.14,>=3.10` |
+| CrewAI | 1.15.8 | |
+| Reasoning model | `claude-sonnet-5` | Bound by capability, not name (AD-11) |
+| Extraction model | `gemini-3.1-flash-lite` | |
+| Vitest | 4.x | |
+| pytest | current | |
+
+**Hosting.** The Next.js gateway, the Python agent service, and Postgres all run on **Railway**, on
+one private network. Object storage is the single external dependency in the data plane.
+
+**Correction — sessions are JWT, not database rows (2026-07-31).** The decision was recorded as
+"sessions in Postgres". That is **not achievable with the Credentials provider**: Auth.js supports
+database sessions only with providers that perform their own redirect flow, and the two are mutually
+exclusive by design. The consequence is real and is stated rather than discovered later — **a session
+cannot be revoked server-side before it expires.** Disabling a departed director stops them signing
+in again but does not immediately kill a session they already hold. `maxAge` is set to 8 hours to
+bound that window. Genuine revocation would mean moving to an email magic-link provider, which needs
+a mail sender this project does not build until Epic 3 — so it is a deliberate pilot-scope
+acceptance, revisited when `adapters/mail` exists.
+
+**Auth.js v5 is pinned at a beta.** `5.0.0-beta.32`; the stable line is v4, which predates the App
+Router. "Use the stable one" is the more dangerous choice here, not the safer one. Recorded so the
+pin reads as a decision rather than an accident.
+
+**Why Supabase left (2026-07-31).** Access to Supabase was blocked for this project. It had been
+carrying three jobs — Postgres, auth, and object storage — and only the first has a drop-in
+replacement, so the swap forced two real decisions rather than a connection-string change. The
+replacements were chosen for boringness: Auth.js is the conventional Postgres-backed auth for this
+stack, and S3-compatible storage is the conventional answer for documents. Both sit behind adapters,
+which is what kept the change cheap: `core/` never knew Supabase existed.
 
 ## Structural Seed
 
@@ -175,25 +211,24 @@ Container view — only one component holds database credentials:
 ```mermaid
 graph TB
   USER[Board member] --> NEXT
-  subgraph vercel[Vercel]
-    NEXT[Next.js gateway: UI, auth, uploads. HOLDS ALL DB CREDENTIALS]
-  end
-  subgraph container[Container host]
+  subgraph railway[Railway private network]
+    NEXT[Next.js gateway: UI, auth, uploads. HOLDS ALL DB AND STORAGE CREDENTIALS]
     PY[Python agent service: CrewAI orchestration. Model key only, no DB]
+    PG[(Postgres: watchdog_writer and watchdog_reader)]
   end
-  subgraph supabase[Supabase]
-    PG[(Postgres: writer and reader roles)]
-    OBJ[(Object storage: uploaded documents)]
-  end
+  OBJ[(S3-compatible object storage: document bytes)]
   GEM[Gemini extractor]
   MAIL[Email alerts]
+  NEXT --> PG
   NEXT --> OBJ
   NEXT --> GEM
-  NEXT --> PG
-  PY -->|tools endpoints only| NEXT
-  NEXT -->|chat turn| PY
   NEXT --> MAIL
+  PY -->|tools endpoints only, private network| NEXT
+  NEXT -->|chat turn| PY
 ```
+
+Postgres is not published to the public internet; only the gateway is. The agent service reaches
+nothing but the gateway, and reaches it privately.
 
 Ingestion path — the quarantine gate is the only crossing, and it is one-way:
 
@@ -234,9 +269,12 @@ HOA-Treasurer-Assistant/
   core/           # pure domain - no I/O, no imports outward
     ports/        # interfaces the adapters implement
   adapters/
+    auth/         # Auth.js configuration and session access
     db/           # both roles live here; nothing else opens a connection
+    storage/      # the only place a storage client is constructed (AD-16)
     extraction/   # Gemini adapter + schema definitions
     mail/         # alert delivery
+  migrations/     # SQL, including the two role definitions and their grants
   catalog/        # versioned query catalog - reviewed SQL + typed params
   tools/          # /tools/* endpoints, the agent service's only data path
   agent/          # Python service (3.13, CrewAI) - separate deploy unit
@@ -248,7 +286,8 @@ HOA-Treasurer-Assistant/
 
 | Capability / Area | Lives in | Governed by |
 | --- | --- | --- |
-| FR-1 Document upload | `app/`, `adapters/db` | AD-1, AD-9 |
+| FR-1 Document upload | `app/`, `adapters/db`, `adapters/storage` | AD-1, AD-9, AD-16 |
+| Board member sign-in | `app/`, `adapters/auth` | AD-4 |
 | FR-2 Extraction isolation | `adapters/extraction` | AD-8, AD-9, AD-10 |
 | FR-3 Schema conformance | `adapters/extraction` | AD-9 |
 | FR-4 Intent routing & tool execution | `agent/`, `tools/` | AD-3, AD-5, AD-11 |
@@ -277,7 +316,8 @@ HOA-Treasurer-Assistant/
   Dropbox app-folder scope is light, while Google `drive.readonly` is a restricted scope requiring
   an annually-revalidated third-party CASA assessment. To be built as a provider-agnostic port with
   two adapters.
-- **Service-to-service auth mechanism** (mTLS / signed service token / private networking) for the `/tools/*` boundary. The *requirement* is fixed by AD-15; the mechanism waits for the deployment topology to be concrete, since the container host's networking options determine what is available.
+- ~~**Service-to-service auth mechanism** for the `/tools/*` boundary.~~ **Resolved 2026-07-31** — see AD-15. Co-locating both runtimes on a Railway private network made private networking plus a shared service token the answer.
+- **Backup and restore for object storage.** Splitting documents out of the database means the database backup no longer contains them. Two stores now need a recovery story, and they must be recoverable to a consistent point — a restored database referencing storage keys that no longer exist is worse than either failure alone. Interacts with the retention question below.
 - **Model tiering.** A cheaper model for FR-8 alert prose, where deterministic SQL does the work. Revisit if pilot token spend becomes material — at one association's volume it will not.
 - **Extraction model tier.** Newer Gemini Flash tiers exist; `gemini-3.1-flash-lite` is bound on measured cost and quality. AD-9's API-layer schema enforcement is the invariant; the model id is not.
 - **Multi-tenancy.** The pilot is one association. Row-level security, tenant scoping in the catalog, and per-tenant vendor tables are deliberately out of scope and will require revisiting AD-4 and AD-5 before a second association is onboarded.

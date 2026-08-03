@@ -1,0 +1,71 @@
+# generated: 2026-07-30
+# last_updated: 2026-07-30
+# project: HOA-Treasurer-Assistant
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+#
+# NOTE: Epics 2, 3 and 4 are named in the epic list but have no story breakdown yet
+# (_bmad-output/planning-artifacts/epics.md details Epic 1 only). Re-run sprint planning
+# after their stories are written to populate them here.
+
+generated: 2026-07-30
+last_updated: 2026-07-30
+project: HOA-Treasurer-Assistant
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: in-progress
+  1-1-project-scaffold-with-a-verified-build: done
+  1-2-board-member-sign-in: done
+  1-3-visual-foundation: done
+  1-4-upload-a-document-and-see-it-accepted-or-rejected: backlog
+  1-5-read-a-document-into-structured-records: backlog
+  1-6-hold-unknown-vendors-for-a-human: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  epic-4-retrospective: optional
