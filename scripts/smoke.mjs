@@ -35,7 +35,7 @@ const CHECKS = [
 
 const server = spawn(
   process.execPath,
-  ['--env-file=.env.local', './node_modules/next/dist/bin/next', 'start', '-p', String(PORT)],
+  ['--env-file-if-exists=.env.local', './node_modules/next/dist/bin/next', 'start', '-p', String(PORT)],
   { stdio: ['ignore', 'pipe', 'pipe'] },
 )
 

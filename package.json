@@ -12,8 +12,8 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:db": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run migrations/",
-    "migrate": "node --env-file=.env.local scripts/migrate.mjs",
+    "test:db": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run migrations/",
+    "migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {

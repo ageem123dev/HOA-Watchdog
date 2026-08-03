@@ -1,0 +1,52 @@
+# The three gates, on GitLab.
+#
+# `.github/workflows/ci.yml` does not run here — it is kept so the repository can
+# move back or mirror without losing it, but GitLab reads this file.
+#
+# Story 1.1's rule stands: no `allow_failure` on any gate. A pipeline that can go
+# green with a failing test is worse than no pipeline, because it is believed.
+
+stages: [verify]
+
+default:
+  image: node:24
+  # A lockfile-exact install, and the cache is keyed on it so a dependency change
+  # cannot be served a stale tree.
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+verify:
+  stage: verify
+  script:
+    - npm run lint
+    - npm run build
+    # The suite includes core/security/nfr2-guard.test.ts, which asserts that no
+    # banking, payment-processor, or external-accounting credential exists in
+    # this deploy unit's environment or tracked configuration. That assertion
+    # enforces NFR-2 by way of AD-2 ("the air-gap is an absence, not a
+    # permission"), which names a CI check as its mechanism. If it fails, remove
+    # the credential — removing the check is an architecture change, not a fix.
+    - npm test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH
+
+# The database and storage tests need live credentials, so they cannot run on a
+# fork or an untrusted pipeline. They are opt-in: define WATCHDOG_WRITER_DATABASE_URL
+# and WATCHDOG_READER_DATABASE_URL as *protected, masked* CI/CD variables and this
+# job runs on protected branches only.
+#
+# These are the tests that prove AD-4 — that the SELECT-only role the LLM query
+# path uses genuinely cannot write. Without them that guarantee is only asserted.
+verify:database:
+  stage: verify
+  script:
+    - npm run test:db
+  rules:
+    - if: $WATCHDOG_READER_DATABASE_URL
+      when: on_success
+    - when: never
