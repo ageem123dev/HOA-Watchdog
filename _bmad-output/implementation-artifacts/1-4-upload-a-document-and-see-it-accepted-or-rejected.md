@@ -4,7 +4,7 @@ baseline_commit: f6d718e0bb8418d868888427c454b7ba7098d452
 
 # Story 1.4: Upload a document and see it accepted or rejected
 
-Status: review
+Status: done
 
 ## Story
 
