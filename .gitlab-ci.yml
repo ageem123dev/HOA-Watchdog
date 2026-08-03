@@ -47,6 +47,9 @@ verify:database:
   script:
     - npm run test:db
   rules:
-    - if: $WATCHDOG_READER_DATABASE_URL
+    # Both URLs, not just the reader. The suite needs the writer connection too,
+    # so gating on the reader alone lets the job start without what it requires
+    # and fail — reporting a broken build where the honest outcome is "skipped".
+    - if: $WATCHDOG_READER_DATABASE_URL && $WATCHDOG_WRITER_DATABASE_URL
       when: on_success
     - when: never

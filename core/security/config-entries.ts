@@ -102,20 +102,45 @@ export function entriesFromJson(source: string, content: string): ConfigEntry[] 
 
   const entries: ConfigEntry[] = []
 
+  /**
+   * A key whose value is absent still reports the key. `findForbiddenCredentials`
+   * matches on `entry.name` as well as on the value, so the name alone is enough
+   * to raise a violation — and a name is exactly what survives when the value is
+   * held somewhere this walk cannot see.
+   *
+   * Without this, `{"env": {"PLAID_SECRET": null}}` and `{"env": {"PLAID_SECRET":
+   * {}}}` both pass the guard clean, because the recursion returns before any
+   * entry is pushed and the key name is discarded. `entriesFromEnv` already keeps
+   * the name and omits the value in the same situation; this matches it.
+   */
   const walk = (node: unknown, name: string | undefined): void => {
     if (Array.isArray(node)) {
+      if (node.length === 0) {
+        if (name !== undefined) entries.push({ source, name })
+        return
+      }
       for (const item of node) walk(item, name)
       return
     }
 
     if (node !== null && typeof node === 'object') {
-      for (const [key, child] of Object.entries(node)) walk(child, key)
+      const children = Object.entries(node)
+      if (children.length === 0) {
+        if (name !== undefined) entries.push({ source, name })
+        return
+      }
+      for (const [key, child] of children) walk(child, key)
       return
     }
 
-    if (name !== undefined && node !== null && node !== undefined) {
-      entries.push({ source, name, value: String(node) })
+    if (name === undefined) return
+
+    if (node === null || node === undefined) {
+      entries.push({ source, name })
+      return
     }
+
+    entries.push({ source, name, value: String(node) })
   }
 
   walk(parsed, undefined)

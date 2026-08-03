@@ -190,6 +190,30 @@ describe('entriesFromJson', () => {
     expect(entriesFromJson('vercel.json', '{}')).toEqual([])
   })
 
+  /**
+   * `findForbiddenCredentials` matches on the name as well as the value, so a key
+   * whose value this walk cannot read must still report the key. Dropping it is
+   * how `{"env": {"PLAID_SECRET": null}}` passes the NFR-2 guard clean — the
+   * declaration is right there in tracked config and the scan says nothing.
+   */
+  it('reports a key whose value is null, keeping the name for the guard to match', () => {
+    expect(entriesFromJson('vercel.json', JSON.stringify({ env: { PLAID_SECRET: null } }))).toEqual(
+      [{ source: 'vercel.json', name: 'PLAID_SECRET' }],
+    )
+  })
+
+  it('reports a key whose value is an empty object', () => {
+    expect(entriesFromJson('vercel.json', JSON.stringify({ env: { PLAID_SECRET: {} } }))).toEqual([
+      { source: 'vercel.json', name: 'PLAID_SECRET' },
+    ])
+  })
+
+  it('reports a key whose value is an empty array', () => {
+    expect(entriesFromJson('vercel.json', JSON.stringify({ env: { PLAID_SECRET: [] } }))).toEqual([
+      { source: 'vercel.json', name: 'PLAID_SECRET' },
+    ])
+  })
+
   it('throws on malformed JSON rather than reporting a clean scan of a file it could not read', () => {
     expect(() => entriesFromJson('vercel.json', '{ not json')).toThrow(/vercel\.json/)
   })

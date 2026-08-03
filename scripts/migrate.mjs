@@ -27,13 +27,23 @@ function generatePassword() {
   return randomBytes(24).toString('base64url')
 }
 
-/** Rewrites a single KEY=value line in .env.local, leaving everything else alone. */
+/**
+ * Rewrites a single KEY=value line in .env.local, leaving everything else alone.
+ *
+ * The replacement is a function, not a string. `String.prototype.replace` reads
+ * `$&`, `` $` ``, `$'`, `$1` and `$$` inside a replacement *string* as
+ * substitution patterns, and `value` here is a connection URL carrying the host,
+ * port, path and admin credentials copied out of DATABASE_URL. A single `$` in
+ * any of those silently writes a corrupted URL, and the damage surfaces much
+ * later as an authentication failure with nothing pointing back to this line.
+ */
 function setEnvValue(key, value) {
   const source = readFileSync(ENV_FILE, 'utf8')
   const line = `${key}=${value}`
+  const existing = new RegExp(`^${key}=.*$`, 'm')
 
-  const updated = new RegExp(`^${key}=.*$`, 'm').test(source)
-    ? source.replace(new RegExp(`^${key}=.*$`, 'm'), line)
+  const updated = existing.test(source)
+    ? source.replace(existing, () => line)
     : `${source.trimEnd()}\n${line}\n`
 
   writeFileSync(ENV_FILE, updated, 'utf8')

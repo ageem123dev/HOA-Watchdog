@@ -31,6 +31,29 @@ describe('hashPassword', () => {
     expect(Number(parallelization)).toBe(FAST.parallelization)
   })
 
+  /**
+   * A hash made above the ceilings `parseStoredHash` enforces would verify for
+   * nobody: written successfully, then rejected on every later read, locking the
+   * account out with no error to explain it. Refuse at creation instead.
+   */
+  it('refuses to create a hash whose cost could never be verified', async () => {
+    await expect(
+      hashPassword('pw', { cost: 2 ** 21, blockSize: 8, parallelization: 1 }),
+    ).rejects.toThrow(RangeError)
+  })
+
+  it('refuses a block size above the ceiling', async () => {
+    await expect(
+      hashPassword('pw', { cost: 2 ** 8, blockSize: 64, parallelization: 1 }),
+    ).rejects.toThrow(RangeError)
+  })
+
+  it('refuses a parallelization above the ceiling', async () => {
+    await expect(
+      hashPassword('pw', { cost: 2 ** 8, blockSize: 8, parallelization: 32 }),
+    ).rejects.toThrow(RangeError)
+  })
+
   it('salts, so the same password hashes differently every time', async () => {
     const [a, b] = await Promise.all([hashPassword('same', FAST), hashPassword('same', FAST)])
 

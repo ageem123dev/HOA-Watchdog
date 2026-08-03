@@ -91,6 +91,28 @@ export async function hashPassword(
     throw new TypeError('hashPassword expects a non-empty password')
   }
 
+  /**
+   * The same ceilings `parseStoredHash` enforces, applied at the point of
+   * creation. Without this, hashing above a bound produces a hash that verifies
+   * for nobody: the row is written successfully, and every later sign-in reads it
+   * back, rejects the parameters, and returns "this password does not match" —
+   * locking the account out permanently with no error anywhere to explain why.
+   *
+   * This throws rather than clamping. Silently hashing at different parameters
+   * than the caller asked for would be worse: it would look like it worked.
+   */
+  if (
+    parameters.cost > MAX_COST ||
+    parameters.blockSize > MAX_BLOCK_SIZE ||
+    parameters.parallelization > MAX_PARALLELIZATION
+  ) {
+    throw new RangeError(
+      `hashPassword parameters exceed the supported ceilings ` +
+        `(cost <= ${MAX_COST}, blockSize <= ${MAX_BLOCK_SIZE}, ` +
+        `parallelization <= ${MAX_PARALLELIZATION}); a hash made above them could never be verified`,
+    )
+  }
+
   const salt = randomBytes(SALT_BYTES)
   const derived = await derive(password, salt, parameters)
 

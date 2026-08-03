@@ -35,6 +35,16 @@
  * environment of this process. That is a real limit and it is stated rather than
  * papered over: surface 3 is what gives the check reach over CI secrets, because
  * a secret that is never referenced in a tracked workflow cannot be used by one.
+ *
+ * That reach is narrower for GitLab than for GitHub, and the difference matters.
+ * `secretReferencesFromText` recognises `${{ secrets.NAME }}`, which is GitHub's
+ * syntax. GitLab injects CI/CD variables as bare `$NAME`, indistinguishable from
+ * any other shell variable, so reference-following gives no reach over the GitLab
+ * variable store. `.gitlab-ci.yml` is still read and still parsed for outright
+ * assignments — a credential written into a `variables:` block is caught — but a
+ * name that appears only as `$SOMETHING` in a script line is not treated as a
+ * secret reference. Closing that gap means a GitLab-specific reference pattern,
+ * which is a change to `secretReferencesFromText` rather than to this list.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -61,12 +71,21 @@ const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], {
   encoding: 'utf8',
 }).trim()
 
-/** Tracked config worth reading in full, as git pathspecs relative to the root. */
+/**
+ * Tracked config worth reading in full, as git pathspecs relative to the root.
+ *
+ * Both CI systems are listed. GitLab is the one this project actually runs, and
+ * omitting it would leave the guard reading a pipeline definition nobody executes
+ * while ignoring the one that does — a check that inspects the wrong file and
+ * still reports compliance.
+ */
 const TRACKED_CONFIG_PATHSPECS = [
   '**/.env*',
   '**/*.env.example',
   '.github/workflows/*.yml',
   '.github/workflows/*.yaml',
+  '.gitlab-ci.yml',
+  '.gitlab-ci.yaml',
 ]
 
 const JSON_CONFIG_FILES = ['vercel.json']
