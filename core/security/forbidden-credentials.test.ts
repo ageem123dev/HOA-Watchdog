@@ -59,6 +59,14 @@ const PERMITTED_NAMES = [
   'DATABASE_URL',
   'WATCHDOG_WRITER_DATABASE_URL',
   'WATCHDOG_READER_DATABASE_URL',
+  // The object store this system writes its own documents to (AD-16). AD-2 permits
+  // writing to our own store explicitly; only external financial rails are forbidden.
+  // These are the real variable names in .env.example, so a change to the guard that
+  // broke storage configuration would fail here rather than at deploy time.
+  'R2_ACCOUNT_ID',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'R2_BUCKET',
   'BANK_STATEMENT_BUCKET',
   'PAYMENT_DUE_DAY',
   'ASSESSMENT_PERIOD_START',
@@ -110,6 +118,49 @@ describe('findForbiddenCredentials', () => {
 
   it('matches names case-insensitively', () => {
     expect(findForbiddenCredentials([at('plaid_secret', 'x')])).toHaveLength(1)
+  })
+
+  /**
+   * The `external-write-token` pattern is the only entry in the table that names
+   * no specific rail: it matches any `*_WRITE_TOKEN`, `*_WRITE_KEY`,
+   * `*_WRITE_SECRET` or `*_WRITE_CREDENTIAL`.
+   *
+   * That is deliberately broader than AD-2's rule text, which forbids credentials
+   * for external *financial* rails, and the breadth is the point. Every other
+   * pattern is an enumeration, and an enumeration fails open: a fintech vendor
+   * nobody has listed passes clean until a human remembers to add it. The
+   * catch-all is what stops the guard degrading into an allowlist-by-omission.
+   *
+   * The trade is a false positive on a hypothetical external write token that is
+   * not financial. That costs a rename; a false negative costs the air-gap. These
+   * tests pin the choice so a later reader finds a decision rather than an
+   * accident, and narrows it only by amending AD-2 to match.
+   */
+  it('flags a write token for a financial rail', () => {
+    const violations = findForbiddenCredentials([at('STRIPE_WRITE_TOKEN', 'redacted')])
+
+    expect(violations).not.toHaveLength(0)
+    expect(violations[0]).toMatchObject({ name: 'STRIPE_WRITE_TOKEN', matchedOn: 'name' })
+  })
+
+  it('flags an unenumerated vendor write token, which is what the catch-all is for', () => {
+    const violations = findForbiddenCredentials([at('MODERNTREASURY_WRITE_KEY', 'redacted')])
+
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toMatchObject({ patternId: 'external-write-token' })
+  })
+
+  it('over-matches a non-financial write token, deliberately and visibly', () => {
+    // Not a name this project uses — storage is configured as R2_ACCESS_KEY_ID and
+    // R2_SECRET_ACCESS_KEY, both asserted permitted above. If a legitimate need for
+    // a `*_WRITE_TOKEN` name ever arises, this test is where the conversation starts.
+    expect(findForbiddenCredentials([at('R2_WRITE_TOKEN', 'redacted')])).toHaveLength(1)
+  })
+
+  it('does not flag storage configuration, which writes only to our own store', () => {
+    const storage = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET']
+
+    expect(findForbiddenCredentials(storage.map((n) => at(n, 'value')))).toEqual([])
   })
 
   it('flags a payment-processor key hidden under an innocuous name', () => {
