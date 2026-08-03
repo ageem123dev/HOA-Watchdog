@@ -1,10 +1,16 @@
 /**
- * Auth and database configuration, read at call time rather than at module load.
+ * Database configuration, read at call time rather than at module load.
  *
  * The distinction is not stylistic. Next.js evaluates modules during
  * `next build`, so a module-scope read that throws would make the build itself
  * require real credentials — turning the build gate into something only a
  * developer with a populated environment can run.
+ *
+ * `AUTH_SECRET` is deliberately *not* read here. Auth.js picks it up from the
+ * environment itself, at request time. An earlier version bundled the two, which
+ * meant the route gate — which needs only the secret to verify a JWT — threw
+ * whenever the database URL was absent, turning a database blip into a total
+ * outage on a path that never touches the database.
  */
 
 export class MissingAuthConfigError extends Error {
@@ -19,34 +25,16 @@ export class MissingAuthConfigError extends Error {
   }
 }
 
-export const DATABASE_URL_VAR = 'WATCHDOG_WRITER_DATABASE_URL'
-export const AUTH_SECRET_VAR = 'AUTH_SECRET'
+export const WRITER_DATABASE_URL_VAR = 'WATCHDOG_WRITER_DATABASE_URL'
 
-export interface AuthConfig {
-  readonly databaseUrl: string
-  readonly authSecret: string
-}
+export function readWriterDatabaseUrl(
+  env: Readonly<Record<string, string | undefined>> = {
+    [WRITER_DATABASE_URL_VAR]: process.env.WATCHDOG_WRITER_DATABASE_URL,
+  },
+): string {
+  const url = env[WRITER_DATABASE_URL_VAR]?.trim()
 
-function readFromProcess(): Record<string, string | undefined> {
-  return {
-    [DATABASE_URL_VAR]: process.env.WATCHDOG_WRITER_DATABASE_URL,
-    [AUTH_SECRET_VAR]: process.env.AUTH_SECRET,
-  }
-}
+  if (!url) throw new MissingAuthConfigError([WRITER_DATABASE_URL_VAR])
 
-export function readAuthConfig(
-  env: Readonly<Record<string, string | undefined>> = readFromProcess(),
-): AuthConfig {
-  const databaseUrl = env[DATABASE_URL_VAR]?.trim()
-  const authSecret = env[AUTH_SECRET_VAR]?.trim()
-
-  const missing: string[] = []
-  if (!databaseUrl) missing.push(DATABASE_URL_VAR)
-  if (!authSecret) missing.push(AUTH_SECRET_VAR)
-
-  // Reported together: a developer setting this up for the first time should
-  // learn everything that is wrong in one pass.
-  if (missing.length > 0) throw new MissingAuthConfigError(missing)
-
-  return { databaseUrl: databaseUrl as string, authSecret: authSecret as string }
+  return url
 }

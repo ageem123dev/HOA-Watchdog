@@ -1,6 +1,6 @@
 import { Pool } from 'pg'
 import type { DirectoryUser, UserDirectory } from '@/core/ports/user-directory'
-import { readAuthConfig } from './env'
+import { readWriterDatabaseUrl } from './env'
 
 /**
  * The `UserDirectory` port backed by Postgres.
@@ -19,7 +19,7 @@ let pool: Pool | null = null
  */
 function getPool(): Pool {
   if (pool === null) {
-    pool = new Pool({ connectionString: readAuthConfig().databaseUrl, max: 5 })
+    pool = new Pool({ connectionString: readWriterDatabaseUrl(), max: 5 })
   }
   return pool
 }

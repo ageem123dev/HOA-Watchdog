@@ -76,8 +76,16 @@ describeWithDatabase('AD-4: the two database roles', () => {
   })
 
   describe('watchdog_reader', () => {
-    it('can read', async () => {
-      await expect(reader.query('select count(*) from board_member')).resolves.toBeDefined()
+    /**
+     * The reader's read surface is deliberately narrow and currently almost
+     * empty: migration 003 removed its blanket default grant, so it reads only
+     * tables it has been granted explicitly. The ledger tables arrive with story
+     * 1.4 and are granted then. This asserts the role can connect and query at
+     * all — without it, every "cannot write" assertion below would also pass for
+     * a role that simply cannot reach the database.
+     */
+    it('can connect and read what it has been granted', async () => {
+      await expect(reader.query('select count(*) from schema_migration')).resolves.toBeDefined()
     })
 
     /**
@@ -112,7 +120,7 @@ describeWithDatabase('AD-4: the two database roles', () => {
       )
     })
 
-    it('holds no write privilege on any table, present or future', async () => {
+    it('holds no table-level write privilege', async () => {
       const { rows } = await reader.query(
         `select table_name, privilege_type
            from information_schema.table_privileges
@@ -121,6 +129,63 @@ describeWithDatabase('AD-4: the two database roles', () => {
       )
 
       expect(rows).toEqual([])
+    })
+
+    /**
+     * Column-level grants do not appear in `table_privileges` at all — they live
+     * in `column_privileges`. Review demonstrated a live
+     * `GRANT UPDATE (note) ON … TO watchdog_reader` that the table-level
+     * assertion above reported as clean while the reader really could write.
+     * A `GRANT UPDATE (password_hash) ON board_member` would have been invisible
+     * the same way.
+     */
+    it('holds no column-level write privilege either', async () => {
+      const { rows } = await reader.query(
+        `select table_name, column_name, privilege_type
+           from information_schema.column_privileges
+          where grantee = 'watchdog_reader'
+            and privilege_type <> 'SELECT'`,
+      )
+
+      expect(rows).toEqual([])
+    })
+
+    /**
+     * Future-table grants live in `pg_default_acl`, which neither privilege view
+     * reflects. Without this, "present or future" was an unearned claim.
+     */
+    it('is granted nothing by default on tables added later', async () => {
+      const { rows } = await reader.query(
+        `select defaclobjtype, defaclacl::text
+           from pg_default_acl
+          where array_to_string(defaclacl, ',') like '%watchdog_reader%'`,
+      )
+
+      expect(rows).toEqual([])
+    })
+
+    /**
+     * TEMPORARY is granted to PUBLIC by default, and `pg_temp` precedes `public`
+     * in unqualified name resolution — so the reader could create a temp table
+     * named after a real one, fill it with forged figures, and have every later
+     * unqualified query on that pooled connection read the forgery. Nothing is
+     * persisted, so nothing is detectable afterwards.
+     */
+    it('cannot create a temporary table to shadow a real one', async () => {
+      await expect(reader.query('create temp table board_member (id uuid)')).rejects.toThrow(
+        /permission denied/i,
+      )
+    })
+
+    /**
+     * The catalog path reasons over ledger data. It has no business with the
+     * credential table, and a prompt injection that induces it to read one is a
+     * roster of scrypt hashes leaving the system in a chat response.
+     */
+    it('cannot read the credential table at all', async () => {
+      await expect(reader.query('select password_hash from board_member')).rejects.toThrow(
+        /permission denied/i,
+      )
     })
   })
 

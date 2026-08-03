@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:db": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run migrations/",
-    "migrate": "node --env-file=.env.local scripts/migrate.mjs"
+    "migrate": "node --env-file=.env.local scripts/migrate.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1100.0",
