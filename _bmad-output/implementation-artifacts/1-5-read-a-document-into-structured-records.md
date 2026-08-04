@@ -61,11 +61,11 @@ Epic story 1.5's ACs 2, 3 and 5. AC1 and AC4 belong to 1.5b.
   - [x] Value constraints live here and are asserted to agree with the migration, read from the SQL rather than restated
   - [x] Money is `numeric`/string, never a float — see Dev Notes
 
-- [ ] **Validation and the unreadable outcome** `core/extraction/validate.ts` (AC: 2)
-  - [ ] Reject on any constraint violation; return a structured result, never a thrown parser error
-  - [ ] `Document Unreadable` as a closed outcome the surface renders, matching `core/ingestion/acceptance.ts`
-  - [ ] **No verbatim copy exists for this case.** FR-1 dictated the unreadable-*file* sentence word for word; FR-3 specifies only a "structured Document Unreadable error" with no wording. Write it in EXPERIENCE.md's voice and keep it distinct from FR-1's — a file that could not be *opened* and a document that could not be *read* are different events, and a treasurer acts differently on each
-  - [ ] No partial record survives a failure — asserted, not assumed
+- [x] **Validation and the unreadable outcome** `core/extraction/validate.ts` (AC: 2)
+  - [x] Reject on any constraint violation; return a structured result, never a thrown parser error
+  - [x] `Document Unreadable` as a closed outcome the surface renders, matching `core/ingestion/acceptance.ts`
+  - [x] **No verbatim copy exists for this case.** FR-1 dictated the unreadable-*file* sentence word for word; FR-3 specifies only a "structured Document Unreadable error" with no wording. Write it in EXPERIENCE.md's voice and keep it distinct from FR-1's — a file that could not be *opened* and a document that could not be *read* are different events, and a treasurer acts differently on each
+  - [x] No partial record survives a failure — asserted, not assumed
 
 - [ ] **Deterministic parsing** `core/extraction/tabular.ts` (AC: 1)
   - [ ] CSV parsed by a hand-rolled RFC 4180 parser — quoting, embedded commas, embedded newlines, CRLF
@@ -286,6 +286,50 @@ string was promised. The same trap is one line away here.
 rule carried forward from Task 1), parsing anything (Task 4), and persistence (Task 5). This task
 publishes the vocabulary; it does not police it.
 
+## Task 3 — validation and the unreadable outcome (`core/extraction/validate.ts`)
+
+**Behaviour E — `validate(candidate)` → the record, or the reasons it is not one**
+
+*If it ran correctly, how would I know?* A well-formed candidate comes back as a typed record; a
+malformed one comes back as a list of problems and **nothing is stored**. It never throws, and it
+never returns a record it had to alter to make valid.
+
+*How am I going to test this?* Pure function over a plain object — no seams. Purity is the design
+decision, not a convenience: a validator that cannot store anything cannot leave a partial record
+behind, so "no partial or best-effort record is stored" becomes true by construction rather than by
+a cleanup path.
+
+*Cross-check (required by `require_inverse_or_crosscheck`).* The independent oracle is **Postgres
+itself**: every amount this validator accepts must be accepted unchanged by `numeric(14,2)`, and
+every amount it rejects for precision must be one the column would have silently altered. That test
+lives in the database suite, because only the real column can answer it.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| E1 | A parser exception escapes to the caller, so the pipeline sees a crash instead of an outcome | GUARD | Never throws for any input, including hostile ones; returns a value |
+| E2 | **More than two decimal places accepted.** `numeric(14,2)` rounds silently, so `1.005` is stored as `1.01` — a cent invented by the schema, on an association's ledger. Carried forward from Task 1, where no constraint could catch it | GUARD | Rejected before any insert; cross-checked against the real column |
+| E3 | A JS number reaches the amount field, having already lost precision before validation ran | GUARD | Numbers rejected outright — only decimal strings admitted |
+| E4 | A parser emits `$1,450.00`, `1 450,00`, or `+1450.00`. All plausible from a real spreadsheet | GUARD | Rejected, not "helpfully" stripped — silently reinterpreting money is how a thousands separator becomes a decimal point |
+| E5 | An amount beyond twelve integer digits, which the column would refuse at INSERT with `22003` | GUARD | Rejected here, so the failure is an outcome rather than an exception |
+| E6 | `2026-02-30` — a date that is well-formed and does not exist | GUARD | Rejected; the boundary-condition classic |
+| E7 | `06/01/2026` — ambiguous between two continents | GUARD | Only ISO `YYYY-MM-DD` accepted |
+| E8 | A whitespace-only vendor name, which trims to nothing | GUARD | Rejected, **not silently nulled** — null means "this document has none", and quietly converting a failed parse into that would be a lie the record cannot distinguish from truth |
+| E9 | An over-long vendor name **truncated** to fit | GUARD | Rejected, not truncated. Truncation stores a different vendor than the document names |
+| E10 | An unknown document kind | GUARD | Rejected via `isDocumentKind` |
+| E11 | `usd` in the wrong case | GUARD | Normalised to upper case, then checked. Case is the one variation that carries no information — unlike an amount, where any coercion changes a figure |
+| E12 | A raw exception message reaches the outcome, leaking a path or a library name | GUARD | Problems carry a field and a reason from a **closed set**, never free text |
+| E13 | Only the first problem is reported, so fixing it reveals the next one document at a time | GUARD | **All** problems returned together |
+| E14 | A partial record survives a failed validation | Unrepresentable | The function is pure and returns a value; it has nothing to write to |
+
+**The copy.** FR-3 names a "structured Document Unreadable error" and gives no wording, unlike FR-1
+which dictated its sentence. One sentence is written here in EXPERIENCE.md's voice, and it is
+deliberately **distinct from FR-1's**: that one is about a file that could not be opened, this one is
+about a document that was opened and could not be read. A treasurer acts differently on each — the
+first wants an unlocked copy, the second wants a clearer scan or a different export.
+
+**Out of scope:** parsing bytes into a candidate (Task 4), storage (Task 5), and the provider's
+schema enforcement (story 1.5b, AD-9).
+
 ### Debug Log References
 
 **Task 1 — red.** 34 failing, 0 passing. Verified the failures were for the right reason rather than
@@ -327,6 +371,30 @@ the parameterised cases so an empty vocabulary cannot make them disappear.
 | Drift the vendor length cap (200 → 250) | **1** |
 | Drift the numeric scale (2 → 3) | 2 — parity, plus the cents assertion |
 | Membership by object index instead of list `includes` | 4 — every inherited-property case |
+
+**Task 3 — red, and two more of my own vacuous tests.** 58 failed, 2 passed. Both passers were
+negative assertions over `UNREADABLE_MESSAGE = ''`: an empty string contains no "password
+protected" and matches no apology. Added a truthiness precondition to each — a negative assertion
+about a string that does not exist proves nothing. Second red: **60 failed, 0 passed**.
+
+**Task 3 — the cross-check earns its place.** `require_inverse_or_crosscheck` is satisfied by
+Postgres itself, in the database suite: every amount the validator accepts is stored unchanged, and
+`1.005` — which the validator refuses — is shown to be **silently rounded to 1.01 by the column**.
+That second test is the one that matters: it proves the guard is answering a real behaviour rather
+than a remembered one, and it would tell us if a future Postgres started refusing instead.
+
+**Task 3 — sensitivity, five mutations:**
+
+| Mutation | Unit | DB | Reading |
+| --- | --- | --- | --- |
+| Allow six decimal places instead of two | 1 | **1** | Caught in both suites — the oracle is load-bearing, not decoration |
+| Truncate an over-long name instead of refusing | 2 | — | |
+| Treat a blank name as absent | 2 | — | |
+| Report only the first problem | 1 | — | |
+
+One mutation initially reported *"target text not found"* rather than a result, because shell
+escaping mangled the template literal. Worth noting: that guard is what stopped it being recorded as
+"no test noticed" — the same false-negative shape that appeared in Task 1's first sensitivity run.
 
 ### Completion Notes List
 
@@ -377,6 +445,33 @@ written the wrong way.
 `totalAmount` is a **decimal string** in the type, not a number. The value travels as text from
 parser to `numeric` column without passing through a representation that would round it.
 
+**Task 3 — `core/extraction/validate.ts`.** One pure function from a candidate to either a typed
+record or the complete list of reasons it is not one.
+
+**The bias is refusal over repair.** A validator that strips a currency symbol, truncates a name, or
+rounds a third decimal place produces a record that looks clean and says something the document did
+not — and nobody goes looking for that later. Exactly two coercions are permitted, because neither
+can change a meaning: surrounding whitespace on a text field, and the case of a currency code.
+`$1,450.00`, `1 450,00`, `+1450.00` and `1.45e3` are all refused rather than helpfully reinterpreted,
+because stripping a separator is how `1,450` becomes `1450` in one locale and `1.450` in another.
+
+**The decimal-places rule closes Task 1's open hazard.** `numeric(14,2)` rounds rather than errors,
+so `1.005` becomes a cent the document never stated, and no constraint can see it — the column
+coerces before any constraint runs. It is refused here, and the database suite proves the rounding
+is real rather than assumed.
+
+**A blank vendor name is refused, not nulled.** `null` means "this document has no vendor"; quietly
+converting a failed parse into it would be indistinguishable from that truth. An over-long name is
+refused, not truncated, for the same reason — a truncated name is a different vendor, stored in a
+way that reads as success.
+
+**Every problem is returned at once**, so a treasurer is not led through one repair per attempt, and
+each carries a `field` plus a `reason` from a closed set — never free text, so no exception message
+can reach a surface.
+
+Purity is the design decision behind "no partial record survives a failure": a function with nothing
+to write to cannot leave one.
+
 **Carried forward to Task 3 (not handled here, and not mistaken for handled):** `numeric(14,2)`
 *rounds* rather than errors, so `1.005` becomes `1.01` with no complaint — a cent invented by the
 schema. No check constraint can catch it, because the column has already coerced the value before
@@ -402,6 +497,30 @@ the parameterised cases so an empty vocabulary cannot make them disappear.
 | Drift the numeric scale (2 → 3) | 2 — parity, plus the cents assertion |
 | Membership by object index instead of list `includes` | 4 — every inherited-property case |
 
+**Task 3 — red, and two more of my own vacuous tests.** 58 failed, 2 passed. Both passers were
+negative assertions over `UNREADABLE_MESSAGE = ''`: an empty string contains no "password
+protected" and matches no apology. Added a truthiness precondition to each — a negative assertion
+about a string that does not exist proves nothing. Second red: **60 failed, 0 passed**.
+
+**Task 3 — the cross-check earns its place.** `require_inverse_or_crosscheck` is satisfied by
+Postgres itself, in the database suite: every amount the validator accepts is stored unchanged, and
+`1.005` — which the validator refuses — is shown to be **silently rounded to 1.01 by the column**.
+That second test is the one that matters: it proves the guard is answering a real behaviour rather
+than a remembered one, and it would tell us if a future Postgres started refusing instead.
+
+**Task 3 — sensitivity, five mutations:**
+
+| Mutation | Unit | DB | Reading |
+| --- | --- | --- | --- |
+| Allow six decimal places instead of two | 1 | **1** | Caught in both suites — the oracle is load-bearing, not decoration |
+| Truncate an over-long name instead of refusing | 2 | — | |
+| Treat a blank name as absent | 2 | — | |
+| Report only the first problem | 1 | — | |
+
+One mutation initially reported *"target text not found"* rather than a result, because shell
+escaping mangled the template literal. Worth noting: that guard is what stopped it being recorded as
+"no test noticed" — the same false-negative shape that appeared in Task 1's first sensitivity run.
+
 ### Completion Notes List
 
 ### File List
@@ -412,5 +531,11 @@ the parameterised cases so an empty vocabulary cannot make them disappear.
 - `migrations/extraction.test.ts` — 34 tests; requires a database, skips loudly without one
 - `core/extraction/record.ts` — the record vocabulary and its membership tests
 - `core/extraction/record.test.ts` — 27 tests, parity read from the migration
+- `core/extraction/validate.ts` — validation, the closed problem set, and the unreadable copy
+- `core/extraction/validate.test.ts` — 60 tests
+
+**Modified**
+
+- `migrations/extraction.test.ts` — added the Postgres cross-check for the amount rules
 
 ### Change Log

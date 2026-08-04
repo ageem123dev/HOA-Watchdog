@@ -16,6 +16,8 @@ import { randomBytes } from 'node:crypto'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { validate } from '../core/extraction/validate'
+
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
 const configured = Boolean(writerUrl && readerUrl)
@@ -278,6 +280,44 @@ describeWithDatabase('the extraction table', () => {
 
     it('refuses an amount beyond the column precision rather than truncating it', async () => {
       await expectRefusal(insert({ totalAmount: '1000000000000.00' }), NUMERIC_OUT_OF_RANGE)
+    })
+  })
+
+  describe('the validator agrees with the column it writes to', () => {
+    // The independent oracle for `core/extraction/validate.ts`. Its amount rules
+    // are only worth anything if the real column agrees, and only the real
+    // column can answer that.
+
+    it('stores every amount the validator accepts, unchanged', async () => {
+      const accepted = ['1450.00', '-250.00', '0.00', '0.01', '1450', '1450.5', '99999999999.99']
+
+      for (const totalAmount of accepted) {
+        expect(
+          validate({ documentKind: 'invoice', currency: 'USD', totalAmount }).ok,
+          `validator rejected ${totalAmount}`,
+        ).toBe(true)
+
+        const { rows } = await insert({ totalAmount })
+        expect(Number(rows[0].total_amount)).toBe(Number(totalAmount))
+      }
+    })
+
+    it('proves the column would silently round what the validator refuses', async () => {
+      // The whole reason the third decimal place is refused in application code:
+      // the column does not error on it, it rounds. This asserts that Postgres
+      // really behaves that way rather than taking the comment's word for it —
+      // if a future Postgres started refusing, the guard would be redundant and
+      // this test would say so.
+      const refused = '1.005'
+
+      expect(validate({ documentKind: 'invoice', currency: 'USD', totalAmount: refused }).ok).toBe(
+        false,
+      )
+
+      const { rows } = await insert({ totalAmount: refused })
+
+      expect(rows[0].total_amount).not.toBe(refused)
+      expect(Number(rows[0].total_amount)).toBeCloseTo(1.01, 5)
     })
   })
 
