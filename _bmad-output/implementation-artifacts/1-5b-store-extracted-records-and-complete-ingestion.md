@@ -66,9 +66,9 @@ nothing is deleted until there is something to put back.
 
 - [ ] **Fill in `replaceDerivedRows`** (AC: 3)
   - [ ] 1.4 left it a called, tested no-op with a comment naming this moment. This is it
-  - [ ] **Move the call.** `ingest.ts` invokes it in the `alreadyHeld` branch *before* anything is parsed. Give it a body there and a failed re-parse deletes the previous good records and stores nothing in their place
-  - [ ] **One operation, after validation.** Replacement takes the complete validated set and does delete-then-insert in a single transaction. Nothing is removed until there is something to put back; on a parse failure the previous set survives untouched
-  - [ ] That makes `replaceDerivedRows(documentId)` the wrong shape — it carries no records. Either widen it to take the set or drop it and let the repository own replacement outright, and record which
+  - [ ] **One order, stated once: parse → validate the complete set → replace.** Replacement is a single transactional delete-then-insert taking the whole validated set. It is **never** called on a parse or validation failure, and nothing is deleted until there is something to put back
+  - [ ] **Delete the existing call site first.** `ingest.ts` currently invokes `replaceDerivedRows` in the `alreadyHeld` branch, *before* anything is parsed. That call must be removed, not filled in — giving it a body where it stands would delete a document's good records and then fail to replace them
+  - [ ] `replaceDerivedRows(documentId)` is therefore the wrong shape: it carries no records. Either widen it to take the set, or drop it and let the repository own replacement outright — and record which
 
 - [ ] **Wire parsing into ingestion** `core/ingestion/ingest.ts` (AC: 1, 2, 4)
   - [ ] Route by content type: CSV and Excel to the deterministic path; PDF and image are **not** handled until 1.5c and must not silently succeed
@@ -138,6 +138,17 @@ this outcome and no `extraction` row.
 
 `bmad-dev-tdd` applies. Database tests belong in `migrations/` or `adapters/db/`, or they skip
 silently under `npm test` while reporting green — see 1.5's notes.
+
+**This story must make that skip fail closed, and it is a real gap rather than a tidy-up.** Every AC
+here is about persistence, and the tests that prove them only run under `npm run test:db`. Today
+that suite skips without credentials and CI's `verify:database` job does not run at all unless
+`WATCHDOG_WRITER_DATABASE_URL` and `WATCHDOG_READER_DATABASE_URL` are defined — so the pipeline can
+be green having executed none of them, and the story could be called done on the strength of a suite
+that never ran. That is the project's characteristic failure at the CI level rather than in a test.
+
+Name the enforcement explicitly: `npm run test:db` must **fail** rather than skip when the database
+is unreachable, and the pipeline must run it for this branch. If the variables genuinely cannot be
+provided, that is a decision to raise — not a silence to accept.
 
 The characteristic failure of this codebase is a guard that reads as protective and proves nothing;
 twelve have now been found. In this story the likely candidates are the transaction boundary (a
