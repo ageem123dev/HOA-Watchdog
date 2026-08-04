@@ -32,7 +32,9 @@ description: 'Implement an entire epic by running bmad-ship-story once per story
 
 ### Step 1 — Resolve the epic and its stories
 
-From `development_status`, collect `epic-{N}` and all its `{N}-{M}-*` story keys **in order**. Record which are `done`. Mark `epic-{N}` as `in-progress` if it is not already.
+From `development_status`, collect `epic-{N}` and all its `{N}-{M}-*` story keys **in order**. Record which are `done`.
+
+**Read only. Write nothing here.** At this point there is no branch to write on: the next step checks out `main`, and an uncommitted edit to `sprint-status.yaml` either blocks that checkout or gets swept into the first story's merge request by `bmad-ship-story`'s `git add -A`. The epic's own status is written by `bmad-ship-story` Step 9, inside that story's commit, where it has a controlled home and travels with the work that justifies it.
 
 If every story is already `done`, go to Step 4.
 
@@ -40,9 +42,19 @@ If every story is already `done`, go to Step 4.
 
 For each not-`done` story, **in order**:
 
-1. **Sync:** `git checkout main && git pull --ff-only`.
+1. **Sync:** `git checkout main && git pull --ff-only origin main`. Name the remote — a bare `git pull` follows the branch's configured upstream, and a wrong one fails silently by reporting "Already up to date" while leaving you behind. That has already happened here.
 
-2. **Check the previous story actually landed.** If the previous story in this epic is marked `done` but its work is not in `main`, its MR is still open and awaiting the user's merge. **STOP and report**: name the open MR, say the epic is paused on that merge, and say that re-running this skill resumes from here. This is a user gate, not a failure — do not work around it.
+2. **Check the previous story actually landed — from GitLab and git, not from a status word.**
+
+   `done` is written by `bmad-ship-story` on an unmerged branch and means "ready for the user to merge", not "in `main`". Reading it as the latter is how the loop starts a story on top of work that is not there yet.
+
+   Take `merge_request` from the previous story's frontmatter and assert **both**:
+   - `glab api "projects/{project_path_encoded}/merge_requests/{iid}"` reports `state: merged`; and
+   - `git merge-base --is-ancestor {merge_commit_sha} origin/main` succeeds.
+
+   The second check is not redundant. A merged state with an unreachable commit means you are looking at a different `main` than GitLab is — a stale remote, a wrong upstream, an unfetched ref. That has happened on this repo.
+
+   If either fails, **STOP and report**: name the open MR, say the epic is paused on that merge, and say that re-running this skill resumes from here. This is a user gate, not a failure — do not work around it.
 
    Do not branch the next story off the unmerged one. That puts the parent's whole diff inside the child's MR, which is the reviewability problem this pipeline exists to avoid. (`bmad-ship-story` documents stacking as an explicit, user-requested exception.)
 
@@ -62,9 +74,14 @@ There is no `epic-{N}` branch in this design. If one exists from an earlier run,
 
 When every story is `done` and merged into `main`:
 
-1. Set `epic-{N}` to `done` in `sprint-status.yaml` (+ `last_updated`). Commit and push that doc update on a small branch with its own MR, or fold it into the last story's MR — **not** by pushing to `main`.
-2. Report: every story with its MR URL and review outcome, and the confirmation that `main` contains them all.
-3. If the epic has a `epic-{N}-retrospective` entry, mention that `bmad-retrospective` is available. Do not run it unasked.
+1. **Verify, do not write.** `epic-{N}` should already read `done` in `sprint-status.yaml` on `main`, because `bmad-ship-story` Step 9 sets it inside the last story's commit — so it lands exactly when that story's MR merges.
+
+   There is deliberately **no epic-level merge request**. An earlier version offered one "or fold it into the last story's MR", which could not work: this step only runs once every story has merged, so that MR is already closed, leaving an epic-only MR as the sole option — reintroducing the very thing this pipeline removed, to carry a one-line status change.
+
+   If the status is somehow wrong (an interrupted run, a hand edit), do **not** push to `main` and do **not** open an MR for it. Report the discrepancy and let the next story's MR carry the correction, or ask.
+
+2. Report: every story with its MR URL and review outcome, and confirmation that `main` contains them all.
+3. If the epic has an `epic-{N}-retrospective` entry, mention that `bmad-retrospective` is available. Do not run it unasked.
 4. STOP.
 
 ## Driving with /loop

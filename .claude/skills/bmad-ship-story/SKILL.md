@@ -29,7 +29,7 @@ This skill is a **resumable state machine**. Every run detects the current state
 - **NEVER merge the MR** and never push to `main` directly. Terminal state is "ready-to-merge"; the user merges.
 - **NEVER commit secrets.** `.env*.local` are gitignored — keep it that way; never `git add -f` them.
 - **NEVER mark a story `done` on unverified work.** `done` requires: all story tasks checked, local `lint` + `build` + `test` clean, pipeline green on the MR head commit, and no unresolved actionable review comments.
-- Only edit the story file in the permitted areas (Status, Tasks checkboxes, Dev Agent Record — Debug Log / Test Design / Completion Notes, File List, Change Log, frontmatter `baseline_commit`) — same contract as `bmad-dev-tdd`.
+- Only edit the story file in the permitted areas: Status, Tasks checkboxes, Dev Agent Record (Debug Log / Test Design / Completion Notes), **Review Findings**, File List, Change Log, and the frontmatter keys `baseline_commit` and `merge_request`. This extends `bmad-dev-tdd`'s contract by the two things this pipeline owns — the review audit trail Step 6 writes, and the MR reference Step 5 records.
 - **Never weaken, skip, or delete a test** to get a green suite or a green pipeline. Fix the code, or STOP and surface the conflict. This applies to local review fixes (Step 6) and CodeRabbit fixes (Step 8) as much as to the dev step.
 - Quote real tool/CI/MR output rather than asserting success. If a step fails, surface it and stop; never fake completion.
 
@@ -54,7 +54,9 @@ This skill is a **resumable state machine**. Every run detects the current state
 
 ### Step 2 — Branch setup: one branch per story
 
-1. `git checkout main && git pull --ff-only` — start from the latest `main`, which contains every previously merged story.
+1. `git checkout main && git pull --ff-only origin main` — start from the latest `main`, which contains every previously merged story.
+
+   **Name the remote.** A bare `git pull` follows whatever upstream the branch is configured with, and a wrong upstream fails *silently by succeeding*: it reports "Already up to date" while leaving you behind. This has already happened on this repo — local `main` tracked an abandoned `github` remote and a pull reported success while `main` sat one merge behind `origin`. Verify with `git rev-parse main origin/main` if anything looks stale.
 2. If `story/{story_key}` already exists, check it out (resumption). Otherwise `git checkout -b story/{story_key}`.
 3. Record it as `work_branch`.
 
@@ -89,6 +91,7 @@ After it returns, commit and push: `git add -A`, commit with a clear message end
    Build the body from the story's statement, acceptance criteria, the decisions worth arguing with, and a verification line (lint / build / test counts / pipeline). **Long descriptions belong in a file** — write it to the scratchpad and pass `--description "$(cat file)"`; inline shell strings containing backticks get command-substituted by bash.
 3. **The MR must target `main`.** `.coderabbit.yaml` sets `auto_review.base_branches: [main]` — an MR to any other branch gets no review at all, which silently removes the entire point of this step.
 4. Record `mr_iid`/`mr_url` and report the URL.
+5. **Write `merge_request: {mr_iid}` into the story file frontmatter.** `bmad-implement-epic` uses it to ask GitLab whether the previous story actually merged, rather than inferring it from a status word. A story's `done` is written on an unmerged branch and cannot, by itself, mean "in `main`".
 
 ### Step 6 — Adversarial local review (once per new code state)
 
@@ -123,13 +126,21 @@ This is the phase `/loop` re-enters. Keep cycling fix → push → re-review unt
 - Thread IDs for replying come from `.../merge_requests/{mr_iid}/discussions`.
 - Only trust a review whose commit matches the **current** head. A review for an older head is stale.
 
-**8b. Detect convergence.** Clean = pipeline green AND one of:
+**8b. Detect convergence.**
 
-- the newest review for the current head says `Actionable comments posted: 0`; or
-- CodeRabbit has **resolved the threads itself** (it does this when satisfied — check `discussions` for unresolved count `0`); or
-- a full wake cadence has elapsed since your push with still no review for the current head (use the cadences below, not a vague "wait a bit").
+**A review must exist before anything can be called clean.** The precondition is: a review from the service account whose commit **matches the current head**. Nothing below applies until that exists.
 
-Until then, treat it as *pending*, not converged. Do not mistake a slow or rate-limited review for a clean result.
+That precondition is not a formality. "Zero unresolved discussions" is trivially true *before any review has run*, and so is "no review has appeared yet" — so a predicate built from those alone reports a story ready-to-merge that has never been reviewed. An earlier version of this file did exactly that. It is the same defect this skill tells you to hunt for in Step 6, written into the check that decides when to stop hunting.
+
+With a current-head review in hand, converged = pipeline green AND every actionable finding in it is in one of these states:
+
+- **fixed**, and the fix pushed (which produces a new head — so return to 8a and wait for the review of *that* head); or
+- **explicitly skipped**, with a written reason posted on its thread; or
+- **resolved by CodeRabbit itself** after that review (it resolves threads when satisfied — check `discussions`).
+
+Anything else is **pending**.
+
+**If no current-head review has appeared** after a full wake cadence (use the cadences below, not a vague "wait a bit"): that is **not** convergence. Report "MR green; awaiting CodeRabbit review of `{sha}`", say plainly that the review has not run, and either keep waiting or STOP. Never let absence of evidence become evidence of cleanliness.
 
 **8c. Triage — verify each finding, do not apply blindly.**
 
@@ -147,11 +158,19 @@ Until then, treat it as *pending*, not converged. Do not mistake a slow or rate-
 
 ### Step 9 — Ready-to-merge (terminal)
 
-When the pipeline is green and no actionable feedback is open:
+When 8b reports converged:
 
-1. Mark the story `done`: `Status: done` in the story file, a Change Log entry summarizing the review outcome, and `development_status[{story_key}] = done` + `last_updated` in `sprint_status`. Commit and push.
-2. Report: MR URL, review outcome (rounds and finding counts), pipeline status, and the explicit line **"Ready to merge — leaving the merge to you."**
-3. STOP.
+1. **Write the doc updates first, then verify.** Set `Status: done` in the story file, add a Change Log entry summarizing the review outcome, and set `development_status[{story_key}] = done` + `last_updated` in `sprint_status`. If this story is the last not-`done` story of its epic, also set `development_status[epic-{N}] = done` in the same commit — otherwise set it to `in-progress` if it is not already. Commit and push.
+
+2. **Re-verify on the new head.** The push in step 1 created a new commit, and every piece of evidence gathered in Steps 7 and 8 belongs to the *previous* head. Declaring ready-to-merge on the strength of a pipeline that ran on a commit no longer at the top of the branch is asserting something nobody checked. So: return to Step 7 for the pipeline, and to Step 8a/8b for the review, against this new head.
+
+   The push is documentation-only, so this normally converges in one quick round. If CodeRabbit raises something on it, that is a real finding on a real commit — treat it as any other.
+
+3. Report: MR URL, review outcome (rounds and finding counts), pipeline status on the **final** head, and the explicit line **"Ready to merge — leaving the merge to you."**
+
+4. STOP.
+
+**What `done` means here.** `done` is written on an unmerged branch, so it means *"implemented, reviewed, green, and ready for the user to merge"* — it does **not** mean the work is in `main`. Nothing downstream may treat it as proof of a merge; `bmad-implement-epic` checks GitLab and git for that.
 
 ## Stacking, and why it is the exception
 
@@ -172,4 +191,4 @@ If the user explicitly wants to keep building without merging the previous story
 - **CodeRabbit on GitLab:** configured by `.coderabbit.yaml`, `auto_review.base_branches: [main]`. Full Pro reviews are free on **public** repos and the tier binds at MR-open time. It posts as a **service account**, puts findings in the **review body**, resolves threads itself when satisfied, and has hourly rate limits.
 - **Architecture invariants a review must not trade away:** NFR-2 / AD-2 — no banking, payment-rail, or external-accounting credential in any environment, secret store, or CI config; `core/security/nfr2-guard.test.ts` enforces it in the pipeline. AD-4 — the reader role is SELECT-only. AD-13 — content-hash idempotency is a database constraint, not an application check. `core/` imports nothing outward (`core/ports/boundary.test.ts`). If a review finding asks you to weaken one of these, that is an architecture decision for the user, not a fix to apply.
 - **`_bmad-output/` is committed.** `.claude/` (except tracked skills), `.agents/`, `_bmad/`, `node_modules/`, `.next/`, `.probe/`, `envprobe`, and `.env*.local` are gitignored. Benign noise: Git's `LF will be replaced by CRLF` warnings.
-- **Shell gotchas that have cost real time:** backticks inside double-quoted bash strings are command-substituted (write long bodies to files); PowerShell here-strings do not work in the Bash tool; `git show origin/branch:path` gets mangled by Windows path conversion (use `git cat-file -p <blob>`); `npx vitest run <file>` can fail where `npm test -- <substring>` works; do not run `npx prettier` — the repo has no prettier config and its defaults (double quotes, semicolons) fight the house style.
+- **Shell gotchas that have cost real time:** backticks inside double-quoted bash strings are command-substituted (write long bodies to files); PowerShell here-strings do not work in the Bash tool; `git show origin/branch:path` gets mangled by Windows path conversion (use `git cat-file -p <blob>`); run a single test file with `npm test -- <substring>`, never `npx vitest run <file>` — it fails here, and `npx` will happily fetch an unpinned package when the local one is missing; do not run `npx prettier` at all — the repo has no prettier config and its defaults (double quotes, semicolons) fight the house style.
