@@ -1,12 +1,12 @@
-# Story 1.5b: Extract structured records from PDFs and images
+# Story 1.5c: Extract structured records from PDFs and images
 
 Status: backlog
 
-> **Second half of epic story 1.5, split at the AC2 seam.**
-> **Story 1.5** owns the deterministic path and the shared foundation — the record shape, the `extraction` table, validation, the unreadable outcome, and AD-13's replacement. **This story does not redefine any of them; it conforms to them.**
-> This story owns the provider path: the extraction adapter, AD-9's schema enforcement at the API layer, and AD-10's vendor boundary.
+> **Third of three stories from epic story 1.5.**
+> **1.5** built the deterministic path and the shared foundation — the `extraction` table, the record vocabulary, validation and the unreadable outcome. **1.5b** stores records and wires extraction into ingestion. **This story adds the provider path**: the extraction adapter, AD-9's schema enforcement at the API layer, and AD-10's vendor boundary.
+> It redefines none of the above; it conforms to them and reuses the storage path 1.5b built.
 
-**Depends on 1.5.** Do not start until 1.5 is merged — the record shape, the table, and the validation layer this story feeds all come from it.
+**Depends on 1.5 and 1.5b.** Do not start until both are merged — the record vocabulary and validator come from 1.5, and the repository this story's output is written through comes from 1.5b.
 
 ## Story
 
@@ -152,7 +152,8 @@ app/upload/                          # UPDATE — staged extraction progress
 - [Source: ARCHITECTURE-SPINE.md#AD-8] — extracted values are data, never instructions
 - [Source: ARCHITECTURE-SPINE.md#Stack] — `gemini-3.1-flash-lite`, `claude-sonnet-5`
 - [Source: epics.md#UX-DR12] and #UX-DR20 — extraction progress, live regions
-- [Source: 1-5-read-a-document-into-structured-records.md] — the record shape and validation this story conforms to
+- [Source: 1-5-read-a-document-into-structured-records.md] — the record vocabulary and validator this story conforms to
+- [Source: 1-5b-store-extracted-records-and-complete-ingestion.md] — the repository and ingestion path this story writes through
 - [Source: 1-4-upload-a-document-and-see-it-accepted-or-rejected.md] — adapter patterns, probe standard, the vacuous-guard record
 
 ## Dev Agent Record

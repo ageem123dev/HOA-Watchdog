@@ -4,12 +4,12 @@ baseline_commit: 3422f01ea496f717e270a5b2c254e0e7001f27a4
 
 # Story 1.5: Read a document into structured records
 
-Status: in-progress
+Status: review
 
-> **First half of epic story 1.5, split at the AC2 seam.**
-> This story owns the **deterministic path** — CSV and Excel — and the foundation both halves share: the record shape, the `extraction` table, validation, the unreadable outcome, and AD-13's replacement.
-> **Story 1.5b** owns the **provider path** — PDF and image extraction, AD-9 schema enforcement, and the AD-10 vendor boundary.
-> Deliberately in this order: the domain defines the record shape from data it fully controls, and the vendor then conforms to it. The reverse lets a provider's output shape the schema.
+> **First of three stories from epic story 1.5.**
+> This story builds and proves the parts: the `extraction` table, the record vocabulary, the validator and its unreadable outcome, and deterministic CSV and Excel parsing.
+> **It deliberately connects none of them.** Uploading a spreadsheet today still produces no records — persistence and ingestion wiring are **1.5b**, and the provider path for PDFs and images is **1.5c**.
+> The order is deliberate: the domain defines the record vocabulary from data it fully controls, storage is wired against a proven vocabulary, and the vendor conforms last. The reverse lets a provider's output shape the schema.
 
 ## Story
 
@@ -19,34 +19,37 @@ so that I do not have to key them in, and so nothing is recorded that could not 
 
 ## Acceptance Criteria
 
-Epic story 1.5's ACs 2, 3 and 5. AC1 and AC4 belong to 1.5b.
+Scoped to what this story delivers. The epic's ACs that require persistence or a wired pipeline
+belong to **1.5b**, and the provider ACs to **1.5c** — see the note above. Nothing here claims a
+record has been stored, because nothing stores one yet.
 
-**AC1 — A CSV or Excel file is parsed deterministically, with no model involved**
+**AC1 — A CSV or Excel file is read deterministically into validated records, with no model involved**
 
-**Given** an uploaded CSV or Excel file
-**When** it is processed
-**Then** it is parsed deterministically with no model involved at any point
-**And** the resulting structured record is stored against the document
+**Given** a CSV or Excel file matching the declared header contract
+**When** it is read
+**Then** it yields one validated record per data row
+**And** no model is involved on any code path, enforced by the boundary test
 
-**AC2 — A file that cannot be read halts for that document and stores nothing**
+**AC2 — A file that cannot be read yields a structured refusal and no partial records**
 
-**Given** a file whose contents cannot be parsed into a valid record
-**When** the pipeline evaluates it
-**Then** the pipeline halts for that document and returns a structured "Document Unreadable" error
-**And** no partial or best-effort record is stored or displayed
+**Given** a file that is malformed, off-contract, or contains a single invalid row
+**When** it is read
+**Then** the result is a refusal carrying reasons from a closed set
+**And** no records are produced for that file at all
 
-**AC3 — Stored fields carry constraints beyond type**
+**AC3 — Field constraints exist beyond type, and the schema and the validator agree on them**
 
-**Given** an extracted field
-**When** it is stored
-**Then** value-level constraints beyond type are enforced — length caps, format, and enums where applicable
+**Given** the record vocabulary
+**When** the suite runs
+**Then** length caps, enums and numeric precision are enforced as database constraints
+**And** the application's copy of each is compared against the migration by reading the SQL
 
-**AC4 — Re-ingesting a document replaces its records rather than accumulating them**
+**AC4 — The schema supports set-shaped replacement**
 
-**Given** a document that already has an extraction
-**When** the same bytes are ingested again
-**Then** the existing extraction is replaced, not duplicated
-**And** exactly one live extraction exists for that document
+**Given** the `extraction` table
+**When** a document is re-read
+**Then** many records per document are representable, deleting a document removes them all,
+and replacing a document's set leaves no other document's records disturbed
 
 ## Tasks / Subtasks
 
@@ -73,19 +76,9 @@ Epic story 1.5's ACs 2, 3 and 5. AC1 and AC4 belong to 1.5b.
   - [x] A test proves no model path is reachable for these types (`core/ports/boundary.test.ts`, with `xlsx` on the forbidden list)
   - [x] **Confirmed `npm ci` passes in the GitLab pipeline** — 444 packages installed on the runner in 14s, pipeline `2730736705` green
 
-- [ ] **Extraction repository** `adapters/db/extraction-repository-postgres.ts` (AC: 1, 4)
-  - [ ] Writer role, following `document-repository-postgres.ts`
-  - [ ] Replacement is a single statement, so two concurrent re-ingests cannot both insert
-
-- [ ] **Wire into ingestion** (AC: 1, 2, 4)
-  - [ ] Parsing runs after the `document` row exists — hashing still precedes everything (1.4's AC1)
-  - [ ] **`replaceDerivedRows` finally gets a body** — 1.4 left it a called, tested no-op for exactly this
-  - [ ] Per-file outcomes extended for unreadable; one document's failure cannot fail the batch
-
-- [ ] **Surface** (AC: 1, 2)
-  - [ ] The unreadable-document state, distinct from 1.4's four outcomes
-  - [ ] **Partial extraction is never displayed under any state** (UX-DR12, verbatim requirement)
-  - [ ] Tokens only — `core/design/no-raw-values.test.ts` enforces this
+**Moved to story 1.5b** — persistence, ingestion wiring, and the surface state. They were scoped
+here originally; the work is unchanged and now carries the ACs that depend on it, so neither story
+claims something it has not done.
 
 ## Dev Notes
 
@@ -714,3 +707,31 @@ failed the boundary test with the file named.
 - `package.json` / `package-lock.json` — SheetJS pinned from cdn.sheetjs.com
 
 ### Change Log
+
+| Date | Change |
+| --- | --- |
+| 2026-08-04 | Task 1 — `006_extraction.sql` and 34 database tests |
+| 2026-08-04 | Task 2 — the record vocabulary, parity-tested against the migration |
+| 2026-08-04 | Task 3 — the validator, the closed problem set, and the unreadable copy |
+| 2026-08-04 | Cardinality corrected to many-per-document after the ER diagram was checked |
+| 2026-08-04 | Task 4 — RFC 4180 CSV parser, the header contract, and the SheetJS adapter |
+| 2026-08-04 | Rescoped: persistence, ingestion wiring and the surface moved to 1.5b, with the ACs that depend on them |
+| 2026-08-04 | 727 unit + 94 database tests; lint and build clean; pipeline green |
+
+### Deliberately not in this story
+
+Nothing here is wired. Uploading a spreadsheet still produces no records — **1.5b** connects the
+repository and ingestion, **1.5c** adds the provider path. The acceptance criteria above were
+narrowed to match, rather than left claiming a record had been stored.
+
+### Carried forward
+
+- The record vocabulary is invoice-shaped while the contract is bank-feed-shaped: `description` maps
+  to `vendorName`. It works and feeds 1.6's vendor resolution directly, but a bank line's description
+  is not strictly a vendor, and epic 2's anomaly detection will read it as one. Flagged rather than
+  resolved.
+- The first sheet of a multi-sheet workbook is the one read. Documented in the adapter; refusing
+  multi-sheet files would refuse the many real exports that carry a cover sheet.
+- `npm audit` reports three high-severity advisories, all under `next@16.2.12` (`postcss`, `sharp`),
+  all pre-existing. Not fixable without moving off the pinned version, which is an architecture
+  decision rather than a task.
