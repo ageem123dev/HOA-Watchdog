@@ -364,13 +364,15 @@ immediately.
 | F1 | A comma inside a quoted field splits it into two | GUARD | `"Smith, J."` stays one field |
 | F2 | A newline inside a quoted field ends the row | GUARD | Multi-line field kept whole |
 | F3 | `""` inside a quoted field read as end-of-field | GUARD | Round-trips as one `"` |
-| F4 | CRLF line endings leaving `` on every last field — the default from Excel on Windows | GUARD | CRLF and LF give identical rectangles |
+| F4 | CRLF line endings leaving `
+` on every last field — the default from Excel on Windows | GUARD | CRLF and LF give identical rectangles |
 | F5 | A trailing newline producing a phantom empty final row | GUARD | Row count unchanged with or without it |
 | F6 | **A UTF-8 BOM** on the first header, so `date` arrives as `﻿date` and the required-header check fails on a file that is correct. Excel writes one by default | GUARD | BOM stripped; headers match |
 | F7 | An unterminated quote at end of input, silently truncating the file | GUARD | Refused, not truncated |
 | F8 | Ragged rows — a row with more or fewer fields than the header | GUARD | Refused; a shifted column is a wrong figure, not a missing one |
 | F9 | Empty input | GUARD | Refused |
-| F10 | A lone `` line ending (pre-2001 Mac) | OUT-OF-SCOPE | Not produced by any tool in this pipeline; recorded rather than silently unhandled |
+| F10 | A lone `
+` line ending (pre-2001 Mac) | OUT-OF-SCOPE | Not produced by any tool in this pipeline; recorded rather than silently unhandled |
 | F11 | An input large enough to exhaust memory | OUT-OF-SCOPE | Bounded by the 25 MiB upload limit from story 1.4, which runs first |
 
 **Behaviour G — rows into candidate records (`core/extraction/tabular.ts`)**
@@ -387,6 +389,38 @@ immediately.
 
 **Out of scope:** Excel decoding, which needs SheetJS and therefore an adapter (same task, separate
 module — `core/` may not import a vendor library).
+
+**Behaviour H — a workbook into rows (`adapters/extraction/workbook-sheetjs.ts`)**
+
+*Why an adapter?* SheetJS is a vendor library, and `core/` imports nothing outward. The adapter
+decodes bytes to the same rectangle of strings `parseCsv` produces, and the contract in
+`tabular.ts` then treats both paths identically — which is also what makes the cross-check below
+possible.
+
+*Cross-check.* Two independent ones. The library's own writer produces a real `.xlsx` for the tests
+to read back, so no binary fixture is committed; and **the same logical table expressed as CSV and
+as XLSX must yield identical records**, which compares two entirely separate code paths against
+each other.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| H1 | **A money cell read as a float and rendered by its display format.** SheetJS returns `1450` as a number and, asked for formatted text, returns whatever Excel was showing — `$1,450.00`, which the validator rightly refuses. A correct file would be reported unreadable | GUARD | The cell's **value** is read, not its presentation; `$`, thousands separators and locale formats never reach the record |
+| H2 | A date arriving as the Excel serial `45444` | GUARD | Dates converted to ISO `YYYY-MM-DD`; a serial number never reaches `issuedOn` |
+| H3 | Formulas evaluated, or an external reference followed, while parsing an untrusted upload | GUARD | Formula parsing disabled; a workbook containing one still reads its cached values |
+| H4 | Bytes that are not a workbook — a renamed `.exe`, a truncated file | GUARD | Refused, never thrown |
+| H5 | A workbook with no sheets, or a sheet with no rows | GUARD | Refused |
+| H6 | Ragged rows, where a short row shifts every column after it | GUARD | Padded to a consistent width, so the contract's own ragged check governs |
+| H7 | **A multi-sheet workbook**, where which sheet is read decides which figures are stored | Decided | The **first** sheet, documented. Refusing multi-sheet files would refuse the many real exports that carry a cover sheet; the limitation is recorded rather than hidden |
+| H8 | `core/` importing SheetJS, putting a vendor parser inside the domain | GUARD | Added to `core/ports/boundary.test.ts`'s forbidden list, which is tested against planted violations |
+| H9 | A crafted workbook exhausting memory | OUT-OF-SCOPE | Bounded by story 1.4's 25 MiB upload limit, which runs first |
+
+**On the dependency.** Installed as `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, pinned
+exactly, **not** `npm i xlsx` — that package is the abandoned distribution carrying a
+prototype-pollution advisory, which matters acutely for code that parses uploads. `npm audit` after
+the install reports three high-severity advisories and **none of them is xlsx**: they are `postcss`
+and `sharp`, both transitive under `next@16.2.12`, and both present before this install. They are
+not fixable without moving off the pinned Next version, which is an architecture decision rather
+than a task.
 
 ### Debug Log References
 
