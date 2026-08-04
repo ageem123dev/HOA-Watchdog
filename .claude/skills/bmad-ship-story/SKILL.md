@@ -39,15 +39,18 @@ With an argument, match the `N-M-*` key. Without one, take the first non-`done` 
 
 ### 2 — Branch
 
-1. `git checkout main && git pull --ff-only origin main`. **Name the remote** — a bare `git pull` follows the branch's configured upstream and a wrong one fails *silently by succeeding* ("Already up to date" while behind). That has happened here. Verify with `git rev-parse main origin/main` if anything looks stale.
-2. Branch, in this order — `git checkout -b` fails outright on an existing branch, which would break resumability on the second run:
+1. `git checkout main && git pull --ff-only origin main`, then `git fetch origin`. **Name the remote** — a bare `git pull` follows the branch's configured upstream and a wrong one fails *silently by succeeding* ("Already up to date" while behind). That has happened here. The separate fetch matters too: `pull origin main` updates only `origin/main`, so without it a remote story branch is invisible locally and step 3 misclassifies it as absent.
+
+2. **Predecessor gate — before selecting or creating any branch.** If `main` lacks the previous story's work, branching now bases this story on the wrong commit, and a later resume reuses that branch and ships the predecessor's diff inside this MR. Diagnose the two causes separately:
+   - GitLab says its MR is **not merged** → it awaits the user. STOP and name the MR. See *Stacking*.
+   - GitLab says **merged** but the commit is unreachable → your local `main` is wrong, not the MR. Fetch and re-check the upstream; do not report it as awaiting a merge.
+
+3. Select the branch — `git checkout -b` fails outright on an existing branch, which would break resumability on the second run:
    - local branch exists → `git checkout story/{story_key}`
    - only the remote exists → `git checkout -b story/{story_key} --track origin/story/{story_key}`
    - neither → `git checkout -b story/{story_key}`
 
-**If `main` lacks the previous story's work**, diagnose before reporting — the two causes need different actions:
-   - GitLab says its MR is **not merged** → it awaits the user. STOP and name the MR. Branching on an unmerged parent puts the parent's diff in this MR, which is what one-story-per-MR prevents. See *Stacking*.
-   - GitLab says **merged** but the commit is unreachable → your local `main` is wrong, not the MR. Fetch and re-check the upstream; do not report it as awaiting a merge.
+4. **On either existing-branch path, require `origin/main` to be an ancestor** (`git merge-base --is-ancestor origin/main story/{story_key}`). A branch cut before the predecessor merged is stale, and its MR would carry work that is not this story's. If it is not an ancestor, rebase onto `origin/main`; STOP on conflicts rather than resolving them here.
 
 ### 3 — Create (if needed)
 
@@ -68,7 +71,7 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 ### 5 — Merge request to main
 
 1. Existing? `glab api "projects/{enc}/merge_requests?source_branch={branch}&state=opened&target_branch=main"`. Filter on the target: an open MR from this branch to anything else must **stop the run** — it gets no CodeRabbit review (see 3), and opening a second MR from the same source is worse. Report it and let the user close or retarget it.
-2. Else `glab mr create --source-branch {branch} --target-branch main --title "{story_id}: {title}" --description "$(cat file)" --yes`. **Write the body to a file** — backticks in a double-quoted bash string get command-substituted.
+2. Else write the description to a scratch file `{description_file}` and run `glab mr create --source-branch {branch} --target-branch main --title "{story_id}: {title}" --description "$(cat {description_file})" --yes`. **The body must come from a file** — backticks in a double-quoted bash string get command-substituted. `{description_file}` is a scratch path you choose, not `story_file` and not a literal `file`.
 3. **Must target `main`.** `.coderabbit.yaml` sets `auto_review.base_branches: [main]`; any other target gets no review at all.
 4. Record `mr_iid`/`mr_url`, report the URL, and write `merge_request: {mr_iid}` into the story frontmatter — the epic loop uses it to verify the merge rather than trusting a status word.
 

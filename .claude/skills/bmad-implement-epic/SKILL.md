@@ -61,13 +61,17 @@ Each iteration starts from a freshly pulled `main`, so there is no epic branch a
 
 ### 3 — Epic complete (terminal)
 
-1. **Verify, do not write.** `epic-{N}` should already read `done`, because ship-story Step 9 sets it inside the last story's commit, landing when that MR merges.
+1. **Require every story MR merged, first.** The loop's 2.2 gate only ever checks the *previous* story, so after the last story ships, nothing has verified its MR. `done` means ready-to-merge, and ship-story writes it — along with `epic-{N} = done` — on the story branch *before* the user merges. Without this check, the epic reports complete while the final MR is still open and `main` does not contain the story.
+
+   For **every** story in the epic, assert `state: merged` and `git merge-base --is-ancestor {merge_commit_sha} origin/main`. Any failure → stop at the user merge gate, exactly as in 2.2 and with the same two diagnoses.
+
+2. **Verify, do not write.** `epic-{N}` should then already read `done`, because ship-story Step 9 sets it inside the last story's commit, landing when that MR merges.
 
    **There is no epic-level MR.** An earlier version offered "fold it into the last story's MR, or its own" — impossible, since this step only runs after that MR has merged, leaving an epic-only MR to carry a one-line status change. If the status is wrong (interrupted run, hand edit), do not push to `main` and do not open an MR: report it, and let the next story's MR carry the correction, or ask.
 
-2. Report every story with its MR URL and review outcome, and confirm `main` contains them all.
-3. Mention `bmad-retrospective` if an `epic-{N}-retrospective` entry exists. Do not run it unasked.
-4. STOP.
+3. Report every story with its MR URL and review outcome, and confirm `main` contains them all.
+4. Mention `bmad-retrospective` if an `epic-{N}-retrospective` entry exists. Do not run it unasked.
+5. STOP.
 
 ## Driving with /loop
 
