@@ -70,6 +70,7 @@ without saying so.
   - [ ] A guard test in `core/security/`, shaped like `nfr2-guard.test.ts` — it must fail the pipeline, not live in a convention
   - [ ] Extraction and reasoning credentials are distinct names; no module reads both
   - [ ] **Assert the providers differ, not only the credentials.** Distinct key names prove nothing about which endpoint is called — pin the extraction origin and the reasoning origin as separate values and fail if they converge. AC3 says different *providers*
+  - [ ] **And different deploy units**, which is AD-10's third clause and the one nothing yet checks. Credentials, origins and content flow can all be correct while both run in the same unit, which is the arrangement AD-10 exists to prevent. Add a configuration check that fails on a planted same-unit deployment — the extraction adapter belongs to the Node gateway and the reasoning agent to the Python service, and a deploy config placing them together must break the pipeline, not a code review
   - [ ] No code path passes document bytes or raw extracted text toward the reasoning side
   - [ ] **Prove the guard detects a violation** by planting one, as `core/ports/boundary.test.ts` does. A guard tested only against a clean tree cannot distinguish "nothing wrong" from "nothing checked"
 
@@ -116,9 +117,25 @@ Check whether an extraction key trips it **before** assuming it passes. If it do
 
 1.5 kept parsing synchronous because it is fast and local. **This story makes that question real**: a model call is seconds, not milliseconds, and UX-DR12 asks for staged named progress, implying the treasurer watches it happen.
 
-Three options in increasing cost: keep it synchronous and accept a slow upload for small batches; return after storage and extract on a follow-up request the surface polls; or introduce a job queue. **There is no queue in this project and adding one is a significant architectural addition — out of scope here, and not to be introduced without asking.**
+Three options in increasing cost: keep it synchronous and accept a slow upload for small batches;
+return after storage and extract on a follow-up request the surface polls; or introduce a job queue.
+**There is no queue in this project and adding one is a significant architectural addition — out of
+scope here, and not to be introduced without asking.**
 
-Two constraints hold whatever is chosen: the `document` row and its bytes must be durable before extraction begins, so a provider failure never loses the upload; and a document with no extraction yet must be distinguishable from one whose extraction failed.
+**Choose between the first two before implementing, and write the choice here.** Listing options is
+planning; leaving them listed means ingestion and `app/upload` each pick one, and they will not pick
+the same one.
+
+Whichever is chosen, the **durable states must be named and distinguishable**, because the surface
+renders a different thing for each and "no records" is otherwise indistinguishable from success:
+
+- **held, not yet read** — bytes stored, extraction not started or still running
+- **read** — a validated set is stored
+- **could not be read** — extraction ran and its output failed validation; the previous set, if any, is untouched
+- **provider unavailable** — extraction could not run at all, which is retryable and is *not* the same as unreadable
+
+A document with no extraction rows is never "successful". Define the transitions between these
+states, and make the retry path explicit for the last one.
 
 ### An open question this story must answer rather than inherit
 
