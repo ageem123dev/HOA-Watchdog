@@ -330,6 +330,64 @@ first wants an unlocked copy, the second wants a clearer scan or a different exp
 **Out of scope:** parsing bytes into a candidate (Task 4), storage (Task 5), and the provider's
 schema enforcement (story 1.5b, AD-9).
 
+## Task 4 — deterministic parsing
+
+**The contract, decided 2026-08-04.** Nothing in the PRD, epics or spine specified what a tabular
+upload contains, and a deterministic parser cannot be written against an undefined input. The pilot
+contract is a **required-header set**, matching the PRD's stated use — *"Bank feeds are manually
+uploaded via CSV for the pilot"*:
+
+| Header | Required | Maps to |
+| --- | --- | --- |
+| `date` | yes | `issuedOn` |
+| `description` | yes | `vendorName` — the counterparty, which is exactly what 1.6 resolves |
+| `amount` | yes | `totalAmount`; negative is a credit, already decided in Task 1 |
+| `reference` | no | `documentNumber` |
+| `type` | no | `documentKind`, defaulting to `statement` |
+
+Matched case-insensitively after trimming. Unknown columns are **ignored** — a real bank export
+carries balance, running total and posting codes, and refusing files for having them would refuse
+every real file.
+
+**Behaviour F — CSV text into rows (`core/extraction/csv.ts`)**
+
+*If it ran correctly, how would I know?* Text in, a rectangle of strings out, with quoting honoured
+exactly as RFC 4180 states it.
+
+*How am I going to test this?* Pure string function. The **inverse test** required by
+`require_inverse_or_crosscheck` applies directly: serialise the parsed rows back to CSV, parse
+again, and assert the same rectangle — quoting defects that example-based tests miss show up
+immediately.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| F1 | A comma inside a quoted field splits it into two | GUARD | `"Smith, J."` stays one field |
+| F2 | A newline inside a quoted field ends the row | GUARD | Multi-line field kept whole |
+| F3 | `""` inside a quoted field read as end-of-field | GUARD | Round-trips as one `"` |
+| F4 | CRLF line endings leaving `` on every last field — the default from Excel on Windows | GUARD | CRLF and LF give identical rectangles |
+| F5 | A trailing newline producing a phantom empty final row | GUARD | Row count unchanged with or without it |
+| F6 | **A UTF-8 BOM** on the first header, so `date` arrives as `﻿date` and the required-header check fails on a file that is correct. Excel writes one by default | GUARD | BOM stripped; headers match |
+| F7 | An unterminated quote at end of input, silently truncating the file | GUARD | Refused, not truncated |
+| F8 | Ragged rows — a row with more or fewer fields than the header | GUARD | Refused; a shifted column is a wrong figure, not a missing one |
+| F9 | Empty input | GUARD | Refused |
+| F10 | A lone `` line ending (pre-2001 Mac) | OUT-OF-SCOPE | Not produced by any tool in this pipeline; recorded rather than silently unhandled |
+| F11 | An input large enough to exhaust memory | OUT-OF-SCOPE | Bounded by the 25 MiB upload limit from story 1.4, which runs first |
+
+**Behaviour G — rows into candidate records (`core/extraction/tabular.ts`)**
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| G1 | A required header missing, and the treasurer told only "unreadable" | GUARD | Refused, and the refusal names the headers it expected |
+| G2 | Header case or padding — `Date`, ` amount ` | GUARD | Normalised; these carry no information |
+| G3 | **Duplicate headers**, so which column wins is arbitrary | GUARD | Refused — silently picking one is how a figure comes from the wrong column |
+| G4 | Extra columns refused, rejecting every real bank export | GUARD | Ignored, and a test proves a realistic export with eight columns parses |
+| G5 | A header-only file storing zero records and reporting success | GUARD | Refused — the treasurer uploaded a file expecting figures |
+| G6 | **One malformed row storing the other 199.** "No partial or best-effort record is stored" would be violated in the most plausible way there is | GUARD | One bad row fails the whole document; nothing stored |
+| G7 | A model reachable on this path | GUARD | The module imports nothing that could call one; asserted by the boundary test plus an explicit import assertion |
+
+**Out of scope:** Excel decoding, which needs SheetJS and therefore an adapter (same task, separate
+module — `core/` may not import a vendor library).
+
 ### Debug Log References
 
 **Task 1 — red.** 34 failing, 0 passing. Verified the failures were for the right reason rather than
