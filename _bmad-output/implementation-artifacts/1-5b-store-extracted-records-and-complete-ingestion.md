@@ -4,7 +4,7 @@ baseline_commit: c54185bdb0fcc3158e94caf74e2df12a2307338c
 
 # Story 1.5b: Store extracted records and complete ingestion
 
-Status: in-progress
+Status: review
 
 > **Second of three stories from epic story 1.5.**
 > **1.5** built the parts and proved them: the `extraction` table, the record vocabulary, the validator, the unreadable outcome, and deterministic CSV and Excel parsing. **None of it is connected** — uploading a spreadsheet today still produces no records.
@@ -457,4 +457,35 @@ Deliberately out of scope here: when replacement is called (Task 3), the `replac
 - `_bmad-output/implementation-artifacts/1-2-board-member-sign-in.md` — stripped one NUL byte
 - `core/extraction/csv.test.ts` — NUL written as the escape `\u0000` rather than embedded raw
 
+### Definition of Done
+
+**PASS, with one deviation recorded rather than papered over.**
+
+| AC | Satisfied by |
+| --- | --- |
+| AC1 — records stored against the document, through `watchdog_writer` | `adapters/db/extraction-repository-postgres.test.ts`; role separation proven in `migrations/extraction.test.ts` (reader may select, may not insert or update) |
+| AC2 — unreadable stores nothing new and destroys nothing old | `reading.test.ts` "stores nothing for it", "keeps the document…", "destroys nothing when the re-read fails"; the outcome reaches the treasurer via `upload-feedback.test.ts` |
+| AC3 — re-ingest replaces the whole set, never partially | Single-transaction delete-then-insert; "keeps the previous set when the whole call is rolled back mid-flight", "serialises two replacements rather than interleaving them" |
+| AC4 — one document's failure does not affect the batch | `reading.test.ts` "carries on past an unreadable file" — five files, one bad, five outcomes |
+
+**Deviation — Retrofitted tests (one task).** The DoD asks that no test be written after the code it
+covers. The four spreadsheet tests through ingestion were: Task 3's routing was written and checked
+off, and the tests came later, when re-reading the subtask claims found that every ingestion test
+used a CSV. They were sensitivity-checked against three mutations (3, 1, 3 failures) so they are
+real tests, but they were not red-first, and calling that clean would be the same kind of unearned
+claim the story spent four rounds removing from the code.
+
+Gates on this head: lint clean, `next build` compiled, **764 unit passed / 109 skipped**, **109
+database passed**. Baseline had no pre-existing failures; none introduced. The 109 skipped are the
+database tests under the unit runner, which is by design — they run under `npm run test:db`.
+
+**Not proven by CI.** `verify:database` runs only when `WATCHDOG_WRITER_DATABASE_URL` and
+`WATCHDOG_READER_DATABASE_URL` are set as protected masked CI variables. They are not, so the
+pipeline can be green having executed **none** of AC1's or AC3's proving tests. They pass locally,
+which is where that evidence currently lives.
+
 ### Change Log
+
+- 2026-08-04 — Tasks 1-4 implemented test-first. Extraction repository with transactional set
+  replacement; `replaceDerivedRows` retired; reading wired into ingestion behind a workbook decoder
+  port; the surface given distinct file-unreadable and figures-unreadable copy. Status -> review.
