@@ -56,10 +56,10 @@ Epic story 1.5's ACs 2, 3 and 5. AC1 and AC4 belong to 1.5b.
   - [x] Exactly one live extraction per document as a **database** constraint, not an application check (AC4, AD-13)
   - [x] Explicit `grant` decision for `watchdog_reader` (migration 003 revoked defaults — see Dev Notes)
 
-- [ ] **The record shape** `core/extraction/record.ts` (AC: 1, 3)
-  - [ ] One definition of what a structured record is, shared by both halves of this story
-  - [ ] Value constraints live here and are asserted to agree with the migration, read from the SQL rather than restated
-  - [ ] Money is `numeric`/string, never a float — see Dev Notes
+- [x] **The record shape** `core/extraction/record.ts` (AC: 1, 3)
+  - [x] One definition of what a structured record is, shared by both halves of this story
+  - [x] Value constraints live here and are asserted to agree with the migration, read from the SQL rather than restated
+  - [x] Money is `numeric`/string, never a float — see Dev Notes
 
 - [ ] **Validation and the unreadable outcome** `core/extraction/validate.ts` (AC: 2)
   - [ ] Reject on any constraint violation; return a structured result, never a thrown parser error
@@ -255,6 +255,37 @@ The AD-10 tension is real and is resolved by what the table does *not* have: `ve
 
 **Out of scope for this task:** the record type and its parsing (Task 2), the decimal-places rule (Task 3, per A6), the repository that performs the replacement (Task 5), and anything about vendors resolving to known records (story 1.6).
 
+## Task 2 — the record shape (`core/extraction/record.ts`)
+
+**Behaviour D — the constraint data, and membership tests over it**
+
+*If it ran correctly, how would I know?* The kinds, currencies and limits this module publishes are
+the same ones migration 006 enforces, and the membership tests answer truthfully for values that are
+not members.
+
+*How am I going to test this?* Pure data and pure predicates — no seams needed. The parity half is a
+**cross-check against an independent source**: the migration SQL, read from the file rather than
+restated in the test. A test that restates the list proves the test agrees with itself.
+
+*Could this problem happen anywhere else?* **Yes, and it has.** `core/auth/sign-in-feedback.ts`
+carries a comment explaining why its lookup is an explicit membership test over a frozen list rather
+than an object index: `'toString' in MESSAGES` is true, so an object index returns a function where a
+string was promised. The same trap is one line away here.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| D1 | The kind list drifts from `extraction_kind_known`, so a value passes here and is refused at INSERT — after the bytes are already stored | GUARD | Parity **both directions**, reading the `in (...)` list out of `006_extraction.sql` |
+| D2 | The currency list drifts from `extraction_currency_supported` | GUARD | Same, same source |
+| D3 | The length caps drift from the `char_length … between` clauses | GUARD | Numbers parsed out of the SQL, not restated |
+| D4 | Precision or scale drifts from `numeric(14,2)`, so the module believes a range the column will refuse | GUARD | Parsed out of the column declaration |
+| D5 | **The parity test's regex matches nothing and the comparison passes vacuously** — the failure shape that shipped twice in 1.4 (`0 % n === 0`, and a `for` loop over an empty list) | GUARD | Every extraction asserted non-empty and of expected size *before* it is compared |
+| D6 | A membership test written as an object index, so `'toString'` and `'constructor'` are accepted as document kinds | GUARD | Both asserted false, alongside the real members |
+| D7 | Money typed as `number` somewhere in the record | GUARD | Made unrepresentable by the type; a runtime test asserts the amount is a string when present, because a type is not a runtime guarantee at the database boundary |
+
+**Out of scope for this task:** validating a candidate record (Task 3, including the decimal-places
+rule carried forward from Task 1), parsing anything (Task 4), and persistence (Task 5). This task
+publishes the vocabulary; it does not police it.
+
 ### Debug Log References
 
 **Task 1 — red.** 34 failing, 0 passing. Verified the failures were for the right reason rather than
@@ -277,6 +308,25 @@ relies on `on conflict` — and nothing else. Restored, 92 green.
 
 Worth keeping: a sensitivity check that reports "no test noticed" is itself a claim that needs
 checking. Here the mutation silently did not happen.
+
+**Task 2 — red, and a vacuous shape in my own tests.** 20 failed, 1 passed. The passer is correct:
+it guards the parity tests by asserting the migration file actually contains the constraints, and
+deliberately does not call the implementation.
+
+But the run reported **21 tests where the finished file has 27**. Six were silently absent:
+`it.each([...DOCUMENT_KINDS])` over an **empty** array generates *zero* cases and reports nothing
+missing. That is the same failure shape as 1.4's `for` loop over an empty list, wearing a different
+costume — and it would have hidden every membership test. Added an explicit size assertion before
+the parameterised cases so an empty vocabulary cannot make them disappear.
+
+**Task 2 — sensitivity, four mutations, all detected:**
+
+| Mutation | Failures |
+| --- | --- |
+| Drift a document kind from the migration | **1** — exactly the kind-parity test |
+| Drift the vendor length cap (200 → 250) | **1** |
+| Drift the numeric scale (2 → 3) | 2 — parity, plus the cents assertion |
+| Membership by object index instead of list `includes` | 4 — every inherited-property case |
 
 ### Completion Notes List
 
@@ -309,11 +359,48 @@ does *not* have: `vendor_name` and `document_number` are bounded typed fields, n
 text. The migration states that no column here may ever hold raw OCR text or a document body, and
 that adding one would force this grant to become per-column.
 
+**Task 2 — `core/extraction/record.ts`.** The vocabulary both halves of extraction share: the
+document kinds, the supported currencies, the length caps, and `numeric(14,2)`'s precision and scale.
+
+Every constant has a counterpart in migration 006, and the tests **read that file** rather than
+restating its lists. A restated list proves the test agrees with itself; the drift worth catching is
+a value accepted here and refused at INSERT, after the bytes are already in object storage.
+
+The lists are `Object.freeze`d, because a caller pushing onto one would widen what the application
+accepts while the database constraint stayed where it was.
+
+Membership is `includes` over the list, never an object index — `'toString' in someObject` is true,
+so an object-keyed lookup accepts every inherited property name as a document kind. The same note
+sits in `core/auth/sign-in-feedback.ts`; the sensitivity check confirms four tests fail if it is
+written the wrong way.
+
+`totalAmount` is a **decimal string** in the type, not a number. The value travels as text from
+parser to `numeric` column without passing through a representation that would round it.
+
 **Carried forward to Task 3 (not handled here, and not mistaken for handled):** `numeric(14,2)`
 *rounds* rather than errors, so `1.005` becomes `1.01` with no complaint — a cent invented by the
 schema. No check constraint can catch it, because the column has already coerced the value before
 any constraint sees it. The validator must refuse more than two decimal places **before** the
 insert.
+
+**Task 2 — red, and a vacuous shape in my own tests.** 20 failed, 1 passed. The passer is correct:
+it guards the parity tests by asserting the migration file actually contains the constraints, and
+deliberately does not call the implementation.
+
+But the run reported **21 tests where the finished file has 27**. Six were silently absent:
+`it.each([...DOCUMENT_KINDS])` over an **empty** array generates *zero* cases and reports nothing
+missing. That is the same failure shape as 1.4's `for` loop over an empty list, wearing a different
+costume — and it would have hidden every membership test. Added an explicit size assertion before
+the parameterised cases so an empty vocabulary cannot make them disappear.
+
+**Task 2 — sensitivity, four mutations, all detected:**
+
+| Mutation | Failures |
+| --- | --- |
+| Drift a document kind from the migration | **1** — exactly the kind-parity test |
+| Drift the vendor length cap (200 → 250) | **1** |
+| Drift the numeric scale (2 → 3) | 2 — parity, plus the cents assertion |
+| Membership by object index instead of list `includes` | 4 — every inherited-property case |
 
 ### Completion Notes List
 
@@ -323,5 +410,7 @@ insert.
 
 - `migrations/006_extraction.sql` — the `extraction` table, its constraints, and the reader grant
 - `migrations/extraction.test.ts` — 34 tests; requires a database, skips loudly without one
+- `core/extraction/record.ts` — the record vocabulary and its membership tests
+- `core/extraction/record.test.ts` — 27 tests, parity read from the migration
 
 ### Change Log
