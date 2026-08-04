@@ -15,6 +15,9 @@ if (missing.length > 0) {
 }
 
 const bucket = process.env.R2_BUCKET
+// Kept in step with adapters/storage/document-store-s3.ts on purpose. A probe
+// that connects differently from the application can report a healthy bucket
+// the application cannot actually use.
 const client = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -22,6 +25,13 @@ const client = new S3Client({
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
+  requestHandler: {
+    connectionTimeout: 5_000,
+    socketTimeout: 30_000,
+    requestTimeout: 300_000,
+    throwOnRequestTimeout: true,
+  },
+  requestChecksumCalculation: 'WHEN_REQUIRED',
 })
 
 const key = `_connectivity-probe/${randomBytes(8).toString('hex')}.txt`
