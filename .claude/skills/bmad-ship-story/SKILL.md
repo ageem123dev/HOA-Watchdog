@@ -91,29 +91,47 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 
 ### 8 — CodeRabbit loop (the `/loop` tick)
 
-**8a. Read the review body.** CodeRabbit posts as a **service account** (`service_account_group_138854092_…`), *not* a username containing "coderabbit" — filtering on the name returns nothing and looks exactly like "no review yet". Fetch `.../merge_requests/{iid}/notes?per_page=100&sort=desc`; the authoritative count is **`Actionable comments posted: N`** (inline tallies differ). Thread IDs from `.../discussions`. Only trust a review whose commit matches the current head.
+**8a. Wait first.** A review takes ~20 min on a new MR, ~4 after a fix push; checking earlier cannot succeed. Time it from the MR's `created_at`, or from the push that made the current head. Under `/loop` that wait is the next `ScheduleWakeup`; standalone, say when the review is due and STOP.
 
-**8b. Convergence.** **Precondition: a service-account review whose commit matches the current head.** Nothing else applies until it exists — "zero unresolved threads" and "no review yet" are both trivially true *before* any review, so a predicate without this precondition reports a never-reviewed story as clean. An earlier version of this file did exactly that.
+**On waking, before reading anything:** confirm the MR is still `opened` and its `sha` is still yours. A merge can land while you sleep — that happened on story 1.5 — and 8e would then push fixes to a branch about to be deleted. If either changed, stop and move any unmerged commits to a fresh branch and MR.
 
-Given that review, converged = pipeline green AND every actionable finding is **fixed** (push → new head → back to 8a), **explicitly skipped** with a reason on its thread, or **resolved by CodeRabbit** itself. Anything else is pending.
+**8b. Read the review.** CodeRabbit posts as a **service account** (`service_account_group_138854092_…`), not a name containing "coderabbit" — filtering on the name finds nothing and looks like "no review yet". Fetch `.../merge_requests/{iid}/notes?per_page=100&sort=desc` and match **`Actionable comments posted: N`**; that line is the review. Threads from `.../discussions`. Only trust one whose commit matches the current head.
 
-No current-head review after a full wake cadence is **not** convergence: report "MR green; awaiting review of `{sha}`" and either wait or STOP. Absence of evidence is never evidence of cleanliness.
+`per_page=100` is **one page** — story 1.5's MR reached 64 notes, and replies push a review down fast. Follow `X-Next-Page` until the current-head review is found or the pages run out. Concluding "no review" from page one is the same absence-of-evidence error in a new place.
 
-**8c. Triage.** Fix real correctness/security/accessibility issues. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
+A review announces itself in **four** shapes. Match all of them, and read the note body rather than trusting its first line:
 
-**8d. Apply.** Fix test-first, re-run lint+build+test, commit, push (auto-triggers re-review; force with `@coderabbitai review`).
+| Shape | Means |
+| --- | --- |
+| `Actionable comments posted: N` | N findings |
+| **`No actionable comments were generated`** | **reviewed and clean — this is how convergence actually arrives** |
+| `Duplicate comments (N)` | an incremental re-review of repeats; carries **no** actionable line |
+| `Outside diff range comments (N)` | findings that could not be posted inline |
 
-**8e. Reply per thread** — Fixed (what changed) or Skipped (why). **Write bodies to files** and post with `--field "body=$(cat file)"`.
+The clean shape is the one that matters most: keying only on `Actionable comments posted:` means a clean MR **never converges** and the loop waits forever for a line that is never coming. That happened on MR !8 — reviewed clean in 24 seconds, reported as "awaiting review" for an hour.
+
+A note is a review only if it carries a `Commits` / `Files selected for processing` block. The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) does not, and carries no findings. Do not treat a stray `rate limited` string as proof either — it appears in stale fragments of otherwise-complete reviews.
+
+**8c. Convergence.** Precondition: a service-account review matching the current head, in any of 8b's four shapes. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
+
+Converged = pipeline green AND every finding **fixed** (push → new head → back to 8a), **skipped** with a reason on its thread, or **resolved by CodeRabbit**. Anything else is pending — including a review still missing after the wait.
+
+**8d. Triage.** Fix real correctness/security/accessibility issues. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
+
+**8e. Apply.** Fix test-first, re-run lint+build+test, commit, push (auto-triggers re-review; force with `@coderabbitai review`).
+
+**8f. Reply per thread** — Fixed (what changed) or Skipped (why). **Write bodies to files** and post with `--field "body=$(cat file)"`.
 
 **Caps:** ~3–4 rounds; only-already-skipped findings recurring counts as converged. On a rate limit, back off ~2400s and re-request rather than pushing.
 
 ### 9 — Ready-to-merge (terminal)
 
 1. **Docs first.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`. If this is the epic's last not-`done` story also set `epic-{N} = done` in the same commit; otherwise set it `in-progress` if unset. Commit and push.
-2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence, which belongs to the previous commit. Re-run Step 7 and Step 8a/8b against the new head. Docs-only, so normally one quick round.
+2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence. Re-run Step 7, then Step 8 **including 8a's wait** — a docs-only push triggers a re-review like any other.
 3. **If that re-verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
-4. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
-5. STOP.
+4. **Confirm the MR is still open at your head**, as in 8a, before reporting.
+5. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
+6. STOP.
 
 **`done` means ready-to-merge, not merged** — it is written on an unmerged branch. Nothing downstream may treat it as proof of a merge.
 
@@ -123,7 +141,9 @@ If the user wants to keep building without merging, branch off the previous *sto
 
 ## Driving with /loop
 
-`/loop ship story {id}`. Early ticks run 1–7 once; later ticks sit in Step 8; the loop ends at Step 9. Cadence: ~1200–1800s after opening an MR (first review can take 10–20+ min), ~270s after pushing a fix, ~2400s after a rate limit. Bounded `until` loops only — a foreground `sleep` is blocked. Standalone: run 0–7, do one Step 8 check, report "awaiting CodeRabbit".
+`/loop ship story {id}`. Early ticks run 1–7 once; later ticks sit in Step 8; the loop ends at Step 9.
+
+Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a fix push, ~2400s after a rate limit. Bounded `until` loops are for pipelines, which finish in a minute or two; a foreground `sleep` is blocked. Standalone: run 0–7, STOP at 8a, say when the review is due.
 
 ## Project facts
 
