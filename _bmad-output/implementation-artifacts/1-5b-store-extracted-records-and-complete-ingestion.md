@@ -608,5 +608,14 @@ which is where that evidence currently lives.
 - 2026-08-04 — MR !9 opened to `main`. CodeRabbit round 1: 7 findings, 5 fixed and 2 declined with
   reasons (one contradicted AC2; one needs CI database credentials only the owner can grant). Round 2:
   1 finding, fixed — the workbook cell cap was placed after the call that materialises the sheet.
-  Round 3: **no actionable comments**. Pipeline green on the final head. Status -> done (ready to
-  merge; the merge is the user's).
+  Round 3 (code head `6edcc12`): clean. Round 4 (docs head `4653502`): 1 finding, on documentation.
+
+  **A correction to the entry as first written.** It claimed round 3 was clean *at the final head*.
+  It was not: the review of `4653502` had been **rate-limited and never ran**, and the "no actionable
+  comments" line I read came from CodeRabbit's walkthrough **summary** comment — which is edited in
+  place and had, by then, been updated to a different commit range. The skill I was following warns
+  that the summary comment is not a review; the check I wrote to enforce that keyed on a `Commits`
+  block, which the summary now also carries, so it matched anyway. Re-requested after the limit
+  window and the real review arrived with a finding. Recorded because a convergence test that passes
+  on the wrong note is the same defect this story kept finding in its own guards — the seventh, and
+  this one was mine about my own process rather than about the code.
