@@ -5,7 +5,7 @@ merge_request: 9
 
 # Story 1.5b: Store extracted records and complete ingestion
 
-Status: review
+Status: done
 
 > **Second of three stories from epic story 1.5.**
 > **1.5** built the parts and proved them: the `extraction` table, the record vocabulary, the validator, the unreadable outcome, and deterministic CSV and Excel parsing. **None of it is connected** — uploading a spreadsheet today still produces no records.
@@ -604,3 +604,9 @@ which is where that evidence currently lives.
 - 2026-08-04 — Tasks 1-4 implemented test-first. Extraction repository with transactional set
   replacement; `replaceDerivedRows` retired; reading wired into ingestion behind a workbook decoder
   port; the surface given distinct file-unreadable and figures-unreadable copy. Status -> review.
+
+- 2026-08-04 — MR !9 opened to `main`. CodeRabbit round 1: 7 findings, 5 fixed and 2 declined with
+  reasons (one contradicted AC2; one needs CI database credentials only the owner can grant). Round 2:
+  1 finding, fixed — the workbook cell cap was placed after the call that materialises the sheet.
+  Round 3: **no actionable comments**. Pipeline green on the final head. Status -> done (ready to
+  merge; the merge is the user's).
