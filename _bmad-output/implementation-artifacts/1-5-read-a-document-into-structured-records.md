@@ -1,5 +1,6 @@
 ---
 baseline_commit: 3422f01ea496f717e270a5b2c254e0e7001f27a4
+merge_request: 6
 ---
 
 # Story 1.5: Read a document into structured records
