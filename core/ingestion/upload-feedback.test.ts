@@ -17,6 +17,7 @@ import {
   REJECTION_REASONS,
   type RejectionReason,
 } from './acceptance'
+import { UNREADABLE_MESSAGE } from '../extraction/validate'
 import type { IngestOutcome } from './ingest'
 import { uploadFeedback } from './upload-feedback'
 
@@ -27,13 +28,38 @@ const rejected = (reason: RejectionReason): IngestOutcome => ({
 })
 
 const ALL_OUTCOMES: IngestOutcome[] = [
-  { filename: 'a.pdf', outcome: 'accepted', documentId: 'doc-1' },
+  { filename: 'a.pdf', outcome: 'read', documentId: 'doc-1' },
+  { filename: 'a.pdf', outcome: 'stored-not-read', documentId: 'doc-1' },
+  { filename: 'a.pdf', outcome: 'unreadable', documentId: 'doc-1' },
   { filename: 'a.pdf', outcome: 'already-held', documentId: 'doc-1' },
   { filename: 'a.pdf', outcome: 'failed' },
   ...REJECTION_REASONS.map((reason) => rejected(reason)),
 ]
 
 describe('uploadFeedback', () => {
+  describe('the figures-not-stored case', () => {
+    const stored = () =>
+      uploadFeedback({ filename: 'ledger.csv', outcome: 'figures-not-stored', documentId: 'doc-1' })
+
+    it('does not tell the treasurer the file was not saved', () => {
+      // The exact wrong instruction: the bytes and the document row are durable
+      // by the time this outcome is possible.
+      expect(stored().message).not.toMatch(/not saved|could not be stored|upload(ing)? it again/i)
+    })
+
+    it('says the document is saved', () => {
+      expect(stored().message).toMatch(/saved/i)
+    })
+
+    it('offers no replacement, because nothing is wrong with the file', () => {
+      expect(stored().offerReplacement).toBe(false)
+    })
+
+    it('does not blame the file the way the unreadable copy does', () => {
+      expect(stored().message).not.toMatch(/unreadable|clearer scan|could not be read/i)
+    })
+  })
+
   describe('the unreadable case (AC4)', () => {
     /**
      * The expected sentence is read out of the PRD rather than restated here.
@@ -122,11 +148,11 @@ describe('uploadFeedback', () => {
     })
   })
 
-  describe('a document that was added', () => {
+  describe('a document that was read', () => {
     it('reports it plainly and asks for nothing further', () => {
       const feedback = uploadFeedback({
         filename: 'a.pdf',
-        outcome: 'accepted',
+        outcome: 'read',
         documentId: 'doc-1',
       })
 
@@ -148,11 +174,55 @@ describe('uploadFeedback', () => {
     })
   })
 
+  describe('a document held but not yet read', () => {
+    const feedback = () =>
+      uploadFeedback({ filename: 'a.pdf', outcome: 'stored-not-read', documentId: 'doc-1' })
+
+    it('says it is held, so nothing suggests the figures are in', () => {
+      expect(feedback().message).toMatch(/held|kept|stored/i)
+    })
+
+    it('does not read as a failure, because nothing failed', () => {
+      const { status, message } = feedback()
+
+      expect(`${status} ${message}`).not.toMatch(/fail|error|problem|could ?n[o']t|invalid|reject/i)
+    })
+
+    it('asks for no replacement, since the file is fine and kept', () => {
+      expect(feedback().offerReplacement).toBe(false)
+    })
+  })
+
+  describe('a document that could not be read', () => {
+    const feedback = () =>
+      uploadFeedback({ filename: 'a.csv', outcome: 'unreadable', documentId: 'doc-1' })
+
+    it('uses the sentence the extraction layer owns, not a second copy of it', () => {
+      // Two copies of a user-facing sentence drift, and the version a treasurer
+      // reads is the one that would be wrong.
+      expect(feedback().message).toBe(UNREADABLE_MESSAGE)
+    })
+
+    it('is distinct from the copy for a file that would not open', () => {
+      const openFailure = uploadFeedback({
+        filename: 'a.pdf',
+        outcome: 'rejected',
+        reason: 'unreadable',
+      })
+
+      expect(feedback().message).not.toBe(openFailure.message)
+    })
+
+    it('offers a path to supply a better export', () => {
+      expect(feedback().offerReplacement).toBe(true)
+    })
+  })
+
   describe('coverage of the whole outcome set', () => {
     it('has copy for every outcome the service can produce', () => {
       // A new reason added to the closed set without copy here is a blank row in
       // front of a volunteer, which is why this enumerates rather than samples.
-      expect(ALL_OUTCOMES).toHaveLength(7)
+      expect(ALL_OUTCOMES).toHaveLength(9)
 
       for (const outcome of ALL_OUTCOMES) {
         const feedback = uploadFeedback(outcome)
@@ -163,7 +233,7 @@ describe('uploadFeedback', () => {
     })
 
     it('gives every outcome except the plain success something to read', () => {
-      for (const outcome of ALL_OUTCOMES.filter((o) => o.outcome !== 'accepted')) {
+      for (const outcome of ALL_OUTCOMES.filter((o) => o.outcome !== 'read')) {
         expect(uploadFeedback(outcome).message, `no message for ${outcome.outcome}`).toBeTruthy()
       }
     })

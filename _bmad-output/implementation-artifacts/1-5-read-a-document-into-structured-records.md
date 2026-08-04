@@ -496,7 +496,7 @@ at the table layer the exact blank-versus-absent distinction the validator exist
 columns now pass through as written so the validator sees and refuses them.
 
 *SheetJS does not refuse non-workbook bytes.* Handed the four bytes of a renamed executable it
-returns a one-cell sheet containing `MZ ` — verified directly rather than inferred from a failing
+returns a one-cell sheet containing `MZ\0` — verified directly rather than inferred from a failing
 test. Its format sniffing falls back to text parsers, so the adapter now gates on the ZIP and OLE
 container signatures before the library sees anything. That is a second lock behind the upload gate,
 placed where bytes actually meet a parser.
@@ -658,7 +658,7 @@ at the table layer the exact blank-versus-absent distinction the validator exist
 columns now pass through as written so the validator sees and refuses them.
 
 *SheetJS does not refuse non-workbook bytes.* Handed the four bytes of a renamed executable it
-returns a one-cell sheet containing `MZ ` — verified directly rather than inferred from a failing
+returns a one-cell sheet containing `MZ\0` — verified directly rather than inferred from a failing
 test. Its format sniffing falls back to text parsers, so the adapter now gates on the ZIP and OLE
 container signatures before the library sees anything. That is a second lock behind the upload gate,
 placed where bytes actually meet a parser.

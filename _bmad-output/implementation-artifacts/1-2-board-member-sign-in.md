@@ -316,7 +316,7 @@ clean. `npm run lint` clean.
 **Control characters in source.** The first implementation expressed the unsafe-character check as
 a regex class containing literal control bytes, which made `core/auth/route-policy.ts` a binary
 file to git and grep. Replaced with an explicit code-point scan (`hasControlCharacter`); the test
-file's literal NUL was replaced with ` `. Verified zero control characters across every source
+file's literal NUL was replaced with `\x00`. Verified zero control characters across every source
 file in `core/` and `adapters/`.
 
 ### Completion Notes List

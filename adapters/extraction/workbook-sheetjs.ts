@@ -15,7 +15,27 @@ import * as XLSX from 'xlsx'
  * type is converted explicitly below.
  */
 
-export const WORKBOOK_PROBLEMS = ['unreadable-file', 'no-sheets', 'no-rows'] as const
+export const WORKBOOK_PROBLEMS = [
+  'unreadable-file',
+  'no-sheets',
+  'no-rows',
+  'too-many-cells',
+] as const
+
+/**
+ * The most cells this pipeline will turn into strings.
+ *
+ * The 25 MiB upload limit bounds the *compressed* file. A spreadsheet is a ZIP,
+ * so a small upload can expand into an enormous sheet, and every cell below
+ * becomes a string in memory while every row becomes one INSERT. Twelve years
+ * of monthly rows across six columns is under a thousand cells, so this leaves
+ * an association three orders of magnitude of room.
+ *
+ * **What this does not bound:** decompression inside `XLSX.read` itself, which
+ * happens before any of this runs. Bounding that needs streaming or a
+ * memory-capped subprocess, which is a hardening story rather than a constant.
+ */
+export const MAX_WORKBOOK_CELLS = 500_000
 
 export type WorkbookProblem = (typeof WORKBOOK_PROBLEMS)[number]
 
@@ -116,6 +136,20 @@ export function readWorkbook(bytes: Uint8Array): WorkbookResult {
   const sheet = book.Sheets[firstSheet]
   if (sheet === undefined) return { ok: false, reason: 'no-sheets' }
 
+  // Preflight on the range the sheet *declares*, before converting anything.
+  // `sheet_to_json` below is what builds the array, so a cap applied only to its
+  // output has already paid for the allocation it exists to prevent. A sheet can
+  // declare an enormous range while holding almost no cells, which the
+  // post-conversion check cannot see at all.
+  const declared = sheet['!ref']
+  if (declared !== undefined) {
+    const range = XLSX.utils.decode_range(declared)
+    const cells =
+      (range.e.r - range.s.r + 1) * (range.e.c - range.s.c + 1)
+
+    if (cells > MAX_WORKBOOK_CELLS) return { ok: false, reason: 'too-many-cells' }
+  }
+
   // The first sheet, deliberately. Refusing multi-sheet workbooks would refuse
   // the many real exports that carry a cover sheet; the limitation is recorded
   // rather than hidden.
@@ -128,9 +162,14 @@ export function readWorkbook(bytes: Uint8Array): WorkbookResult {
 
   if (raw.length === 0) return { ok: false, reason: 'no-rows' }
 
+  // Checked before the padding below, which is what actually allocates.
+  const width = widestRow(raw)
+  if (raw.length * width > MAX_WORKBOOK_CELLS) {
+    return { ok: false, reason: 'too-many-cells' }
+  }
+
   // Pad to a consistent width. A short row would otherwise shift every column
   // after it, and a shifted column is a wrong figure rather than a missing one.
-  const width = widestRow(raw)
   const rows = raw.map((row) =>
     Array.from({ length: width }, (_, column) => asText(row[column])),
   )

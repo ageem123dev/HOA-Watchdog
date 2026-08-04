@@ -1,3 +1,4 @@
+import { UNREADABLE_MESSAGE as FIGURES_UNREADABLE_MESSAGE } from '../extraction/validate'
 import { ACCEPTED_FORMAT_LABELS, MAX_DOCUMENT_BYTES, type RejectionReason } from './acceptance'
 import type { IngestOutcome } from './ingest'
 
@@ -25,7 +26,15 @@ export interface UploadFeedback {
  * FR-1, quoted exactly. AC4 says verbatim, and a test compares this against the
  * sentence in `docs/prd/prd.md` rather than trusting the comment above it.
  */
-const UNREADABLE_MESSAGE =
+/**
+ * FR-1's sentence, for a file that would not **open**.
+ *
+ * Distinct from `FIGURES_UNREADABLE_MESSAGE`, which is for a file that opened
+ * and whose figures could not be read. Two different events with two different
+ * next steps — an unlocked copy versus a cleaner export — and briefly, while
+ * both constants shared a name, they were the same message.
+ */
+const FILE_UNREADABLE_MESSAGE =
   'This file cannot be read. It might be password protected or corrupted. ' +
   'Please upload an unlocked or clearer version.'
 
@@ -49,13 +58,29 @@ const REJECTION_MESSAGES: Readonly<Record<RejectionReason, string>> = Object.fre
   'unsupported-type': `Accepted formats are ${acceptedFormats()}.`,
   'too-large': `Files are accepted up to ${sizeLimit()}.`,
   empty: 'This file is empty. Check that it saved before uploading it.',
-  unreadable: UNREADABLE_MESSAGE,
+  unreadable: FILE_UNREADABLE_MESSAGE,
 })
 
 export function uploadFeedback(outcome: IngestOutcome): UploadFeedback {
   switch (outcome.outcome) {
-    case 'accepted':
+    case 'read':
       return { status: 'Added', message: null, offerReplacement: false }
+
+    case 'stored-not-read':
+      // Neither success nor failure, and the copy has to avoid implying either.
+      // The file is kept, so the figures arriving later costs the treasurer
+      // nothing — but saying "added" would tell them the numbers are in.
+      return {
+        status: 'Held',
+        message: 'This file is kept. Reading figures out of this format is not available yet.',
+        offerReplacement: false,
+      }
+
+    case 'unreadable':
+      // The sentence itself lives in `core/extraction`, which owns the concept.
+      // A second copy here would drift, and the version a treasurer reads is the
+      // one that would be wrong.
+      return { status: 'Not read', message: FIGURES_UNREADABLE_MESSAGE, offerReplacement: true }
 
     case 'already-held':
       // AC2 is explicit: told it was already held, not that it failed. Nothing
@@ -81,6 +106,22 @@ export function uploadFeedback(outcome: IngestOutcome): UploadFeedback {
         status: 'Not saved',
         message: 'This file could not be stored just now. Try uploading it again.',
         offerReplacement: true,
+      }
+
+    case 'figures-not-stored':
+      // Deliberately not `failed`'s "Not saved. Try uploading it again." The
+      // document *is* saved, so that instruction is wrong twice: nothing is
+      // lost, and uploading the same file again returns already-held with the
+      // figures still missing. No replacement is offered for the same reason —
+      // there is nothing wrong with the file to replace.
+      return {
+        status: 'Saved, figures pending',
+        // Phrased without the words "upload it again" even as a negation: a
+        // treasurer scanning a list of outcomes reads the verb, not the "no".
+        message:
+          'This document is saved, but its figures could not be recorded just now. ' +
+          'Nothing further is needed from you.',
+        offerReplacement: false,
       }
 
     default: {

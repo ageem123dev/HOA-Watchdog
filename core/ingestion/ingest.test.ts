@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { DocumentRepository, NewDocument } from '../ports/document-repository'
 import type { DocumentStore, StoredDocument } from '../ports/document-store'
+import type { ExtractionRepository } from '../ports/extraction-repository'
 import { contentHash } from './content-hash'
 import { ingest } from './ingest'
 import { storageKeyFor } from './storage-key'
@@ -29,9 +30,10 @@ const file = (filename: string, bytes = pdf(filename), contentType = 'applicatio
 interface Fakes {
   store: DocumentStore
   repository: DocumentRepository
+  extractions: ExtractionRepository
   stored: StoredDocument[]
   recorded: NewDocument[]
-  replaced: string[]
+  destructiveCalls: string[]
 }
 
 function fakes(
@@ -43,13 +45,24 @@ function fakes(
 ): Fakes {
   const stored: StoredDocument[] = []
   const recorded: NewDocument[] = []
-  const replaced: string[] = []
+  const destructiveCalls: string[] = []
   const held = options.heldHashes ?? new Set<string>()
 
   return {
     stored,
     recorded,
-    replaced,
+    destructiveCalls,
+    // Every file in this suite is a PDF or a rejection, so nothing here should
+    // ever reach extraction. Throwing rather than recording makes that a proven
+    // property instead of an untested assumption: if routing ever sends a PDF
+    // down the reading path, these tests report `failed` and say so.
+    extractions: {
+      replace: vi.fn(async () => {
+        destructiveCalls.push('replace')
+        throw new Error('no file in this suite should reach extraction')
+      }),
+      findByDocument: vi.fn(async () => []),
+    },
     store: {
       put: vi.fn(async (document: StoredDocument) => {
         if (options.failStoreFor?.(document)) throw new Error('R2 said no')
@@ -57,6 +70,10 @@ function fakes(
       }),
     },
     repository: {
+      // `destructiveCalls` stays empty by construction now that the port has no
+      // destructive method. It is still asserted, so re-introducing one without
+      // a place for it in the ordering fails these tests rather than passing
+      // quietly.
       record: vi.fn(async (document: NewDocument) => {
         if (options.failRecordFor?.(document)) throw new Error('database said no')
 
@@ -67,9 +84,6 @@ function fakes(
         }
 
         return { id: `doc-${document.contentHash.slice(0, 8)}`, alreadyHeld }
-      }),
-      replaceDerivedRows: vi.fn(async (documentId: string) => {
-        replaced.push(documentId)
       }),
     },
   }
@@ -86,7 +100,9 @@ describe('ingest', () => {
       expect(outcomes).toEqual([
         {
           filename: 'june-statement.pdf',
-          outcome: 'accepted',
+          // A PDF is stored and held unread until the provider story adds a
+          // reader for it. Not `read`, because nothing read it.
+          outcome: 'stored-not-read',
           documentId: `doc-${contentHash(one.bytes).slice(0, 8)}`,
         },
       ])
@@ -182,24 +198,25 @@ describe('ingest', () => {
       expect(f.recorded).toHaveLength(0)
     })
 
-    it('replaces the derived rows rather than leaving them stale (AD-13)', async () => {
-      // The half of AD-13 nothing visibly breaks without, which is exactly why
-      // it needs a test rather than a good intention.
+    it('destroys nothing when the same bytes arrive again', async () => {
+      // AD-13's replacement is real, but it belongs *after* a complete set has
+      // been read and validated — which is Task 3's wiring, not this branch.
+      // Deleting here, before anything is parsed, means a failed re-read leaves
+      // the document with no records where it had a full set.
       const bytes = pdf('same')
-      const hash = contentHash(bytes)
-      const f = fakes({ heldHashes: new Set([hash]) })
+      const f = fakes({ heldHashes: new Set([contentHash(bytes)]) })
 
       await ingest([file('again.pdf', bytes)], UPLOADER, f)
 
-      expect(f.replaced).toEqual([`doc-${hash.slice(0, 8)}`])
+      expect(f.destructiveCalls).toEqual([])
     })
 
-    it('does not replace derived rows for a document seen for the first time', async () => {
+    it('destroys nothing for a document seen for the first time either', async () => {
       const f = fakes()
 
       await ingest([file('new.pdf')], UPLOADER, f)
 
-      expect(f.replaced).toEqual([])
+      expect(f.destructiveCalls).toEqual([])
     })
 
     it('handles the same file twice inside one batch', async () => {
@@ -214,7 +231,7 @@ describe('ingest', () => {
         f,
       )
 
-      expect(outcomes.map((o) => o.outcome)).toEqual(['accepted', 'already-held'])
+      expect(outcomes.map((o) => o.outcome)).toEqual(['stored-not-read', 'already-held'])
       expect(f.recorded).toHaveLength(1)
     })
   })
@@ -260,11 +277,11 @@ describe('ingest', () => {
       const outcomes = await ingest(files, UPLOADER, f)
 
       expect(outcomes.map((o) => o.outcome)).toEqual([
-        'accepted',
-        'accepted',
+        'stored-not-read',
+        'stored-not-read',
         'rejected',
-        'accepted',
-        'accepted',
+        'stored-not-read',
+        'stored-not-read',
       ])
       expect(f.recorded).toHaveLength(4)
     })
@@ -281,7 +298,12 @@ describe('ingest', () => {
         f,
       )
 
-      expect(outcomes.map((o) => o.outcome)).toEqual(['accepted', 'accepted', 'failed', 'accepted'])
+      expect(outcomes.map((o) => o.outcome)).toEqual([
+        'stored-not-read',
+        'stored-not-read',
+        'failed',
+        'stored-not-read',
+      ])
       expect(f.recorded).toHaveLength(3)
     })
 
@@ -293,7 +315,7 @@ describe('ingest', () => {
 
       const outcomes = await ingest([file('1.pdf'), second, file('3.pdf')], UPLOADER, f)
 
-      expect(outcomes.map((o) => o.outcome)).toEqual(['accepted', 'failed', 'accepted'])
+      expect(outcomes.map((o) => o.outcome)).toEqual(['stored-not-read', 'failed', 'stored-not-read'])
     })
 
     it('carries no message, cause, or stack out of the failure', async () => {
@@ -342,9 +364,9 @@ describe('ingest', () => {
       const outcomes = await ingest(files, UPLOADER, f)
 
       expect(outcomes).toMatchObject([
-        { filename: 'good-1.pdf', outcome: 'accepted' },
+        { filename: 'good-1.pdf', outcome: 'stored-not-read' },
         { filename: 'empty.pdf', outcome: 'rejected', reason: 'empty' },
-        { filename: 'good-2.pdf', outcome: 'accepted' },
+        { filename: 'good-2.pdf', outcome: 'stored-not-read' },
       ])
     })
   })
