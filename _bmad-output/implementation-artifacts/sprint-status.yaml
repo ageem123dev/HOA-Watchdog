@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: 2026-08-03
+last_updated: 2026-08-04
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -57,7 +57,7 @@ development_status:
   1-2-board-member-sign-in: done
   1-3-visual-foundation: done
   1-4-upload-a-document-and-see-it-accepted-or-rejected: done
-  1-5-read-a-document-into-structured-records: backlog
+  1-5-read-a-document-into-structured-records: ready-for-dev
   1-6-hold-unknown-vendors-for-a-human: backlog
   epic-1-retrospective: optional
 
