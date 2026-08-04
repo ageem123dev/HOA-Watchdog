@@ -108,15 +108,5 @@ export function createPostgresDocumentRepository(
 
       return { id: row.id, alreadyHeld: true }
     },
-
-    // Takes no parameter yet, deliberately: the port passes a document id and
-    // there is nothing here that consumes one, so the signature says so rather
-    // than accepting an argument it quietly drops.
-    async replaceDerivedRows(): Promise<void> {
-      // AD-13's replace half. No derived tables exist until story 1.5, so there
-      // is nothing to delete yet and this is deliberately empty rather than
-      // absent: the call site exists and is tested, so 1.5 fills in one function
-      // instead of hunting for where the call should have gone.
-    },
   }
 }

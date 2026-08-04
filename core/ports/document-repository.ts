@@ -31,15 +31,4 @@ export interface RecordedDocument {
 
 export interface DocumentRepository {
   record(document: NewDocument): Promise<RecordedDocument>
-
-  /**
-   * AD-13's other half: re-ingesting known bytes **replaces** that document's
-   * derived rows rather than appending a second set.
-   *
-   * No derived tables exist until story 1.5, so today's implementation has
-   * nothing to delete. The seam is declared and called anyway, so 1.5 has one
-   * place to fill rather than a call site to remember to add — the half of AD-13
-   * that is easiest to leave undone is the half nothing visibly breaks without.
-   */
-  replaceDerivedRows(documentId: string): Promise<void>
 }

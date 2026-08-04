@@ -68,11 +68,11 @@ nothing is deleted until there is something to put back.
   - [x] A deterministic concurrency test using the `pg_stat_activity` interleaving technique, **not `Promise.all`**
   - [x] Port in `core/ports/`, since `core/` may not import `pg`
 
-- [ ] **Fill in `replaceDerivedRows`** (AC: 3)
-  - [ ] 1.4 left it a called, tested no-op with a comment naming this moment. This is it
-  - [ ] **One order, stated once: parse → validate the complete set → replace.** Replacement is a single transactional delete-then-insert taking the whole validated set. It is **never** called on a parse or validation failure, and nothing is deleted until there is something to put back
-  - [ ] **Delete the existing call site first.** `ingest.ts` currently invokes `replaceDerivedRows` in the `alreadyHeld` branch, *before* anything is parsed. That call must be removed, not filled in — giving it a body where it stands would delete a document's good records and then fail to replace them
-  - [ ] `replaceDerivedRows(documentId)` is therefore the wrong shape: it carries no records. Either widen it to take the set, or drop it and let the repository own replacement outright — and record which
+- [x] **Retire `replaceDerivedRows`** (AC: 3)
+  - [x] 1.4 left it a called, tested no-op with a comment naming this moment. This is it — and the answer is that it should not exist
+  - [x] **One order, stated once: parse → validate the complete set → replace.** Replacement is a single transactional delete-then-insert taking the whole validated set. It is **never** called on a parse or validation failure, and nothing is deleted until there is something to put back
+  - [x] **Deleted the existing call site.** `ingest.ts` currently invokes `replaceDerivedRows` in the `alreadyHeld` branch, *before* anything is parsed. That call must be removed, not filled in — giving it a body where it stands would delete a document's good records and then fail to replace them
+  - [x] `replaceDerivedRows(documentId)` is therefore the wrong shape: it carries no records. Either widen it to take the set, or drop it and let the repository own replacement outright — and record which
 
 - [ ] **Wire parsing into ingestion** `core/ingestion/ingest.ts` (AC: 1, 2, 4)
   - [ ] Route by content type: CSV and Excel to the deterministic path; PDF and image are **not** handled until 1.5c and must not silently succeed
@@ -217,6 +217,42 @@ than through a JavaScript number, which is the conversion the column exists to p
 **Out of scope for this task:** deciding *when* replacement is called (Task 3), the `replaceDerivedRows`
 seam (Task 2), and the surface (Task 4).
 
+## Task 2 — retire `replaceDerivedRows`
+
+**The decision, made rather than deferred.** The story left it open whether to widen
+`replaceDerivedRows(documentId)` to take a record set or drop it. **Dropped.** Task 1's
+`ExtractionRepository.replace(documentId, records)` already *is* the replacement operation, and it
+lives in the repository that owns the table. Keeping a second, emptier one on `DocumentRepository`
+would mean two ways to replace derived rows and a document repository that knows about extraction.
+
+**Behaviour B — re-ingesting known bytes destroys nothing before anything is parsed**
+
+*If it ran correctly, how would I know?* Handing `ingest` a document whose bytes are already held
+leaves that document's existing extraction untouched at the point the already-held outcome is
+returned. Nothing has been deleted, because nothing has been read yet.
+
+*How am I going to test this?* The ports are already injected, so a fake repository records whether
+a destructive call was made. The assertion is about a call that must **not** happen, which is worth
+naming: a test that something is absent is only meaningful if the same test would notice it being
+present. It would — the seam exists today and the test fails against it.
+
+*Could this problem happen anywhere else?* This is the third appearance of *destroy-then-fail* in
+this story alone: Task 1's split-transaction, Task 1's empty-set, and now this. Same shape each
+time — a destructive step reached before the step that justifies it.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| B1 | **A failed re-parse deletes the previous good set.** The call sits in the `alreadyHeld` branch *before* parsing, so filling it in as 1.4 intended would delete a document's records and then fail to replace them | GUARD | Re-ingesting an already-held document performs no destructive call |
+| B2 | The seam stays, empty and inviting, and a later implementer fills it in exactly where it is | Unrepresentable | Removed from the port, the adapter and the call site — there is nothing left to fill in |
+| B3 | `DocumentRepository` keeps knowing about extraction rows it does not own | Unrepresentable | Removed by the same deletion |
+| B4 | Removing it means re-ingest now replaces nothing at all | OUT-OF-SCOPE | True until Task 3, which calls `ExtractionRepository.replace` after validation for new and already-held documents alike. Recorded so the gap is deliberate rather than forgotten |
+| B5 | The `already-held` outcome changes shape and the surface breaks | GUARD | The outcome is unchanged; existing tests for it must stay green |
+
+**On removing a test.** The existing case *"replaces the derived rows rather than leaving them
+stale"* asserts a call this task deletes. It is **re-specified, not weakened**: the replacement test
+asserts the stronger property — that the destructive call does *not* happen before parsing — and it
+fails against today's code, which is what makes it a real test rather than a deletion dressed up.
+
 ### Debug Log References
 
 **Task 1 — red.** 13 failing against a stub whose methods throw, 97 baseline untouched. Each failed
@@ -232,7 +268,36 @@ because they are the failures this method is shaped around:
 | Obey an empty set instead of refusing it | 1 | Precisely the destroy-a-good-set case |
 | Append instead of replacing | 3 | |
 
+**Task 2 — red.** The two existing tests asserted a call this task removes, so they were
+**re-specified rather than deleted**: the replacements assert the stronger property — that no
+destructive call happens before parsing — and one of them failed against the code as it stood, which
+is what makes it a test rather than a deletion dressed up. 1 failed, 21 passed.
+
+**Task 2 — sensitivity.** Putting the destructive call back exactly where 1.4 left it fails
+`destroys nothing when the same bytes arrive again`. An assertion that something is *absent* is only
+worth anything if it notices the thing being present; this one does.
+
 ### Completion Notes List
+
+**Task 2 — `replaceDerivedRows` is gone.**
+
+The story left the choice open: widen it to take a record set, or drop it. **Dropped.** Task 1's
+`ExtractionRepository.replace(documentId, records)` already is the replacement operation, and it
+lives in the repository that owns the table. Keeping a second, emptier one on `DocumentRepository`
+would have meant two ways to replace derived rows and a document repository that knows about
+extraction rows it does not own.
+
+The call site mattered more than the method. It sat in the `alreadyHeld` branch **before anything is
+parsed**, so filling it in as 1.4 intended would have deleted a document's records and then failed to
+replace them on a bad re-read. Removed rather than filled — there is now nothing left to fill in,
+which is a stronger guarantee than a comment warning against it.
+
+**Re-ingest currently replaces nothing at all.** That is deliberate and temporary: Task 3 calls
+`ExtractionRepository.replace` after validation, for new and already-held documents alike. Recorded
+so the gap is a decision rather than an omission.
+
+Third appearance of *destroy-then-fail* in this story: the split transaction, the empty set, and this
+call site. Same shape each time — a destructive step reached before the step that justifies it.
 
 **Task 1 — `adapters/db/extraction-repository-postgres.ts` and `core/ports/extraction-repository.ts`.**
 
@@ -256,6 +321,15 @@ caught me making in the equivalent test.
 Deliberately out of scope here: when replacement is called (Task 3), the `replaceDerivedRows` seam
 (Task 2), and the surface (Task 4).
 
+**Task 2 — red.** The two existing tests asserted a call this task removes, so they were
+**re-specified rather than deleted**: the replacements assert the stronger property — that no
+destructive call happens before parsing — and one of them failed against the code as it stood, which
+is what makes it a test rather than a deletion dressed up. 1 failed, 21 passed.
+
+**Task 2 — sensitivity.** Putting the destructive call back exactly where 1.4 left it fails
+`destroys nothing when the same bytes arrive again`. An assertion that something is *absent* is only
+worth anything if it notices the thing being present; this one does.
+
 ### Completion Notes List
 
 ### File List
@@ -265,6 +339,14 @@ Deliberately out of scope here: when replacement is called (Task 3), the `replac
 - `core/ports/extraction-repository.ts` — the port
 - `adapters/db/extraction-repository-postgres.ts` — writer-role adapter, transactional set replacement
 - `adapters/db/extraction-repository-postgres.test.ts` — 13 tests, requires a database
+
+**Modified (Task 2)**
+
+- `core/ports/document-repository.ts` — `replaceDerivedRows` removed
+- `adapters/db/document-repository-postgres.ts` — its no-op implementation removed
+- `core/ingestion/ingest.ts` — the pre-parse destructive call removed
+- `core/ingestion/ingest.test.ts` — two tests re-specified to assert nothing is destroyed
+- `adapters/db/document-repository-postgres.test.ts` — the seam's own test removed with it
 
 **Modified**
 

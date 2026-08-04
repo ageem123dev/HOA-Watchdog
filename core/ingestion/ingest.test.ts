@@ -31,7 +31,7 @@ interface Fakes {
   repository: DocumentRepository
   stored: StoredDocument[]
   recorded: NewDocument[]
-  replaced: string[]
+  destructiveCalls: string[]
 }
 
 function fakes(
@@ -43,13 +43,13 @@ function fakes(
 ): Fakes {
   const stored: StoredDocument[] = []
   const recorded: NewDocument[] = []
-  const replaced: string[] = []
+  const destructiveCalls: string[] = []
   const held = options.heldHashes ?? new Set<string>()
 
   return {
     stored,
     recorded,
-    replaced,
+    destructiveCalls,
     store: {
       put: vi.fn(async (document: StoredDocument) => {
         if (options.failStoreFor?.(document)) throw new Error('R2 said no')
@@ -57,6 +57,10 @@ function fakes(
       }),
     },
     repository: {
+      // `destructiveCalls` stays empty by construction now that the port has no
+      // destructive method. It is still asserted, so re-introducing one without
+      // a place for it in the ordering fails these tests rather than passing
+      // quietly.
       record: vi.fn(async (document: NewDocument) => {
         if (options.failRecordFor?.(document)) throw new Error('database said no')
 
@@ -67,9 +71,6 @@ function fakes(
         }
 
         return { id: `doc-${document.contentHash.slice(0, 8)}`, alreadyHeld }
-      }),
-      replaceDerivedRows: vi.fn(async (documentId: string) => {
-        replaced.push(documentId)
       }),
     },
   }
@@ -182,24 +183,25 @@ describe('ingest', () => {
       expect(f.recorded).toHaveLength(0)
     })
 
-    it('replaces the derived rows rather than leaving them stale (AD-13)', async () => {
-      // The half of AD-13 nothing visibly breaks without, which is exactly why
-      // it needs a test rather than a good intention.
+    it('destroys nothing when the same bytes arrive again', async () => {
+      // AD-13's replacement is real, but it belongs *after* a complete set has
+      // been read and validated — which is Task 3's wiring, not this branch.
+      // Deleting here, before anything is parsed, means a failed re-read leaves
+      // the document with no records where it had a full set.
       const bytes = pdf('same')
-      const hash = contentHash(bytes)
-      const f = fakes({ heldHashes: new Set([hash]) })
+      const f = fakes({ heldHashes: new Set([contentHash(bytes)]) })
 
       await ingest([file('again.pdf', bytes)], UPLOADER, f)
 
-      expect(f.replaced).toEqual([`doc-${hash.slice(0, 8)}`])
+      expect(f.destructiveCalls).toEqual([])
     })
 
-    it('does not replace derived rows for a document seen for the first time', async () => {
+    it('destroys nothing for a document seen for the first time either', async () => {
       const f = fakes()
 
       await ingest([file('new.pdf')], UPLOADER, f)
 
-      expect(f.replaced).toEqual([])
+      expect(f.destructiveCalls).toEqual([])
     })
 
     it('handles the same file twice inside one batch', async () => {

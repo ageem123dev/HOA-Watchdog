@@ -87,10 +87,10 @@ async function ingestOne(
     })
 
     if (recorded.alreadyHeld) {
-      // AD-13's other half. Detecting the duplicate and leaving the derived rows
-      // stale is the failure mode nothing visibly breaks on.
-      await deps.repository.replaceDerivedRows(recorded.id)
-
+      // Nothing is destroyed here. AD-13's replacement is real, but it belongs
+      // after a complete set has been read and validated — deleting on the way
+      // in means a failed re-read leaves the document with no records where it
+      // had a full set, and that is indistinguishable from never having any.
       return { filename, outcome: 'already-held', documentId: recorded.id }
     }
 

@@ -267,11 +267,4 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await expect(repository.record(document)).rejects.toMatchObject({ code: '23503' })
   })
 
-  describe('replaceDerivedRows', () => {
-    it('accepts a document id without failing, so the AD-13 seam is callable today', async () => {
-      const { id } = await repository.record(newDocument(`derived-${Date.now()}`, boardMemberId))
-
-      await expect(repository.replaceDerivedRows(id)).resolves.toBeUndefined()
-    })
-  })
 })
