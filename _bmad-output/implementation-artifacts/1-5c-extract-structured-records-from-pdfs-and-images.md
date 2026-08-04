@@ -23,7 +23,12 @@ Epic story 1.5's ACs 1 and 4, plus the provider half of AC3.
 **Given** an uploaded PDF or image
 **When** extraction runs
 **Then** it is performed by the extraction provider with a machine-enforced output schema (`responseMimeType: application/json` plus `responseSchema`)
-**And** the resulting structured record is stored against the document
+**And** it returns a **validated collection** of structured records
+**And** **every record in that collection** is stored against the document
+
+A statement holds many figures and the `extraction` table is many-rows-per-document, so a singular
+reading of this criterion would licence a single-record port that drops rows or aggregates them
+without saying so.
 
 **AC2 — Schema-invalid provider output halts that document and stores nothing**
 

@@ -24,13 +24,23 @@ These are the epic's ACs that 1.5 could not satisfy without persistence, plus th
 **Then** one `extraction` row exists per record read from it
 **And** the write happens through the `watchdog_writer` role
 
-**AC2 — A document that cannot be read stores nothing**
+**AC2 — A document that cannot be read stores nothing new, and destroys nothing old**
 
-**Given** a file that fails parsing or validation
+Two cases, because they have different correct outcomes.
+
+**Given** a *new* upload that fails parsing or validation
 **When** ingestion runs
 **Then** no `extraction` row exists for that document
+**And** the document row and its stored bytes are retained, so a fix needs no re-upload
 **And** the treasurer is shown the Document Unreadable outcome
-**And** the document row and its stored bytes are unaffected
+
+**Given** a *re-ingestion* of bytes already held, which then fails parsing or validation
+**When** ingestion runs
+**Then** the document's existing extraction set is preserved **unchanged**
+**And** the treasurer is shown the Document Unreadable outcome
+
+**And** in both cases replacement happens only after a complete set has passed validation —
+nothing is deleted until there is something to put back.
 
 **AC3 — Re-ingesting replaces the whole set**
 
