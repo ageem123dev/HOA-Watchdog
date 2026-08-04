@@ -34,6 +34,7 @@ const FORBIDDEN_PACKAGES = [
   { specifier: 'pg', why: 'the database belongs to adapters/db' },
   { specifier: 'next-auth', why: 'the auth framework belongs to adapters/auth' },
   { specifier: 'next', why: 'the framework belongs to app/ and adapters/' },
+  { specifier: 'xlsx', why: 'the spreadsheet parser belongs to adapters/extraction' },
 ] as const
 
 /** Directories `core/` must not reach into, however the path is spelled. */
@@ -114,6 +115,7 @@ describe('the core/ boundary', () => {
     it.each([
       ['a plain import', `import { Pool } from 'pg'\n`],
       ['a scoped package', `import { S3Client } from '@aws-sdk/client-s3'\n`],
+      ['the spreadsheet parser', `import * as XLSX from 'xlsx'\n`],
       [
         'an import wrapped across lines by a formatter',
         `import {\n  PutObjectCommand,\n  S3Client,\n} from '@aws-sdk/client-s3'\n`,
