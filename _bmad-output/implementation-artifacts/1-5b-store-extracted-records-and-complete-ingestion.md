@@ -1,6 +1,10 @@
+---
+baseline_commit: c54185bdb0fcc3158e94caf74e2df12a2307338c
+---
+
 # Story 1.5b: Store extracted records and complete ingestion
 
-Status: ready-for-dev
+Status: in-progress
 
 > **Second of three stories from epic story 1.5.**
 > **1.5** built the parts and proved them: the `extraction` table, the record vocabulary, the validator, the unreadable outcome, and deterministic CSV and Excel parsing. **None of it is connected** — uploading a spreadsheet today still produces no records.
@@ -58,11 +62,11 @@ nothing is deleted until there is something to put back.
 
 ## Tasks / Subtasks
 
-- [ ] **Extraction repository** `adapters/db/extraction-repository-postgres.ts` (AC: 1, 3)
-  - [ ] Writer role, following `document-repository-postgres.ts`
-  - [ ] `replace(documentId, records)` — delete the document's existing rows and insert the new set **in one transaction**, so AC3's "never partially replaced" is a property of the statement rather than of luck
-  - [ ] A deterministic concurrency test using the `pg_stat_activity` interleaving technique from 1.4, **not `Promise.all`** — that passed against a deliberately racy implementation once already
-  - [ ] Port in `core/ports/`, since `core/` may not import `pg`
+- [x] **Extraction repository** `adapters/db/extraction-repository-postgres.ts` (AC: 1, 3)
+  - [x] Writer role, following `document-repository-postgres.ts`
+  - [x] `replace(documentId, records)` — delete and insert **in one transaction**, so "never partially replaced" is a property of the code rather than of luck
+  - [x] A deterministic concurrency test using the `pg_stat_activity` interleaving technique, **not `Promise.all`**
+  - [x] Port in `core/ports/`, since `core/` may not import `pg`
 
 - [ ] **Fill in `replaceDerivedRows`** (AC: 3)
   - [ ] 1.4 left it a called, tested no-op with a comment naming this moment. This is it
@@ -170,10 +174,102 @@ batch-isolation test (one that never makes a real failure happen proves nothing 
 
 ### Test Design
 
+## Task 1 — the extraction repository
+
+One behaviour, and it is the whole story in miniature: **replace a document's records as a set**.
+
+**Behaviour A — `replace(documentId, records)`**
+
+*If it ran correctly, how would I know?* After it returns, the document's rows are exactly the set
+passed in — no survivors from the previous set, no partial mixture — and no other document's rows
+moved.
+
+*How am I going to test this?* Against a real database. This behaviour is a transaction boundary,
+and a fake proves only that the fake was written to agree. `document-repository-postgres.test.ts`
+is the pattern, including its deterministic interleaving technique.
+
+*What else can go wrong?* The dangerous failures here are not wrong values — they are **missing
+rows nobody notices**. A ledger that quietly loses three lines from a re-read looks exactly like a
+ledger that never had them, and the treasurer has no way to tell.
+
+*Could this problem happen anywhere else?* **It already did, twice.** 1.4's content-hash uniqueness
+exists because a read-then-write lets two uploads both insert. And 1.5's first cardinality attempt
+had `unique (document_id)`, which would have made this method impossible. Same shape, third
+appearance: the database decides, not the application.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| A1 | **Delete and insert in separate transactions.** A crash between them leaves the document with *no* records where it had a full set — the worst outcome available, and invisible | GUARD | Single transaction; a forced failure mid-way leaves the previous set intact |
+| A2 | Replacement **appends** instead of replacing, so a re-read doubles every figure | GUARD | After replacing, the row count equals the new set exactly |
+| A3 | Replacing document X disturbs document Y | GUARD | Y's rows unchanged, asserted rather than assumed |
+| A4 | **An empty set silently wipes a document's records.** `replace(id, [])` is indistinguishable from "extraction found nothing" and would delete a good set | GUARD | Refused — an empty replacement is a caller error, not an instruction |
+| A5 | Two concurrent replacements interleave, leaving a mixture of both sets | GUARD | Deterministic interleaving test: hold one uncommitted, poll `pg_stat_activity` until the second genuinely blocks, then commit. **Not `Promise.all`** — that passed against a deliberately racy implementation in 1.4 |
+| A6 | A record violating a database constraint aborts mid-insert, leaving a partial set | GUARD | The whole call fails and the previous set survives |
+| A7 | An unknown `documentId` silently succeeds, writing nothing | GUARD | Foreign-key violation escapes (`23503`) rather than a quiet no-op |
+| A8 | Money loses precision on the way in | GUARD | Cross-check: written and read back as strings, compared by Postgres rather than through `Number` |
+| A9 | The port lives in `core/` but needs `pg` | Unrepresentable | Port in `core/ports/`, implementation in `adapters/db/` — `core/ports/boundary.test.ts` enforces it |
+
+**Inverse/cross-check (required).** Write a set, read it back, and assert the round trip preserves
+every field — with amounts compared **in the database** (`total_amount = $1::numeric(14,2)`) rather
+than through a JavaScript number, which is the conversion the column exists to prevent and which
+1.5's review caught me doing.
+
+**Out of scope for this task:** deciding *when* replacement is called (Task 3), the `replaceDerivedRows`
+seam (Task 2), and the surface (Task 4).
+
 ### Debug Log References
+
+**Task 1 — red.** 13 failing against a stub whose methods throw, 97 baseline untouched. Each failed
+on its own assertion rather than on a collection error — the shape a real red should have.
+
+**Task 1 — sensitivity, four mutations, all detected.** The two that matter are the first two,
+because they are the failures this method is shaped around:
+
+| Mutation | Failures | Reading |
+| --- | --- | --- |
+| Split the transaction — delete, then `begin`, then insert | **2** | The atomicity tests are real, not decorative |
+| Remove the `rollback` on the error path | **3** | Without it the delete stands and the document is left empty |
+| Obey an empty set instead of refusing it | 1 | Precisely the destroy-a-good-set case |
+| Append instead of replacing | 3 | |
+
+### Completion Notes List
+
+**Task 1 — `adapters/db/extraction-repository-postgres.ts` and `core/ports/extraction-repository.ts`.**
+
+`replace(documentId, records)` makes the given set the document's complete set. Delete and insert are
+**one transaction**, and that is the whole design: separated, a failure between them leaves a
+document holding no records where it held a full set — and a ledger missing three lines looks exactly
+like a ledger that never had them. Nothing tells the treasurer which happened. The destructive part
+and the fallible part therefore share a fate, and the `rollback` on the error path is what enforces
+it.
+
+**An empty set is refused, not obeyed.** `replace(id, [])` reads identically to "extraction found
+nothing", so obeying it would destroy a good set on a caller's mistake. Clearing a document's records
+is a different intention and needs a different method to express it.
+
+`findByDocument` reads `issued_on` as text: letting the driver build a `Date` and formatting it back
+introduces a timezone shift, and the record's contract is an ISO calendar date rather than an
+instant. Amounts stay strings end to end, and the exactness test compares them **in Postgres**
+(`total_amount = $1::numeric(14,2)`) rather than through `Number` — the conversion 1.5's review
+caught me making in the equivalent test.
+
+Deliberately out of scope here: when replacement is called (Task 3), the `replaceDerivedRows` seam
+(Task 2), and the surface (Task 4).
 
 ### Completion Notes List
 
 ### File List
+
+**Added**
+
+- `core/ports/extraction-repository.ts` — the port
+- `adapters/db/extraction-repository-postgres.ts` — writer-role adapter, transactional set replacement
+- `adapters/db/extraction-repository-postgres.test.ts` — 13 tests, requires a database
+
+**Modified**
+
+- `_bmad-output/implementation-artifacts/1-5-read-a-document-into-structured-records.md` — stripped two NUL bytes
+- `_bmad-output/implementation-artifacts/1-2-board-member-sign-in.md` — stripped one NUL byte
+- `core/extraction/csv.test.ts` — NUL written as the escape `\u0000` rather than embedded raw
 
 ### Change Log
