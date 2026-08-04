@@ -67,11 +67,11 @@ Epic story 1.5's ACs 2, 3 and 5. AC1 and AC4 belong to 1.5b.
   - [x] **No verbatim copy exists for this case.** FR-1 dictated the unreadable-*file* sentence word for word; FR-3 specifies only a "structured Document Unreadable error" with no wording. Write it in EXPERIENCE.md's voice and keep it distinct from FR-1's — a file that could not be *opened* and a document that could not be *read* are different events, and a treasurer acts differently on each
   - [x] No partial record survives a failure — asserted, not assumed
 
-- [ ] **Deterministic parsing** `core/extraction/tabular.ts` (AC: 1)
-  - [ ] CSV parsed by a hand-rolled RFC 4180 parser — quoting, embedded commas, embedded newlines, CRLF
-  - [ ] Excel via SheetJS, **pinned from `https://cdn.sheetjs.com`** — see Dev Notes for why not npm, and the untrusted-input options
-  - [ ] A test proves no model path is reachable for these types
-  - [ ] **Confirm `npm ci` still passes in the GitLab pipeline** once the SheetJS pin lands in `package-lock.json`
+- [x] **Deterministic parsing** `core/extraction/tabular.ts` (AC: 1)
+  - [x] CSV parsed by a hand-rolled RFC 4180 parser — quoting, embedded commas, embedded newlines, CRLF
+  - [x] Excel via SheetJS, **pinned from `https://cdn.sheetjs.com`** — in an adapter, since `core/` may not import a vendor library
+  - [x] A test proves no model path is reachable for these types (`core/ports/boundary.test.ts`, with `xlsx` on the forbidden list)
+  - [x] **Confirmed `npm ci` passes in the GitLab pipeline** — 444 packages installed on the runner in 14s, pipeline `2730736705` green
 
 - [ ] **Extraction repository** `adapters/db/extraction-repository-postgres.ts` (AC: 1, 4)
   - [ ] Writer role, following `document-repository-postgres.ts`
@@ -488,6 +488,43 @@ One mutation initially reported *"target text not found"* rather than a result, 
 escaping mangled the template literal. Worth noting: that guard is what stopped it being recorded as
 "no test noticed" — the same false-negative shape that appeared in Task 1's first sensitivity run.
 
+**Task 4 — the CI risk, settled with evidence.** The story flagged that pinning SheetJS from
+`cdn.sheetjs.com` puts a non-npm tarball URL in `package-lock.json`, and the GitLab runner has to
+reach that host. Pushed the branch specifically to find out: pipeline `2730736705` green,
+`npm ci --cache .npm --prefer-offline` → *"added 444 packages … in 14s"*, and the 14 workbook tests
+ran in CI. Not assumed.
+
+**Task 4 — two defects the tests caught mid-implementation.**
+
+*A blank required cell was being read as absent.* The `cell` helper converted whitespace to `null`
+for every column, so a row with an empty `description` became a document with no vendor — recreating
+at the table layer the exact blank-versus-absent distinction the validator exists to keep. Required
+columns now pass through as written so the validator sees and refuses them.
+
+*SheetJS does not refuse non-workbook bytes.* Handed the four bytes of a renamed executable it
+returns a one-cell sheet containing `MZ ` — verified directly rather than inferred from a failing
+test. Its format sniffing falls back to text parsers, so the adapter now gates on the ZIP and OLE
+container signatures before the library sees anything. That is a second lock behind the upload gate,
+placed where bytes actually meet a parser.
+
+**Task 4 — sensitivity, ten mutations across the two `core/` modules, all detected:**
+
+| Mutation | Failures |
+| --- | --- |
+| Stop stripping the UTF-8 BOM | 1 |
+| Treat CRLF as two line endings | 2 |
+| Drop the ragged-row check | 2 |
+| Ignore an unterminated quote | 1 |
+| Treat a mid-field quote as opening a quoted field | 1 |
+| **Store the good rows and drop the bad ones** | **8** |
+| Take the first of duplicate headers | 1 |
+| Accept a header-only file as zero records | 1 |
+| Stop normalising header case | 3 |
+| Treat a blank required cell as absent | 1 |
+
+Plus the boundary rule: planting a real `import * as XLSX from 'xlsx'` in `core/extraction/tabular.ts`
+failed the boundary test with the file named.
+
 ### Completion Notes List
 
 **Task 1 — `migrations/006_extraction.sql`.** The `extraction` table: one row per document holding
@@ -613,6 +650,43 @@ One mutation initially reported *"target text not found"* rather than a result, 
 escaping mangled the template literal. Worth noting: that guard is what stopped it being recorded as
 "no test noticed" — the same false-negative shape that appeared in Task 1's first sensitivity run.
 
+**Task 4 — the CI risk, settled with evidence.** The story flagged that pinning SheetJS from
+`cdn.sheetjs.com` puts a non-npm tarball URL in `package-lock.json`, and the GitLab runner has to
+reach that host. Pushed the branch specifically to find out: pipeline `2730736705` green,
+`npm ci --cache .npm --prefer-offline` → *"added 444 packages … in 14s"*, and the 14 workbook tests
+ran in CI. Not assumed.
+
+**Task 4 — two defects the tests caught mid-implementation.**
+
+*A blank required cell was being read as absent.* The `cell` helper converted whitespace to `null`
+for every column, so a row with an empty `description` became a document with no vendor — recreating
+at the table layer the exact blank-versus-absent distinction the validator exists to keep. Required
+columns now pass through as written so the validator sees and refuses them.
+
+*SheetJS does not refuse non-workbook bytes.* Handed the four bytes of a renamed executable it
+returns a one-cell sheet containing `MZ ` — verified directly rather than inferred from a failing
+test. Its format sniffing falls back to text parsers, so the adapter now gates on the ZIP and OLE
+container signatures before the library sees anything. That is a second lock behind the upload gate,
+placed where bytes actually meet a parser.
+
+**Task 4 — sensitivity, ten mutations across the two `core/` modules, all detected:**
+
+| Mutation | Failures |
+| --- | --- |
+| Stop stripping the UTF-8 BOM | 1 |
+| Treat CRLF as two line endings | 2 |
+| Drop the ragged-row check | 2 |
+| Ignore an unterminated quote | 1 |
+| Treat a mid-field quote as opening a quoted field | 1 |
+| **Store the good rows and drop the bad ones** | **8** |
+| Take the first of duplicate headers | 1 |
+| Accept a header-only file as zero records | 1 |
+| Stop normalising header case | 3 |
+| Treat a blank required cell as absent | 1 |
+
+Plus the boundary rule: planting a real `import * as XLSX from 'xlsx'` in `core/extraction/tabular.ts`
+failed the boundary test with the file named.
+
 ### Completion Notes List
 
 ### File List
@@ -625,9 +699,18 @@ escaping mangled the template literal. Worth noting: that guard is what stopped 
 - `core/extraction/record.test.ts` — 27 tests, parity read from the migration
 - `core/extraction/validate.ts` — validation, the closed problem set, and the unreadable copy
 - `core/extraction/validate.test.ts` — 60 tests
+- `core/extraction/csv.ts` — RFC 4180 parser, zero dependencies
+- `core/extraction/csv.test.ts` — 26 tests, including serialise/parse round trips
+- `core/extraction/tabular.ts` — the header contract, rows to candidate records
+- `core/extraction/tabular.test.ts` — 31 tests
+- `adapters/extraction/workbook-sheetjs.ts` — Excel decoding, the only `xlsx` importer
+- `adapters/extraction/workbook-sheetjs.test.ts` — 14 tests, fixtures written by SheetJS itself
 
 **Modified**
 
 - `migrations/extraction.test.ts` — added the Postgres cross-check for the amount rules
+- `migrations/006_extraction.sql` — cardinality corrected to many-per-document; index added
+- `core/ports/boundary.test.ts` — `xlsx` added to the forbidden list and to the planted cases
+- `package.json` / `package-lock.json` — SheetJS pinned from cdn.sheetjs.com
 
 ### Change Log
