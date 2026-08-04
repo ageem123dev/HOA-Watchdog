@@ -95,7 +95,10 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 
 **8b. Read the review.** CodeRabbit posts as a **service account** (`service_account_group_138854092_…`), not a name containing "coderabbit" — filtering on the name finds nothing and looks like "no review yet". Fetch `.../merge_requests/{iid}/notes?per_page=100&sort=desc` and match **`Actionable comments posted: N`**; that line is the review. Threads from `.../discussions`. Only trust one whose commit matches the current head.
 
-The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) arrives within a minute and carries no findings. Never treat a note's presence as a review.
+Two shapes will fool a naive match, in opposite directions:
+
+- The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) arrives within a minute and carries no findings — a note that is not a review.
+- An **incremental re-review** that finds only repeats posts `Duplicate comments (N)` with **no** `Actionable comments posted:` line — a review that does not look like one. Match either header, and read a note carrying `Outside diff range comments (N)` too: those are findings that could not be posted inline.
 
 **8c. Convergence.** Precondition: a service-account review matching the current head. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
 
@@ -114,8 +117,9 @@ Converged = pipeline green AND every finding **fixed** (push → new head → ba
 1. **Docs first.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`. If this is the epic's last not-`done` story also set `epic-{N} = done` in the same commit; otherwise set it `in-progress` if unset. Commit and push.
 2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence. Re-run Step 7, then Step 8 **including 8a's wait** — a docs-only push triggers a re-review like any other.
 3. **If that re-verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
-4. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
-5. STOP.
+4. **Confirm the MR is still open at your head** before reporting. `state` must be `opened` and its `sha` must equal yours. The user may merge at any point, including while you are fixing findings — if it merged at an earlier head, say so and move the unmerged commits to a fresh branch and MR rather than leaving them on a branch that is about to be deleted.
+5. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
+6. STOP.
 
 **`done` means ready-to-merge, not merged** — it is written on an unmerged branch. Nothing downstream may treat it as proof of a merge.
 
