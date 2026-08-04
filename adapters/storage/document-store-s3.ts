@@ -28,8 +28,28 @@ const REQUIRED_VARS = [
 /** How long to wait for a connection before giving up. */
 const CONNECTION_TIMEOUT_MS = 5_000
 
-/** Socket inactivity, not total transfer time — a large upload is not idle. */
-const REQUEST_INACTIVITY_TIMEOUT_MS = 30_000
+/**
+ * How long a socket may sit **idle** before it is closed.
+ *
+ * This is `socketTimeout`, not `requestTimeout`. The two are easy to confuse and
+ * an earlier version of this file confused them: `requestTimeout` bounds the
+ * total duration of request and response, which for a 25 MiB upload on a slow
+ * connection is legitimately long. The SDK's own documentation notes that
+ * `requestTimeout` "was for a long time incorrectly being set as a socket idle
+ * timeout" — which is exactly the mistake that was made here.
+ */
+const SOCKET_IDLE_TIMEOUT_MS = 30_000
+
+/**
+ * A hard ceiling on the whole request, generous enough that a legitimate upload
+ * never reaches it: 25 MiB inside five minutes is about 85 KB/s.
+ *
+ * `throwOnRequestTimeout` is not optional here. Without it a breach is *logged
+ * as a warning* and the request carries on — a bound that reports the problem
+ * and then does nothing about it, which is worse than no bound because it reads
+ * like one.
+ */
+const REQUEST_TIMEOUT_MS = 300_000
 
 export class MissingStorageConfigError extends Error {
   override readonly name = 'MissingStorageConfigError'
@@ -92,22 +112,21 @@ export function createS3DocumentStore(options: S3DocumentStoreOptions = {}): Doc
         secretAccessKey: config.secretAccessKey,
       },
       /**
-       * The Node handler defaults both of these to `0`, meaning no timeout at
-       * all. An upload against an unresponsive endpoint then hangs for as long
-       * as the socket stays open, holding the request and whatever memory the
-       * document occupies.
+       * The Node handler defaults every one of these to `0`, meaning no timeout
+       * at all. An upload against an unresponsive endpoint then hangs for as
+       * long as the socket stays open, holding the request and whatever memory
+       * the document occupies.
        *
        * The database was bounded deliberately in `adapters/db` and
        * `adapters/auth`; storage was left unbounded by omission. These are the
        * same decision, and it should not depend on which adapter someone
        * happened to be writing that day.
-       *
-       * `requestTimeout` bounds socket inactivity rather than total transfer, so
-       * it can be well under the time a 25 MiB upload legitimately takes.
        */
       requestHandler: {
         connectionTimeout: CONNECTION_TIMEOUT_MS,
-        requestTimeout: REQUEST_INACTIVITY_TIMEOUT_MS,
+        socketTimeout: SOCKET_IDLE_TIMEOUT_MS,
+        requestTimeout: REQUEST_TIMEOUT_MS,
+        throwOnRequestTimeout: true,
       },
       /**
        * Cloudflare R2 has historically rejected the CRC32 checksum headers the

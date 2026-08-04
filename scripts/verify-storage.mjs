@@ -25,7 +25,12 @@ const client = new S3Client({
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
-  requestHandler: { connectionTimeout: 5_000, requestTimeout: 30_000 },
+  requestHandler: {
+    connectionTimeout: 5_000,
+    socketTimeout: 30_000,
+    requestTimeout: 300_000,
+    throwOnRequestTimeout: true,
+  },
   requestChecksumCalculation: 'WHEN_REQUIRED',
 })
 

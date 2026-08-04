@@ -15,6 +15,8 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MAX_DOCUMENT_BYTES } from '../../core/ingestion/acceptance'
+
 import { MissingStorageConfigError, createS3DocumentStore } from './document-store-s3'
 
 const CONFIGURED = {
@@ -179,9 +181,55 @@ describe('createS3DocumentStore', () => {
 
       await store.put(document)
 
-      const handler = constructed[0]?.requestHandler as Record<string, number> | undefined
+      const handler = constructed[0]?.requestHandler as
+        | Record<string, number | boolean>
+        | undefined
+
       expect(handler?.connectionTimeout).toBeGreaterThan(0)
+      // `socketTimeout` is the idle bound. `requestTimeout` is the total
+      // duration and is a different thing — conflating them is the mistake the
+      // SDK's own docs warn about, and the one this file made first time round.
+      expect(handler?.socketTimeout).toBeGreaterThan(0)
       expect(handler?.requestTimeout).toBeGreaterThan(0)
+    })
+
+    it('actually throws on a request timeout rather than logging a warning', async () => {
+      // Without `throwOnRequestTimeout`, a breach of `requestTimeout` is logged
+      // and the request continues. A bound that reports the problem and then
+      // does nothing is worse than no bound, because it reads like one.
+      const constructed: Array<Record<string, unknown>> = []
+      const store = createS3DocumentStore({
+        env: CONFIGURED,
+        createClient: (config) => {
+          constructed.push(config as Record<string, unknown>)
+          return client as never
+        },
+      })
+
+      await store.put(document)
+
+      const handler = constructed[0]?.requestHandler as Record<string, unknown> | undefined
+      expect(handler?.throwOnRequestTimeout).toBe(true)
+    })
+
+    it('leaves room for a large upload before the total-duration ceiling', async () => {
+      // 25 MiB inside the ceiling must not require an unreasonable link speed,
+      // or the bound starts refusing legitimate documents.
+      const constructed: Array<Record<string, unknown>> = []
+      const store = createS3DocumentStore({
+        env: CONFIGURED,
+        createClient: (config) => {
+          constructed.push(config as Record<string, unknown>)
+          return client as never
+        },
+      })
+
+      await store.put(document)
+
+      const handler = constructed[0]?.requestHandler as Record<string, number> | undefined
+      const requiredBytesPerSecond = MAX_DOCUMENT_BYTES / ((handler?.requestTimeout ?? 0) / 1000)
+
+      expect(requiredBytesPerSecond).toBeLessThan(200 * 1024)
     })
 
     it('does not send checksums R2 has not asked for', async () => {
