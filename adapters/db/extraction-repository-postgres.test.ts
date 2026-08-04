@@ -252,6 +252,29 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     })
   })
 
+  describe('the date contract does not depend on a session setting', () => {
+    it('returns YYYY-MM-DD even when the session DateStyle is not ISO', async () => {
+      // Measured, not assumed: under `SQL, MDY` a date cast to text reads
+      // `06/01/2026`, and under `German, DMY` it reads `01.06.2026`. The record
+      // contract is an ISO calendar date, so it must not move with a setting a
+      // connection, a pooler, or a server default could change underneath it.
+      const documentId = await newDocument()
+      await repository.replace(documentId, [record({ issuedOn: '2026-06-01' })])
+
+      const styled = new Pool({ connectionString: writerUrl, max: 1 })
+      try {
+        await styled.query("set datestyle to 'German, DMY'")
+        const scoped = createPostgresExtractionRepository({ pool: styled })
+
+        const [held] = await scoped.findByDocument(documentId)
+
+        expect(held?.issuedOn).toBe('2026-06-01')
+      } finally {
+        await styled.end()
+      }
+    })
+  })
+
   describe('concurrency', () => {
     it('serialises two replacements rather than interleaving them', async () => {
       // Deterministic, not hopeful. A second connection holds an uncommitted
@@ -287,6 +310,47 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
       expect(held).toHaveLength(2)
       expect(held.map((r) => r.vendorName).sort()).toEqual(['Replacement A', 'Replacement B'])
     }, 40_000)
+
+    it('serialises two replacements when the document has no rows yet', async () => {
+      // The case the test above cannot reach. `delete` takes row locks, so when
+      // a document already has extractions the two replacements serialise on
+      // them for free. With **zero** rows the delete locks nothing, and two
+      // concurrent replacements would each delete nothing, each insert, and both
+      // commit -- leaving the document holding both sets at once. AC3 says every
+      // previous record is gone and the new set is present; a union of two sets
+      // is neither.
+      //
+      // So the transaction must take a lock that exists whether or not any
+      // extraction rows do: the parent `document` row.
+      const documentId = await newDocument()
+      expect(await countFor(documentId)).toBe(0)
+
+      const holder = new Client({ connectionString: writerUrl })
+      await holder.connect()
+      let pending: Promise<unknown> | undefined
+
+      try {
+        await holder.query('begin')
+        await holder.query('select 1 from document where id = $1 for update', [documentId])
+
+        pending = repository.replace(documentId, [
+          record({ vendorName: 'Replacement A' }),
+          record({ vendorName: 'Replacement B' }),
+        ])
+        // Throws if the replacement never blocks -- which is exactly the defect:
+        // without the parent lock it sails past and interleaves.
+        await waitUntilBlocked(admin, '%for update%')
+        await holder.query('rollback')
+
+        await pending
+      } finally {
+        await holder.query('rollback').catch(() => undefined)
+        await pending?.catch(() => undefined)
+        await holder.end()
+      }
+
+      expect(await countFor(documentId)).toBe(2)
+    }, 40_000)
   })
 })
 
@@ -296,14 +360,15 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
  * Throws rather than returning if it never blocks — a test that silently failed
  * to set up its own scenario would otherwise pass and mean nothing.
  */
-async function waitUntilBlocked(client: Client): Promise<void> {
+async function waitUntilBlocked(client: Client, queryLike = '%extraction%'): Promise<void> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const { rows } = await client.query<{ blocked: number }>(
       `select count(*)::int as blocked
          from pg_stat_activity
         where datname = current_database()
           and wait_event_type = 'Lock'
-          and query ilike '%extraction%'`,
+          and query ilike $1`,
+      [queryLike],
     )
     if ((rows[0]?.blocked ?? 0) > 0) return
     await new Promise((resolve) => setTimeout(resolve, 25))

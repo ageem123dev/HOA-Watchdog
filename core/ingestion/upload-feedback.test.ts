@@ -37,6 +37,29 @@ const ALL_OUTCOMES: IngestOutcome[] = [
 ]
 
 describe('uploadFeedback', () => {
+  describe('the figures-not-stored case', () => {
+    const stored = () =>
+      uploadFeedback({ filename: 'ledger.csv', outcome: 'figures-not-stored', documentId: 'doc-1' })
+
+    it('does not tell the treasurer the file was not saved', () => {
+      // The exact wrong instruction: the bytes and the document row are durable
+      // by the time this outcome is possible.
+      expect(stored().message).not.toMatch(/not saved|could not be stored|upload(ing)? it again/i)
+    })
+
+    it('says the document is saved', () => {
+      expect(stored().message).toMatch(/saved/i)
+    })
+
+    it('offers no replacement, because nothing is wrong with the file', () => {
+      expect(stored().offerReplacement).toBe(false)
+    })
+
+    it('does not blame the file the way the unreadable copy does', () => {
+      expect(stored().message).not.toMatch(/unreadable|clearer scan|could not be read/i)
+    })
+  })
+
   describe('the unreadable case (AC4)', () => {
     /**
      * The expected sentence is read out of the PRD rather than restated here.

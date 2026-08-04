@@ -14,7 +14,7 @@
 import * as XLSX from 'xlsx'
 import { describe, expect, it } from 'vitest'
 
-import { readWorkbook, widestRow } from './workbook-sheetjs'
+import { MAX_WORKBOOK_CELLS, readWorkbook, widestRow } from './workbook-sheetjs'
 
 type Cell = string | number | Date | null
 
@@ -147,6 +147,48 @@ describe('readWorkbook', () => {
 
       expect(result.ok && result.rows).toHaveLength(5_001)
     }, 60_000)
+  })
+
+  describe('a workbook larger than this pipeline will materialise', () => {
+    // Story 1.5b is what first makes this reachable: the decoder is now called
+    // from an upload. The 25 MiB byte limit bounds the *compressed* file, and a
+    // spreadsheet is a ZIP — a small upload can expand into an enormous sheet.
+    // Each row also becomes one INSERT, so an unbounded sheet is an unbounded
+    // transaction as well.
+    it('refuses it rather than materialising every cell', () => {
+      const rows = Math.ceil(MAX_WORKBOOK_CELLS / 4) + 10
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ['date', 'description', 'amount', 'reference'],
+        ...Array.from({ length: rows }, (_, i) => ['2026-06-01', 'x', 1, String(i)]),
+      ])
+      const book = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(book, sheet, 'Sheet1')
+
+      const result = readWorkbook(new Uint8Array(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' })))
+
+      expect(result).toMatchObject({ ok: false, reason: 'too-many-cells' })
+    }, 60_000)
+
+    it('accepts one just inside the bound, so the limit is not merely a refusal', () => {
+      // Without this the cap could be zero and the test above would still pass.
+      const rows = Math.floor(MAX_WORKBOOK_CELLS / 4) - 10
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ['date', 'description', 'amount', 'reference'],
+        ...Array.from({ length: rows }, () => ['2026-06-01', 'x', 1, 'r']),
+      ])
+      const book = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(book, sheet, 'Sheet1')
+
+      const result = readWorkbook(new Uint8Array(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' })))
+
+      expect(result.ok).toBe(true)
+    }, 60_000)
+
+    it('has a bound big enough for a real association ledger', () => {
+      // A guard nobody can hit is a guard that refuses real work. Twelve years
+      // of monthly rows across six columns is well inside it.
+      expect(MAX_WORKBOOK_CELLS).toBeGreaterThan(12 * 12 * 6)
+    })
   })
 
   describe('multiple sheets', () => {

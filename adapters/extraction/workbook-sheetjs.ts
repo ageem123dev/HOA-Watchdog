@@ -15,7 +15,27 @@ import * as XLSX from 'xlsx'
  * type is converted explicitly below.
  */
 
-export const WORKBOOK_PROBLEMS = ['unreadable-file', 'no-sheets', 'no-rows'] as const
+export const WORKBOOK_PROBLEMS = [
+  'unreadable-file',
+  'no-sheets',
+  'no-rows',
+  'too-many-cells',
+] as const
+
+/**
+ * The most cells this pipeline will turn into strings.
+ *
+ * The 25 MiB upload limit bounds the *compressed* file. A spreadsheet is a ZIP,
+ * so a small upload can expand into an enormous sheet, and every cell below
+ * becomes a string in memory while every row becomes one INSERT. Twelve years
+ * of monthly rows across six columns is under a thousand cells, so this leaves
+ * an association three orders of magnitude of room.
+ *
+ * **What this does not bound:** decompression inside `XLSX.read` itself, which
+ * happens before any of this runs. Bounding that needs streaming or a
+ * memory-capped subprocess, which is a hardening story rather than a constant.
+ */
+export const MAX_WORKBOOK_CELLS = 500_000
 
 export type WorkbookProblem = (typeof WORKBOOK_PROBLEMS)[number]
 
@@ -128,9 +148,14 @@ export function readWorkbook(bytes: Uint8Array): WorkbookResult {
 
   if (raw.length === 0) return { ok: false, reason: 'no-rows' }
 
+  // Checked before the padding below, which is what actually allocates.
+  const width = widestRow(raw)
+  if (raw.length * width > MAX_WORKBOOK_CELLS) {
+    return { ok: false, reason: 'too-many-cells' }
+  }
+
   // Pad to a consistent width. A short row would otherwise shift every column
   // after it, and a shifted column is a wrong figure rather than a missing one.
-  const width = widestRow(raw)
   const rows = raw.map((row) =>
     Array.from({ length: width }, (_, column) => asText(row[column])),
   )

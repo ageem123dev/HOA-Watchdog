@@ -488,6 +488,73 @@ were accurate, a valid legacy `.xls` would be reported unreadable. Probed with a
 written by SheetJS and read back through `readWorkbook`: it decodes. No defect, and the claim now
 rests on having run it.
 
+### CodeRabbit round 1 — MR !9, 7 actionable findings
+
+**Fixed (5)**
+
+**R1 — the fake missing from `ingest.test.ts`.** The same defect as F1 above, found independently
+before the review arrived. Its second half — *"the `destructiveCalls` assertions are disconnected and
+always pass"* — was true when written and is not now: the fake pushes `'replace'` to that array
+before throwing, so the assertions have something real to observe, proven by a mutation that makes
+them fail 9 times.
+
+**R2 — `issued_on::text` renders through a session setting.** Real, and measured rather than
+reasoned about: against this database the same date reads `2026-06-01` under `ISO, MDY`,
+`06/01/2026` under `SQL, MDY`, `01-06-2026` under `Postgres, DMY` and `01.06.2026` under
+`German, DMY`. The record contract is an ISO calendar date, so `to_char(issued_on, 'YYYY-MM-DD')`
+states the format instead of inheriting it. A test sets a non-ISO `DateStyle` on its own pool and
+asserts the contract holds; reverting the fix fails it with `expected '01.06.2026' to be '2026-06-01'`.
+
+**R3 — replacement did not serialise on a document with no rows yet, and my test could not see it.**
+The most serious finding of the round, and correct. `delete` takes row locks on what it removes, so
+two concurrent replacements serialise for free *once a document has extractions* — which is the case
+my concurrency test set up. With **zero** rows the delete locks nothing: both transactions delete
+nothing, both insert, both commit, and the document ends up holding two sets at once. AC3 says every
+previous record is gone and the new set is present; a union of two sets is neither.
+
+Fixed by locking the parent `document` row (`select 1 … for update`) before touching anything, since
+that row exists whether or not any extraction does. The new test failed first with *"the replacement
+never blocked, so the interleaving this test needs did not happen"* — the defect stated exactly.
+
+This is the fifth guard-that-proved-less-than-it-claimed in this story, and the first one a reviewer
+caught rather than a mutation. Worth noting *why* mine missed it: the test was written against the
+interesting case (a document with existing records) and the empty case never occurred to me as
+different. Sensitivity checking finds guards that do nothing; it does not find a scenario never set up.
+
+**R4 — `failed` told the treasurer their file was not saved when it was.** By the time `replace` can
+fail, the bytes and the document row are durable, but `failed` renders as *"Not saved. Try uploading
+it again"* — wrong twice over, because nothing is lost and re-uploading identical bytes returns
+already-held with the figures still missing. Added a distinct `figures-not-stored` outcome carrying
+the document id, with copy that says the document is saved and asks for nothing. The exhaustive
+`never` guard in `upload-feedback.ts` — written in story 1.4 — turned the new variant into a compile
+error rather than a blank row, which is the first time that guard has actually fired.
+
+**R5 — an unbounded spreadsheet, which this story is what makes reachable.** The 25 MiB limit bounds
+the *compressed* upload, and a spreadsheet is a ZIP, so a small file can expand into an enormous
+sheet — where every cell becomes a string and every row becomes one INSERT. Added
+`MAX_WORKBOOK_CELLS`, checked before the padding pass that does the allocating, with a test on each
+side of the bound so the cap cannot silently be zero.
+
+**Partial, and said so:** this bounds what *this code* materialises, **not** decompression inside
+`XLSX.read`, which happens first. Bounding that needs streaming or a memory-capped subprocess. The
+copy is imprecise too — an oversized workbook currently renders as Document Unreadable, which tells
+the treasurer to try a clearer scan. Both belong to a hardening story; neither is fixed here.
+
+**Also fixed:** the `unreadable` doc comment said *"Nothing was stored for it"*, which is false — the
+bytes and document row are stored, and only the extraction is not.
+
+**Skipped (2), with reasons**
+
+**R6 — "return `already-held` when an already-held document fails to parse."** Declined: it
+contradicts AC2, which says of exactly this case that *"the treasurer is shown the Document
+Unreadable outcome"*. Their upload did not produce figures and telling them it was merely a duplicate
+would hide that. Changing it is an acceptance-criteria decision for the user, not a review fix.
+
+**R7 — "make `verify:database` always run."** Agreed as a problem, declined as a change here. It is
+gated on two protected masked CI variables that are not set, and setting them is the user's call —
+it means giving CI credentials to a real database. Already flagged in the MR description rather than
+left to be discovered. Worth its own story alongside the `tsc --noEmit` gate from F2.
+
 ### Definition of Done
 
 **PASS, with one deviation recorded rather than papered over.**

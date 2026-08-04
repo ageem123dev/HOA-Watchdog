@@ -73,6 +73,18 @@ export function createPostgresExtractionRepository(
 
       try {
         await client.query('begin')
+
+        // Lock the parent row before touching anything. The delete below takes
+        // row locks on the extractions it removes, which serialises two
+        // replacements against each other — but only when there are rows to
+        // lock. On a document with none, both transactions delete nothing, both
+        // insert, and both commit, leaving the document holding two sets at
+        // once. AC3 says every previous record is gone and the new set is
+        // present; a union of two sets is neither. The `document` row exists in
+        // both cases, so locking it is what makes replacement serialise
+        // regardless of what the document already holds.
+        await client.query('select 1 from document where id = $1 for update', [documentId])
+
         await client.query('delete from extraction where document_id = $1', [documentId])
 
         for (const record of records) {
@@ -109,9 +121,17 @@ export function createPostgresExtractionRepository(
       // `issued_on` is read as text: letting the driver build a Date and
       // formatting it back introduces a timezone shift, and the record's
       // contract is an ISO calendar date rather than an instant.
+      //
+      // `to_char`, not `::text`. Casting a date to text renders it through the
+      // session's `DateStyle`, which is a *setting* — under `SQL, MDY` the same
+      // date reads `06/01/2026` and under `German, DMY` it reads `01.06.2026`.
+      // Both were measured against this database, not assumed. The record's
+      // contract is `YYYY-MM-DD`, so the format is stated here rather than
+      // inherited from whatever the connection happens to be configured with.
       const { rows } = await pool().query<ExtractionRow>(
         `select document_kind, vendor_name, document_number,
-                issued_on::text as issued_on_text, total_amount, currency
+                to_char(issued_on, 'YYYY-MM-DD') as issued_on_text,
+                total_amount, currency
            from extraction
           where document_id = $1
           order by extracted_at, id`,

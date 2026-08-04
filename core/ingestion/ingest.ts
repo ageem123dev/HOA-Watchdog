@@ -49,12 +49,27 @@ export type IngestOutcome =
    * without asking the treasurer to upload anything again.
    */
   | { readonly filename: string; readonly outcome: 'stored-not-read'; readonly documentId: string }
-  /** It opened, and could not be read into figures. Nothing was stored for it. */
+  /**
+   * It opened, and could not be read into figures.
+   *
+   * The bytes and the document row **are** stored — that happens before any
+   * reading. What is not written is the extraction: no records are inserted,
+   * and on a re-ingest none are deleted either, so a document that already had
+   * a good set still has it. Carries the document id for exactly that reason.
+   */
   | { readonly filename: string; readonly outcome: 'unreadable'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'already-held'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'rejected'; readonly reason: RejectionReason }
   /** The file was fine; something underneath was not. Retryable, and not the file's fault. */
   | { readonly filename: string; readonly outcome: 'failed' }
+  /**
+   * Read, but its figures could not be written. Distinct from `failed` on
+   * purpose: the bytes and the document row are durable, so nothing is lost and
+   * re-uploading is the wrong instruction — identical bytes come back
+   * already-held and the figures are still missing. Carries the document id so
+   * the write can be retried against what is already held.
+   */
+  | { readonly filename: string; readonly outcome: 'figures-not-stored'; readonly documentId: string }
 
 export interface IngestDependencies {
   readonly store: DocumentStore
@@ -126,7 +141,17 @@ async function ingestOne(
 
     // Replacement only now, with a complete validated set in hand. This is the
     // whole of AD-13's other half, and the reason it is not called earlier.
-    await deps.extractions.replace(recorded.id, reading.records)
+    //
+    // Caught separately from everything above, because by this point the upload
+    // has already survived: reporting a storage-layer `failed` here would tell
+    // the treasurer their file was not saved when it was.
+    try {
+      await deps.extractions.replace(recorded.id, reading.records)
+    } catch (error) {
+      deps.onError?.(error, filename)
+
+      return { filename, outcome: 'figures-not-stored', documentId: recorded.id }
+    }
 
     if (recorded.alreadyHeld) {
       return { filename, outcome: 'already-held', documentId: recorded.id }

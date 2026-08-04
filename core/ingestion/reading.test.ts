@@ -289,14 +289,44 @@ describe('reading during ingestion', () => {
   })
 
   describe('when the repository fails', () => {
-    it('reports it as failed, not as unreadable', async () => {
+    it('does not report it as unreadable', async () => {
       // The file was fine. Blaming it would send the treasurer to fix an export
       // that has nothing wrong with it.
       const f = fakes({ failReplace: true })
 
       const [outcome] = await ingest([csvFile()], UPLOADER, f)
 
-      expect(outcome).toMatchObject({ outcome: 'failed' })
+      expect(outcome).not.toMatchObject({ outcome: 'unreadable' })
+    })
+
+    it('does not report it as failed either, because the document was stored', async () => {
+      // `failed` means nothing was kept, and its copy tells the treasurer to
+      // upload the file again. Here the bytes and the document row are already
+      // durable, so that instruction is wrong twice over: nothing is lost, and
+      // re-uploading identical bytes returns already-held and still leaves no
+      // figures. Only the extraction write failed.
+      const f = fakes({ failReplace: true })
+
+      const [outcome] = await ingest([csvFile()], UPLOADER, f)
+
+      expect(outcome).toMatchObject({ outcome: 'figures-not-stored' })
+    })
+
+    it('still hands the error to the reporter', async () => {
+      const reported: unknown[] = []
+      const f = fakes({ failReplace: true })
+
+      await ingest([csvFile()], UPLOADER, { ...f, onError: (error) => reported.push(error) })
+
+      expect(reported).toHaveLength(1)
+    })
+
+    it('names the document, so the figures can be retried without a re-upload', async () => {
+      const f = fakes({ failReplace: true })
+
+      const [outcome] = await ingest([csvFile()], UPLOADER, f)
+
+      expect(outcome && 'documentId' in outcome ? outcome.documentId : undefined).toBeTruthy()
     })
   })
 

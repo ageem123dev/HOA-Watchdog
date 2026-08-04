@@ -108,6 +108,22 @@ export function uploadFeedback(outcome: IngestOutcome): UploadFeedback {
         offerReplacement: true,
       }
 
+    case 'figures-not-stored':
+      // Deliberately not `failed`'s "Not saved. Try uploading it again." The
+      // document *is* saved, so that instruction is wrong twice: nothing is
+      // lost, and uploading the same file again returns already-held with the
+      // figures still missing. No replacement is offered for the same reason —
+      // there is nothing wrong with the file to replace.
+      return {
+        status: 'Saved, figures pending',
+        // Phrased without the words "upload it again" even as a negation: a
+        // treasurer scanning a list of outcomes reads the verb, not the "no".
+        message:
+          'This document is saved, but its figures could not be recorded just now. ' +
+          'Nothing further is needed from you.',
+        offerReplacement: false,
+      }
+
     default: {
       // A new `IngestOutcome` variant becomes a build error here rather than a
       // blank row beside a filename. Without this the function returns
