@@ -36,7 +36,6 @@ if (!configured) {
 
 const NOT_NULL_VIOLATION = '23502'
 const FOREIGN_KEY_VIOLATION = '23503'
-const UNIQUE_VIOLATION = '23505'
 const CHECK_VIOLATION = '23514'
 const NUMERIC_OUT_OF_RANGE = '22003'
 const INSUFFICIENT_PRIVILEGE = '42501'
@@ -321,66 +320,69 @@ describeWithDatabase('the extraction table', () => {
     })
   })
 
-  describe('exactly one live extraction per document', () => {
-    it('refuses a second extraction for the same document', async () => {
+  describe('many records per document, replaced as a set', () => {
+    // A bank feed uploaded as CSV is one document and many lines, which is what
+    // `DOCUMENT ||--o{ EXTRACTION` in the architecture spine says. AD-13's
+    // replacement is therefore set-shaped: everything this document produced is
+    // removed and the new reading inserted, never merged row by row.
+
+    it('accepts many extractions for one document', async () => {
       const documentId = await newDocument()
-      await insert({ documentId })
 
-      await expectRefusal(insert({ documentId }), UNIQUE_VIOLATION)
-    })
-
-    it('replaces on conflict, leaving one row carrying the new values', async () => {
-      const documentId = await newDocument()
-      await insert({ documentId, vendorName: 'First Read', totalAmount: '10.00' })
-
-      await writer.query(
-        `insert into extraction
-           (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency)
-         values ($1, 'invoice', 'Second Read', 'INV-2', '2026-07-01', '20.00', 'USD')
-         on conflict (document_id) do update set
-           document_kind = excluded.document_kind,
-           vendor_name = excluded.vendor_name,
-           document_number = excluded.document_number,
-           issued_on = excluded.issued_on,
-           total_amount = excluded.total_amount,
-           currency = excluded.currency,
-           extracted_at = now()`,
-        [documentId],
-      )
+      await insert({ documentId, documentNumber: 'LINE-1' })
+      await insert({ documentId, documentNumber: 'LINE-2' })
+      await insert({ documentId, documentNumber: 'LINE-3' })
 
       const { rows } = await writer.query(
-        'select vendor_name, total_amount from extraction where document_id = $1',
+        'select id from extraction where document_id = $1',
         [documentId],
       )
 
-      expect(rows).toHaveLength(1)
-      expect(rows[0].vendor_name).toBe('Second Read')
-      expect(rows[0].total_amount).toBe('20.00')
+      expect(rows).toHaveLength(3)
     })
 
-    it('leaves another document’s extraction untouched when one is replaced', async () => {
+    it('replaces the whole set rather than merging into it', async () => {
+      const documentId = await newDocument()
+      await insert({ documentId, documentNumber: 'OLD-1' })
+      await insert({ documentId, documentNumber: 'OLD-2' })
+
+      await writer.query('begin')
+      await writer.query('delete from extraction where document_id = $1', [documentId])
+      await writer.query(
+        `insert into extraction (document_id, document_kind, document_number, currency)
+         values ($1, 'statement', 'NEW-1', 'USD')`,
+        [documentId],
+      )
+      await writer.query('commit')
+
+      const { rows } = await writer.query(
+        'select document_number from extraction where document_id = $1 order by document_number',
+        [documentId],
+      )
+
+      expect(rows.map((r) => r.document_number)).toEqual(['NEW-1'])
+    })
+
+    it('leaves another document’s records untouched when one document is replaced', async () => {
       const [first, second] = [await newDocument(), await newDocument()]
-      await insert({ documentId: first, vendorName: 'Document One' })
-      await insert({ documentId: second, vendorName: 'Document Two' })
+      await insert({ documentId: first, documentNumber: 'FIRST-1' })
+      await insert({ documentId: second, documentNumber: 'SECOND-1' })
+      await insert({ documentId: second, documentNumber: 'SECOND-2' })
 
-      await writer.query(
-        `insert into extraction (document_id, document_kind, vendor_name, currency)
-         values ($1, 'invoice', 'Document One, Reread', 'USD')
-         on conflict (document_id) do update set vendor_name = excluded.vendor_name`,
-        [first],
-      )
+      await writer.query('delete from extraction where document_id = $1', [first])
 
       const { rows } = await writer.query(
-        'select vendor_name from extraction where document_id = $1',
+        'select document_number from extraction where document_id = $1',
         [second],
       )
 
-      expect(rows[0].vendor_name).toBe('Document Two')
+      expect(rows).toHaveLength(2)
     })
 
-    it('removes the extraction when its document is deleted', async () => {
+    it('removes every record when the document is deleted', async () => {
       const documentId = await newDocument()
-      await insert({ documentId })
+      await insert({ documentId, documentNumber: 'A' })
+      await insert({ documentId, documentNumber: 'B' })
 
       await writer.query('delete from document where id = $1', [documentId])
       const { rows } = await writer.query('select id from extraction where document_id = $1', [

@@ -9,18 +9,21 @@
 create table extraction (
   id            uuid        primary key default uuidv7(),
 
-  -- One live extraction per document, and the database decides it.
+  -- Many records per document, deliberately.
   --
-  -- Re-ingesting known bytes must replace what was read, not add a second
-  -- reading. An application-level check reads, finds none, and inserts -- and
-  -- two concurrent re-ingests both find none and both insert, leaving the
-  -- catalog to pick between two answers arbitrarily. The unique constraint
-  -- makes that unrepresentable and lets the writer use a single upsert, so
-  -- there is never a moment when a document has lost its extraction.
+  -- One uploaded file is one document, and it commonly holds many figures: the
+  -- pilot ingests bank feeds as CSV, where a single upload is hundreds of lines.
+  -- The architecture states this directly -- DOCUMENT ||--o{ EXTRACTION -- and a
+  -- unique constraint here would make that file impossible to store.
   --
-  -- Cascade because an extraction without its document is not a record of
-  -- anything; it is debris that still satisfies a foreign key.
-  document_id   uuid        not null unique references document (id) on delete cascade,
+  -- AD-13's replacement is therefore set-shaped rather than row-shaped: on
+  -- re-ingest, every record this document produced is deleted and the new
+  -- reading inserted, inside one transaction. That is what "replaces that
+  -- document's derived rows" means when a document yields more than one.
+  --
+  -- Cascade because a record without its document is not a record of anything;
+  -- it is debris that still satisfies a foreign key.
+  document_id   uuid        not null references document (id) on delete cascade,
 
   document_kind text        not null,
   vendor_name   text,
@@ -83,8 +86,13 @@ create table extraction (
 grant select on extraction to watchdog_reader;
 
 comment on table extraction is
-  'What a document was read to say. One live extraction per document -- re-reading replaces rather than appends (AD-13). Readable by watchdog_reader so the catalog can cite a figure''s source (AD-4).';
+  'What a document was read to say -- one row per figure, many per document. Re-reading replaces the whole set for that document rather than merging into it (AD-13). Readable by watchdog_reader so the catalog can cite a figure''s source (AD-4).';
 comment on column extraction.total_amount is
   'numeric, never a float. Negative means a credit to the association.';
 comment on column extraction.vendor_name is
   'Bounded and typed, never raw extracted text. Resolution against known vendors happens elsewhere (AD-8).';
+
+-- The set-replacement path deletes by document_id on every re-ingest, and the
+-- catalog reads a document's figures the same way. Postgres indexes the primary
+-- key but not a plain referencing column.
+create index extraction_document_id_idx on extraction (document_id);
