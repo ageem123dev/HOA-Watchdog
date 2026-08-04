@@ -123,7 +123,10 @@ describe('contentHash', () => {
 
       expect(declared, 'migration 004 no longer declares the hash-format constraint').not.toBeNull()
 
-      const constraint = new RegExp(declared![1])
+      const pattern = declared?.[1]
+      expect(pattern, 'the hash-format constraint declares no pattern').toBeDefined()
+
+      const constraint = new RegExp(pattern!)
       expect(constraint.test(contentHash(utf8('a document')))).toBe(true)
     })
   })
@@ -153,7 +156,7 @@ describe('contentHash', () => {
     it('accepts a Buffer, since that is what the runtime hands us', () => {
       // Buffer extends Uint8Array. A guard written as a constructor-name check
       // rather than an instanceof would refuse the one input we always get.
-      expect(contentHash(Buffer.from('abc', 'utf8'))).toBe(KNOWN_ANSWERS[1][1])
+      expect(contentHash(Buffer.from('abc', 'utf8'))).toBe(KNOWN_ANSWERS[1]![1])
     })
   })
 })

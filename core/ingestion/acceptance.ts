@@ -24,6 +24,29 @@
 export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 
 /**
+ * Bounds on a whole submission, not on one file.
+ *
+ * These exist because the transport has a limit whether or not the application
+ * states one. Next.js caps a Server Action request body at 1 MB by default, so
+ * without an explicit configuration every real scanned statement would have been
+ * refused by the framework before any of this code ran — a 25 MiB single-file
+ * limit that nothing could ever reach.
+ *
+ * `next.config.ts` must therefore admit at least `MAX_UPLOAD_BATCH_BYTES`, and a
+ * test asserts that it does by reading the config rather than trusting this
+ * comment. Refusing here, above the framework's ceiling, is what turns "the
+ * request died" into a sentence a treasurer can act on.
+ */
+export const MAX_UPLOAD_BATCH_BYTES = 2 * MAX_DOCUMENT_BYTES
+
+/**
+ * A count limit as well as a byte limit: the bytes of a submission are all held
+ * in memory at once while it is read, and a thousand tiny files is a different
+ * shape of the same problem.
+ */
+export const MAX_FILES_PER_UPLOAD = 20
+
+/**
  * The leading bytes a container must present to be what it claims.
  *
  * `null` means the format has no signature — CSV is text, and any byte sequence

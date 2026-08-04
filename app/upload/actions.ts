@@ -3,6 +3,10 @@
 import { auth } from '@/adapters/auth/auth'
 import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
+import {
+  MAX_FILES_PER_UPLOAD,
+  MAX_UPLOAD_BATCH_BYTES,
+} from '@/core/ingestion/acceptance'
 import { ingest } from '@/core/ingestion/ingest'
 import type { UploadState } from './upload-state'
 
@@ -38,7 +42,12 @@ export async function uploadDocuments(
   // should be impossible. It is checked anyway: `uploaded_by` is the audit
   // trail's actor, and a document recorded against nobody is worse than a
   // refused upload.
-  if (uploaderId === undefined) {
+  //
+  // Checked for substance, not merely for `undefined`. A session callback that
+  // supplies `null` or an empty string would pass an `!== undefined` test, and
+  // the emptiness would then surface as every file in the batch reporting
+  // `failed` on a foreign-key violation — an outcome with no explanation in it.
+  if (typeof uploaderId !== 'string' || uploaderId.trim() === '') {
     return { outcomes: [], error: 'Your session has expired. Sign in again to upload.' }
   }
 
@@ -47,6 +56,25 @@ export async function uploadDocuments(
 
   if (chosen.length === 0) {
     return { outcomes: [], error: 'Choose at least one file to upload.' }
+  }
+
+  // Both limits are checked against the declared sizes, before a single byte is
+  // read. Reading first and refusing afterwards would hold the whole submission
+  // in memory to decide it was too big to hold in memory.
+  if (chosen.length > MAX_FILES_PER_UPLOAD) {
+    return {
+      outcomes: [],
+      error: `Upload up to ${MAX_FILES_PER_UPLOAD} files at a time. This submission had ${chosen.length}.`,
+    }
+  }
+
+  const totalBytes = chosen.reduce((running, file) => running + file.size, 0)
+
+  if (totalBytes > MAX_UPLOAD_BATCH_BYTES) {
+    return {
+      outcomes: [],
+      error: `Upload up to ${MAX_UPLOAD_BATCH_BYTES / (1024 * 1024)} MB at a time. Send these in smaller batches.`,
+    }
   }
 
   const files = await Promise.all(
@@ -63,8 +91,13 @@ export async function uploadDocuments(
     // The real error goes to the server log, never to the page — its text can
     // name a bucket, a path, or a library. The treasurer gets the per-file
     // outcome instead.
+    // The filename is client-supplied, so it is passed as a structured field
+    // rather than interpolated into the line. Interpolating it lets a filename
+    // containing a newline forge log entries, and puts a name or an address —
+    // the very thing the hash-derived storage key keeps out of object storage —
+    // into the log store verbatim.
     onError: (error, filename) => {
-      console.error(`[upload] ${filename} could not be ingested`, error)
+      console.error('[upload] a file could not be ingested', { filename, error })
     },
   })
 

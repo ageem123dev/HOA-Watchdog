@@ -42,18 +42,25 @@ const bytesFor = (label: string) => new TextEncoder().encode(`%PDF-1.7 ${label}`
  * insert never blocked, the scenario did not happen and the result means
  * nothing.
  */
+const BLOCK_POLL_INTERVAL_MS = 25
+const BLOCK_POLL_ATTEMPTS = 60
+
 async function waitUntilBlockedOnInsert(client: Client): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < BLOCK_POLL_ATTEMPTS; attempt += 1) {
     const { rows } = await client.query<{ blocked: number }>(
+      // Scoped to this database: a backend on another database of the same
+      // instance can be blocked on its own `document` table, and counting it
+      // would let the test proceed before the interleaving it needs exists.
       `select count(*)::int as blocked
          from pg_stat_activity
-        where wait_event_type = 'Lock'
+        where datname = current_database()
+          and wait_event_type = 'Lock'
           and query ilike 'insert into document%'`,
     )
 
     if ((rows[0]?.blocked ?? 0) > 0) return
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, BLOCK_POLL_INTERVAL_MS))
   }
 
   throw new Error(
@@ -209,6 +216,7 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     const document = newDocument(`interleave-${Date.now()}`, boardMemberId)
     const holder = new Client({ connectionString: writerUrl })
     await holder.connect()
+    let pending: Promise<unknown> | undefined
 
     try {
       await holder.query('begin')
@@ -228,16 +236,21 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
       )
       const firstId = rows[0]!.id
 
-      const pending = repository.record(document)
+      pending = repository.record(document)
       await waitUntilBlockedOnInsert(admin)
       await holder.query('commit')
 
       expect(await pending).toEqual({ id: firstId, alreadyHeld: true })
     } finally {
       await holder.query('rollback').catch(() => undefined)
+      // Settle `pending` here as well as above. If the wait throws or the
+      // assertion fails, the rollback releases the lock, the blocked insert
+      // completes after the test has ended, and an unhandled rejection lands on
+      // whichever unrelated test happens to be running.
+      await pending?.catch(() => undefined)
       await holder.end()
     }
-  })
+  }, BLOCK_POLL_INTERVAL_MS * BLOCK_POLL_ATTEMPTS + 15_000)
 
   it('lets a constraint violation escape rather than reporting a phantom success', async () => {
     // An unsupported content type must not come back as "recorded".

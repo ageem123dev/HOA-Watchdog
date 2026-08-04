@@ -259,7 +259,13 @@ describe('assess', () => {
 
       expect(clause, 'migration 004 no longer declares the content-type constraint').not.toBeNull()
 
-      return Array.from(clause![1].matchAll(/'([^']+)'/g), (match) => match[1])
+      // `noUncheckedIndexedAccess` makes every capture `string | undefined`.
+      // Filtering rather than asserting keeps the declared `string[]` honest.
+      const list = clause?.[1] ?? ''
+
+      return Array.from(list.matchAll(/'([^']+)'/g), (match) => match[1]).filter(
+        (value): value is string => value !== undefined,
+      )
     }
 
     it('accepts nothing the database will refuse', () => {

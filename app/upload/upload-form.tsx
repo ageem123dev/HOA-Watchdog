@@ -46,45 +46,57 @@ export function UploadForm() {
         </p>
       ) : null}
 
-      {state.outcomes.length > 0 ? (
-        <table style={styles.table}>
-          <caption style={styles.caption}>
-            {state.outcomes.length} file{state.outcomes.length === 1 ? '' : 's'} submitted
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col" style={styles.columnHeading}>
-                File
-              </th>
-              <th scope="col" style={styles.columnHeading}>
-                Outcome
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.outcomes.map((outcome, index) => {
-              const feedback = uploadFeedback(outcome)
+      {/*
+        A polite live region around the results, not merely a caption.
 
-              return (
-                <tr key={`${outcome.filename}-${index}`} style={styles.row}>
-                  <td style={styles.cell}>{outcome.filename}</td>
-                  <td style={styles.cell}>
-                    <span style={styles.status}>{feedback.status}</span>
-                    {feedback.message !== null ? (
-                      <span style={styles.detail}>{feedback.message}</span>
-                    ) : null}
-                    {feedback.offerReplacement ? (
-                      <span style={styles.detail}>
-                        Choose a replacement above and upload again.
-                      </span>
-                    ) : null}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      ) : null}
+        The table is inserted after the response, and an inserted table
+        announces nothing — so a screen reader user submits an upload and hears
+        silence, which means the entire point of this page goes unreported. The
+        region is always in the document and only its contents change, because a
+        live region added at the same moment as its content is announced
+        unreliably.
+      */}
+      <div role="status" aria-live="polite" style={styles.results}>
+        {state.outcomes.length > 0 ? (
+          <table style={styles.table}>
+            <caption style={styles.caption}>
+              {state.outcomes.length} file{state.outcomes.length === 1 ? '' : 's'} submitted
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" style={styles.columnHeading}>
+                  File
+                </th>
+                <th scope="col" style={styles.columnHeading}>
+                  Outcome
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.outcomes.map((outcome, index) => {
+                const feedback = uploadFeedback(outcome)
+
+                return (
+                  <tr key={`${outcome.filename}-${index}`} style={styles.row}>
+                    <td style={styles.cell}>{outcome.filename}</td>
+                    <td style={styles.cell}>
+                      <span style={styles.status}>{feedback.status}</span>
+                      {feedback.message !== null ? (
+                        <span style={styles.detail}>{feedback.message}</span>
+                      ) : null}
+                      {feedback.offerReplacement ? (
+                        <span style={styles.detail}>
+                          Choose a replacement above and upload again.
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        ) : null}
+      </div>
     </>
   )
 }
@@ -119,6 +131,7 @@ const styles = {
     borderInlineStart: 'var(--component-margin-tick-width) solid var(--color-flag)',
     paddingInlineStart: 'var(--space-row)',
   },
+  results: { width: '100%' },
   table: { borderCollapse: 'collapse', width: '100%', textAlign: 'start' },
   caption: {
     textAlign: 'start',

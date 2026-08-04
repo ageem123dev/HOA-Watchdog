@@ -18,6 +18,8 @@
  * loud rather than silent.
  */
 
+import { randomBytes } from 'node:crypto'
+
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -37,11 +39,30 @@ if (!configured) {
   )
 }
 
-/** A distinct 64-char lower-case hex digest per call, so tests never collide. */
+/**
+ * A distinct 64-char lower-case hex digest per call.
+ *
+ * The per-run prefix matters as much as the counter. A counter alone restarts at
+ * 1 every run, so run N reproduces run N-1's digests exactly -- and `afterAll`
+ * does not clean up when the process is killed or `beforeAll` throws. A leftover
+ * row then collides on `document_content_hash_unique` in a later run, and the
+ * failure reads as a defect in the constraint rather than as debris.
+ */
+const RUN_PREFIX = randomBytes(8).toString('hex') // 16 hex characters
+const COUNTER_WIDTH = 64 - RUN_PREFIX.length
 let hashCounter = 0
 function distinctHash(): string {
+  const digest = `${RUN_PREFIX}${hashCounter.toString(16).padStart(COUNTER_WIDTH, '0')}`
   hashCounter += 1
-  return hashCounter.toString(16).padStart(64, 'a')
+
+  // A digest of the wrong length is refused by document_content_hash_is_sha256,
+  // which would make every positive test in this file fail for a reason that has
+  // nothing to do with what it is testing.
+  if (digest.length !== 64) {
+    throw new Error(`distinctHash produced ${digest.length} characters, expected 64`)
+  }
+
+  return digest
 }
 
 /**
@@ -237,8 +258,12 @@ describeWithDatabase('the document table', () => {
 
     it('records timestamps with their zone, not a bare local timestamp', async () => {
       const { rows } = await writer.query<{ data_type: string }>(
+        // Scoped to the schema under test: `document` in any other visible
+        // schema would otherwise satisfy this and describe the wrong column.
         `select data_type from information_schema.columns
-         where table_name = 'document' and column_name = 'uploaded_at'`,
+         where table_schema = 'public'
+           and table_name = 'document'
+           and column_name = 'uploaded_at'`,
       )
 
       expect(rows[0]?.data_type).toBe('timestamp with time zone')

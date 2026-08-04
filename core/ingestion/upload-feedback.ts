@@ -82,5 +82,18 @@ export function uploadFeedback(outcome: IngestOutcome): UploadFeedback {
         message: 'This file could not be stored just now. Try uploading it again.',
         offerReplacement: true,
       }
+
+    default: {
+      // A new `IngestOutcome` variant becomes a build error here rather than a
+      // blank row beside a filename. Without this the function returns
+      // `undefined` at runtime, which is the exact failure the tests describe
+      // and the one no test can anticipate for a variant that does not exist
+      // yet.
+      const unhandled: never = outcome
+
+      throw new TypeError(
+        `no upload feedback for outcome ${JSON.stringify(unhandled)}`,
+      )
+    }
   }
 }

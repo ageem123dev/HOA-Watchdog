@@ -25,6 +25,12 @@ const REQUIRED_VARS = [
   'R2_BUCKET',
 ] as const
 
+/** How long to wait for a connection before giving up. */
+const CONNECTION_TIMEOUT_MS = 5_000
+
+/** Socket inactivity, not total transfer time — a large upload is not idle. */
+const REQUEST_INACTIVITY_TIMEOUT_MS = 30_000
+
 export class MissingStorageConfigError extends Error {
   override readonly name = 'MissingStorageConfigError'
 
@@ -85,6 +91,32 @@ export function createS3DocumentStore(options: S3DocumentStoreOptions = {}): Doc
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
       },
+      /**
+       * The Node handler defaults both of these to `0`, meaning no timeout at
+       * all. An upload against an unresponsive endpoint then hangs for as long
+       * as the socket stays open, holding the request and whatever memory the
+       * document occupies.
+       *
+       * The database was bounded deliberately in `adapters/db` and
+       * `adapters/auth`; storage was left unbounded by omission. These are the
+       * same decision, and it should not depend on which adapter someone
+       * happened to be writing that day.
+       *
+       * `requestTimeout` bounds socket inactivity rather than total transfer, so
+       * it can be well under the time a 25 MiB upload legitimately takes.
+       */
+      requestHandler: {
+        connectionTimeout: CONNECTION_TIMEOUT_MS,
+        requestTimeout: REQUEST_INACTIVITY_TIMEOUT_MS,
+      },
+      /**
+       * Cloudflare R2 has historically rejected the CRC32 checksum headers the
+       * AWS SDK adds by default. This connectivity path was verified working
+       * against R2 with the default in place, so this is defence rather than a
+       * repair — but the cost is a line of configuration and the failure it
+       * prevents is every upload rejected at once.
+       */
+      requestChecksumCalculation: 'WHEN_REQUIRED',
     })
 
     return { client, bucket }

@@ -80,13 +80,22 @@ describe('createS3DocumentStore', () => {
       })
     })
 
+    // Every variable, not just the bucket: a validator that accepts a blank
+    // secret key would have passed a bucket-only version of this test, and a
+    // blank credential fails somewhere far less legible than here.
     it.each([
-      ['an empty value', ''],
-      ['whitespace only', '   '],
-    ])('treats %s as missing rather than as configuration', async (_label, value) => {
-      const store = createS3DocumentStore({ env: { ...CONFIGURED, R2_BUCKET: value } })
+      ['R2_ACCOUNT_ID', ''],
+      ['R2_ACCOUNT_ID', '   '],
+      ['R2_ACCESS_KEY_ID', ''],
+      ['R2_ACCESS_KEY_ID', '   '],
+      ['R2_SECRET_ACCESS_KEY', ''],
+      ['R2_SECRET_ACCESS_KEY', '   '],
+      ['R2_BUCKET', ''],
+      ['R2_BUCKET', '   '],
+    ])('treats a blank %s (%j) as missing rather than as configuration', async (name, value) => {
+      const store = createS3DocumentStore({ env: { ...CONFIGURED, [name]: value } })
 
-      await expect(store.put(document)).rejects.toMatchObject({ missing: ['R2_BUCKET'] })
+      await expect(store.put(document)).rejects.toMatchObject({ missing: [name] })
     })
 
     it('says what to do about it, since this error is read by whoever deploys', async () => {
@@ -154,6 +163,40 @@ describe('createS3DocumentStore', () => {
 
       expect(constructed[0]?.region).toBe('auto')
       expect(constructed[0]?.endpoint).toBe('https://acct.r2.cloudflarestorage.com')
+    })
+
+    it('bounds the request, because the handler defaults to no timeout at all', async () => {
+      // `0` means wait forever. An unresponsive endpoint would otherwise hold
+      // the request and the document's bytes for as long as the socket lives.
+      const constructed: Array<Record<string, unknown>> = []
+      const store = createS3DocumentStore({
+        env: CONFIGURED,
+        createClient: (config) => {
+          constructed.push(config as Record<string, unknown>)
+          return client as never
+        },
+      })
+
+      await store.put(document)
+
+      const handler = constructed[0]?.requestHandler as Record<string, number> | undefined
+      expect(handler?.connectionTimeout).toBeGreaterThan(0)
+      expect(handler?.requestTimeout).toBeGreaterThan(0)
+    })
+
+    it('does not send checksums R2 has not asked for', async () => {
+      const constructed: Array<Record<string, unknown>> = []
+      const store = createS3DocumentStore({
+        env: CONFIGURED,
+        createClient: (config) => {
+          constructed.push(config as Record<string, unknown>)
+          return client as never
+        },
+      })
+
+      await store.put(document)
+
+      expect(constructed[0]?.requestChecksumCalculation).toBe('WHEN_REQUIRED')
     })
   })
 

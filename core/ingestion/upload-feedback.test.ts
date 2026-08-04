@@ -46,7 +46,10 @@ describe('uploadFeedback', () => {
 
       expect(quoted, 'FR-1 no longer states its unreadable-file copy in the expected form').not.toBeNull()
 
-      return quoted![1]
+      const sentence = quoted?.[1]
+      expect(sentence, 'FR-1 states no sentence between the quotes').toBeDefined()
+
+      return sentence!
     }
 
     it('uses the PRD sentence exactly', () => {

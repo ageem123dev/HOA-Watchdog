@@ -179,7 +179,7 @@ From `EXPERIENCE.md` → State Patterns:
 
 Hexagonal, per the spine's paradigm:
 
-```
+```text
 core/ports/document-store.ts       # NEW — the port
 core/ingestion/                    # NEW — accept/reject rules, hashing (pure)
 adapters/storage/                  # NEW — S3/R2 adapter, the only AWS SDK importer
