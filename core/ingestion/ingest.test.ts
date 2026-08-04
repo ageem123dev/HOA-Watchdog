@@ -87,7 +87,9 @@ describe('ingest', () => {
       expect(outcomes).toEqual([
         {
           filename: 'june-statement.pdf',
-          outcome: 'accepted',
+          // A PDF is stored and held unread until the provider story adds a
+          // reader for it. Not `read`, because nothing read it.
+          outcome: 'stored-not-read',
           documentId: `doc-${contentHash(one.bytes).slice(0, 8)}`,
         },
       ])
@@ -216,7 +218,7 @@ describe('ingest', () => {
         f,
       )
 
-      expect(outcomes.map((o) => o.outcome)).toEqual(['accepted', 'already-held'])
+      expect(outcomes.map((o) => o.outcome)).toEqual(['stored-not-read', 'already-held'])
       expect(f.recorded).toHaveLength(1)
     })
   })
@@ -262,11 +264,11 @@ describe('ingest', () => {
       const outcomes = await ingest(files, UPLOADER, f)
 
       expect(outcomes.map((o) => o.outcome)).toEqual([
-        'accepted',
-        'accepted',
+        'stored-not-read',
+        'stored-not-read',
         'rejected',
-        'accepted',
-        'accepted',
+        'stored-not-read',
+        'stored-not-read',
       ])
       expect(f.recorded).toHaveLength(4)
     })
@@ -283,7 +285,12 @@ describe('ingest', () => {
         f,
       )
 
-      expect(outcomes.map((o) => o.outcome)).toEqual(['accepted', 'accepted', 'failed', 'accepted'])
+      expect(outcomes.map((o) => o.outcome)).toEqual([
+        'stored-not-read',
+        'stored-not-read',
+        'failed',
+        'stored-not-read',
+      ])
       expect(f.recorded).toHaveLength(3)
     })
 
@@ -295,7 +302,7 @@ describe('ingest', () => {
 
       const outcomes = await ingest([file('1.pdf'), second, file('3.pdf')], UPLOADER, f)
 
-      expect(outcomes.map((o) => o.outcome)).toEqual(['accepted', 'failed', 'accepted'])
+      expect(outcomes.map((o) => o.outcome)).toEqual(['stored-not-read', 'failed', 'stored-not-read'])
     })
 
     it('carries no message, cause, or stack out of the failure', async () => {
@@ -344,9 +351,9 @@ describe('ingest', () => {
       const outcomes = await ingest(files, UPLOADER, f)
 
       expect(outcomes).toMatchObject([
-        { filename: 'good-1.pdf', outcome: 'accepted' },
+        { filename: 'good-1.pdf', outcome: 'stored-not-read' },
         { filename: 'empty.pdf', outcome: 'rejected', reason: 'empty' },
-        { filename: 'good-2.pdf', outcome: 'accepted' },
+        { filename: 'good-2.pdf', outcome: 'stored-not-read' },
       ])
     })
   })

@@ -55,7 +55,18 @@ export function readTable(text: string): TableResult {
     return { ok: false, problems: [{ reason: 'unreadable-file' }] }
   }
 
-  const [headerRow, ...dataRows] = parsed.rows
+  return readRows(parsed.rows)
+}
+
+/**
+ * The contract applied to an already-decoded rectangle.
+ *
+ * Split out so a spreadsheet and a CSV meet exactly the same rules: the vendor
+ * library that decodes a workbook lives in an adapter, and what it produces is
+ * the same rectangle `parseCsv` produces.
+ */
+export function readRows(rows: readonly (readonly string[])[]): TableResult {
+  const [headerRow, ...dataRows] = rows
   const headers = (headerRow ?? []).map(normalise)
 
   const duplicates = headers.filter((header, index) => headers.indexOf(header) !== index)

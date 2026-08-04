@@ -1,5 +1,8 @@
+import { readRows, readTable } from '../extraction/tabular'
 import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
+import type { ExtractionRepository } from '../ports/extraction-repository'
+import type { WorkbookDecoder } from '../ports/workbook-decoder'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
@@ -36,7 +39,18 @@ export interface IngestibleFile {
 }
 
 export type IngestOutcome =
-  | { readonly filename: string; readonly outcome: 'accepted'; readonly documentId: string }
+  /** Stored, and its figures are in the record. */
+  | { readonly filename: string; readonly outcome: 'read'; readonly documentId: string }
+  /**
+   * Stored, but nothing here can read this type yet.
+   *
+   * Deliberately neither `read` — nothing read it — nor `failed`, because
+   * nothing went wrong. The bytes are kept, so the reader story adds them
+   * without asking the treasurer to upload anything again.
+   */
+  | { readonly filename: string; readonly outcome: 'stored-not-read'; readonly documentId: string }
+  /** It opened, and could not be read into figures. Nothing was stored for it. */
+  | { readonly filename: string; readonly outcome: 'unreadable'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'already-held'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'rejected'; readonly reason: RejectionReason }
   /** The file was fine; something underneath was not. Retryable, and not the file's fault. */
@@ -45,6 +59,9 @@ export type IngestOutcome =
 export interface IngestDependencies {
   readonly store: DocumentStore
   readonly repository: DocumentRepository
+  readonly extractions: ExtractionRepository
+  /** Absent means spreadsheets are held unread rather than failing. */
+  readonly workbooks?: WorkbookDecoder
   /**
    * Where the real error goes. It is deliberately absent from the outcome — an
    * exception's text can name a path, a bucket, or a library — but discarding it
@@ -86,20 +103,64 @@ async function ingestOne(
       uploadedBy,
     })
 
+    // Everything above is durable now. Reading happens after, so a document
+    // that cannot be read is still held and a corrected export needs no
+    // re-upload — and a failed read cannot cost what was already stored.
+    const reading = read(assessment.contentType, bytes, deps)
+
+    if (reading === 'no-reader') {
+      // Already-held wins here. The treasurer uploaded this file before, and
+      // 1.4's contract is that they are told so rather than told something that
+      // is also true but less useful.
+      if (recorded.alreadyHeld) {
+        return { filename, outcome: 'already-held', documentId: recorded.id }
+      }
+      return { filename, outcome: 'stored-not-read', documentId: recorded.id }
+    }
+
+    if (!reading.ok) {
+      // Nothing is written and nothing is deleted. On a re-ingest the previous
+      // set is still there, because replacement has not been reached.
+      return { filename, outcome: 'unreadable', documentId: recorded.id }
+    }
+
+    // Replacement only now, with a complete validated set in hand. This is the
+    // whole of AD-13's other half, and the reason it is not called earlier.
+    await deps.extractions.replace(recorded.id, reading.records)
+
     if (recorded.alreadyHeld) {
-      // Nothing is destroyed here. AD-13's replacement is real, but it belongs
-      // after a complete set has been read and validated — deleting on the way
-      // in means a failed re-read leaves the document with no records where it
-      // had a full set, and that is indistinguishable from never having any.
       return { filename, outcome: 'already-held', documentId: recorded.id }
     }
 
-    return { filename, outcome: 'accepted', documentId: recorded.id }
+    return { filename, outcome: 'read', documentId: recorded.id }
   } catch (error) {
     deps.onError?.(error, filename)
 
     return { filename, outcome: 'failed' }
   }
+}
+
+/** Types with no reader yet are held rather than failed — see the outcome above. */
+const SPREADSHEET_TYPES = [
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]
+
+type Reading = ReturnType<typeof readTable> | 'no-reader'
+
+function read(contentType: string, bytes: Uint8Array, deps: IngestDependencies): Reading {
+  if (contentType === 'text/csv') {
+    return readTable(new TextDecoder().decode(bytes))
+  }
+
+  if (SPREADSHEET_TYPES.includes(contentType)) {
+    if (deps.workbooks === undefined) return 'no-reader'
+    const decoded = deps.workbooks.decode(bytes)
+    if (!decoded.ok) return { ok: false, problems: [{ reason: 'unreadable-file' }] }
+    return readRows(decoded.rows)
+  }
+
+  return 'no-reader'
 }
 
 export async function ingest(

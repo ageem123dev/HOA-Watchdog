@@ -74,17 +74,17 @@ nothing is deleted until there is something to put back.
   - [x] **Deleted the existing call site.** `ingest.ts` currently invokes `replaceDerivedRows` in the `alreadyHeld` branch, *before* anything is parsed. That call must be removed, not filled in — giving it a body where it stands would delete a document's good records and then fail to replace them
   - [x] `replaceDerivedRows(documentId)` is therefore the wrong shape: it carries no records. Either widen it to take the set, or drop it and let the repository own replacement outright — and record which
 
-- [ ] **Wire parsing into ingestion** `core/ingestion/ingest.ts` (AC: 1, 2, 4)
-  - [ ] Route by content type: CSV and Excel to the deterministic path; PDF and image are **not** handled until 1.5c and must not silently succeed
-  - [ ] Order: the `document` row and its bytes are durable **before** parsing begins, so a parse failure never loses the upload
-  - [ ] A new per-file outcome for unreadable, alongside 1.4's `accepted` / `already-held` / `rejected` / `failed`
-  - [ ] One document's failure cannot fail the batch — the property 1.4 established and this must not regress
+- [x] **Wire parsing into ingestion** `core/ingestion/ingest.ts` (AC: 1, 2, 4)
+  - [x] Route by content type: CSV and Excel to the deterministic path; PDF and image are **not** handled until 1.5c and must not silently succeed
+  - [x] Order: the `document` row and its bytes are durable **before** parsing begins, so a parse failure never loses the upload
+  - [x] A new per-file outcome for unreadable, alongside 1.4's `accepted` / `already-held` / `rejected` / `failed`
+  - [x] One document's failure cannot fail the batch — the property 1.4 established and this must not regress
 
-- [ ] **Surface** `app/upload/` (AC: 2)
-  - [ ] The unreadable-document state, rendering `UNREADABLE_MESSAGE` from `core/extraction/validate.ts`
-  - [ ] Distinct from 1.4's unreadable-**file** state: one is a file that would not open, the other a file that opened and could not be read
-  - [ ] **Partial extraction is never displayed under any state** (UX-DR12, verbatim)
-  - [ ] Tokens only — `core/design/no-raw-values.test.ts` enforces this
+- [x] **Surface** `app/upload/` (AC: 2)
+  - [x] The unreadable-document state, rendering `UNREADABLE_MESSAGE` from `core/extraction/validate.ts`
+  - [x] Distinct from 1.4's unreadable-**file** state: one is a file that would not open, the other a file that opened and could not be read
+  - [x] **Partial extraction is never displayed under any state** (UX-DR12, verbatim)
+  - [x] Tokens only — `core/design/no-raw-values.test.ts` enforces this
 
 ## Dev Notes
 
@@ -253,6 +253,44 @@ stale"* asserts a call this task deletes. It is **re-specified, not weakened**: 
 asserts the stronger property — that the destructive call does *not* happen before parsing — and it
 fails against today's code, which is what makes it a real test rather than a deletion dressed up.
 
+## Task 3 — wire reading into ingestion
+
+**Behaviour C — a stored document is read, and its records replace whatever it had**
+
+*If it ran correctly, how would I know?* A CSV upload comes back `read` with its figures in the
+database. A malformed one comes back `unreadable` with **nothing** stored for it and, on a re-ingest,
+its previous set still intact. A PDF comes back `stored-not-read` — held, and honestly labelled.
+
+*How am I going to test this?* Both ports are injected, so the fakes record what was called and in
+what order. Ordering is the property under test as much as the outcomes.
+
+*Could this problem happen anywhere else?* This is the fourth *destroy-then-fail* of the story, and
+the one with the most surface: replacement must not run until a complete validated set exists.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| C1 | **A failed read wipes the previous set.** Replacement called before validation, or called with a partial set | GUARD | An unreadable re-ingest performs no `replace`; the previous set is untouched |
+| C2 | A PDF reports `accepted` as if it had been read, so the treasurer believes figures exist | GUARD | PDF and image yield `stored-not-read` and **no** `replace` call |
+| C3 | Parsing runs before the bytes are durable, so a parse failure loses the upload | GUARD, **narrowed after a failed sensitivity check** | What is proven is the *consequence*: an unreadable document still has its row and bytes (`order` ends at `put`, `record`). The literal position of the parse call is **not** proven — see the Debug Log |
+| C4 | One unreadable file fails the batch | GUARD | A five-file batch with one bad file returns five outcomes, four of them stored |
+| C5 | A repository failure during `replace` is reported as `unreadable`, blaming the file for an outage | GUARD | Distinguished: `failed` for infrastructure, `unreadable` for content |
+| C6 | An already-held document is never re-read, so a corrected re-upload of *identical* bytes never refreshes | GUARD | Already-held documents are read and replaced like new ones |
+| C7 | A CSV that parses to zero records calls `replace` with an empty set, which Task 1 refuses — surfacing as `failed` rather than `unreadable` | GUARD | Zero-record files report `unreadable`; `replace` is never called with `[]` |
+| C8 | Extraction is attempted on a rejected file | Unrepresentable | Rejection returns before any of this |
+
+**The outcome set grows from four to six**, and each new one says something the others cannot:
+
+| Outcome | Means |
+| --- | --- |
+| `read` | figures stored (replaces `accepted` for files that are read) |
+| `stored-not-read` | held, no reader for this type yet — not success, not failure |
+| `unreadable` | opened and could not be read into figures; nothing stored, previous set intact |
+
+`already-held`, `rejected` and `failed` are unchanged.
+
+**Inverse/cross-check.** The records handed to `replace` must equal what `readTable` produced for the
+same bytes, recomputed independently in the test rather than read back from the fake.
+
 ### Debug Log References
 
 **Task 1 — red.** 13 failing against a stub whose methods throw, 97 baseline untouched. Each failed
@@ -277,7 +315,72 @@ is what makes it a test rather than a deletion dressed up. 1 failed, 21 passed.
 `destroys nothing when the same bytes arrive again`. An assertion that something is *absent* is only
 worth anything if it notices the thing being present; this one does.
 
+**Task 3 — sensitivity, and one mutation that exposed my own weak claim.**
+
+| Mutation | Failures |
+| --- | --- |
+| Replace before reading, as 1.4 had it | **16** |
+| Report a PDF as `read` | 2 |
+| Store the records even when reading failed | 9 |
+| **Parse before storing** | **0 — not detected** |
+
+The last one matters. C3 claimed the tests guard "parsing runs after the bytes are durable", and they
+do not: parsing is a pure call with no side effect a fake can observe, so moving it earlier changes
+nothing any assertion can see. The `order` array proves `put` → `record` → `replace`, which is a
+different claim.
+
+Rather than inject a reader port purely to observe something with no user-visible consequence, C3 is
+**narrowed to what is actually proven**: an unreadable document still holds its row and its bytes, so
+a corrected export needs no re-upload. That is the requirement the ordering existed to serve, and it
+is covered by `keeps the document, so a corrected export needs no re-upload`.
+
+Worth naming plainly: this was a guard that proved less than its description claimed, found because
+the mutation was run rather than assumed. Four of them in this story so far.
+
+**Task 4 — a name collision that would have merged two different messages.** Importing
+`UNREADABLE_MESSAGE` from `core/extraction/validate.ts` into a module that already had its own
+constant of that name silently collapsed FR-1's sentence (a file that would not **open**) and the
+extraction sentence (a file that opened and whose **figures** could not be read). Story 1.5
+explicitly required they stay distinct. Two tests caught it. Renamed to `FILE_UNREADABLE_MESSAGE`
+and `FIGURES_UNREADABLE_MESSAGE`, with a comment on each saying why the other exists.
+
+**Task 3 — the spreadsheet path was checked off before it was tested.** The subtask says "CSV and
+Excel to the deterministic path", and the routing existed, but every test through ingestion used a
+CSV. Reviewing the checkboxes rather than trusting the edit that set them found it. Four tests added
+through the **real** SheetJS adapter — a fake decoder would only have proved the fake agrees with
+itself — including a cross-check that the same table as `.xlsx` and as CSV yields identical records.
+
+| Mutation | Failures |
+| --- | --- |
+| Never consult the decoder, so `.xlsx` falls through to `stored-not-read` | **3** |
+| Report a decode failure as `no-reader` rather than `unreadable` | 1 |
+| Drop `.xlsx` from the tabular content types | **3** |
+
+Worth naming the shape: a checkbox is not evidence, and the check that caught this was reading the
+claims back one at a time. Same lesson as the `Promise.all` concurrency test and C3's narrowed claim
+above, in a third form.
+
 ### Completion Notes List
+
+**Task 3 — reading wired into ingestion.** Route by content type: CSV in `core/`, spreadsheets
+through a `WorkbookDecoder` **port**, since `core/` may not import the vendor library. `readRows` was
+split out of `readTable` so both paths meet exactly the same header contract rather than growing a
+second set of rules.
+
+Order is the safety property: store, record, **then** read. A document that cannot be read is still
+held, so a corrected export needs no re-upload — and replacement is reached only with a complete
+validated set in hand, which is what makes a failed re-read leave the previous set untouched.
+
+`already-held` takes precedence over `stored-not-read`, because 1.4's contract is that a treasurer
+re-uploading a file is told it is already held rather than told something also true but less useful.
+
+**Task 4 — three new outcomes, each saying what the others cannot.** `read` (figures stored),
+`stored-not-read` (held, no reader for this type yet — not success, not failure), `unreadable`
+(opened, figures unreadable, nothing stored). The unreadable copy is imported from the extraction
+layer that owns it rather than restated, so the two cannot drift.
+
+The 1.4 exhaustiveness guard earned its keep here: adding outcome variants produced a **compile
+error** in the feedback switch rather than a blank row in front of a treasurer.
 
 **Task 2 — `replaceDerivedRows` is gone.**
 
@@ -321,17 +424,6 @@ caught me making in the equivalent test.
 Deliberately out of scope here: when replacement is called (Task 3), the `replaceDerivedRows` seam
 (Task 2), and the surface (Task 4).
 
-**Task 2 — red.** The two existing tests asserted a call this task removes, so they were
-**re-specified rather than deleted**: the replacements assert the stronger property — that no
-destructive call happens before parsing — and one of them failed against the code as it stood, which
-is what makes it a test rather than a deletion dressed up. 1 failed, 21 passed.
-
-**Task 2 — sensitivity.** Putting the destructive call back exactly where 1.4 left it fails
-`destroys nothing when the same bytes arrive again`. An assertion that something is *absent* is only
-worth anything if it notices the thing being present; this one does.
-
-### Completion Notes List
-
 ### File List
 
 **Added**
@@ -339,6 +431,8 @@ worth anything if it notices the thing being present; this one does.
 - `core/ports/extraction-repository.ts` — the port
 - `adapters/db/extraction-repository-postgres.ts` — writer-role adapter, transactional set replacement
 - `adapters/db/extraction-repository-postgres.test.ts` — 13 tests, requires a database
+- `core/ports/workbook-decoder.ts` — the spreadsheet port, so `core/` never imports SheetJS
+- `core/ingestion/reading.test.ts` — 26 tests covering reading during ingestion
 
 **Modified (Task 2)**
 
@@ -347,6 +441,15 @@ worth anything if it notices the thing being present; this one does.
 - `core/ingestion/ingest.ts` — the pre-parse destructive call removed
 - `core/ingestion/ingest.test.ts` — two tests re-specified to assert nothing is destroyed
 - `adapters/db/document-repository-postgres.test.ts` — the seam's own test removed with it
+
+**Modified (Tasks 3 and 4)**
+
+- `core/extraction/tabular.ts` — `readRows(rows)` split out of `readTable(text)` so the CSV and
+  spreadsheet paths meet one header contract rather than two
+- `core/ingestion/ingest.ts` — content-type routing, the three new outcomes, replacement after validation
+- `core/ingestion/upload-feedback.ts` / `.test.ts` — copy for the new outcomes;
+  `FILE_UNREADABLE_MESSAGE` vs `FIGURES_UNREADABLE_MESSAGE`
+- `app/upload/actions.ts` — wires the extraction repository and the workbook decoder
 
 **Modified**
 

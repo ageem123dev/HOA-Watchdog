@@ -2,6 +2,8 @@
 
 import { auth } from '@/adapters/auth/auth'
 import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
+import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
+import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
 import {
   MAX_FILES_PER_UPLOAD,
@@ -30,6 +32,13 @@ import type { UploadState } from './upload-state'
  */
 const documentStore = createS3DocumentStore()
 const documentRepository = createPostgresDocumentRepository()
+const extractionRepository = createPostgresExtractionRepository()
+
+/**
+ * The vendor spreadsheet parser, behind the port, so `core/` never sees it.
+ * `readWorkbook` already returns the rectangle the contract expects.
+ */
+const workbookDecoder = { decode: readWorkbook }
 
 export async function uploadDocuments(
   _previous: UploadState,
@@ -88,6 +97,8 @@ export async function uploadDocuments(
   const outcomes = await ingest(files, uploaderId, {
     store: documentStore,
     repository: documentRepository,
+    extractions: extractionRepository,
+    workbooks: workbookDecoder,
     // The real error goes to the server log, never to the page — its text can
     // name a bucket, a path, or a library. The treasurer gets the per-file
     // outcome instead.
