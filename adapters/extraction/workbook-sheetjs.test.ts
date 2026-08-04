@@ -14,7 +14,7 @@
 import * as XLSX from 'xlsx'
 import { describe, expect, it } from 'vitest'
 
-import { readWorkbook } from './workbook-sheetjs'
+import { readWorkbook, widestRow } from './workbook-sheetjs'
 
 type Cell = string | number | Date | null
 
@@ -120,6 +120,33 @@ describe('readWorkbook', () => {
     it('refuses a workbook whose first sheet has no rows', () => {
       expect(readWorkbook(workbook([])).ok).toBe(false)
     })
+  })
+
+  describe('large workbooks', () => {
+    it('measures row width without spreading every row into an argument list', () => {
+      // The defect this pins: `Math.max(...rows.map(r => r.length))` throws
+      // RangeError once the argument list is long enough, and it sat outside
+      // the try/catch — so a workbook well inside the 25 MiB upload limit
+      // crashed the caller instead of returning a refusal. An Excel sheet holds
+      // over a million rows.
+      //
+      // Tested through the extracted helper rather than a real workbook of this
+      // size: writing one would cost seconds and hundreds of megabytes for a
+      // property that has nothing to do with the file format.
+      const rows = Array.from({ length: 300_000 }, () => [1, 2, 3])
+
+      expect(() => widestRow(rows)).not.toThrow()
+      expect(widestRow(rows)).toBe(3)
+    })
+
+    it('reads a workbook with several thousand rows end to end', () => {
+      const rows: Cell[][] = [['amount']]
+      for (let i = 0; i < 5_000; i += 1) rows.push([i])
+
+      const result = readWorkbook(workbook(rows))
+
+      expect(result.ok && result.rows).toHaveLength(5_001)
+    }, 60_000)
   })
 
   describe('multiple sheets', () => {

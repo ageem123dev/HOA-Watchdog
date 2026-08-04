@@ -56,11 +56,22 @@ create table extraction (
   -- The upper bound is the more load-bearing half: without it, a page of OCR
   -- text or an injection payload lands in a field the catalog will hand to the
   -- reasoning side as a vendor identity.
+  -- btrim, not char_length alone: char_length('   ') is 3, so a whitespace-only
+  -- name satisfies a bare length check and reaches the catalog as a vendor made
+  -- of spaces. The character set is spelled out because btrim defaults to
+  -- spaces only -- a tab or a newline would otherwise still get through.
+  --
+  -- The validator refuses these too. This is the boundary that holds if
+  -- anything ever writes here without going through it.
   constraint extraction_vendor_name_length check (
-    vendor_name is null or char_length(vendor_name) between 1 and 200
+    vendor_name is null
+      or char_length(btrim(vendor_name, E' 	
+')) between 1 and 200
   ),
   constraint extraction_document_number_length check (
-    document_number is null or char_length(document_number) between 1 and 64
+    document_number is null
+      or char_length(btrim(document_number, E' 	
+')) between 1 and 64
   ),
 
   -- The pilot handles one currency. This is a list rather than an equality so

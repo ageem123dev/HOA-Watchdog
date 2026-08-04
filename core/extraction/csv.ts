@@ -13,7 +13,12 @@
  * than an error because nothing reports it.
  */
 
-export const CSV_PROBLEMS = ['empty', 'unterminated-quote', 'ragged-rows'] as const
+export const CSV_PROBLEMS = [
+  'empty',
+  'unterminated-quote',
+  'text-after-quote',
+  'ragged-rows',
+] as const
 
 export type CsvProblem = (typeof CSV_PROBLEMS)[number]
 
@@ -24,6 +29,11 @@ export type CsvResult =
 const QUOTE = '"'
 const DELIMITER = ','
 const BOM = '﻿'
+const LINE_FEED = '\n'
+const CARRIAGE_RETURN = '\r'
+
+const isLineEnding = (character: string | undefined): boolean =>
+  character === LINE_FEED || character === CARRIAGE_RETURN
 
 export function parseCsv(text: string): CsvResult {
   const source = text.startsWith(BOM) ? text.slice(BOM.length) : text
@@ -34,6 +44,11 @@ export function parseCsv(text: string): CsvResult {
   let row: string[] = []
   let field = ''
   let inQuotes = false
+  // Set when a quoted field closes, so the next character can be checked. A
+  // quoted field may be followed only by a delimiter, a line ending, or the end
+  // of input — without this, `"ACME"x` silently becomes the field `ACMEx`, which
+  // then validates cleanly while saying something the file does not.
+  let justClosedQuote = false
 
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index]
@@ -46,11 +61,19 @@ export function parseCsv(text: string): CsvResult {
           index += 1
         } else {
           inQuotes = false
+          justClosedQuote = true
         }
       } else {
         field += character
       }
       continue
+    }
+
+    if (justClosedQuote) {
+      if (character !== DELIMITER && !isLineEnding(character)) {
+        return { ok: false, reason: 'text-after-quote' }
+      }
+      justClosedQuote = false
     }
 
     if (character === QUOTE && field === '') {
@@ -66,10 +89,10 @@ export function parseCsv(text: string): CsvResult {
       continue
     }
 
-    if (character === '\n' || character === '\r') {
+    if (isLineEnding(character)) {
       // Consume CRLF as a single ending. Treated as two, every field in the
       // last column of an Excel-on-Windows export keeps a carriage return.
-      if (character === '\r' && source[index + 1] === '\n') index += 1
+      if (character === CARRIAGE_RETURN && source[index + 1] === LINE_FEED) index += 1
       row.push(field)
       rows.push(row)
       row = []
@@ -113,5 +136,5 @@ export function serialiseCsv(rows: readonly (readonly string[])[]): string {
         )
         .join(DELIMITER),
     )
-    .join('\n')
+    .join(LINE_FEED)
 }

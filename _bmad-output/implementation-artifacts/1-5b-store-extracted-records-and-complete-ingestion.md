@@ -56,7 +56,9 @@ These are the epic's ACs that 1.5 could not satisfy without persistence, plus th
 
 - [ ] **Fill in `replaceDerivedRows`** (AC: 3)
   - [ ] 1.4 left it a called, tested no-op with a comment naming this moment. This is it
-  - [ ] Decide and record whether it delegates to the extraction repository or the repository owns replacement outright
+  - [ ] **Move the call.** `ingest.ts` invokes it in the `alreadyHeld` branch *before* anything is parsed. Give it a body there and a failed re-parse deletes the previous good records and stores nothing in their place
+  - [ ] **One operation, after validation.** Replacement takes the complete validated set and does delete-then-insert in a single transaction. Nothing is removed until there is something to put back; on a parse failure the previous set survives untouched
+  - [ ] That makes `replaceDerivedRows(documentId)` the wrong shape — it carries no records. Either widen it to take the set or drop it and let the repository own replacement outright, and record which
 
 - [ ] **Wire parsing into ingestion** `core/ingestion/ingest.ts` (AC: 1, 2, 4)
   - [ ] Route by content type: CSV and Excel to the deterministic path; PDF and image are **not** handled until 1.5c and must not silently succeed
@@ -96,8 +98,14 @@ and is probably right, but it is a decision rather than an obvious default.
 ### Ordering, which is a safety property
 
 The `document` row and its bytes must be durable before parsing begins. A parse failure then costs
-the treasurer nothing — the document is held, and re-uploading after fixing the export re-reads it
-under AD-13's replacement. Parsing first and storing after would lose the upload on a bad row.
+the treasurer nothing: the document is held, and the failure is reported against it.
+
+**Correction to an earlier draft of this note.** It said a corrected export "re-reads under AD-13's
+replacement". That is wrong. Document identity is the content hash, so corrected bytes are a
+*different* document and `alreadyHeld` never fires for them. AD-13's replacement applies only to
+**the same bytes** ingested again. A corrected export produces a second document, and whether the
+first should then be superseded is an open question — record it as one rather than assuming the
+replacement path already covers it.
 
 ### Scope boundaries
 
@@ -108,8 +116,13 @@ under AD-13's replacement. Parsing first and storing after would lose the upload
 | — | AD-9, AD-10, the credential guard | Vendor resolution |
 
 PDF and image uploads are accepted by the gate today but have no extraction path until 1.5c. **They
-must not report success as though they were read** — decide explicitly what a PDF upload reports in
-the meantime and test it.
+must not report success as though they were read.**
+
+Name the outcome rather than leaving it to the implementation: a per-file `stored-not-read` that
+`ingestOne` returns, the batch preserves, and the surface renders as "held, not yet read". It is not
+`accepted`, because nothing read it, and not `failed`, because nothing went wrong. The document and
+its bytes are kept, so 1.5c reads them without a re-upload. Test that a PDF upload produces exactly
+this outcome and no `extraction` row.
 
 ### Testing standards
 

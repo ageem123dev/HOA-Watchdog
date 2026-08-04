@@ -74,6 +74,20 @@ function isWorkbookContainer(bytes: Uint8Array): boolean {
   )
 }
 
+/**
+ * The width of the widest row.
+ *
+ * A reduce rather than `Math.max(...rows.map(...))`: spreading turns every row
+ * into a function argument, and the argument list overflows well below the row
+ * count a real spreadsheet can hold. Exported so the overflow can be tested
+ * against a large array instead of a large workbook.
+ */
+export function widestRow(rows: readonly (readonly unknown[])[]): number {
+  let widest = 0
+  for (const row of rows) if (row.length > widest) widest = row.length
+  return widest
+}
+
 export function readWorkbook(bytes: Uint8Array): WorkbookResult {
   if (!isWorkbookContainer(bytes)) return { ok: false, reason: 'unreadable-file' }
 
@@ -116,7 +130,7 @@ export function readWorkbook(bytes: Uint8Array): WorkbookResult {
 
   // Pad to a consistent width. A short row would otherwise shift every column
   // after it, and a shifted column is a wrong figure rather than a missing one.
-  const width = Math.max(...raw.map((row) => row.length))
+  const width = widestRow(raw)
   const rows = raw.map((row) =>
     Array.from({ length: width }, (_, column) => asText(row[column])),
   )

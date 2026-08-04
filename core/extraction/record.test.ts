@@ -45,7 +45,7 @@ function declaredList(constraint: string): string[] {
 
 function declaredLength(constraint: string): { min: number; max: number } {
   const clause = new RegExp(
-    `${constraint} check \\(\\s*[a-z_]+ is null or char_length\\([a-z_]+\\) between (\\d+) and (\\d+)`,
+    `${constraint} check \\(\\s*[a-z_]+ is null\\s+or char_length\\(btrim\\([a-z_]+[^)]*\\)\\) between (\\d+) and (\\d+)`,
   ).exec(migration())
 
   expect(clause, `migration 006 no longer declares ${constraint}`).not.toBeNull()

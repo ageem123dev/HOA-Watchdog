@@ -48,9 +48,11 @@ Epic story 1.5's ACs 1 and 4, plus the provider half of AC3.
 ## Tasks / Subtasks
 
 - [ ] **Extraction port and adapter** `core/ports/extractor.ts`, `adapters/extraction/` (AC: 1, 3)
-  - [ ] Narrow port — take bytes and a media type, return a candidate record or a refusal. Nothing provider-shaped crosses it (AD-16's lesson)
+  - [ ] Narrow port — take bytes and a media type, return **a collection of candidate records** or a refusal. Nothing provider-shaped crosses it (AD-16's lesson)
+  - [ ] **A collection, not one record.** A statement holds many figures, and 1.5's `extraction` table is many-rows-per-document. A single-record port either loses rows or forces an unstated aggregation. Validation is all-or-nothing across the set, as it is on the tabular path
   - [ ] The adapter is the only place the provider is constructed, and the only file that knows the request shape
   - [ ] `fetch` against the REST API — **no SDK dependency** (decided; see Dev Notes)
+  - [ ] **A fixed HTTPS origin, and redirects refused** (`redirect: 'manual'`). The request carries a credential, and a redirect followed blindly can carry that credential somewhere else
   - [ ] Injected client for tests; lazy construction so `next build` needs no credential (1.4's `env.ts` and S3 notes)
   - [ ] Bounded timeouts — and note 1.4's lesson: `requestTimeout` without `throwOnRequestTimeout` only logs. Whatever the transport, prove the bound actually bounds
 
@@ -62,6 +64,7 @@ Epic story 1.5's ACs 1 and 4, plus the provider half of AC3.
 - [ ] **The AD-10 boundary guard** (AC: 3)
   - [ ] A guard test in `core/security/`, shaped like `nfr2-guard.test.ts` — it must fail the pipeline, not live in a convention
   - [ ] Extraction and reasoning credentials are distinct names; no module reads both
+  - [ ] **Assert the providers differ, not only the credentials.** Distinct key names prove nothing about which endpoint is called — pin the extraction origin and the reasoning origin as separate values and fail if they converge. AC3 says different *providers*
   - [ ] No code path passes document bytes or raw extracted text toward the reasoning side
   - [ ] **Prove the guard detects a violation** by planting one, as `core/ports/boundary.test.ts` does. A guard tested only against a clean tree cannot distinguish "nothing wrong" from "nothing checked"
 
@@ -111,6 +114,17 @@ Check whether an extraction key trips it **before** assuming it passes. If it do
 Three options in increasing cost: keep it synchronous and accept a slow upload for small batches; return after storage and extract on a follow-up request the surface polls; or introduce a job queue. **There is no queue in this project and adding one is a significant architectural addition — out of scope here, and not to be introduced without asking.**
 
 Two constraints hold whatever is chosen: the `document` row and its bytes must be durable before extraction begins, so a provider failure never loses the upload; and a document with no extraction yet must be distinguishable from one whose extraction failed.
+
+### An open question this story must answer rather than inherit
+
+AD-8 says prompts carry row identifiers and tools resolve values; AD-10 forbids raw extracted text in
+the reasoning context. Neither says whether `/tools/*` returns **extracted field values**
+(`vendorName`, `totalAmount`) to the model, or only bounded identifiers the model cannot read.
+
+Those are different security postures, and the difference stays invisible until epic 2 wires the
+agent. Decide it here — while the extraction side is being built and the answer is cheap — and write
+it into the port's contract with a test. If values cross, say what bounds them; if only identifiers
+cross, say what resolves them and where.
 
 ### Non-negotiables
 

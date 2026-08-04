@@ -87,7 +87,10 @@ describeWithDatabase('the extraction table', () => {
   })
 
   afterAll(async () => {
-    if (writer) {
+    // Guarded on boardMemberId, not on `writer`: `writer` is assigned before
+    // connect() resolves, so a failure in beforeAll would run these deletes with
+    // an undefined parameter and replace the real setup error in the report.
+    if (boardMemberId) {
       await writer.query(
         'delete from document where uploaded_by = $1',
         [boardMemberId],
@@ -147,14 +150,18 @@ describeWithDatabase('the extraction table', () => {
       }
 
       const { rows: inserted } = await insert(written)
-      const { rows: read } = await writer.query('select * from extraction where id = $1', [
-        inserted[0].id,
-      ])
+      // issued_on is selected as text: comparing a driver-built Date reintroduces
+      // a timezone shift, and asserting only its type would let a different date
+      // pass a test whose title promises every value is unchanged.
+      const { rows: read } = await writer.query(
+        'select *, issued_on::text as issued_on_text from extraction where id = $1',
+        [inserted[0].id],
+      )
 
       expect(read[0].document_kind).toBe(written.documentKind)
       expect(read[0].vendor_name).toBe(written.vendorName)
       expect(read[0].document_number).toBe(written.documentNumber)
-      expect(read[0].issued_on).toBeInstanceOf(Date)
+      expect(read[0].issued_on_text).toBe(written.issuedOn)
       expect(read[0].total_amount).toBe(written.totalAmount)
       expect(read[0].currency).toBe('USD')
     })
@@ -183,6 +190,16 @@ describeWithDatabase('the extraction table', () => {
       // statement with no vendor; the second is a parser that found nothing and
       // said so in the wrong vocabulary.
       await expectRefusal(insert({ vendorName: '' }), CHECK_VIOLATION)
+    })
+
+    it.each([
+      ['a whitespace-only vendor name', { vendorName: '   ' }],
+      ['a whitespace-only document number', { documentNumber: '\t\n ' }],
+    ])('refuses %s, which a bare length check would admit', async (_label, input) => {
+      // `char_length('   ')` is 3, so length alone is satisfied. The validator
+      // refuses these too; this is the boundary that holds if anything ever
+      // writes here without going through it.
+      await expectRefusal(insert(input), CHECK_VIOLATION)
     })
 
     it('accepts a vendor name at the 200-character limit', async () => {
@@ -254,7 +271,8 @@ describeWithDatabase('the extraction table', () => {
   describe('money', () => {
     it.each([
       ['a value a float cannot represent', '0.10'],
-      ['the largest value the column admits', '99999999999.99'],
+      ['the largest value the column admits', '999999999999.99'],
+      ['one order below the limit', '99999999999.99'],
       ['a whole number', '1450.00'],
     ])('round-trips %s exactly', async (_label, totalAmount) => {
       // Compared as strings on purpose. Reading into a JS number is the very
@@ -278,7 +296,9 @@ describeWithDatabase('the extraction table', () => {
     })
 
     it('refuses an amount beyond the column precision rather than truncating it', async () => {
-      await expectRefusal(insert({ totalAmount: '1000000000000.00' }), NUMERIC_OUT_OF_RANGE)
+      // One digit past the twelve the column holds, so the edge is pinned
+      // rather than approached from two orders away.
+      await expectRefusal(insert({ totalAmount: '9999999999999.99' }), NUMERIC_OUT_OF_RANGE)
     })
   })
 
@@ -288,7 +308,7 @@ describeWithDatabase('the extraction table', () => {
     // column can answer that.
 
     it('stores every amount the validator accepts, unchanged', async () => {
-      const accepted = ['1450.00', '-250.00', '0.00', '0.01', '1450', '1450.5', '99999999999.99']
+      const accepted = ['1450.00', '-250.00', '0.00', '0.01', '1450', '1450.5', '999999999999.99']
 
       for (const totalAmount of accepted) {
         expect(
@@ -297,7 +317,13 @@ describeWithDatabase('the extraction table', () => {
         ).toBe(true)
 
         const { rows } = await insert({ totalAmount })
-        expect(Number(rows[0].total_amount)).toBe(Number(totalAmount))
+        // Compared by asking Postgres, not by converting both sides to doubles —
+        // that conversion is the step `numeric` exists to avoid.
+        const { rows: same } = await writer.query<{ equal: boolean }>(
+          'select total_amount = $1::numeric(14,2) as equal from extraction where id = $2',
+          [totalAmount, rows[0].id],
+        )
+        expect(same[0]!.equal).toBe(true)
       }
     })
 
@@ -346,14 +372,22 @@ describeWithDatabase('the extraction table', () => {
       await insert({ documentId, documentNumber: 'OLD-1' })
       await insert({ documentId, documentNumber: 'OLD-2' })
 
-      await writer.query('begin')
-      await writer.query('delete from extraction where document_id = $1', [documentId])
-      await writer.query(
-        `insert into extraction (document_id, document_kind, document_number, currency)
-         values ($1, 'statement', 'NEW-1', 'USD')`,
-        [documentId],
-      )
-      await writer.query('commit')
+      // Rolled back on failure: `writer` is shared by every test in this file,
+      // and an aborted transaction would make each later test fail with 25P02,
+      // burying the one real failure under a cascade of false ones.
+      try {
+        await writer.query('begin')
+        await writer.query('delete from extraction where document_id = $1', [documentId])
+        await writer.query(
+          `insert into extraction (document_id, document_kind, document_number, currency)
+           values ($1, 'statement', 'NEW-1', 'USD')`,
+          [documentId],
+        )
+        await writer.query('commit')
+      } catch (error) {
+        await writer.query('rollback')
+        throw error
+      }
 
       const { rows } = await writer.query(
         'select document_number from extraction where document_id = $1 order by document_number',
@@ -428,14 +462,25 @@ describeWithDatabase('the extraction table', () => {
     })
 
     it('does not let the reader update', async () => {
+      // Scoped by id even though the privilege check runs first. If a later
+      // migration ever widened the grant, an unscoped statement would not simply
+      // fail — it would rewrite every vendor name in the shared test database,
+      // and the report would describe a privilege problem rather than the loss.
+      const { rows } = await insert()
+
       await expectRefusal(
-        reader.query("update extraction set vendor_name = 'x'"),
+        reader.query("update extraction set vendor_name = 'x' where id = $1", [rows[0].id]),
         INSUFFICIENT_PRIVILEGE,
       )
     })
 
     it('does not let the reader delete', async () => {
-      await expectRefusal(reader.query('delete from extraction'), INSUFFICIENT_PRIVILEGE)
+      const { rows } = await insert()
+
+      await expectRefusal(
+        reader.query('delete from extraction where id = $1', [rows[0].id]),
+        INSUFFICIENT_PRIVILEGE,
+      )
     })
   })
 })
