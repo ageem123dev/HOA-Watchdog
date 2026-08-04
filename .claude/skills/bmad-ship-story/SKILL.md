@@ -99,12 +99,20 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 
 `per_page=100` is **one page** — story 1.5's MR reached 64 notes, and replies push a review down fast. Follow `X-Next-Page` until the current-head review is found or the pages run out. Concluding "no review" from page one is the same absence-of-evidence error in a new place.
 
-Two shapes will fool a naive match, in opposite directions:
+A review announces itself in **four** shapes. Match all of them, and read the note body rather than trusting its first line:
 
-- The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) arrives within a minute and carries no findings — a note that is not a review.
-- An **incremental re-review** that finds only repeats posts `Duplicate comments (N)` with **no** `Actionable comments posted:` line — a review that does not look like one. Match either header, and read a note carrying `Outside diff range comments (N)` too: those are findings that could not be posted inline.
+| Shape | Means |
+| --- | --- |
+| `Actionable comments posted: N` | N findings |
+| **`No actionable comments were generated`** | **reviewed and clean — this is how convergence actually arrives** |
+| `Duplicate comments (N)` | an incremental re-review of repeats; carries **no** actionable line |
+| `Outside diff range comments (N)` | findings that could not be posted inline |
 
-**8c. Convergence.** Precondition: a service-account review matching the current head. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
+The clean shape is the one that matters most: keying only on `Actionable comments posted:` means a clean MR **never converges** and the loop waits forever for a line that is never coming. That happened on MR !8 — reviewed clean in 24 seconds, reported as "awaiting review" for an hour.
+
+A note is a review only if it carries a `Commits` / `Files selected for processing` block. The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) does not, and carries no findings. Do not treat a stray `rate limited` string as proof either — it appears in stale fragments of otherwise-complete reviews.
+
+**8c. Convergence.** Precondition: a service-account review matching the current head, in any of 8b's four shapes. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
 
 Converged = pipeline green AND every finding **fixed** (push → new head → back to 8a), **skipped** with a reason on its thread, or **resolved by CodeRabbit**. Anything else is pending — including a review still missing after the wait.
 
