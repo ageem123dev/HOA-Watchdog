@@ -5,109 +5,73 @@ description: 'Implement an entire epic by running bmad-ship-story once per story
 
 # Implement Epic Pipeline
 
-**Goal:** Deliver a whole epic, one story at a time, by looping **`bmad-ship-story`** over the epic's stories in order.
+Run **`bmad-ship-story`** once per story, in order.
 
-**This skill is a loop, not a second pipeline.** It owns: which epic, which stories, what order, when to stop, and the handoff between stories. Everything about *shipping* a story — branch, create, implement test-first, local review, MR, pipeline, CodeRabbit loop, ready-to-merge — belongs to `bmad-ship-story` and is not restated here. If the two ever disagree, `bmad-ship-story` wins.
+**This is a loop, not a second pipeline.** It owns which epic, which stories, what order, when to stop, and the handoff between them. Branching, implementation, review, MR, and convergence all belong to `bmad-ship-story`. **If the two disagree, `bmad-ship-story` wins.**
 
-**Why it works this way.** An earlier version batched every story in an epic onto one branch and opened a single epic MR, to avoid per-story CodeRabbit reviews and their hourly rate limit. That trade stopped paying: stories in this project are large enough that one is already a substantial review, and an epic-sized diff is one nobody can read carefully. Review quality is the thing being bought here, and it degrades fast with diff size. Fewer, bigger stories also means fewer MRs, so the rate limit that motivated batching is much less pressing.
+An earlier version batched a whole epic onto one branch behind a single epic MR, to avoid per-story CodeRabbit reviews and their rate limit. Stories here are large enough that one is already a substantial review, and epic-sized diffs cannot be read carefully. Fewer, larger stories also means fewer MRs, so the rate limit matters much less.
 
 ## Hard rules
 
-- **NEVER merge an MR** and never push to `main`. Each story's terminal state is "ready-to-merge"; the user merges.
-- **One story = one branch = one MR to `main` = one review cycle.** Never combine stories into a single MR.
-- **A story is `done` only when its MR is ready-to-merge** — implemented test-first, locally reviewed, lint/build/test clean, pipeline green, and no open actionable review feedback.
-- **Never weaken, skip, or delete a test** to get a green suite, a green pipeline, or a clean review. Fix the code, or STOP with the conflict stated.
-- **A HALT inside a story halts the epic.** Do not skip a blocked story and move to the next one — the next story is usually built on it, and the blockage compounds silently.
-- **NEVER commit secrets** (`.env*.local` stay gitignored). Quote real pipeline/MR output; never fake completion.
-
-## Inputs
-
-- Epic number (e.g. `2`, `epic 2`). If omitted, infer the single `in-progress` epic from `sprint-status.yaml`; if that is ambiguous, ask.
+- **Never merge, never push to `main`.** Each story ends ready-to-merge; the user merges.
+- **One story = one branch = one MR to `main`.** Never combine stories.
+- **Never weaken, skip, or delete a test** to get a green suite, pipeline, or review.
+- **A HALT inside a story halts the epic.** Do not skip a blocked story — the next one usually builds on it.
+- **Never commit secrets.** Quote real output.
 
 ## Workflow
 
-### Step 0 — Preflight
+**Input:** epic number. If omitted, infer the single `in-progress` epic; if ambiguous, ask.
 
-`glab auth status` (STOP if unauthenticated), `git` available, default branch is `main`. Read `_bmad-output/implementation-artifacts/sprint-status.yaml` fully, top to bottom — the order of `development_status` is the story order.
+### 0 — Preflight
+`glab auth status`, `git` available. Read `sprint-status.yaml` fully — the order of `development_status` is the story order.
 
-### Step 1 — Resolve the epic and its stories
+### 1 — Resolve the epic (read only)
+Collect `epic-{N}` and its `{N}-{M}-*` story keys in order; note which are `done`.
 
-From `development_status`, collect `epic-{N}` and all its `{N}-{M}-*` story keys **in order**. Record which are `done`.
+**Write nothing here.** There is no branch yet: the next step checks out `main`, so an uncommitted `sprint-status.yaml` edit either blocks that checkout or is swept into the first story's MR by ship-story's `git add -A`. The epic's status is written by `bmad-ship-story` Step 9 inside the story commit that justifies it.
 
-**Read only. Write nothing here.** At this point there is no branch to write on: the next step checks out `main`, and an uncommitted edit to `sprint-status.yaml` either blocks that checkout or gets swept into the first story's merge request by `bmad-ship-story`'s `git add -A`. The epic's own status is written by `bmad-ship-story` Step 9, inside that story's commit, where it has a controlled home and travels with the work that justifies it.
+All stories `done` → Step 3.
 
-If every story is already `done`, go to Step 4.
+### 2 — The loop
+For each not-`done` story, in order:
 
-### Step 2 — The loop
+1. **Sync:** `git checkout main && git pull --ff-only origin main`. Name the remote — a bare `git pull` follows the configured upstream, and a wrong one reports "Already up to date" while leaving you behind. That has happened here.
 
-For each not-`done` story, **in order**:
-
-1. **Sync:** `git checkout main && git pull --ff-only origin main`. Name the remote — a bare `git pull` follows the branch's configured upstream, and a wrong one fails silently by reporting "Already up to date" while leaving you behind. That has already happened here.
-
-2. **Check the previous story actually landed — from GitLab and git, not from a status word.**
-
-   `done` is written by `bmad-ship-story` on an unmerged branch and means "ready for the user to merge", not "in `main`". Reading it as the latter is how the loop starts a story on top of work that is not there yet.
-
-   Take `merge_request` from the previous story's frontmatter and assert **both**:
-   - `glab api "projects/{project_path_encoded}/merge_requests/{iid}"` reports `state: merged`; and
+2. **Verify the previous story landed — from GitLab and git, not from a status word.** `done` is written on an unmerged branch and means ready-to-merge, not "in `main`". Take `merge_request` from the previous story's frontmatter and assert **both**:
+   - `glab api "projects/{enc}/merge_requests/{iid}"` → `state: merged`; and
    - `git merge-base --is-ancestor {merge_commit_sha} origin/main` succeeds.
 
-   The second check is not redundant. A merged state with an unreachable commit means you are looking at a different `main` than GitLab is — a stale remote, a wrong upstream, an unfetched ref. That has happened on this repo.
+   The second is not redundant: merged-but-unreachable means you are looking at a different `main` than GitLab is — stale remote, wrong upstream, unfetched ref. That has happened here.
 
-   If either fails, **STOP and report**: name the open MR, say the epic is paused on that merge, and say that re-running this skill resumes from here. This is a user gate, not a failure — do not work around it.
+   Either failing → **STOP and report**: name the open MR, say the epic is paused on that merge, and that re-running resumes from here. A user gate, not a failure.
 
-   Do not branch the next story off the unmerged one. That puts the parent's whole diff inside the child's MR, which is the reviewability problem this pipeline exists to avoid. (`bmad-ship-story` documents stacking as an explicit, user-requested exception.)
+3. **Ship:** invoke **`bmad-ship-story`** with the story id. It runs its own Steps 0–9 and terminates ready-to-merge, having marked the story `done`.
 
-3. **Ship it:** invoke **`bmad-ship-story`** with this story's id. It runs its own Steps 0–9 and terminates at ready-to-merge, having marked the story `done` in `sprint-status.yaml`.
+4. Report the MR, continue at 2.1.
 
-4. **Report the MR** and continue to the next story at Step 2.1.
+Anything other than reaching ready-to-merge → surface it and stop the epic there.
 
-If `bmad-ship-story` HALTs or STOPs for any reason other than reaching ready-to-merge, surface that and stop the epic there.
+Each iteration starts from a freshly pulled `main`, so there is no epic branch and no integration step — each story integrated itself when its MR merged. If an `epic-{N}` branch exists from an earlier run, leave it alone.
 
-### Step 3 — Between stories
+### 3 — Epic complete (terminal)
+1. **Verify, do not write.** `epic-{N}` should already read `done`, because ship-story Step 9 sets it inside the last story's commit, landing when that MR merges.
 
-Each iteration starts from a freshly pulled `main`, so a story picks up every previously merged story. Nothing accumulates on a long-lived epic branch, and there is no epic-level merge step — there is nothing to integrate, because each story integrated itself when its MR merged.
+   **There is no epic-level MR.** An earlier version offered "fold it into the last story's MR, or its own" — impossible, since this step only runs after that MR has merged, leaving an epic-only MR to carry a one-line status change. If the status is wrong (interrupted run, hand edit), do not push to `main` and do not open an MR: report it, and let the next story's MR carry the correction, or ask.
 
-There is no `epic-{N}` branch in this design. If one exists from an earlier run, leave it alone; do not build on it.
-
-### Step 4 — Epic complete (terminal)
-
-When every story is `done` and merged into `main`:
-
-1. **Verify, do not write.** `epic-{N}` should already read `done` in `sprint-status.yaml` on `main`, because `bmad-ship-story` Step 9 sets it inside the last story's commit — so it lands exactly when that story's MR merges.
-
-   There is deliberately **no epic-level merge request**. An earlier version offered one "or fold it into the last story's MR", which could not work: this step only runs once every story has merged, so that MR is already closed, leaving an epic-only MR as the sole option — reintroducing the very thing this pipeline removed, to carry a one-line status change.
-
-   If the status is somehow wrong (an interrupted run, a hand edit), do **not** push to `main` and do **not** open an MR for it. Report the discrepancy and let the next story's MR carry the correction, or ask.
-
-2. Report: every story with its MR URL and review outcome, and confirmation that `main` contains them all.
-3. If the epic has an `epic-{N}-retrospective` entry, mention that `bmad-retrospective` is available. Do not run it unasked.
+2. Report every story with its MR URL and review outcome, and confirm `main` contains them all.
+3. Mention `bmad-retrospective` if an `epic-{N}-retrospective` entry exists. Do not run it unasked.
 4. STOP.
 
 ## Driving with /loop
+`/loop implement epic {N}`. Cadence follows the current story's phase, since every wait is inside `bmad-ship-story`: short ticks while implementing, ~1200–1800s awaiting a first review, ~270s after a fix push, ~2400s after a rate limit. **Paused on a user merge (2.2) is the one wait a tick cannot resolve** — stop and report rather than waking to find the same unmerged MR. Ends itself at Step 3.
 
-`/loop implement epic {N}` (dynamic mode).
+## Out of scope
+It implements nothing (that is `bmad-dev-tdd`, via ship-story), runs no reviews (`bmad-code-review` and CodeRabbit, via ship-story), and neither merges nor judges a story good enough — those are the user's.
 
-Cadence follows whatever phase the current story is in, because the wait is always inside `bmad-ship-story`:
+## Epic-level facts
+Toolchain, gates, CodeRabbit specifics and architecture invariants live in **`bmad-ship-story`** — a duplicated list drifts.
 
-- Story being created or implemented — local and fast; short ticks are fine.
-- Waiting on a first CodeRabbit review — ~1200–1800s.
-- Just pushed a review fix — ~270s.
-- Rate-limited — ~2400s.
-- **Paused on a user merge (Step 2.2)** — this is the one wait a tick cannot resolve. Stop the loop and report rather than waking repeatedly to find the same unmerged MR. The user restarts it after merging.
-
-The loop ends itself at Step 4.
-
-## What this skill does not do
-
-- It does not implement anything. If you find yourself writing production code here, you are in the wrong skill — that is `bmad-dev-tdd`, via `bmad-ship-story`.
-- It does not run reviews. Local review is `bmad-code-review`; cloud review is CodeRabbit. Both are driven by `bmad-ship-story`.
-- It does not merge, and it does not decide that a story is good enough. Those are the user's.
-
-## Project learnings baked in (HOA Treasurer Assistant)
-
-Everything about the toolchain, the gates, the CodeRabbit specifics, and the architecture invariants lives in **`bmad-ship-story`** — read its *Project learnings baked in* section rather than duplicating it here, because a duplicated list is one that drifts. The epic-level points:
-
-- **Stories here are big.** Story 1.4 was six tasks, 30 files, ~3,900 lines, and 166 new tests, and it drew 17 actionable review findings on its first pass — two of which were defects that made a stated guarantee untrue. That size is the reason for one MR per story; do not batch.
-- **Order matters and dependencies are real.** Epic 1's stories build directly on each other — schema, then ingestion, then extraction. A story that starts before its predecessor is in `main` either misses that work or drags it into its own MR.
-- **The epic is not done when the code is written.** It is done when every story's MR is merged. Marking `epic-{N}` `done` while an MR is open is the same class of error as marking a story `done` on unverified work.
+- **Stories here are big.** Story 1.4 was 30 files, ~3,900 lines, 166 new tests, and drew 17 actionable findings on its first pass — two of them defects that made a stated guarantee untrue. That is why one MR per story.
+- **Order matters.** Epic 1's stories build directly on each other. A story started before its predecessor is in `main` either misses that work or drags it into its own MR.
+- **The epic is done when every MR is merged**, not when the code is written. Marking `epic-{N}` `done` with an MR open is the same error as marking a story `done` on unverified work.
