@@ -24,9 +24,11 @@ An earlier version batched a whole epic onto one branch behind a single epic MR,
 **Input:** epic number. If omitted, infer the single `in-progress` epic; if ambiguous, ask.
 
 ### 0 — Preflight
+
 `glab auth status`, `git` available. Read `sprint-status.yaml` fully — the order of `development_status` is the story order.
 
 ### 1 — Resolve the epic (read only)
+
 Collect `epic-{N}` and its `{N}-{M}-*` story keys in order; note which are `done`.
 
 **Write nothing here.** There is no branch yet: the next step checks out `main`, so an uncommitted `sprint-status.yaml` edit either blocks that checkout or is swept into the first story's MR by ship-story's `git add -A`. The epic's status is written by `bmad-ship-story` Step 9 inside the story commit that justifies it.
@@ -34,6 +36,7 @@ Collect `epic-{N}` and its `{N}-{M}-*` story keys in order; note which are `done
 All stories `done` → Step 3.
 
 ### 2 — The loop
+
 For each not-`done` story, in order:
 
 1. **Sync:** `git checkout main && git pull --ff-only origin main`. Name the remote — a bare `git pull` follows the configured upstream, and a wrong one reports "Already up to date" while leaving you behind. That has happened here.
@@ -44,7 +47,9 @@ For each not-`done` story, in order:
 
    The second is not redundant: merged-but-unreachable means you are looking at a different `main` than GitLab is — stale remote, wrong upstream, unfetched ref. That has happened here.
 
-   Either failing → **STOP and report**: name the open MR, say the epic is paused on that merge, and that re-running resumes from here. A user gate, not a failure.
+   They fail for different reasons and must not be reported alike:
+   - **not merged** → the epic is paused on the user's merge. STOP, name the MR, say re-running resumes from here. A user gate, not a failure.
+   - **merged but unreachable** → your local `main` is wrong, not the MR. STOP and say so: fetch, check the branch's upstream. Reporting this as "awaiting merge" sends the user to look at an MR that is already done.
 
 3. **Ship:** invoke **`bmad-ship-story`** with the story id. It runs its own Steps 0–9 and terminates ready-to-merge, having marked the story `done`.
 
@@ -55,6 +60,7 @@ Anything other than reaching ready-to-merge → surface it and stop the epic the
 Each iteration starts from a freshly pulled `main`, so there is no epic branch and no integration step — each story integrated itself when its MR merged. If an `epic-{N}` branch exists from an earlier run, leave it alone.
 
 ### 3 — Epic complete (terminal)
+
 1. **Verify, do not write.** `epic-{N}` should already read `done`, because ship-story Step 9 sets it inside the last story's commit, landing when that MR merges.
 
    **There is no epic-level MR.** An earlier version offered "fold it into the last story's MR, or its own" — impossible, since this step only runs after that MR has merged, leaving an epic-only MR to carry a one-line status change. If the status is wrong (interrupted run, hand edit), do not push to `main` and do not open an MR: report it, and let the next story's MR carry the correction, or ask.
@@ -64,12 +70,15 @@ Each iteration starts from a freshly pulled `main`, so there is no epic branch a
 4. STOP.
 
 ## Driving with /loop
+
 `/loop implement epic {N}`. Cadence follows the current story's phase, since every wait is inside `bmad-ship-story`: short ticks while implementing, ~1200–1800s awaiting a first review, ~270s after a fix push, ~2400s after a rate limit. **Paused on a user merge (2.2) is the one wait a tick cannot resolve** — stop and report rather than waking to find the same unmerged MR. Ends itself at Step 3.
 
 ## Out of scope
+
 It implements nothing (that is `bmad-dev-tdd`, via ship-story), runs no reviews (`bmad-code-review` and CodeRabbit, via ship-story), and neither merges nor judges a story good enough — those are the user's.
 
 ## Epic-level facts
+
 Toolchain, gates, CodeRabbit specifics and architecture invariants live in **`bmad-ship-story`** — a duplicated list drifts.
 
 - **Stories here are big.** Story 1.4 was 30 files, ~3,900 lines, 166 new tests, and drew 17 actionable findings on its first pass — two of them defects that made a stated guarantee untrue. That is why one MR per story.

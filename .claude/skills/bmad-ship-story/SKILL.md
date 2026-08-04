@@ -30,21 +30,31 @@ Resumable: every run detects state from `sprint-status.yaml`, git and the MR, th
 **Input:** optional story id (`1.5`, `1-5`, `1-5-slug`) or file path.
 
 ### 0 — Preflight
+
 `glab auth status` and `git` available. If `glab` is missing from PATH: `export PATH="$PATH:/c/Users/magee/AppData/Local/Programs/glab"`. Read `sprint_status` fully — order matters.
 
 ### 1 — Resolve the story
+
 With an argument, match the `N-M-*` key. Without one, take the first non-`done` story key that is not an `epic-*`/`*-retrospective`. All done → report and STOP.
 
 ### 2 — Branch
-1. `git checkout main && git pull --ff-only origin main`. **Name the remote** — a bare `git pull` follows the branch's configured upstream and a wrong one fails *silently by succeeding* ("Already up to date" while behind). That has happened here. Verify with `git rev-parse main origin/main` if anything looks stale.
-2. `git checkout -b story/{story_key}` (check it out if it exists).
 
-**If `main` lacks the previous story**, its MR is still open — STOP and report. Branching on an unmerged parent puts the parent's diff in this MR, which is what one-story-per-MR prevents. See *Stacking*.
+1. `git checkout main && git pull --ff-only origin main`. **Name the remote** — a bare `git pull` follows the branch's configured upstream and a wrong one fails *silently by succeeding* ("Already up to date" while behind). That has happened here. Verify with `git rev-parse main origin/main` if anything looks stale.
+2. Branch, in this order — `git checkout -b` fails outright on an existing branch, which would break resumability on the second run:
+   - local branch exists → `git checkout story/{story_key}`
+   - only the remote exists → `git checkout -b story/{story_key} --track origin/story/{story_key}`
+   - neither → `git checkout -b story/{story_key}`
+
+**If `main` lacks the previous story's work**, diagnose before reporting — the two causes need different actions:
+   - GitLab says its MR is **not merged** → it awaits the user. STOP and name the MR. Branching on an unmerged parent puts the parent's diff in this MR, which is what one-story-per-MR prevents. See *Stacking*.
+   - GitLab says **merged** but the commit is unreachable → your local `main` is wrong, not the MR. Fetch and re-check the upstream; do not report it as awaiting a merge.
 
 ### 3 — Create (if needed)
+
 Status `backlog` or no story file → invoke **`bmad-create-story`**. Otherwise skip.
 
 ### 4 — Implement test-first (if needed)
+
 Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode analysis → red → green → harden; fills the Dev Agent Record; sets status `review`). Already `review`/`done` → skip.
 
 - **Harness (its Step 2):** if none exists for the story's language, approve the conventional one rather than stalling — **Vitest** (TS), **pytest** (Python). STOP only for a heavyweight runtime change the story doesn't cover.
@@ -56,12 +66,14 @@ Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode
 Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`) and `git push -u origin story/{story_key}`.
 
 ### 5 — Merge request to main
-1. Existing? `glab api "projects/{enc}/merge_requests?source_branch={branch}&state=opened"`.
+
+1. Existing? `glab api "projects/{enc}/merge_requests?source_branch={branch}&state=opened&target_branch=main"`. Filter on the target: an open MR from this branch to anything else must **stop the run** — it gets no CodeRabbit review (see 3), and opening a second MR from the same source is worse. Report it and let the user close or retarget it.
 2. Else `glab mr create --source-branch {branch} --target-branch main --title "{story_id}: {title}" --description "$(cat file)" --yes`. **Write the body to a file** — backticks in a double-quoted bash string get command-substituted.
 3. **Must target `main`.** `.coderabbit.yaml` sets `auto_review.base_branches: [main]`; any other target gets no review at all.
 4. Record `mr_iid`/`mr_url`, report the URL, and write `merge_request: {mr_iid}` into the story frontmatter — the epic loop uses it to verify the merge rather than trusting a status word.
 
 ### 6 — Local adversarial review (once per new code state)
+
 Invoke **`bmad-code-review`** (not the lighter built-in `code-review`) on `baseline_commit..HEAD` (fallback `main...HEAD`), passing `story_file` as the spec for **`full`** mode. It writes to the story's `### Review Findings` — the audit trail.
 
 Under `/loop` choose **Apply every patch**; surface and STOP on anything needing a human call. Fix **test-first** — a review fix without a regression test is moved, not fixed. Re-run the gates, commit, push.
@@ -69,6 +81,7 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 **Look hardest at guards that prove nothing** — a check that passes whether or not the thing it guards against is present. Ten found on this project: a bare `rejects.toThrow()` that also passes when the table is absent; a loop over an empty list; a `Promise.all` "concurrency" test that passed against a deliberately racy implementation; a `requestTimeout` that only logged a warning. Tool: the `bmad-dev-tdd` Step 9 sensitivity check — break the covered code, confirm the test fails, restore.
 
 ### 7 — Pipeline on the MR head
+
 `glab api "projects/{enc}/merge_requests/{iid}"` → `head_pipeline.status`, confirming `sha` matches your head; jobs via `.../pipelines/{id}/jobs`. On failure read the log, fix, push, return here. Three failures on one cause → STOP.
 
 `verify:database` runs only when `WATCHDOG_WRITER_DATABASE_URL` and `WATCHDOG_READER_DATABASE_URL` are set as protected masked CI variables; otherwise the DB tests skip in CI — say so rather than implying coverage.
@@ -92,17 +105,21 @@ No current-head review after a full wake cadence is **not** convergence: report 
 **Caps:** ~3–4 rounds; only-already-skipped findings recurring counts as converged. On a rate limit, back off ~2400s and re-request rather than pushing.
 
 ### 9 — Ready-to-merge (terminal)
+
 1. **Docs first.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`. If this is the epic's last not-`done` story also set `epic-{N} = done` in the same commit; otherwise set it `in-progress` if unset. Commit and push.
 2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence, which belongs to the previous commit. Re-run Step 7 and Step 8a/8b against the new head. Docs-only, so normally one quick round.
-3. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
-4. STOP.
+3. **If that re-verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
+4. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
+5. STOP.
 
 **`done` means ready-to-merge, not merged** — it is written on an unmerged branch. Nothing downstream may treat it as proof of a merge.
 
 ## Stacking (exception, on request only)
+
 If the user wants to keep building without merging, branch off the previous *story* branch and say in the MR description that the diff includes the parent. Default is to wait — stacking reintroduces the reviewability problem this design removes.
 
 ## Driving with /loop
+
 `/loop ship story {id}`. Early ticks run 1–7 once; later ticks sit in Step 8; the loop ends at Step 9. Cadence: ~1200–1800s after opening an MR (first review can take 10–20+ min), ~270s after pushing a fix, ~2400s after a rate limit. Bounded `until` loops only — a foreground `sleep` is blocked. Standalone: run 0–7, do one Step 8 check, report "awaiting CodeRabbit".
 
 ## Project facts
