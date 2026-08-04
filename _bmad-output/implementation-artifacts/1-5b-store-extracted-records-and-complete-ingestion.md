@@ -1,5 +1,6 @@
 ---
 baseline_commit: c54185bdb0fcc3158e94caf74e2df12a2307338c
+merge_request: 9
 ---
 
 # Story 1.5b: Store extracted records and complete ingestion
@@ -456,6 +457,36 @@ Deliberately out of scope here: when replacement is called (Task 3), the `replac
 - `_bmad-output/implementation-artifacts/1-5-read-a-document-into-structured-records.md` — stripped two NUL bytes
 - `_bmad-output/implementation-artifacts/1-2-board-member-sign-in.md` — stripped one NUL byte
 - `core/extraction/csv.test.ts` — NUL written as the escape `\u0000` rather than embedded raw
+
+### Review Findings
+
+**F1 — 22 type errors this story introduced, invisible to every configured gate. Fixed.**
+
+`IngestDependencies.extractions` is required, but `ingest.test.ts` never supplied it. Nothing caught
+this: ESLint does not type-check, Vitest does not type-check, and `next build` type-checks only the
+graph it compiles — **test files are in `tsconfig.json`'s `include` but never checked by any gate**.
+Running `npx tsc --noEmit` directly surfaced 30 errors against 8 at the story baseline, so 22 were
+mine. The tests still passed because every file in that suite is a PDF or a rejection and so never
+reaches extraction — the fake was missing and the gap could not show.
+
+Fixed by giving the suite an `extractions` fake that **throws** rather than one that records. That
+turns "no PDF reaches extraction" from an untested assumption into a proven one: mutating `read()` so
+PDFs route down the reading path produces **9 failures**. A passive fake would have absorbed the
+mutation silently — the same guards-that-prove-nothing shape this project keeps finding.
+
+`npx tsc --noEmit` is now back to the baseline 8 with the identical per-file distribution.
+
+**F2 — 8 pre-existing type errors, reported not fixed.** `core/ports/boundary.test.ts` (7) and
+`core/ingestion/upload-limits.test.ts` (1, `TS2532` at line 39). They predate this story and are
+outside its scope. **The gap itself is the finding**: type errors in test files are currently
+unobservable, and closing it means adding a `tsc --noEmit` gate to `.gitlab-ci.yml` — which cannot go
+in this story, because the gate would fail on those 8 the moment it was added. Worth its own story.
+
+**F3 — `.xls` routing verified rather than assumed.** `application/vnd.ms-excel` is accepted at
+upload and routed to the decoder, while story 1.5 described the adapter as an xlsx importer — if that
+were accurate, a valid legacy `.xls` would be reported unreadable. Probed with a real BIFF workbook
+written by SheetJS and read back through `readWorkbook`: it decodes. No defect, and the claim now
+rests on having run it.
 
 ### Definition of Done
 

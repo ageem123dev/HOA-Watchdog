@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { DocumentRepository, NewDocument } from '../ports/document-repository'
 import type { DocumentStore, StoredDocument } from '../ports/document-store'
+import type { ExtractionRepository } from '../ports/extraction-repository'
 import { contentHash } from './content-hash'
 import { ingest } from './ingest'
 import { storageKeyFor } from './storage-key'
@@ -29,6 +30,7 @@ const file = (filename: string, bytes = pdf(filename), contentType = 'applicatio
 interface Fakes {
   store: DocumentStore
   repository: DocumentRepository
+  extractions: ExtractionRepository
   stored: StoredDocument[]
   recorded: NewDocument[]
   destructiveCalls: string[]
@@ -50,6 +52,17 @@ function fakes(
     stored,
     recorded,
     destructiveCalls,
+    // Every file in this suite is a PDF or a rejection, so nothing here should
+    // ever reach extraction. Throwing rather than recording makes that a proven
+    // property instead of an untested assumption: if routing ever sends a PDF
+    // down the reading path, these tests report `failed` and say so.
+    extractions: {
+      replace: vi.fn(async () => {
+        destructiveCalls.push('replace')
+        throw new Error('no file in this suite should reach extraction')
+      }),
+      findByDocument: vi.fn(async () => []),
+    },
     store: {
       put: vi.fn(async (document: StoredDocument) => {
         if (options.failStoreFor?.(document)) throw new Error('R2 said no')
