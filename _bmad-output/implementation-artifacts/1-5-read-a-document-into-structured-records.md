@@ -1,6 +1,10 @@
+---
+baseline_commit: 3422f01ea496f717e270a5b2c254e0e7001f27a4
+---
+
 # Story 1.5: Read a document into structured records
 
-Status: ready-for-dev
+Status: in-progress
 
 > **First half of epic story 1.5, split at the AC2 seam.**
 > This story owns the **deterministic path** — CSV and Excel — and the foundation both halves share: the record shape, the `extraction` table, validation, the unreadable outcome, and AD-13's replacement.
@@ -46,11 +50,11 @@ Epic story 1.5's ACs 2, 3 and 5. AC1 and AC4 belong to 1.5b.
 
 ## Tasks / Subtasks
 
-- [ ] **Migration `006_extraction.sql`** (AC: 1, 3, 4)
-  - [ ] `extraction` table keyed to `document`, following the conventions in `004_document.sql`
-  - [ ] Value-level constraints as **database** constraints — length caps, format regex, enums (AC3)
-  - [ ] Exactly one live extraction per document as a **database** constraint, not an application check (AC4, AD-13)
-  - [ ] Explicit `grant` decision for `watchdog_reader` (migration 003 revoked defaults — see Dev Notes)
+- [x] **Migration `006_extraction.sql`** (AC: 1, 3, 4)
+  - [x] `extraction` table keyed to `document`, following the conventions in `004_document.sql`
+  - [x] Value-level constraints as **database** constraints — length caps, format regex, enums (AC3)
+  - [x] Exactly one live extraction per document as a **database** constraint, not an application check (AC4, AD-13)
+  - [x] Explicit `grant` decision for `watchdog_reader` (migration 003 revoked defaults — see Dev Notes)
 
 - [ ] **The record shape** `core/extraction/record.ts` (AC: 1, 3)
   - [ ] One definition of what a structured record is, shared by both halves of this story
@@ -198,10 +202,126 @@ app/upload/                      # UPDATE — the unreadable state
 
 ### Test Design
 
+## Task 1 — migration `006_extraction.sql`
+
+Three behaviours: which rows the table admits, the one-live-extraction invariant, and the role grants.
+
+**Behaviour A — which extraction rows are representable**
+
+*If it ran correctly, how would I know?* A fully-populated row for a real document is accepted and reads back with every value unchanged; anything violating a stated constraint is refused by the database, not by hope.
+
+*How am I going to test this?* Against a real database, as `migrations/document.test.ts` does — skipping loudly without credentials. Constraint behaviour cannot be faked; a fake refuses whatever the fake was told to refuse.
+
+*What else can go wrong?* Every value here arrives from a parser reading a file someone uploaded. The dangerous inputs are not gibberish — they are plausible-but-wrong: an empty vendor name that looks like data, an amount off by a rounding, a whole page of text landing in a 200-character field.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| A1 | `document_kind` outside the known set — a parser emitting a guess | GUARD | Enum check; each valid value accepted, an unknown one refused (`23514`) |
+| A2 | `vendor_name` **present but empty** — a parse failure wearing the costume of data. Distinct from absent, which is legitimate | GUARD | `''` refused; `null` accepted |
+| A3 | `vendor_name` over-long — a page of text, or an injection payload, in a name field | GUARD | 200 accepted, 201 refused |
+| A4 | `document_number` empty or over-long | GUARD | 1 and 64 accepted; `''` and 65 refused |
+| A5 | Money stored as a float, losing cents | GUARD | `numeric(14,2)`; `0.10` and `99999999999.99` round-trip **exactly**, compared as strings |
+| A6 | **More than two decimals silently rounded.** `numeric(14,2)` *rounds* rather than errors, so `1.005` becomes `1.01` with no complaint — a cent invented by the schema | OUT-OF-SCOPE **here**, GUARD in Task 3 | Cannot be caught by a constraint: the column has already coerced the value before any check sees it. The validator must refuse >2 decimals **before** the insert. Recorded so it is not mistaken for handled |
+| A7 | `currency` outside what the pilot supports | GUARD | Enum check |
+| A8 | `document_id` absent, or pointing at no document | GUARD | `23502` and `23503` |
+| A9 | Timestamps without a zone | GUARD | `timestamptz` asserted from `information_schema`, schema-scoped |
+| A10 | Amount beyond the column's precision | PROPAGATE | `22003` escapes; not silently truncated |
+| A11 | Sign of `total_amount` | **Decided** | Negatives permitted and mean a credit to the association — a statement genuinely shows one. The alternative needs a direction column that does not exist. Written into the migration so epic 2's anomaly detection reads a decision, not an accident |
+
+**Behaviour B — exactly one live extraction per document**
+
+*Could this problem happen anywhere else?* **It already did.** 1.4's `document_content_hash_unique` exists because a read-then-write lets two concurrent uploads both insert. This is the same shape one table over, and the same answer: the database decides, not the application.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| B1 | Two concurrent re-ingests both insert, so a document has two extractions and the catalog picks one arbitrarily | GUARD | `unique (document_id)`, proven by the deterministic interleaving technique from 1.4 — hold an uncommitted insert, poll `pg_stat_activity` until the second is genuinely blocked, then commit. **Not `Promise.all`**, which passed against a deliberately racy implementation last time |
+| B2 | Replacement appends instead of replacing | GUARD | After replacing, exactly one row for that document |
+| B3 | Replacing document X's extraction disturbs document Y's | GUARD | Y's row unchanged — scoping asserted, not assumed |
+| B4 | Delete-then-insert fails between the two, leaving a document with no extraction where it had one | GUARD | Replacement is a **single** statement (`on conflict do update`), so there is no window; asserted by the interleaving test above |
+| B5 | Deleting a document leaves orphaned extractions pointing at nothing | GUARD | `on delete cascade`; deleting the document removes the extraction |
+
+**Behaviour C — role grants on the new table**
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| C1 | The reader gets nothing, because migration 003 revoked default SELECT — silent until epic 2's catalog cannot read a single figure | GUARD | Reader can SELECT `extraction` |
+| C2 | The reader gets more than SELECT, re-opening AD-4 | GUARD | Reader INSERT/UPDATE/DELETE all refused (`42501`) |
+| C3 | The writer was never granted, so ingestion fails at runtime rather than at migration time | GUARD | Writer INSERT/UPDATE/DELETE succeed |
+| C4 | A later table silently inherits a grant | GUARD | The existing "granted nothing by default on tables added later" assertion in `roles.test.ts` must still pass |
+
+**The grant, decided.** `watchdog_reader` gets **SELECT**, because epic 2's catalog must attribute a figure to its source document and that is this table's purpose.
+
+The AD-10 tension is real and is resolved by what the table does *not* have: `vendor_name` and `document_number` are **bounded, typed fields** (200 and 64 characters), not raw extracted text. AD-8 already governs them — vendor identities resolve against a known-vendor table and extracted strings are never interpolated into prompts. **No column on this table may ever hold raw OCR text or a full document body.** Adding one would put raw extracted text one catalog entry from the reasoning side, which AD-10 forbids, and the grant would have to become per-column at that moment.
+
+**Out of scope for this task:** the record type and its parsing (Task 2), the decimal-places rule (Task 3, per A6), the repository that performs the replacement (Task 5), and anything about vendors resolving to known records (story 1.6).
+
 ### Debug Log References
+
+**Task 1 — red.** 34 failing, 0 passing. Verified the failures were for the right reason rather than
+counted: a missing table raises `42P01`, and every negative assertion demands a specific SQLSTATE
+(`23514`, `23502`, `23503`, `23505`, `22003`, `42501`), so none could pass vacuously. The observed
+message was `expected error: relation "extraction" does not exist … to match object { code:
+'23514' }` — the shape a real red should have.
+
+**Task 1 — green.** `apply 006_extraction.sql`; database suite 92 passing (58 baseline + 34 new).
+
+**Task 1 — sensitivity, and a false result caught before it was believed.** The first attempt
+dropped the uniqueness constraint using the **writer** connection and reported all 92 still passing —
+which would have read as "the tests do not detect its absence". They were not detecting anything:
+the drop had failed with `must be owner of table extraction` (`42501`). The writer role has no DDL
+rights, which is AD-4 working exactly as intended, and the constraint was never actually removed.
+
+Re-run through the migration owner: dropping `extraction_document_id_key` failed **exactly three**
+tests — the second-insert refusal, the upsert replacement, and the cross-document scoping test that
+relies on `on conflict` — and nothing else. Restored, 92 green.
+
+Worth keeping: a sensitivity check that reports "no test noticed" is itself a claim that needs
+checking. Here the mutation silently did not happen.
+
+### Completion Notes List
+
+**Task 1 — `migrations/006_extraction.sql`.** The `extraction` table: one row per document holding
+what it was read to say.
+
+**Constraints are database constraints, not validator etiquette.** `document_kind` is a known set,
+`vendor_name` is 1–200 characters when present, `document_number` 1–64, `currency` a supported list.
+The empty-string cases matter as much as the length caps: absent and present-but-empty are different
+facts, and only the first is legitimate — a statement has no vendor, whereas `''` is a parser that
+found nothing and said so in the wrong vocabulary. It would flow downstream as a real vendor named
+"".
+
+**Money is `numeric(14,2)`, and the tests compare it as a string.** Reading it into a JS number is
+the exact conversion the column exists to prevent, and a test that did so would agree with the bug.
+`0.10` and `99999999999.99` both round-trip byte-identical.
+
+**Negative means a credit to the association** — decided and written into the migration, because a
+statement genuinely shows one and the alternative needs a direction column this table does not have.
+Epic 2's anomaly detection will read a decision rather than an accident.
+
+**One live extraction per document is `unique (document_id)`**, which lets the writer replace with a
+single upsert. Two concurrent re-ingests cannot both insert, and there is no window in which a
+document has lost its extraction — the same reasoning, one table over, as 1.4's content-hash
+uniqueness. `on delete cascade` because an extraction without its document is not a record of
+anything.
+
+**The reader is granted SELECT, deliberately**, and the AD-10 tension is resolved by what the table
+does *not* have: `vendor_name` and `document_number` are bounded typed fields, not raw extracted
+text. The migration states that no column here may ever hold raw OCR text or a document body, and
+that adding one would force this grant to become per-column.
+
+**Carried forward to Task 3 (not handled here, and not mistaken for handled):** `numeric(14,2)`
+*rounds* rather than errors, so `1.005` becomes `1.01` with no complaint — a cent invented by the
+schema. No check constraint can catch it, because the column has already coerced the value before
+any constraint sees it. The validator must refuse more than two decimal places **before** the
+insert.
 
 ### Completion Notes List
 
 ### File List
+
+**Added**
+
+- `migrations/006_extraction.sql` — the `extraction` table, its constraints, and the reader grant
+- `migrations/extraction.test.ts` — 34 tests; requires a database, skips loudly without one
 
 ### Change Log
