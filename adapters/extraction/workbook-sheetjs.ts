@@ -136,6 +136,20 @@ export function readWorkbook(bytes: Uint8Array): WorkbookResult {
   const sheet = book.Sheets[firstSheet]
   if (sheet === undefined) return { ok: false, reason: 'no-sheets' }
 
+  // Preflight on the range the sheet *declares*, before converting anything.
+  // `sheet_to_json` below is what builds the array, so a cap applied only to its
+  // output has already paid for the allocation it exists to prevent. A sheet can
+  // declare an enormous range while holding almost no cells, which the
+  // post-conversion check cannot see at all.
+  const declared = sheet['!ref']
+  if (declared !== undefined) {
+    const range = XLSX.utils.decode_range(declared)
+    const cells =
+      (range.e.r - range.s.r + 1) * (range.e.c - range.s.c + 1)
+
+    if (cells > MAX_WORKBOOK_CELLS) return { ok: false, reason: 'too-many-cells' }
+  }
+
   // The first sheet, deliberately. Refusing multi-sheet workbooks would refuse
   // the many real exports that carry a cover sheet; the limitation is recorded
   // rather than hidden.

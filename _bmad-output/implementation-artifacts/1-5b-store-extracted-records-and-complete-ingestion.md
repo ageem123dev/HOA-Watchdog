@@ -555,6 +555,23 @@ gated on two protected masked CI variables that are not set, and setting them is
 it means giving CI credentials to a real database. Already flagged in the MR description rather than
 left to be discovered. Worth its own story alongside the `tsc --noEmit` gate from F2.
 
+### CodeRabbit round 2 — MR !9, 1 actionable finding
+
+**Fixed — the cap was placed after the call it was meant to bound.** `sheet_to_json` is what
+materialises the array, so checking `raw.length * width` afterwards has already paid for the
+allocation the check exists to prevent. Now preflighted on the range the sheet *declares*, via
+`decode_range` on `!ref`, before anything is converted. The post-conversion check stays as defence in
+depth, as the review suggested.
+
+The test that made this concrete is the discriminating one: a sheet that **declares** `A1:Z400000`
+while holding three cells. With `blankrows: false` the converted array is tiny, so the
+post-conversion guard cannot fire at all — only a preflight catches it. It failed before the fix, and
+took **13.9 seconds** doing so, which is a fair measure of what the preflight now avoids.
+
+Round-1's guard was real but mis-placed, and a cap in the wrong place reads exactly like a cap in the
+right one. Sixth of this story's guards-that-proved-less-than-claimed, and the second found by review
+rather than mutation.
+
 ### Definition of Done
 
 **PASS, with one deviation recorded rather than papered over.**
