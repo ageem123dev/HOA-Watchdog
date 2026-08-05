@@ -1,5 +1,6 @@
 ---
 baseline_commit: b369034e84b7df7fd93f1d3a8f65d061447e1d5a
+merge_request: 12
 ---
 
 # Story 1.5d: Extract on upload and show progress
