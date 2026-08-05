@@ -110,15 +110,14 @@ export interface DocumentRepository {
    * alongside the records that justify it, which is `ExtractionRepository.replace`'s
    * single transaction. A separate "mark it read" would be a way to claim
    * figures exist when they do not.
-   */
-  /**
-   * @param fence - the claim that authorises this write, when there is one.
    *
    * Fenced for the same reason `replace` is, and it is easy to miss: expiry
    * creates a second claimant, so a holder whose claim lapsed can return with a
    * *failure* and mark a document unreadable after a fresher run already
    * succeeded. Overwriting a success with a stale failure is the worse
    * direction of the same bug.
+   *
+   * @param fence - the claim that authorises this write, when there is one.
    */
   markExtractionState(
     id: string,

@@ -478,33 +478,27 @@ the repository owner rather than something to slip into a story. The decision lo
 exercise lives in `core/ingestion/extraction-feedback.ts` and is fully covered there; what is not
 covered is the wiring between it and the DOM.
 
-### File List
-
-**Task 3 (in progress) — the claim is taken before the money is spent.** Story 1.5b's parent-row lock
+**Task 3 — the claim is taken before the money is spent.** Story 1.5b's parent-row lock
 sits *inside* `replace`, which serialises the cheap part and lets the expensive part run twice: two
 pollers both call the provider, both get an answer, then queue politely to overwrite each other. The
 claim closes that by being acquired before the call, in one atomic statement whose `returning` says
 who won.
-
 **It lives in the database because two instances share no memory.** An in-memory claim is invisible
 to the instance that matters. Expiry is evaluated with the database's `now()` for the same reason:
 comparing against an application timestamp would give every instance its own clock, and skew would
 decide who owns a document.
-
 **Expiry deliberately creates a second claimant** — that is what stops a dead process holding a
 document forever — which is precisely why the write is fenced. The token is re-checked *inside* the
 finalising transaction, in the same statement that takes the row lock, so there is no window between
 checking and writing. A stale holder is refused with `StaleExtractionClaimError` and changes nothing:
 tested by claiming twice and having the first holder return late.
-
 **`extracting` is still not a durable state.** The document stays `held` for the whole run, and the
 surface derives "extracting" from `held` plus a live claim. A crash therefore leaves a claim that
 expires and a document that is still, accurately, held and waiting — rather than one stranded in a
 state with nothing to move it out.
-
-**Still open in this task:** the follow-up endpoint and its authorisation, wiring `extractDocument`
-to take and release the claim, and the transition definitions.
-
+All of it landed: the follow-up endpoint and its authorisation, the wiring through
+`extractDocument`, and the transitions. Written across three commits because the claim mechanics,
+the wiring and the endpoint each needed their own red-green cycle.
 **Task 3 (endpoint) — the access-control surface that looks like a progress bar.** It takes a
 document id and does expensive, chargeable work against the bytes behind it, so an unguarded version
 would let anyone spend the association's money reading documents they cannot otherwise see. Deny by
@@ -512,11 +506,9 @@ default, and the session is checked for substance rather than for `undefined` �
 `null` or an empty string would pass a loose check and leave it open. A malformed id is refused
 before the database sees it, because letting Postgres reject it would surface as a 500 where the
 honest answer is 400.
-
 **Nothing but a missing document is an error.** `provider-unavailable`, `unreadable` and
 `in-progress` all answer 200 with the state. A poller receiving a 5xx for "we could not reach the
 provider just now" would report a broken server for a condition the server is handling correctly.
-
 **A decision, and the point at which it becomes wrong.** Any signed-in board member may trigger
 extraction, not only the uploader. Documents belong to the association rather than to whoever
 happened to upload them, there is exactly one association in this pilot (`board_member` has no
@@ -524,44 +516,33 @@ organisation column), and restricting to the uploader would stop a colleague ret
 extraction — a real workflow. **This becomes wrong the moment a second association exists**, and the
 test that records it says so, so it should fail rather than quietly widen.
 
-### File List
-
 **Task 2 — the four states now exist where they can be trusted.** Before this migration, "has this
 been read?" was answered by looking for extraction rows, which distinguishes exactly one of the four
 outcomes AC3 requires. *Held*, *provider unavailable* and *could not be read* are all "no rows", and
 a treasurer needs a different sentence for each.
-
 **The state moves in the same transaction as the rows it describes.** `ExtractionRepository.replace`
 sets `extraction_state = 'read'` between its inserts and its commit, so `read` is never visible
 without the records that justify it, and a rollback leaves both the old state and the old rows.
-
 **`read` is not settable through the other path.** `DocumentRepository.markExtractionState` accepts
 `Exclude<ExtractionState, 'read'>` — a compile-time refusal, so there is no way to claim figures
 exist without writing them.
-
 **The check constraint constrains values, not sequences.** Which transitions are legal is Task 3's
 business; a state machine hidden in a check constraint is one nobody would find. The migration says
 so in a comment rather than leaving the omission to be read as an oversight.
-
 **`failed` is absent from the vocabulary deliberately**, and a test asserts its absence. Story 1.5b
 shipped an outcome by that name whose copy told the treasurer their document was not saved when it
 had been.
 
-### File List
-
 **Task 1 — the operation, not yet the schedule.** `extractDocument` reads a held document through the
 provider and stores what it says. When it runs is Task 3's decision; this task only had to make the
 path exist and make it safe to call.
-
 **The tabular guarantee is checked before the bytes are fetched**, so asking to extract a spreadsheet
 costs nothing and — the part that matters — cannot reach the model. Story 1.5's AC2 is a promise that
 costs money per document to break.
-
 **Routing is proven exhaustive, not just correct.** A test asserts the tabular set and the
 provider-backed set together are exactly `ACCEPTED_CONTENT_TYPES`. A type in neither would be
 uploadable and never readable; a type in both could be read twice. Neither list can drift from what
 upload accepts without failing that test.
-
 **`provider-unavailable` is broader than its name**, and this is a deliberate consequence of AC3
 fixing exactly four durable states. It covers a failed object-store read and a failed write as well
 as a provider outage. What the treasurer needs to know is identical in all three: nothing is lost,
@@ -570,7 +551,7 @@ will read as narrower than the behaviour to the next person.
 
 ### File List
 
-**Added**
+**Added and modified**
 
 - `core/ingestion/extraction-feedback.ts` — the words the treasurer reads while a document is read
 - `core/ingestion/extraction-feedback.test.ts` — 29 tests, most of them about what must *not* appear
@@ -582,9 +563,6 @@ will read as narrower than the behaviour to the next person.
 - `migrations/document-extraction-state.test.ts` — 20 tests: vocabulary parity, defaults, grants, and the state/rows agreement
 - `core/ingestion/extract-document.ts` — deferred extraction: read a held document, store what it says
 - `core/ingestion/extract-document.test.ts` — 25 tests, no network
-
-**Modified**
-
 - `core/ports/document-store.ts` — `get`, because nothing had ever read a document back
 - `core/ports/document-repository.ts` — `findById` and the `HeldDocument` shape
 - `adapters/storage/document-store-s3.ts` — `get`, mapping a missing key to `null` rather than a throw
@@ -662,7 +640,14 @@ kind mutation testing also missed, because both only look where someone already 
 | AC3 — the four states are distinguishable and "no rows" is never success | Migration 007's closed vocabulary, `document-extraction-state.test.ts`, and `extraction-feedback.test.ts` asserting the outage and unreadable copy differ |
 | AC4 — progress is staged and never partial | `extraction-feedback.ts` and its 29 tests; no rendered string may contain a digit for any outcome, and the endpoint returns no record for the surface to display |
 
-**Sensitivity: 29 mutations across the four task groups, 28 detected on the first pass**, plus 4 defects found by the local review afterwards (see Review Findings) — which is the more useful number, because mutation testing only probes where a test already exists. The one that
+**Sensitivity: 28 mutations across the four task groups, 27 detected on the first pass.** The
+28th — moving `replace`'s state change after the commit — is recorded in the Debug Log; it needed a
+test asserting *where* the statement is issued rather than what the state ends up as. An earlier
+version of this line said 29 and 28, which reconciled with nothing: the tables have always totalled
+28. Raised in review.
+
+Four further defects were found by the local adversarial review afterwards (see Review Findings), and
+that is the more useful number — mutation testing only probes where a test already exists.
 escaped is recorded in the Debug Log — moving `replace`'s state change after the commit, which needed
 a test asserting *where* the statement is issued rather than what the state ends up as.
 
@@ -680,12 +665,6 @@ behaviour are asserted by reading the code, not by rendering it, because that ne
 `@testing-library/react` and `jsdom` and adding dependencies is the repository owner's decision. The
 logic those tests would exercise is fully covered in `core/`; the wiring between it and the DOM is
 not.
-
-### Change Log
-
-### Completion Notes List
-
-### File List
 
 ### Change Log
 

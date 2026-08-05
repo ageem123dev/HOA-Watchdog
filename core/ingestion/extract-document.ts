@@ -69,18 +69,6 @@ export interface ExtractDocumentDependencies {
 }
 
 /**
- * Types a deterministic parser owns. These never reach a provider.
- *
- * Held as the complement of the provider-backed set rather than as a second
- * hand-written list: a test asserts the two together are exactly
- * `ACCEPTED_CONTENT_TYPES`, so a type that can be uploaded can never fall
- * through both — which would be a document accepted and then never readable.
- */
-/**
- * Long enough for a slow provider, short enough that a crashed run frees the
- * document while the treasurer is still watching.
- */
-/**
  * The outcome for a document that has already finished.
  *
  * Built rather than cast. An earlier version wrote
@@ -112,8 +100,20 @@ async function settledOutcome(
   }
 }
 
+/**
+ * Long enough for a slow provider, short enough that a crashed run frees the
+ * document while the treasurer is still watching.
+ */
 const DEFAULT_CLAIM_TTL_SECONDS = 300
 
+/**
+ * Types a deterministic parser owns. These never reach a provider.
+ *
+ * Held as the complement of the provider-backed set rather than as a second
+ * hand-written list: a test asserts the two together are exactly
+ * `ACCEPTED_CONTENT_TYPES`, so a type that can be uploaded can never fall
+ * through both — which would be a document accepted and then never readable.
+ */
 const TABULAR_TYPES: ReadonlySet<string> = new Set([
   'text/csv',
   'application/vnd.ms-excel',
