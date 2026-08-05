@@ -73,10 +73,10 @@ a validated collection in memory, and says so rather than implying an upload pro
   - [x] Injected client for tests; lazy construction so `next build` needs no credential (1.4's `env.ts` and S3 notes)
   - [x] Bounded timeouts — and note 1.4's lesson: `requestTimeout` without `throwOnRequestTimeout` only logs. Whatever the transport, prove the bound actually bounds
 
-- [ ] **Schema enforcement at the API layer** (AC: 1, 2)
-  - [ ] The request carries `responseMimeType: application/json` **and** `responseSchema` — AD-9 requires enforcement at the extractor, not only after the reply
-  - [ ] The reply is validated again with 1.5's `core/extraction/validate.ts`. Both halves are required; either alone is half the rule
-  - [ ] Schema sent and schema validated derive from **one** definition — assert it, do not maintain two
+- [x] **Schema enforcement at the API layer** (AC: 1, 2)
+  - [x] The request carries `responseMimeType: application/json` **and** `responseSchema` — AD-9 requires enforcement at the extractor, not only after the reply
+  - [x] The reply is validated again with 1.5's `core/extraction/validate.ts`. Both halves are required; either alone is half the rule
+  - [x] Schema sent and schema validated derive from **one** definition — assert it, do not maintain two
 
 - [ ] **The AD-10 boundary guard** (AC: 3)
   - [ ] A guard test in `core/security/`, shaped like `nfr2-guard.test.ts` — it must fail the pipeline, not live in a convention
@@ -265,6 +265,47 @@ them proves the provider actually honours `responseSchema` — only that this co
 revalidates the reply. That is what AC4's probe is for, and it is why the probe is a deliverable
 rather than a convenience. Saying so here so the coverage is not mistaken for more than it is.
 
+## Task 2 — schema enforcement at the API layer
+
+**Behaviour B — the provider is constrained before it answers, and disbelieved after**
+
+*If it ran correctly, how would I know?* The outgoing request carries both `responseMimeType:
+application/json` and a `responseSchema` whose vocabulary is this project's own, and the reply is
+still put through `core/extraction/validate.ts` before anything is believed. AD-9 asks for
+enforcement **at the extractor's API layer**; validating afterwards is a different control and does
+not satisfy it. Either half alone is half the rule.
+
+*How am I going to test this?* The injected `fetch` already exposes the request body, so the schema
+is directly inspectable. The interesting assertions compare it against `core/extraction/record.ts`
+**by importing those constants**, so the test cannot pass by agreeing with a copy of the vocabulary
+that has drifted.
+
+*What else can go wrong?* Drift is the whole risk. A schema is a second statement of a shape that is
+already stated in `record.ts` and again in migration 006, and the failure is silent in both
+directions — a schema that permits more than the validator makes every document unreadable, and one
+that permits less throws away valid figures without saying so.
+
+*Could this problem happen anywhere else?* Yes, and it already did: story 1.5 found the vocabulary
+and the migration could drift, and answered it by parity-testing the constants against the SQL. Same
+technique here, third copy.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| B1 | **`responseSchema` is never sent**, so the provider free-forms and only post-hoc validation catches it — which is not AD-9 | GUARD | The request body carries `responseSchema`; removing it fails a test |
+| B2 | `responseMimeType` is missing, so a schema-conformant answer arrives wrapped in prose | GUARD | Asserted on the request body |
+| B3 | **The schema is a hand-written copy that drifts from `record.ts`** | GUARD | Every enum and length in the schema is compared against the imported constant, not a literal |
+| B4 | The reply is trusted because a schema was sent | GUARD | Revalidation is still applied; a schema-shaped but invalid reply is refused |
+| B5 | The schema permits what the validator refuses — every document then fails, blamed on the scan | GUARD | Cross-check: each value the schema admits is accepted by `validate` |
+| B6 | The schema refuses what the validator permits — valid figures silently lost | GUARD | Cross-check in the other direction, over the vocabulary |
+| B7 | Nullability disagrees with the record type, so an absent vendor is either rejected or invented | GUARD | The nullable set is asserted against the four fields the table allows null |
+| B8 | `required` lists the wrong fields | GUARD | Asserted against the two fields that are `not null` in migration 006 |
+| B9 | The schema constrains a single record, not the collection | GUARD | The schema's root is an object with a `records` array |
+| B10 | A future kind or currency is added to `record.ts` and the schema silently keeps the old set | GUARD | This is B3's parity test; called out separately because it is the one that will actually happen |
+
+**Inverse/cross-check.** B5 and B6 together are the cross-check: the schema and the validator are two
+independent statements of one shape, so each is used as the other's oracle over the whole vocabulary
+rather than on one example.
+
 ### Debug Log References
 
 **Task 1 — red.** 33 failing against a stub whose `extract` throws, so every red was an assertion
@@ -300,7 +341,45 @@ Both are the same shape this project keeps meeting: a guard that passes whether 
 guards against is present. Eighth and ninth instances, and the first found by running a mutation on a
 security control rather than on business logic.
 
+**Task 2 — red.** 8 failing on schema assertions against an adapter that sent `responseMimeType`
+alone. **Sensitivity: eight mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| Drop `responseSchema` | **12** |
+| Drop `responseMimeType` | 1 |
+| Hand-write the kind enum so it drifts | 1 |
+| Hand-write the vendor cap as 255 | 2 |
+| Trust the reply and skip revalidation | 2 |
+| Make `vendorName` non-nullable | 1 |
+| Add a nullable column to `required` | 1 |
+| Constrain a record instead of the collection | 1 |
+
+The two hand-written mutations are the ones worth having: both are *plausible* schemas, wrong only
+because they disagree with `record.ts`. They fail because the tests compare against the imported
+constants rather than against literals — a test asserting `maxLength === 255` would have passed the
+drifted version happily.
+
 ### Completion Notes List
+
+**Task 2 — the schema is derived, not restated.** Every enum and bound in `responseSchema()` reads
+from `core/extraction/record.ts`. Writing them out again would have made it a third statement of a
+shape already in that file and in migration 006, and drift is silent in **both** directions: a schema
+permitting more than the validator makes every document unreadable and blames the scan; one
+permitting less discards valid figures without a word. Story 1.5 met this between the vocabulary and
+the SQL and answered it the same way.
+
+**Both halves of AD-9, and neither substitutes for the other.** The schema stops the provider
+inventing a shape; the revalidation survives a provider that ignores the schema. Removing either
+fails tests — 12 and 2 respectively.
+
+**The schema lives in the adapter, not `core/`.** The *shape* is ours and comes from the vocabulary;
+the *notation* is the provider's OpenAPI subset. Putting that notation in `core/` would be the
+provider leaking upward, which is the thing the port exists to prevent.
+
+**The cross-check runs over the vocabulary, not an example.** Each kind and currency the schema
+admits is fed to `validate` and must be accepted, and one it excludes must be refused. The schema and
+the validator are two independent statements of one shape, so each is used as the other's oracle.
 
 **Task 1 — the port is where AD-8 stops being a matter of care.** `Extractor` returns
 `ExtractionRecord[]` from 1.5's vocabulary: a known kind, a `numeric(14,2)` amount, a date, a

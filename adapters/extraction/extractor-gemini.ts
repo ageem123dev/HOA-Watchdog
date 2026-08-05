@@ -1,3 +1,11 @@
+import {
+  AMOUNT_PRECISION,
+  AMOUNT_SCALE,
+  DOCUMENT_KINDS,
+  DOCUMENT_NUMBER_MAX_LENGTH,
+  SUPPORTED_CURRENCIES,
+  VENDOR_NAME_MAX_LENGTH,
+} from '../../core/extraction/record'
 import type { ExtractionRecord } from '../../core/extraction/record'
 import { validate } from '../../core/extraction/validate'
 import type { Extractor, ExtractionRequest, ExtractionResult } from '../../core/ports/extractor'
@@ -47,6 +55,61 @@ const DEFAULT_TIMEOUT_MS = 60_000
 
 /** Retrying these can succeed; the document is not at fault. */
 const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504])
+
+
+/**
+ * The schema the provider is held to, **derived** from the record vocabulary.
+ *
+ * AD-9 requires conformance enforced at the extractor's API layer, not only
+ * after the reply lands. Both halves are needed and neither substitutes for the
+ * other: the schema stops the provider inventing a shape, and the revalidation
+ * below survives a provider that ignores it.
+ *
+ * Every enum and bound here reads from `core/extraction/record.ts`. Writing them
+ * out again would make this a third copy of a shape already stated in that file
+ * and in migration 006, and drift is silent in both directions — a schema
+ * permitting more than the validator makes every document unreadable, one
+ * permitting less throws away figures without saying so. Story 1.5 met the same
+ * problem between the vocabulary and the SQL and answered it the same way.
+ *
+ * The format is the provider's OpenAPI subset, which is why it is built here
+ * rather than in `core/` — the shape is ours, the notation is theirs.
+ */
+function responseSchema(): Record<string, unknown> {
+  const MAX_INTEGER_DIGITS = AMOUNT_PRECISION - AMOUNT_SCALE
+
+  return {
+    type: 'object',
+    properties: {
+      records: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            documentKind: { type: 'string', enum: [...DOCUMENT_KINDS] },
+            vendorName: { type: 'string', maxLength: VENDOR_NAME_MAX_LENGTH, nullable: true },
+            documentNumber: {
+              type: 'string',
+              maxLength: DOCUMENT_NUMBER_MAX_LENGTH,
+              nullable: true,
+            },
+            issuedOn: { type: 'string', format: 'date', nullable: true },
+            totalAmount: {
+              type: 'string',
+              // Mirrors the validator's rule and the numeric(14,2) column.
+              pattern: `^-?\d{1,${MAX_INTEGER_DIGITS}}(\.\d{1,${AMOUNT_SCALE}})?$`,
+              nullable: true,
+            },
+            currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES] },
+          },
+          // Exactly the two columns migration 006 declares `not null`.
+          required: ['documentKind', 'currency'],
+        },
+      },
+    },
+    required: ['records'],
+  }
+}
 
 export class MissingExtractionConfigError extends Error {
   override readonly name = 'MissingExtractionConfigError'
@@ -218,7 +281,10 @@ export function createGeminiExtractor(options: GeminiExtractorOptions = {}): Ext
                   ],
                 },
               ],
-              generationConfig: { responseMimeType: 'application/json' },
+              generationConfig: {
+                responseMimeType: 'application/json',
+                responseSchema: responseSchema(),
+              },
             }),
           },
         )

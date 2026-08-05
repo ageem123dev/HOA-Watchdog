@@ -15,7 +15,16 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import {
+  AMOUNT_PRECISION,
+  AMOUNT_SCALE,
+  DOCUMENT_KINDS,
+  DOCUMENT_NUMBER_MAX_LENGTH,
+  SUPPORTED_CURRENCIES,
+  VENDOR_NAME_MAX_LENGTH,
+} from '../../core/extraction/record'
 import type { ExtractionRecord } from '../../core/extraction/record'
+import { validate } from '../../core/extraction/validate'
 import {
   createGeminiExtractor,
   MAX_REPLY_BYTES,
@@ -343,6 +352,123 @@ describe('the Gemini extraction adapter', () => {
         const text = `${error.message}\n${error.stack ?? ''}`
         return text.includes('GEMINI_OCR_MODEL') && !text.includes(ENV.GEMINI_API_KEY)
       })
+    })
+  })
+
+
+  describe('schema enforcement at the API layer (AD-9, Task 2)', () => {
+    const sentBody = async () => {
+      const fetchMock = ok(providerReply([RECORD]))
+      await extractorWith(fetchMock).extract(REQUEST)
+      return JSON.parse(String(requestOf(fetchMock).init.body))
+    }
+    const sentSchema = async () => (await sentBody()).generationConfig.responseSchema
+    const recordSchema = async () => (await sentSchema()).properties.records.items
+
+    it('asks for JSON rather than prose (B2)', async () => {
+      expect((await sentBody()).generationConfig.responseMimeType).toBe('application/json')
+    })
+
+    it('sends a response schema, so the constraint is at the API layer (B1)', async () => {
+      // AD-9 is specifically about enforcement *at the extractor*. Validating
+      // the reply afterwards is a different control and does not satisfy it.
+      expect(await sentSchema()).toBeDefined()
+    })
+
+    it('constrains the collection, not a single record (B9)', async () => {
+      const schema = await sentSchema()
+
+      expect(schema.properties.records.type).toBe('array')
+    })
+
+    it('enumerates exactly the document kinds the vocabulary defines (B3, B10)', async () => {
+      // Compared against the imported constant. A hand-written copy that has
+      // drifted cannot pass this by agreeing with itself.
+      expect([...(await recordSchema()).properties.documentKind.enum].sort()).toEqual(
+        [...DOCUMENT_KINDS].sort(),
+      )
+    })
+
+    it('enumerates exactly the supported currencies (B3, B10)', async () => {
+      expect([...(await recordSchema()).properties.currency.enum].sort()).toEqual(
+        [...SUPPORTED_CURRENCIES].sort(),
+      )
+    })
+
+    it('carries the vocabulary length caps rather than its own (B3)', async () => {
+      const properties = (await recordSchema()).properties
+
+      expect(properties.vendorName.maxLength).toBe(VENDOR_NAME_MAX_LENGTH)
+      expect(properties.documentNumber.maxLength).toBe(DOCUMENT_NUMBER_MAX_LENGTH)
+    })
+
+    it('bounds the amount to the precision the column actually has (B3)', async () => {
+      // numeric(14,2): twelve integer digits and two decimals. A schema that
+      // permits more produces values the database refuses after the model has
+      // already been paid for them.
+      const pattern = (await recordSchema()).properties.totalAmount.pattern
+
+      expect(pattern).toContain(String(AMOUNT_PRECISION - AMOUNT_SCALE))
+      expect(pattern).toContain(String(AMOUNT_SCALE))
+    })
+
+    it('requires exactly the two fields the table declares not-null (B8)', async () => {
+      expect([...(await recordSchema()).required].sort()).toEqual(['currency', 'documentKind'])
+    })
+
+    it('permits null on exactly the fields the table allows null (B7)', async () => {
+      const properties = (await recordSchema()).properties
+      const nullable = Object.keys(properties).filter((name) => properties[name].nullable === true)
+
+      expect(nullable.sort()).toEqual(
+        ['documentNumber', 'issuedOn', 'totalAmount', 'vendorName'].sort(),
+      )
+    })
+
+    describe('the schema and the validator agree (B5, B6)', () => {
+      it('accepts every document kind the schema admits', async () => {
+        // Cross-check: the schema is the validator's oracle, over the whole
+        // vocabulary rather than one example.
+        const kinds: string[] = (await recordSchema()).properties.documentKind.enum
+
+        expect(kinds.length).toBeGreaterThan(0)
+        for (const documentKind of kinds) {
+          expect(validate({ ...RECORD, documentKind }).ok, documentKind).toBe(true)
+        }
+      })
+
+      it('accepts every currency the schema admits', async () => {
+        const currencies: string[] = (await recordSchema()).properties.currency.enum
+
+        expect(currencies.length).toBeGreaterThan(0)
+        for (const currency of currencies) {
+          expect(validate({ ...RECORD, currency }).ok, currency).toBe(true)
+        }
+      })
+
+      it('refuses a kind the schema does not admit, in the other direction', async () => {
+        const kinds: string[] = (await recordSchema()).properties.documentKind.enum
+
+        expect(kinds).not.toContain('receipt')
+        expect(validate({ ...RECORD, documentKind: 'receipt' }).ok).toBe(false)
+      })
+
+      it('refuses a vendor name one character past the schema cap', async () => {
+        const cap: number = (await recordSchema()).properties.vendorName.maxLength
+
+        expect(validate({ ...RECORD, vendorName: 'x'.repeat(cap) }).ok).toBe(true)
+        expect(validate({ ...RECORD, vendorName: 'x'.repeat(cap + 1) }).ok).toBe(false)
+      })
+    })
+
+    it('still revalidates the reply, schema or no schema (B4)', async () => {
+      // Sending a schema is not grounds for believing the answer. This is the
+      // half of AD-9 that survives a provider ignoring its instructions.
+      const result = await extractorWith(
+        ok(providerReply([{ ...RECORD, totalAmount: 'not a number' }])),
+      ).extract(REQUEST)
+
+      expect(result).toMatchObject({ ok: false, refusal: 'invalid' })
     })
   })
 
