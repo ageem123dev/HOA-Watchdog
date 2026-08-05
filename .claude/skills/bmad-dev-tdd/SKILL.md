@@ -419,8 +419,8 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
       <action>Verify EVERY finding against the real file before assigning severity — the engine reasons from a token-budgeted
         slice and can cite code it only partly saw. Label each confirmed, not-reproduced, or disagree</action>
       <action>Fix confirmed findings test-first: a regression test that fails against the pre-fix code and passes after</action>
-      <action if="the task's diff is ENTIRELY documentation/comments/story files, OR entirely test-only changes with no
-        production change">Skip the call and SAY WHICH of those two applied, in the completion notes. There is no size
+      <action if="the task's diff is ENTIRELY documentation/comments/story/planning files, OR entirely test-only changes with
+        no production change">Skip the call and SAY WHICH of those two applied, in the completion notes. There is no size
         exemption: judging a small diff to be harmless is the reasoning the review exists to check, and the two-line change
         that made `provider_unavailable` terminal could have lost a document permanently. A skipped check nobody mentions
         reads exactly like a check that passed</action>

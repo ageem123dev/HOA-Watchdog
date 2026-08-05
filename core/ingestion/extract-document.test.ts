@@ -325,8 +325,10 @@ describe('extractDocument', () => {
 
       const [, ttl] = vi.mocked(f.repository.claimForExtraction).mock.calls[0]!
 
-      expect(typeof ttl).toBe('number')
-      expect(ttl).toBeGreaterThan(30)
+      // The actual default, not merely "more than nothing". A loose bound
+       // passes for a 31-second claim, which would expire under a slow provider
+       // and hand the document to a second caller mid-run. Raised in review.
+      expect(ttl).toBe(300)
     })
 
     it('honours an explicit claim TTL', async () => {

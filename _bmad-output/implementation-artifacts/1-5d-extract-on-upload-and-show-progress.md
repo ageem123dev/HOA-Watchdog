@@ -648,12 +648,11 @@ version of this line said 29 and 28, which reconciled with nothing: the tables h
 
 Four further defects were found by the local adversarial review afterwards (see Review Findings), and
 that is the more useful number — mutation testing only probes where a test already exists.
-escaped is recorded in the Debug Log — moving `replace`'s state change after the commit, which needed
-a test asserting *where* the statement is issued rather than what the state ends up as.
 
-**Gates on this head:** lint clean, `next build` compiled, **987 unit passed / 150 skipped**,
-**153 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
-clean.
+**Gates on this head:** lint clean, `next build` compiled, **1017 unit passed / 156 skipped**,
+**161 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
+clean. Counts moved during review: the suites grew as findings were fixed test-first, and the
+database count fell by one where a vacuous test was replaced rather than added to.
 
 **Not proven by CI, stated rather than implied.** `verify:database` still does not run without the
 two protected variables, and this story is the most database-dependent one yet: the claim race, the

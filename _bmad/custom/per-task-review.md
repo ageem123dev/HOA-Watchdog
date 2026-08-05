@@ -64,7 +64,7 @@ them as a diff is reviewing the prose against itself.
 
 The review may be skipped **only** when the task's diff is entirely one of:
 
-1. documentation, comments, or story and planning files
+1. documentation, comments, or story and planning files (including sprint status)
 2. test fixtures or test-only changes with **no** production change
 
 Nothing else. In particular there is **no size exemption**. An earlier version of this file allowed

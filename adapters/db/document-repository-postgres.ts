@@ -227,24 +227,30 @@ export function createPostgresDocumentRepository(
       // that from `held` plus a live claim, and this row is no longer `held`.
       const cooling = state === 'provider_unavailable'
 
+      // One statement with the fence appended, rather than two near-identical
+      // strings. The duplication is how the bug below hid: only one copy would
+      // have been fixed.
+      //
+      // The expiry follows the token. Keeping the existing token while setting
+      // an expiry leaves a NULL token with a non-NULL expiry on an unclaimed
+      // document, which `document_extraction_claim_complete` refuses — so an
+      // unfenced `provider_unavailable` write failed with 23514. Raised in
+      // review.
+      const sql = `update document
+              set extraction_state = $2,
+                  extraction_claim_token = case
+                    when $3 and extraction_claim_token is not null then extraction_claim_token
+                    else null
+                  end,
+                  extraction_claim_expires_at = case
+                    when $3 and extraction_claim_token is not null
+                      then now() + make_interval(secs => $4)
+                    else null
+                  end
+            where id = $1`
+
       const { rowCount } = await pool().query(
-        fence === undefined
-          ? `update document
-                set extraction_state = $2,
-                    extraction_claim_token = case when $3 then extraction_claim_token else null end,
-                    extraction_claim_expires_at = case
-                      when $3 then now() + make_interval(secs => $4)
-                      else null
-                    end
-              where id = $1`
-          : `update document
-                set extraction_state = $2,
-                    extraction_claim_token = case when $3 then extraction_claim_token else null end,
-                    extraction_claim_expires_at = case
-                      when $3 then now() + make_interval(secs => $4)
-                      else null
-                    end
-              where id = $1 and extraction_claim_token = $5`,
+        fence === undefined ? sql : `${sql} and extraction_claim_token = $5`,
         fence === undefined
           ? [id, state, cooling, RETRY_COOLDOWN_SECONDS]
           : [id, state, cooling, RETRY_COOLDOWN_SECONDS, fence.token],

@@ -473,6 +473,48 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
         expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
       })
 
+      it('cools for the configured window, not merely "some expiry"', async () => {
+        // Asserting only that an expiry exists would pass for a one-second
+        // cooldown, which caps nothing. Raised in review.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'provider_unavailable', {
+          token: claim!.token,
+        })
+
+        const { rows } = await admin.query<{ seconds: string }>(
+          `select extract(epoch from (extraction_claim_expires_at - now()))::text as seconds
+             from document where id = $1`,
+          [documentId],
+        )
+        const seconds = Number(rows[0]!.seconds)
+
+        expect(seconds).toBeGreaterThan(45)
+        expect(seconds).toBeLessThanOrEqual(60)
+      })
+
+      it('does not leave an expiry without a token when nobody holds a claim', async () => {
+        // The unfenced path kept whatever token was there -- NULL, for an
+        // unclaimed document -- while still setting an expiry, which violates
+        // document_extraction_claim_complete. The two SQL strings were near
+        // identical, which is exactly where it hid. Raised in review.
+        const documentId = await heldDocument()
+
+        await expect(
+          repository.markExtractionState(documentId, 'provider_unavailable'),
+        ).resolves.toBeUndefined()
+
+        const { rows } = await admin.query<{ token: string | null; expires: string | null }>(
+          `select extraction_claim_token as token,
+                  extraction_claim_expires_at::text as expires
+             from document where id = $1`,
+          [documentId],
+        )
+        expect(rows[0]?.token).toBeNull()
+        expect(rows[0]?.expires).toBeNull()
+      })
+
       it('is claimable again once the cooldown has passed', async () => {
         // The other direction. Without this the cooldown could be permanent and
         // the test above would still pass — the retry path would be dead.
