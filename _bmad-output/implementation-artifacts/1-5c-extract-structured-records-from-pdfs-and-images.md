@@ -1,5 +1,6 @@
 ---
 baseline_commit: c894c032a67f3bbf5830a575f549f395c98bd25c
+merge_request: 10
 ---
 
 # Story 1.5c: Extract structured records from PDFs and images
