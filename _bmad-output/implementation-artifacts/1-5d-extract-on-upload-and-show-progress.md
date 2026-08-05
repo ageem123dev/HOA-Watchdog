@@ -5,7 +5,7 @@ merge_request: 12
 
 # Story 1.5d: Extract on upload and show progress
 
-Status: review
+Status: done
 
 > **Fourth of four stories from epic story 1.5.**
 > **1.5** built the deterministic path and the shared foundation. **1.5b** stores records and wires
@@ -677,7 +677,7 @@ version of this line said 29 and 28, which reconciled with nothing: the tables h
 Four further defects were found by the local adversarial review afterwards (see Review Findings), and
 that is the more useful number — mutation testing only probes where a test already exists.
 
-**Gates on this head:** lint clean, `next build` compiled, **1020 unit passed / 158 skipped**,
+**Gates on the merged head (`c19c801`):** lint clean, `next build` compiled, **1021 unit passed / 158 skipped**,
 **161 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
 clean. Counts moved during review: the suites grew as findings were fixed test-first, and the
 database count fell by one where a vacuous test was replaced rather than added to.
@@ -705,3 +705,35 @@ not.
   transaction as the records it describes, a database-held claim taken *before* the provider call and
   fencing the write against a stale holder, an authenticated follow-up endpoint, and a staged-progress
   surface that has no figure available to display partially. Status -> review.
+
+- 2026-08-05 — Merged via MR !12 (merge commit `3b42fd7`). Status -> done.
+
+  **Five review rounds, 35 findings.** Round 1 found 20 in the original code; rounds 2 and 3 found 8,
+  every one of them a defect in a *fix*; round 4 found 3; round 5 found 3 and **none in the code**,
+  which is where convergence actually showed. One finding was declined — rewriting the already-applied
+  migration 007 as `NOT VALID` — and CodeRabbit later withdrew it, agreeing the applied history makes
+  the change unsafe.
+
+  **The retry cooldown was the story's hard part, and it had three ways around it.** Round 3 added it:
+  `markExtractionState` retains the claim for `provider_unavailable`, and the remaining expiry is the
+  budget. Then `settle` released immediately after marking, clearing what it had just written (found
+  by a local adversarial review of the fix diff). Then the generic `catch` released and left the row
+  `held`, which is immediately re-claimable — worst of the three, since that throw can come from
+  `replace`, *after* the provider has been paid (found by round 4). And twice a test I had written to
+  pin correct behaviour was the obstacle to the fix: both asserted "releases the claim so a retry need
+  not wait", true when written and wrong the moment a cooldown existed.
+
+  **That is what added the test-value pass to the gate** (`_bmad/custom/review-gate.md` §2a). Mutation
+  testing cannot see an expired premise, because such a test is *strongly* sensitive — break the code
+  and it fails loudly, so it looks like the healthiest test in the suite. Running the new pass on this
+  story's own diff immediately found the mirror image: after two tests were correctly re-specified from
+  "asserts a release" to "asserts no release", the one still-legitimate release had no cover at all,
+  and deleting it left the whole suite green. The suite got *greener*, so nothing complained.
+
+  **Merged before a round-6 review ran.** The user merged at 22:58 on a green pipeline with every
+  thread resolved; the two pushes after round 5 (the checker hardening and a merge of `main`) drew no
+  review of their own. Recorded because "reviewed" and "merged" are separate facts and this story ends
+  with the second but not the third round of the first.
+
+  **Epic 1 does not close here.** Story 1.6 was split into 1.6a–d before implementation (MR !13), so
+  four stories remain in `backlog` and `epic-1` stays `in-progress`.
