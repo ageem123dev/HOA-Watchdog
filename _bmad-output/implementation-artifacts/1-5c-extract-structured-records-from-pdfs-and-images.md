@@ -464,7 +464,7 @@ developer it inconveniences". Two tests now pin the distinction.
 **Two self-inflicted defects worth recording.**
 
 *A control byte in source, for the third time in this epic.* Building the regex through a shell
-heredoc into Python produced a literal `0x08` where `` was intended — the same class of corruption
+heredoc into Python produced a literal `0x08` where `\b` was intended — the same class of corruption
 as the NUL bytes in stories 1.2 and 1.5, and again invisible in an editor. Fixed by writing the
 repair script to disk with a raw string rather than piping escapes through two interpreters. A
 repo-wide sweep of every tracked file now reports **zero** NUL, backspace, vertical-tab or form-feed
