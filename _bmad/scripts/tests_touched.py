@@ -84,7 +84,14 @@ DECLARATION = re.compile(
 
 # Deliberately loose: anything that *looks* like a declaration. Whatever this
 # finds and DECLARATION does not is reported rather than dropped.
-LOOSE = re.compile(r"^[ \t]*(?:it|test|describe)\s*[.(]", re.MULTILINE)
+#
+# The `\b` is belt-and-braces. A review argued that without it `items.map(` and
+# `tests.forEach(` would be reported as unparsed declarations; they are not,
+# because the character after `it` or `test` there is a letter and not `.` or
+# `(`, so the pattern already rejects them. Kept anyway: it costs nothing and
+# states the intent, so a later edit to the trailing class cannot introduce the
+# false positives the review was worried about.
+LOOSE = re.compile(r"^[ \t]*(?:it|test|describe)\b\s*[.(]", re.MULTILINE)
 
 
 def run(*args: str) -> str:
@@ -154,7 +161,12 @@ def declarations(text: str) -> list[tuple[int, str, str, str]]:
     """(line, kind, modifier, title) for every declaration in the source."""
     found = []
     for match in DECLARATION.finditer(text):
-        modifier = re.sub(r"\([\s\S]*\)", "", match.group("modifier") or "")
+        # Strip the argument lists, keep the modifier names: `.each([...])`
+        # displays as `.each`. Stripped with the same balanced pattern that
+        # matched them -- a non-greedy `\(.*?\)` leaves residue on nested args,
+        # and a greedy `\(.*\)` swallows everything between the first and last
+        # paren, so `.each(a).skip.each(b)` lost its middle. Raised in review.
+        modifier = re.sub(NESTED_ARGS, "", match.group("modifier") or "")
         line = text.count("\n", 0, match.start()) + 1
         found.append((line, match.group("fn"), modifier, match.group("title")))
     return found
