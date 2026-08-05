@@ -806,13 +806,22 @@ will not run the one check that proves AD-9**. The evidence is the local run quo
   tracked deploy manifest, and the connectivity probe that proves AD-9 against the live provider.
   Status -> review.
 
-- 2026-08-05 — MR !10, five CodeRabbit rounds, 20 findings. Two were real defects: the `totalAmount`
-  pattern sent to the provider was `^-?d{1,12}(.d{1,2})?$` (a template literal had swallowed every
-  backslash, so it rejected `1450.00` and accepted `d.d`), and the request deadline was cleared before
-  the streaming body read, leaving it unbounded. Rounds 3-5 were about the quality of the tests
-  written for those fixes — three consecutive rounds on one assertion. One finding declined with its
-  limitation stated: making the probe injectable for runtime tests. Pipeline green on the final head.
-  Status -> done (ready to merge; the merge is the user's).
+- 2026-08-05 — MR !10, five CodeRabbit rounds, 20 findings. **Four were real defects**, and it is
+  worth counting them accurately because an earlier draft of this entry said two.
+
+  Two were in the adapter as first written: the `totalAmount` pattern sent to the provider was
+  `^-?d{1,12}(.d{1,2})?$` — a template literal had swallowed every backslash, so it rejected
+  `1450.00` and accepted `d.d` — and the request deadline was cleared before the streaming body read,
+  leaving it unbounded.
+
+  Two more were introduced by the fixes for those and caught the round after: `raceAbort` retained an
+  abort listener per chunk, and the deadline released the reader's lock without cancelling the
+  stream, so it stopped waiting without stopping the work.
+
+  Rounds 3-5 were about the quality of the tests written for the fixes — three consecutive rounds on
+  a single assertion. One finding declined with its limitation stated: making the probe injectable
+  for runtime tests. Pipeline green on the final head. Status -> done (ready to merge; the merge is
+  the user's).
 
 - 2026-08-05 — Removed another session's work-in-progress (argus review routing, its code-review skill
   edits and `.mcp.json`) that an overly broad `git add -A` had swept onto this branch. It is preserved
