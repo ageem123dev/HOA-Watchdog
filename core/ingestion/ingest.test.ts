@@ -72,6 +72,7 @@ function fakes(
     },
     repository: {
       findById: vi.fn(async () => null),
+      markExtractionState: vi.fn(async () => undefined),
       // `destructiveCalls` stays empty by construction now that the port has no
       // destructive method. It is still asserted, so re-introducing one without
       // a place for it in the ordering fails these tests rather than passing

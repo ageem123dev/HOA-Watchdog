@@ -2,6 +2,7 @@ import { Pool } from 'pg'
 
 import type {
   DocumentRepository,
+  ExtractionState,
   HeldDocument,
   NewDocument,
   RecordedDocument,
@@ -118,12 +119,32 @@ export function createPostgresDocumentRepository(
         id: string
         storage_key: string
         content_type: string
-      }>('select id, storage_key, content_type from document where id = $1', [id])
+        extraction_state: ExtractionState
+      }>(
+        'select id, storage_key, content_type, extraction_state from document where id = $1',
+        [id],
+      )
 
       const row = rows[0]
       if (row === undefined) return null
 
-      return { id: row.id, storageKey: row.storage_key, contentType: row.content_type }
+      return {
+        id: row.id,
+        storageKey: row.storage_key,
+        contentType: row.content_type,
+        extractionState: row.extraction_state,
+      }
+    },
+
+    async markExtractionState(
+      id: string,
+      state: Exclude<ExtractionState, 'read'>,
+    ): Promise<void> {
+      // Parameterised, so the closed vocabulary is enforced by
+      // `document_extraction_state_known` rather than by string building here.
+      // If a value ever escapes the type, the database refuses it with 23514
+      // instead of storing a state nothing can render.
+      await pool().query('update document set extraction_state = $2 where id = $1', [id, state])
     },
   }
 }

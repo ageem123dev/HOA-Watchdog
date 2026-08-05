@@ -105,6 +105,15 @@ export function createPostgresExtractionRepository(
           )
         }
 
+        // The state moves in the same transaction as the rows it describes.
+        // Committed separately, a crash between them leaves `read` with nothing
+        // to show or a full set of records still reading `held` -- and story
+        // 1.5d's AC3 turns on those never disagreeing.
+        await client.query(
+          "update document set extraction_state = 'read' where id = $1",
+          [documentId],
+        )
+
         await client.query('commit')
       } catch (error) {
         // The rollback is what makes the previous set survive. Without it the

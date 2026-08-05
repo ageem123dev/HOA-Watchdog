@@ -58,12 +58,18 @@ function fakes(
 
   const held: HeldDocument | null =
     options.document === undefined
-      ? { id: DOCUMENT_ID, storageKey: 'documents/ab/cdef', contentType: 'application/pdf' }
+      ? {
+          id: DOCUMENT_ID,
+          storageKey: 'documents/ab/cdef',
+          contentType: 'application/pdf',
+          extractionState: 'held' as const,
+        }
       : options.document
 
   const repository: DocumentRepository = {
     record: vi.fn(async () => ({ id: DOCUMENT_ID, alreadyHeld: false })),
     findById: vi.fn(async () => held),
+    markExtractionState: vi.fn(async () => undefined),
   }
 
   const store: DocumentStore = {
@@ -134,6 +140,7 @@ describe('extractDocument', () => {
         id: DOCUMENT_ID,
         storageKey: 'documents/99/deadbeef',
         contentType: 'application/pdf',
+        extractionState: 'held',
       }
       const f = fakes({ document })
 
@@ -155,7 +162,9 @@ describe('extractDocument', () => {
   describe('the deterministic path never reaches the model (A1, A8)', () => {
     it.each(TABULAR)('does not call the provider for %s', async (contentType) => {
       // Story 1.5's AC2 guarantee. It also costs money per document to break.
-      const f = fakes({ document: { id: DOCUMENT_ID, storageKey: 'k', contentType } })
+      const f = fakes({
+        document: { id: DOCUMENT_ID, storageKey: 'k', contentType, extractionState: 'held' },
+      })
 
       const outcome = await extractDocument(DOCUMENT_ID, f)
 
@@ -166,7 +175,9 @@ describe('extractDocument', () => {
     it.each(PROVIDER_BACKED)('does call the provider for %s', async (contentType) => {
       // The other direction. Without this, the guard above passes for an
       // implementation that never calls the provider at all.
-      const f = fakes({ document: { id: DOCUMENT_ID, storageKey: 'k', contentType } })
+      const f = fakes({
+        document: { id: DOCUMENT_ID, storageKey: 'k', contentType, extractionState: 'held' },
+      })
 
       await extractDocument(DOCUMENT_ID, f)
 
@@ -184,7 +195,7 @@ describe('extractDocument', () => {
     })
 
     it('stores nothing for a tabular document', async () => {
-      const f = fakes({ document: { id: DOCUMENT_ID, storageKey: 'k', contentType: 'text/csv' } })
+      const f = fakes({ document: { id: DOCUMENT_ID, storageKey: 'k', contentType: 'text/csv', extractionState: 'held' } })
 
       await extractDocument(DOCUMENT_ID, f)
 

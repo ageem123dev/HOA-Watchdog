@@ -66,18 +66,18 @@ from *could not be read*
   - [x] Store through 1.5b's `ExtractionRepository.replace`, which is already transactional and refuses an empty set. Do not add a second way to write records
   - [x] **`provider unavailable` is not `unreadable`.** One is retryable and not the document's fault; the other says the scan is bad. 1.5b made exactly this mistake with `failed` and had to add `figures-not-stored` — do not repeat it
 
-- [ ] **A durable extraction state on `document`** (AC: 1, 3) — *raised in review of 1.5c, MR !10*
-  - [ ] **The four states are not currently representable.** `document` has no state column, and
+- [x] **A durable extraction state on `document`** (AC: 1, 3) — *raised in review of 1.5c, MR !10*
+  - [x] **The four states are not currently representable.** `document` has no state column, and
         `ExtractionRepository.replace` touches only extraction rows. Extraction rows alone cannot
         tell *held, not yet read* from *provider unavailable* from *could not be read* — all three
         are "no rows". AC3 says a document with no rows is never successful, and today nothing can
         express that
-  - [ ] A migration adding the state, with the same `check` discipline as migration 006 — a closed
+  - [x] A migration adding the state, with the same `check` discipline as migration 006 — a closed
         vocabulary the database enforces, not a free-text column
-  - [ ] **One transaction boundary** covering the state transition *and* the record replacement, so
+  - [x] **One transaction boundary** covering the state transition *and* the record replacement, so
         `read` is committed only with a complete validated set and neither failure path can leave a
         state that disagrees with the rows
-  - [ ] Do **not** reuse `failed`: its copy tells the treasurer the document was not saved, which is
+  - [x] Do **not** reuse `failed`: its copy tells the treasurer the document was not saved, which is
         exactly the mistake 1.5b had to correct by adding `figures-not-stored`
 
 - [ ] **Deferred extraction** (AC: 1, 3)
@@ -230,6 +230,42 @@ surface.
 extractor returned, and the storage key against one recomputed from the document record — both
 derived independently in the test rather than read back from the code under test.
 
+## Task 2 — a durable extraction state
+
+**Behaviour B — the four states exist in the database, and the state never disagrees with the rows**
+
+*If it ran correctly, how would I know?* A document carries exactly one of four states, the database
+refuses a fifth, and `read` is never visible while the records that justify it are absent. A document
+with no extraction rows is never in a state that renders as success.
+
+*How am I going to test this?* Against a real Postgres, as stories 1.5 and 1.5b did — a check
+constraint asserted through a fake is a fake asserting itself. The atomicity claim needs the same
+treatment: a transaction rolled back mid-flight, with the state read afterwards.
+
+*What else can go wrong?* The state is a second statement of something the rows already partly say,
+so the dominant risk is **disagreement**: `read` with nothing to show, or a full set of records under
+`held`. Every path that changes one must change the other in the same transaction.
+
+*Could this problem happen anywhere else?* This is the fourth appearance of the drift shape in this
+epic — vocabulary versus SQL in 1.5, schema versus validator in 1.5c, and now state versus rows. Same
+answer each time: one definition, and a test that fails when the copies disagree.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| B1 | **`read` is committed without the records that justify it** | GUARD | Replacement sets the state in the *same* transaction; a rollback mid-flight leaves the old state and the old rows |
+| B2 | The column is free text and accepts anything | GUARD | A `check` over a closed vocabulary; an invalid value is refused with `23514` |
+| B3 | **The TypeScript vocabulary drifts from the SQL** | GUARD | Parity test reading `007_*.sql` and comparing against the exported constant, as 1.5 does for document kinds |
+| B4 | Documents that predate the migration have no state | GUARD | `not null default 'held'`, asserted against a row inserted without one |
+| B5 | A failed replacement leaves the state advanced anyway | GUARD | The rollback test above, read from a second connection |
+| B6 | The reader role cannot see the state, so the surface cannot render it | GUARD | `watchdog_reader` can select it; asserted, since AD-4 makes that grant deliberate |
+| B7 | The reader role can *write* it | GUARD | An update as `watchdog_reader` is refused with `42501` |
+| B8 | `failed` is reused, whose copy says the document was not saved | Unrepresentable | It is not in the vocabulary, and the `check` refuses it |
+| B9 | A state moves backwards — `read` reverting to `held` on a later failure | OUT-OF-SCOPE | Task 3 owns transitions. Recorded so the schema is not mistaken for a state machine: it constrains values, not sequences |
+
+**Inverse/cross-check.** The vocabulary is compared in both directions — every value the TypeScript
+constant admits is accepted by the database, and a value it excludes is refused. Neither list is the
+other's copy; the SQL is read from disk.
+
 ### Debug Log References
 
 **Task 1 — red.** 24 failing against a stub whose `extractDocument` throws, so every red was an
@@ -261,7 +297,61 @@ Both return `null` rather than throwing for the absent case. A missing object an
 bucket are different situations — one means this document can never be extracted, the other means
 try later — and a caller that cannot tell them apart tells the treasurer the wrong thing.
 
+**Task 2 — sensitivity, and one mutation that escaped the first attempt.**
+
+| Mutation | Failures |
+| --- | --- |
+| `replace` never moves the state | 3 |
+| **Move the state update to after `commit`** | **0 → 1** |
+| SQL vocabulary drifts from the exported constant | 1 |
+
+**The post-commit mutation is the one worth recording.** My first two tests asserted that `replace`
+marks a document `read`, and that a failed `replace` leaves it `held`. Both pass with the update
+moved *after* the commit — because when `replace` throws it never reaches either statement, so the
+state stays `held` either way.
+
+What that arrangement actually breaks is narrower and worse: a crash between the commit and the
+update leaves the records committed with the document still reading `held`. That is exactly the
+disagreement AC3 forbids, and nothing would ever report it. Observing it from outside would need a
+real crash; what *can* be observed deterministically is **where the statement is issued** — on the
+transaction's own client, before its commit. The added test asserts that, and the post-commit
+version now fails it while passing everything else.
+
+Tenth instance of a guard proving less than its description claimed, and the first found by
+mutating for a *crash window* rather than for a wrong value.
+
+**A green that was not green.** `npm run test:db` reported `115 passed | 17 skipped` while a suite
+had failed outright — vitest reports a suite whose `beforeAll` throws as skipped tests, and the
+grep pattern used throughout this project (`Tests +[0-9]`) does not show the `Test Files … failed`
+line that says so. The hook was inserting a board member with `password_hash: 'x'`, which
+`board_member_password_hash_format` refuses. Every gate check in this story now greps `Test Files`
+as well, because a pattern that cannot see a failed suite is a pattern that reports success for the
+wrong reason — which is the story's own subject matter.
+
 ### Completion Notes List
+
+**Task 2 — the four states now exist where they can be trusted.** Before this migration, "has this
+been read?" was answered by looking for extraction rows, which distinguishes exactly one of the four
+outcomes AC3 requires. *Held*, *provider unavailable* and *could not be read* are all "no rows", and
+a treasurer needs a different sentence for each.
+
+**The state moves in the same transaction as the rows it describes.** `ExtractionRepository.replace`
+sets `extraction_state = 'read'` between its inserts and its commit, so `read` is never visible
+without the records that justify it, and a rollback leaves both the old state and the old rows.
+
+**`read` is not settable through the other path.** `DocumentRepository.markExtractionState` accepts
+`Exclude<ExtractionState, 'read'>` — a compile-time refusal, so there is no way to claim figures
+exist without writing them.
+
+**The check constraint constrains values, not sequences.** Which transitions are legal is Task 3's
+business; a state machine hidden in a check constraint is one nobody would find. The migration says
+so in a comment rather than leaving the omission to be read as an oversight.
+
+**`failed` is absent from the vocabulary deliberately**, and a test asserts its absence. Story 1.5b
+shipped an outcome by that name whose copy told the treasurer their document was not saved when it
+had been.
+
+### File List
 
 **Task 1 — the operation, not yet the schedule.** `extractDocument` reads a held document through the
 provider and stores what it says. When it runs is Task 3's decision; this task only had to make the
@@ -286,6 +376,8 @@ will read as narrower than the behaviour to the next person.
 
 **Added**
 
+- `migrations/007_document_extraction_state.sql` — the four states, a closed vocabulary, a partial index for the held query
+- `migrations/document-extraction-state.test.ts` — 20 tests: vocabulary parity, defaults, grants, and the state/rows agreement
 - `core/ingestion/extract-document.ts` — deferred extraction: read a held document, store what it says
 - `core/ingestion/extract-document.test.ts` — 25 tests, no network
 
@@ -295,6 +387,8 @@ will read as narrower than the behaviour to the next person.
 - `core/ports/document-repository.ts` — `findById` and the `HeldDocument` shape
 - `adapters/storage/document-store-s3.ts` — `get`, mapping a missing key to `null` rather than a throw
 - `adapters/db/document-repository-postgres.ts` — `findById`, selecting only what extraction needs
+- `adapters/db/extraction-repository-postgres.ts` — `replace` moves the state in the same transaction
+- `adapters/db/extraction-repository-postgres.test.ts` — 4 tests for the state, including where the statement is issued
 - `core/ingestion/ingest.test.ts`, `core/ingestion/reading.test.ts` — fakes widened to the ports
 
 ### Change Log

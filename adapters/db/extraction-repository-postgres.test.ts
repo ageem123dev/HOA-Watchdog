@@ -275,6 +275,105 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     })
   })
 
+  describe('the document state moves with the records (story 1.5d)', () => {
+    const stateOf = async (documentId: string): Promise<string> => {
+      const { rows } = await admin.query<{ extraction_state: string }>(
+        'select extraction_state from document where id = $1',
+        [documentId],
+      )
+      return rows[0]!.extraction_state
+    }
+
+    it('marks the document read', async () => {
+      const documentId = await newDocument()
+
+      expect(await stateOf(documentId)).toBe('held')
+
+      await repository.replace(documentId, [record({ vendorName: 'Evergreen' })])
+
+      expect(await stateOf(documentId)).toBe('read')
+    })
+
+    it('leaves it held when the replacement fails', async () => {
+      // The atomicity claim, tested through `replace` rather than through raw
+      // SQL. A separate test proved the database *can* do this in one
+      // transaction; only this one proves the repository actually does.
+      const documentId = await newDocument()
+
+      await expect(
+        repository.replace(documentId, [record({ totalAmount: '9'.repeat(13) })]),
+      ).rejects.toBeDefined()
+
+      expect(await stateOf(documentId)).toBe('held')
+    })
+
+    it('issues the state change inside the transaction, before the commit', async () => {
+      // The property the two tests above cannot see.
+      //
+      // Moving the update to *after* `commit` passes both of them: when
+      // `replace` throws it never reaches either statement, so the state stays
+      // `held` either way. What that arrangement actually breaks is narrower and
+      // worse — a crash between the commit and the update leaves the records
+      // committed with the document still reading `held`, which is precisely the
+      // disagreement AC3 forbids and the one nothing would ever report.
+      //
+      // Observing that from outside would need a real crash. What can be
+      // observed deterministically is *where the statement is issued*: on the
+      // transaction's own client, before its commit. Proven by mutation — the
+      // post-commit version fails this and passes everything else.
+      const issued: { via: 'client' | 'pool'; text: string }[] = []
+      const real = new Pool({ connectionString: writerUrl, max: 2 })
+
+      const watched = {
+        connect: async () => {
+          const client = await real.connect()
+          const original = client.query.bind(client)
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          client.query = ((text: any, params?: any) => {
+            if (typeof text === 'string') issued.push({ via: 'client', text })
+            return original(text, params)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          }) as any
+
+          return client
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        query: (text: any, params?: any) => {
+          if (typeof text === 'string') issued.push({ via: 'pool', text })
+          return real.query(text, params)
+        },
+        end: () => real.end(),
+      } as unknown as Pool
+
+      const documentId = await newDocument()
+
+      try {
+        const scoped = createPostgresExtractionRepository({ pool: watched })
+        await scoped.replace(documentId, [record({ vendorName: 'Atomic' })])
+      } finally {
+        await real.end()
+      }
+
+      const stateAt = issued.findIndex((q) => q.text.includes('extraction_state'))
+      const commitAt = issued.findIndex((q) => q.text.trim() === 'commit')
+
+      expect(stateAt, 'no statement set extraction_state').toBeGreaterThan(-1)
+      expect(commitAt, 'no commit was issued').toBeGreaterThan(-1)
+      expect(issued[stateAt]?.via, 'the state change bypassed the transaction').toBe('client')
+      expect(stateAt, 'the state change happened after the commit').toBeLessThan(commitAt)
+    }, 30_000)
+
+    it('does not move a document that had already been read back to held', async () => {
+      const documentId = await newDocument()
+      await repository.replace(documentId, [record({ vendorName: 'First' })])
+
+      await repository.replace(documentId, [record({ vendorName: 'Second' })])
+
+      expect(await stateOf(documentId)).toBe('read')
+    })
+  })
+
   describe('concurrency', () => {
     it('serialises two replacements rather than interleaving them', async () => {
       // Deterministic, not hopeful. A second connection holds an uncommitted
