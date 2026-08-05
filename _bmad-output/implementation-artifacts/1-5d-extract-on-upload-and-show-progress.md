@@ -116,12 +116,12 @@ from *could not be read*
         *or* provider unavailable; provider unavailable → held on retry. *Provider unavailable* must
         never collapse into *could not be read*
 
-- [ ] **Surface: staged extraction progress** (AC: 3, 4)
-  - [ ] UX-DR12's staged named extraction-progress state
-  - [ ] Live region for progress (UX-DR20)
-  - [ ] **Partial extraction is never displayed under any state** (UX-DR12, verbatim)
-  - [ ] Tokens only — `core/design/no-raw-values.test.ts` enforces this
-  - [ ] Copy for *provider unavailable* asks for nothing from the treasurer, as `figures-not-stored` does
+- [x] **Surface: staged extraction progress** (AC: 3, 4)
+  - [x] UX-DR12's staged named extraction-progress state
+  - [x] Live region for progress (UX-DR20)
+  - [x] **Partial extraction is never displayed under any state** (UX-DR12, verbatim)
+  - [x] Tokens only — `core/design/no-raw-values.test.ts` enforces this
+  - [x] Copy for *provider unavailable* asks for nothing from the treasurer, as `figures-not-stored` does
 
 ## Dev Notes
 
@@ -432,7 +432,52 @@ SQL comment written inside a template literal contained backticks, which termina
 Same family as the NUL and backspace bytes — content that means one thing to a reader and another to
 a parser. Swept the adapters for the pattern; this was the only instance.
 
+**Task 4 — sensitivity, five mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| Show a record count on success | 2 |
+| Outage copy blames the document | 2 |
+| Outage copy asks for an action | 1 |
+| `in-progress` reported as settled | 1 |
+| Outage and unreadable share a status | 1 |
+
+**Two design tokens invented and caught before they shipped.** The first draft of
+`extraction-status.tsx` styled itself with `--space-tight`, `--weight-medium`, `--size-detail` and
+`--color-text` — none of which exist. `core/design/no-raw-values.test.ts` would not have caught it:
+it fails on raw colour and type *values*, and a `var(--invented)` is neither. What catches it is
+reading the token file, which is the check that should have come first. Replaced with the two tokens
+the results table already uses for exactly this pair, so one surface does not end up with two
+vocabularies for the same distinction.
+
 ### Completion Notes List
+
+**Task 4 — "partial extraction is never displayed" is a property of what the surface can see.** The
+endpoint returns a state and never a record, so `ExtractionStatus` has no figure, vendor name or
+running count available to render even by mistake. A test asserts no rendered string contains a digit
+for any outcome — including the successful one, where "3 figures recorded" would read as a result the
+treasurer can check and there is nowhere to check it.
+
+**The outage copy asks for nothing.** `provider-unavailable` says the document could not be read just
+now and will be read shortly. It does not say "try again": that would make our outage the
+treasurer's errand, and it is the mistake story 1.5b shipped in `failed` and had to undo. Tests
+assert it neither blames the document nor requests an action, and that it reads differently from
+`unreadable` — if those two render alike, the distinction this whole story is built around never
+reaches the person it is for.
+
+**Polling stops.** The component stops when the outcome settles, caps its attempts so a tab left open
+on a stuck document stops asking, and checks for unmount *after* the await rather than before it. A
+failed request leaves the last known state on screen rather than replacing it with an error about our
+own connectivity.
+
+**Not covered, and deliberately.** There are no component-rendering tests: the live region, the
+polling lifecycle and the unmount behaviour are asserted only by reading the code, because a
+rendering test needs `@testing-library/react` and `jsdom`, and adding dependencies is a decision for
+the repository owner rather than something to slip into a story. The decision logic those tests would
+exercise lives in `core/ingestion/extraction-feedback.ts` and is fully covered there; what is not
+covered is the wiring between it and the DOM.
+
+### File List
 
 **Task 3 (in progress) — the claim is taken before the money is spent.** Story 1.5b's parent-row lock
 sits *inside* `replace`, which serialises the cheap part and lets the expensive part run twice: two
@@ -526,6 +571,9 @@ will read as narrower than the behaviour to the next person.
 
 **Added**
 
+- `core/ingestion/extraction-feedback.ts` — the words the treasurer reads while a document is read
+- `core/ingestion/extraction-feedback.test.ts` — 29 tests, most of them about what must *not* appear
+- `app/upload/extraction-status.tsx` — the polling surface, live region, staged name
 - `app/api/documents/[id]/extract/route.ts` — the deferred-extraction endpoint
 - `app/api/documents/[id]/extract/route.test.ts` — 21 tests, most of them about who may call it
 - `migrations/008_document_extraction_claim.sql` — the claim, its expiry, and why no index is added
@@ -543,6 +591,7 @@ will read as narrower than the behaviour to the next person.
 - `adapters/db/extraction-repository-postgres.ts` — `replace` moves the state in the same transaction
 - `adapters/db/extraction-repository-postgres.test.ts` — 4 tests for the state, including where the statement is issued
 - `core/ingestion/ingest.test.ts`, `core/ingestion/reading.test.ts` — fakes widened to the ports
+- `app/upload/upload-form.tsx` — renders extraction progress for documents stored but not read
 
 ### Change Log
 
