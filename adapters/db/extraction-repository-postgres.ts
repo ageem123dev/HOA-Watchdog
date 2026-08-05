@@ -1,6 +1,7 @@
 import { Pool, type PoolClient } from 'pg'
 
 import type { ExtractionRecord } from '../../core/extraction/record'
+import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import type { ExtractionRepository } from '../../core/ports/extraction-repository'
 import { readWriterDatabaseUrl } from '../auth/env'
 
@@ -58,7 +59,11 @@ export function createPostgresExtractionRepository(
   const pool = () => options.pool ?? getPool()
 
   return {
-    async replace(documentId: string, records: readonly ExtractionRecord[]): Promise<void> {
+    async replace(
+      documentId: string,
+      records: readonly ExtractionRecord[],
+      fence?: { readonly token: string },
+    ): Promise<void> {
       // An empty set is refused rather than obeyed. `replace(id, [])` reads
       // identically to "extraction found nothing", and obeying it would destroy
       // a good set on a caller's mistake. Clearing a document's records is a
@@ -83,7 +88,22 @@ export function createPostgresExtractionRepository(
         // present; a union of two sets is neither. The `document` row exists in
         // both cases, so locking it is what makes replacement serialise
         // regardless of what the document already holds.
-        await client.query('select 1 from document where id = $1 for update', [documentId])
+        // The fence is checked *inside* this transaction, in the same statement
+        // that takes the lock. Checked outside, or before `begin`, there would
+        // be a window in which the claim expires between the check and the
+        // write — which is the exact gap the fence exists to close.
+        const guarded = await client.query(
+          fence === undefined
+            ? 'select 1 from document where id = $1 for update'
+            : `select 1 from document
+                where id = $1 and extraction_claim_token = $2
+                for update`,
+          fence === undefined ? [documentId] : [documentId, fence.token],
+        )
+
+        if (fence !== undefined && guarded.rowCount === 0) {
+          throw new StaleExtractionClaimError(documentId)
+        }
 
         await client.query('delete from extraction where document_id = $1', [documentId])
 
@@ -104,6 +124,19 @@ export function createPostgresExtractionRepository(
             ],
           )
         }
+
+        // The state moves in the same transaction as the rows it describes.
+        // Committed separately, a crash between them leaves `read` with nothing
+        // to show or a full set of records still reading `held` -- and story
+        // 1.5d's AC3 turns on those never disagreeing.
+        await client.query(
+          `update document
+              set extraction_state = 'read',
+                  extraction_claim_token = null,
+                  extraction_claim_expires_at = null
+            where id = $1`,
+          [documentId],
+        )
 
         await client.query('commit')
       } catch (error) {

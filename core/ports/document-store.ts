@@ -24,4 +24,20 @@ export interface DocumentStore {
    * to clean up, and why AC2's "no second stored object" needs no check.
    */
   put(document: StoredDocument): Promise<void>
+
+  /**
+   * Read the bytes back.
+   *
+   * Story 1.5d needs this because extraction is **deferred**: the upload stores
+   * the document and returns, and a later request reads it again to extract. Up
+   * to now nothing ever read a document back, which is why this port could get
+   * away with being write-only.
+   *
+   * Returns `null` when the key is absent, rather than throwing. A missing
+   * object and an unreachable bucket are different situations — the first means
+   * this document cannot be extracted at all, the second means try later — and
+   * a caller that cannot tell them apart will tell the treasurer the wrong
+   * thing.
+   */
+  get(key: string): Promise<Uint8Array | null>
 }

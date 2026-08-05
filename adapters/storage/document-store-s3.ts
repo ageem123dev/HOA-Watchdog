@@ -1,4 +1,10 @@
-import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3'
+import {
+  GetObjectCommand,
+  NoSuchKey,
+  PutObjectCommand,
+  S3Client,
+  type S3ClientConfig,
+} from '@aws-sdk/client-s3'
 
 import type { DocumentStore, StoredDocument } from '../../core/ports/document-store'
 
@@ -157,6 +163,38 @@ export function createS3DocumentStore(options: S3DocumentStoreOptions = {}): Doc
           ContentType: document.contentType,
         }),
       )
+    },
+
+    async get(key: string): Promise<Uint8Array | null> {
+      const connection = connect()
+
+      try {
+        const object = await connection.client.send(
+          new GetObjectCommand({ Bucket: connection.bucket, Key: key }),
+        )
+
+        // `transformToByteArray` consumes the stream once. There is no second
+        // read, which is why the whole object is materialised here rather than
+        // handed upward as a stream: the caller bounds the object at upload
+        // (25 MiB), so this is bounded too.
+        const bytes = await object.Body?.transformToByteArray()
+
+        return bytes ?? null
+      } catch (error) {
+        // A missing key is an ordinary answer, not a failure: story 1.5d's
+        // extraction path has to tell "these bytes are gone, retrying will not
+        // help" from "the bucket is unreachable, try later", and the caller can
+        // only do that if this returns null for the first and throws for the
+        // second.
+        if (error instanceof NoSuchKey) return null
+
+        const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+          ?.httpStatusCode
+        if (status === 404) return null
+
+        // Everything else escapes unwrapped, for the reason `put` gives above.
+        throw error
+      }
     },
   }
 }

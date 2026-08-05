@@ -54,11 +54,16 @@ function fakes(
     replaced,
     held,
     store: {
+      get: vi.fn(async () => null),
       put: vi.fn(async () => {
         order.push('put')
       }),
     },
     repository: {
+      findById: vi.fn(async () => null),
+      markExtractionState: vi.fn(async () => undefined),
+    claimForExtraction: vi.fn(async () => null),
+    releaseExtractionClaim: vi.fn(async () => undefined),
       record: vi.fn(async (d: NewDocument) => {
         order.push('record')
         return { id: `doc-${d.contentHash.slice(0, 6)}`, alreadyHeld: Boolean(options.alreadyHeld) }

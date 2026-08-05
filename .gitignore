@@ -27,3 +27,7 @@ envprobe
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Python bytecode. A probe script generated this and `git add -A` swept it in.
+__pycache__/
+*.pyc

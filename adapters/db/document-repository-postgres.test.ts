@@ -267,4 +267,336 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await expect(repository.record(document)).rejects.toMatchObject({ code: '23503' })
   })
 
+
+  describe('claiming a document for extraction (story 1.5d)', () => {
+    let counter = 0
+    /** A fresh held document, returning its id. */
+    const heldDocument = async (): Promise<string> => {
+      counter += 1
+      const { id } = await repository.record(
+        newDocument(`claim-${Date.now()}-${counter}`, boardMemberId),
+      )
+      return id
+    }
+
+    const claimStateOf = async (id: string) => {
+      const { rows } = await admin.query<{
+        extraction_claim_token: string | null
+        expired: boolean | null
+      }>(
+        `select extraction_claim_token,
+                extraction_claim_expires_at <= now() as expired
+           from document where id = $1`,
+        [id],
+      )
+      return rows[0]!
+    }
+
+    it('gives the claim to exactly one of two callers racing it (C1, C2)', async () => {
+      // The property a fake cannot demonstrate. Acquisition must be atomic
+      // across *instances*, so this races two repositories on two pools.
+      const documentId = await heldDocument()
+      const poolA = new Pool({ connectionString: writerUrl, max: 1 })
+      const poolB = new Pool({ connectionString: writerUrl, max: 1 })
+
+      try {
+        const a = createPostgresDocumentRepository({ pool: poolA })
+        const b = createPostgresDocumentRepository({ pool: poolB })
+
+        const results = await Promise.all([
+          a.claimForExtraction(documentId, 60),
+          b.claimForExtraction(documentId, 60),
+        ])
+
+        const winners = results.filter((claim) => claim !== null)
+
+        expect(winners).toHaveLength(1)
+        expect(winners[0]!.documentId).toBe(documentId)
+      } finally {
+        await Promise.all([poolA.end(), poolB.end()])
+      }
+    }, 30_000)
+
+    it('refuses a second claim while the first is live', async () => {
+      const documentId = await heldDocument()
+
+      const held = await repository.claimForExtraction(documentId, 60)
+      const second = await repository.claimForExtraction(documentId, 60)
+
+      expect(held).not.toBeNull()
+      expect(second).toBeNull()
+    })
+
+    it('hands an expired claim to the next caller (C3)', async () => {
+      // A process that dies mid-extraction must not hold a document forever.
+      const documentId = await heldDocument()
+
+      const first = await repository.claimForExtraction(documentId, 0)
+      const second = await repository.claimForExtraction(documentId, 60)
+
+      expect(first).not.toBeNull()
+      expect(second).not.toBeNull()
+      expect(second!.token).not.toBe(first!.token)
+    })
+
+    it('gives each attempt its own token', async () => {
+      const one = await heldDocument()
+      const other = await heldDocument()
+
+      const a = await repository.claimForExtraction(one, 60)
+      const b = await repository.claimForExtraction(other, 60)
+
+      expect(a!.token).not.toBe(b!.token)
+    })
+
+    it.each(['read', 'unreadable'] as const)(
+      'does not claim a document that is %s (C8)',
+      async (state) => {
+        // Done, or needing a better scan. Re-running either spends money to
+        // reach the same answer.
+        const documentId = await heldDocument()
+        await admin.query('update document set extraction_state = $2 where id = $1', [
+          documentId,
+          state,
+        ])
+
+        expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
+      },
+    )
+
+    it('does claim a document that is provider_unavailable, because that is retryable', async () => {
+      // The transition the story requires: provider unavailable -> held on
+      // retry. Without this the state would be terminal, and a document could
+      // be permanently lost to one bad afternoon at the provider.
+      const documentId = await heldDocument()
+      await admin.query(
+        "update document set extraction_state = 'provider_unavailable' where id = $1",
+        [documentId],
+      )
+
+      expect(await repository.claimForExtraction(documentId, 60)).not.toBeNull()
+    })
+
+    it('returns a retried document to held, so there is one running state', async () => {
+      const documentId = await heldDocument()
+      await admin.query(
+        "update document set extraction_state = 'provider_unavailable' where id = $1",
+        [documentId],
+      )
+
+      await repository.claimForExtraction(documentId, 60)
+
+      const { rows } = await admin.query<{ extraction_state: string }>(
+        'select extraction_state from document where id = $1',
+        [documentId],
+      )
+      expect(rows[0]?.extraction_state).toBe('held')
+    })
+
+    it('sets an expiry alongside the token, never a token alone', async () => {
+      // The check constraint forbids one without the other. This asserts the
+      // adapter satisfies it rather than leaving the constraint to catch a bug
+      // in production.
+      const documentId = await heldDocument()
+
+      await repository.claimForExtraction(documentId, 60)
+      const claim = await claimStateOf(documentId)
+
+      expect(claim.extraction_claim_token).not.toBeNull()
+      expect(claim.expired).toBe(false)
+    })
+
+    describe('marking a state, fenced (raised in review)', () => {
+      it('records the state and clears the claim when the token is live', async () => {
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'unreadable', { token: claim!.token })
+
+        const { rows } = await admin.query<{ extraction_state: string; token: string | null }>(
+          'select extraction_state, extraction_claim_token as token from document where id = $1',
+          [documentId],
+        )
+        expect(rows[0]?.extraction_state).toBe('unreadable')
+        expect(rows[0]?.token).toBeNull()
+      })
+
+      it('refuses a superseded token and changes nothing', async () => {
+        // The reverse of the record-write fence: a holder whose claim lapsed
+        // could otherwise mark a document unreadable after a fresher run had
+        // already succeeded — overwriting a success with a stale failure.
+        const documentId = await heldDocument()
+        const first = await repository.claimForExtraction(documentId, 0)
+        const second = await repository.claimForExtraction(documentId, 60)
+
+        expect(second!.token).not.toBe(first!.token)
+
+        await expect(
+          repository.markExtractionState(documentId, 'unreadable', { token: first!.token }),
+        ).rejects.toMatchObject({ name: 'StaleExtractionClaimError' })
+
+        const { rows } = await admin.query<{ extraction_state: string; token: string }>(
+          'select extraction_state, extraction_claim_token as token from document where id = $1',
+          [documentId],
+        )
+        expect(rows[0]?.extraction_state).toBe('held')
+        expect(rows[0]?.token).toBe(second!.token)
+      })
+
+      it('works without a fence, for callers that hold no claim', async () => {
+        const documentId = await heldDocument()
+
+        await repository.markExtractionState(documentId, 'unreadable')
+
+        const { rows } = await admin.query<{ extraction_state: string }>(
+          'select extraction_state from document where id = $1',
+          [documentId],
+        )
+        expect(rows[0]?.extraction_state).toBe('unreadable')
+      })
+    })
+
+    describe('a document rests after the provider could not be reached', () => {
+      it('is not immediately claimable again', async () => {
+        // `provider_unavailable` stays claimable on purpose, but nothing capped
+        // how often. An authenticated caller could POST repeatedly and buy a
+        // fresh provider call each time, because the poller stopping is a
+        // client-side courtesy rather than a server-side limit. Raised in
+        // review.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'provider_unavailable', {
+          token: claim!.token,
+        })
+
+        expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
+      })
+
+      it('cools for the configured window, not merely "some expiry"', async () => {
+        // Asserting only that an expiry exists would pass for a one-second
+        // cooldown, which caps nothing. Raised in review.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'provider_unavailable', {
+          token: claim!.token,
+        })
+
+        const { rows } = await admin.query<{ seconds: string }>(
+          `select extract(epoch from (extraction_claim_expires_at - now()))::text as seconds
+             from document where id = $1`,
+          [documentId],
+        )
+        const seconds = Number(rows[0]!.seconds)
+
+        expect(seconds).toBeGreaterThan(45)
+        expect(seconds).toBeLessThanOrEqual(60)
+      })
+
+      it('does not leave an expiry without a token when nobody holds a claim', async () => {
+        // The unfenced path kept whatever token was there -- NULL, for an
+        // unclaimed document -- while still setting an expiry, which violates
+        // document_extraction_claim_complete. The two SQL strings were near
+        // identical, which is exactly where it hid. Raised in review.
+        const documentId = await heldDocument()
+
+        await expect(
+          repository.markExtractionState(documentId, 'provider_unavailable'),
+        ).resolves.toBeUndefined()
+
+        const { rows } = await admin.query<{ token: string | null; expires: string | null }>(
+          `select extraction_claim_token as token,
+                  extraction_claim_expires_at::text as expires
+             from document where id = $1`,
+          [documentId],
+        )
+        expect(rows[0]?.token).toBeNull()
+        expect(rows[0]?.expires).toBeNull()
+      })
+
+      it('is claimable again once the cooldown has passed', async () => {
+        // The other direction. Without this the cooldown could be permanent and
+        // the test above would still pass — the retry path would be dead.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'provider_unavailable', {
+          token: claim!.token,
+        })
+        await admin.query(
+          "update document set extraction_claim_expires_at = now() - interval '1 second' where id = $1",
+          [documentId],
+        )
+
+        expect(await repository.claimForExtraction(documentId, 60)).not.toBeNull()
+      })
+
+      it('keeps the state as provider_unavailable while it cools', async () => {
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'provider_unavailable', {
+          token: claim!.token,
+        })
+
+        const { rows } = await admin.query<{ extraction_state: string }>(
+          'select extraction_state from document where id = $1',
+          [documentId],
+        )
+        expect(rows[0]?.extraction_state).toBe('provider_unavailable')
+      })
+
+      it('does not hold a claim for the terminal states', async () => {
+        // Only the retryable one cools. `unreadable` is finished, and leaving a
+        // claim on it would be a lock nothing ever releases.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.markExtractionState(documentId, 'unreadable', { token: claim!.token })
+
+        const { rows } = await admin.query<{ token: string | null }>(
+          'select extraction_claim_token as token from document where id = $1',
+          [documentId],
+        )
+        expect(rows[0]?.token).toBeNull()
+      })
+    })
+
+    describe('releasing it', () => {
+      it('frees the document for the next caller', async () => {
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.releaseExtractionClaim(claim!)
+
+        expect(await repository.claimForExtraction(documentId, 60)).not.toBeNull()
+      })
+
+      it('clears both columns, not just the token', async () => {
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.releaseExtractionClaim(claim!)
+
+        expect((await claimStateOf(documentId)).extraction_claim_token).toBeNull()
+      })
+
+      it('ignores a release from the wrong holder (C5)', async () => {
+        // A stale claimant returning late must not hand a live document to the
+        // next caller mid-extraction.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.releaseExtractionClaim({
+          documentId,
+          token: '00000000-0000-4000-8000-000000000000',
+        })
+
+        expect((await claimStateOf(documentId)).extraction_claim_token).toBe(claim!.token)
+        expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
+      })
+    })
+  })
+
 })

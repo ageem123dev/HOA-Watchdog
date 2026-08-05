@@ -64,12 +64,28 @@ function fakes(
       findByDocument: vi.fn(async () => []),
     },
     store: {
+      get: vi.fn(async () => null),
       put: vi.fn(async (document: StoredDocument) => {
         if (options.failStoreFor?.(document)) throw new Error('R2 said no')
         stored.push(document)
       }),
     },
     repository: {
+      findById: vi.fn(async () => null),
+      // Silent stubs would let the guarantee above rot. `extractions.replace`
+      // throws so that a PDF reaching extraction is a failure rather than a
+      // pass; these are the rest of that same lifecycle and must behave the
+      // same way, or routing could later send an upload down the deferred path
+      // and this suite would stay green. Raised in review.
+      markExtractionState: vi.fn(async () => {
+        throw new Error('no file in this suite should reach the extraction lifecycle')
+      }),
+      claimForExtraction: vi.fn(async () => {
+        throw new Error('no file in this suite should claim a document')
+      }),
+      releaseExtractionClaim: vi.fn(async () => {
+        throw new Error('no file in this suite should release a claim')
+      }),
       // `destructiveCalls` stays empty by construction now that the port has no
       // destructive method. It is still asserted, so re-introducing one without
       // a place for it in the ordering fails these tests rather than passing

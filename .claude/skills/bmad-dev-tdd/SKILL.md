@@ -409,6 +409,28 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
       <critical>Restore the code immediately and re-run the suite to confirm green before proceeding</critical>
     </check>
 
+    <check if="{workflow.tdd.review_each_task} == true">
+      <critical>`_bmad/custom/review-gate.md` is the authoritative contract for this block and is loaded as a persistent
+        fact on activation. If this step file and that one ever disagree, that one wins — this one is overwritten by a BMad
+        reinstall and that one is not</critical>
+      <action>Run the adversarial review on THIS TASK'S diff — one `argus_review` call, scoped to the paths this task touched
+        since the SHA captured when it started. Follow `_bmad/custom/argus-review-routing.md` for the call shape: `repo_root`
+        mandatory and absolute, pass the diff rather than a `git_range`, one call per scope</action>
+      <action>Verify EVERY finding against the real file before assigning severity — the engine reasons from a token-budgeted
+        slice and can cite code it only partly saw. Label each confirmed, not-reproduced, or disagree</action>
+      <action>Fix confirmed findings test-first: a regression test that fails against the pre-fix code and passes after</action>
+      <action if="the task's diff is ENTIRELY documentation/comments/story/planning files, OR entirely test-only changes with
+        no production change">Skip the call and SAY WHICH of those two applied, in the completion notes. There is no size
+        exemption: judging a small diff to be harmless is the reasoning the review exists to check, and the two-line change
+        that made `provider_unavailable` terminal could have lost a document permanently. A skipped check nobody mentions
+        reads exactly like a check that passed</action>
+      <critical>This is NOT the same check as the sensitivity pass above and does not replace it. Mutation testing asks whether
+        the tests notice a line changing, so it only probes where a test already exists; the review asks what was never
+        considered. Story 1.5d ran 29 mutations, detected 28, and still carried four defects into review — including one that
+        showed "Reading" to the treasurer forever for a document that had been read successfully, because two different
+        situations returned the same value and no assertion existed to mutate</critical>
+    </check>
+
     <!-- REVIEW FOLLOW-UP HANDLING -->
     <check if="task is a review follow-up (has [AI-Review] prefix)">
       <action>Confirm a regression test exists that fails against the pre-fix code and passes now</action>

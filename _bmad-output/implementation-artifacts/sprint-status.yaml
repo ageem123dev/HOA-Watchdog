@@ -60,7 +60,7 @@ development_status:
   1-5-read-a-document-into-structured-records: done
   1-5b-store-extracted-records-and-complete-ingestion: done
   1-5c-extract-structured-records-from-pdfs-and-images: done
-  1-5d-extract-on-upload-and-show-progress: backlog
+  1-5d-extract-on-upload-and-show-progress: review
   # Epic story 1.6 is delivered as four stories; see epics.md for the AC mapping.
   # Order matters: 1.6d resolves from the queue 1.6c builds.
   1-6a-recognise-known-vendors: backlog

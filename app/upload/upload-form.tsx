@@ -5,6 +5,7 @@ import { useActionState } from 'react'
 import { ACCEPTED_CONTENT_TYPES } from '@/core/ingestion/acceptance'
 import { uploadFeedback } from '@/core/ingestion/upload-feedback'
 import { uploadDocuments } from './actions'
+import { ExtractionStatus } from './extraction-status'
 import { EMPTY_UPLOAD_STATE, type UploadState } from './upload-state'
 
 /**
@@ -88,6 +89,15 @@ export function UploadForm() {
                         <span style={styles.detail}>
                           Choose a replacement above and upload again.
                         </span>
+                      ) : null}
+                      {/*
+                        Only for documents the upload stored without reading —
+                        a scan or a PDF. Everything else is already settled by
+                        the time this table renders, and polling for it would
+                        ask a question whose answer cannot change.
+                      */}
+                      {outcome.outcome === 'stored-not-read' ? (
+                        <ExtractionStatus documentId={outcome.documentId} />
                       ) : null}
                     </td>
                   </tr>
