@@ -4,7 +4,7 @@ baseline_commit: c9167f8d32e468251802066f4944cbac1737dab1
 
 # Story 1.6a: Recognise known vendors
 
-Status: ready-for-dev
+Status: review
 
 > **First of four stories from epic story 1.6.**
 > Epic 1.6 was split before any implementation (see `epics.md`, "Delivered as four stories").
@@ -104,23 +104,23 @@ need vendor identity on the read path
         and **write the decision down**, because silent disagreement here creates exactly the duplicate
         identity this story exists to prevent
 
-- [ ] **The port and the resolver** (AC: 1, 2, 4, 5)
-  - [ ] `core/ports/vendor-directory.ts`, named for the `user-directory.ts` precedent
-  - [ ] `resolve(extractedName)` → a vendor **id** or an unresolved result. Never a name: the spine says
+- [x] **The port and the resolver** (AC: 1, 2, 4, 5)
+  - [x] `core/ports/vendor-directory.ts`, named for the `user-directory.ts` precedent
+  - [x] `resolve(extractedName)` → a vendor **id** or an unresolved result. Never a name: the spine says
         "Vendors are referenced by id, never by extracted name"
-  - [ ] `suggest(extractedName, limit)` → ranked candidates with scores, for 1.6c/d
-  - [ ] **Two methods, not one with a flag.** A single call returning "resolved or maybe these" is how a
+  - [x] `suggest(extractedName, limit)` → ranked candidates with scores, for 1.6c/d
+  - [x] **Two methods, not one with a flag.** A single call returning "resolved or maybe these" is how a
         suggestion becomes a resolution six months from now
-  - [ ] `AUTO_RESOLVE_RULE` — the named constant of AC5, exported and pinned by a test
-  - [ ] Nothing in this story calls `resolve` from ingestion. That is 1.6b
+  - [x] `AUTO_RESOLVE_RULE` — the named constant of AC5, exported and pinned by a test
+  - [x] Nothing in this story calls `resolve` from ingestion. That is 1.6b
 
-- [ ] **The Postgres adapter** (AC: 1, 2, 3, 4, 6)
-  - [ ] `adapters/db/vendor-directory-postgres.ts`, following `document-repository-postgres.ts`
-  - [ ] `resolve` matches on the normalised key — an indexed equality, not a `similarity()` call
-  - [ ] `suggest` uses `similarity()` ordered descending, limited
-  - [ ] Database tests for both, plus AC6's grant assertions run **as `watchdog_reader`**, the way
+- [x] **The Postgres adapter** (AC: 1, 2, 3, 4, 6)
+  - [x] `adapters/db/vendor-directory-postgres.ts`, following `document-repository-postgres.ts`
+  - [x] `resolve` matches on the normalised key — an indexed equality, not a `similarity()` call
+  - [x] `suggest` uses `similarity()` ordered descending, limited
+  - [x] Database tests for both, plus AC6's grant assertions run **as `watchdog_reader`**, the way
         `roles.test.ts` and `document-extraction-state.test.ts` already do
-  - [ ] A test that inserting the same vendor twice under different spellings raises **23505**
+  - [x] A test that inserting the same vendor twice under different spellings raises **23505**
 
 ## Dev Notes
 
@@ -369,8 +369,81 @@ new.
 
 ### Completion Notes List
 
+**All four tasks complete; every AC has a test that fails when the behaviour is removed.**
+
+| AC | Proved by |
+| --- | --- |
+| AC1 recognised through variation | `resolve` finds one vendor through case, padding, doubled space, tab, NBSP and narrow NBSP |
+| AC2 nothing else resolves, nothing is created | unknown, prefix-of-known and near-miss names all return `unresolved`; row count unchanged either side |
+| AC3 two spellings cannot both exist | second spelling raises **23505** from a unique index on a generated column |
+| AC4 suggestions rank and never resolve | ranked most-similar-first with scores, and a paired test suggests a name it then refuses to resolve |
+| AC5 the rule is named and pinned | `AUTO_RESOLVE_RULE` is `normalised-exact`, pinned; `resolve` uses indexed equality and a mutation to `similarity()` fails 3 tests |
+| AC6 the role split holds | `watchdog_reader` selects; insert, update and delete each refused with **42501**, asserted by connecting as that role |
+
+**Three defects were found in my own work by the gate, not by the suite going red.**
+
+*A flaky test, caught by running the suite three times rather than once.* `suggest` ranks the whole
+table by design, vitest runs files in parallel against one database, and another file's rows were
+drifting into the assertions. It failed once and passed twice on identical code. Every ranking and
+counting assertion is now scoped to the run's own prefix -- and once scoped, two tests failed
+*consistently*, which showed the earlier passes had been resting on another file's leftovers rather
+than on this story's seed data. The flake was hiding a genuinely weak test.
+
+*Seven type errors, caught by the `tsc` baseline.* The `mine()` helper was typed
+`{ displayName: string }[]`, which erased `id` and `score` from everything it returned. Lint passed,
+the suite passed, `next build` compiled. Only `npx tsc --noEmit` saw it, moving 8 -> 15, which is
+exactly why that number is recorded as a baseline rather than ignored because it is not a gate.
+
+*A no-op conversion that hid a wrong type,* raised by the adversarial review and then measured:
+`similarity()` returns float4, oid 700, which pg deserialises to a JS number. The column was typed
+`string` with a `Number()` call downstream that read like a conversion and did nothing.
+
+**Out of scope, deliberately.** Nothing calls `resolve` from ingestion -- that is 1.6b, and this
+story changes no pipeline behaviour. No quarantine table, no surface, no vendor creation path: AD-8
+says unknown vendors reach a human, and there is no human-facing anything until 1.6c.
+
+**A sibling worth naming.** `SUGGESTION_FLOOR` is a constant in the adapter rather than
+`pg_trgm.similarity_threshold`, which the `%` operator reads from the session. A pooled connection or
+another caller can change a session GUC, and behaviour that moves for reasons invisible in the file
+is the same shape of problem as the normalisation drift this story exists to prevent.
+
+### File List
+
+**Added**
+
+- `migrations/009_vendor.sql` -- the table, the normalisation function, the unique index, the grant
+- `migrations/vendor.test.ts` -- 40 cases: constraints, grants proved by connecting, and the parity corpus
+- `core/vendor/name.ts` -- the application's half of the normalisation, and `AUTO_RESOLVE_RULE`
+- `core/vendor/name.test.ts` -- 22 cases pinning the fold and the separator set
+- `core/ports/vendor-directory.ts` -- `resolve` and `suggest`, kept apart on purpose
+- `adapters/db/vendor-directory-postgres.ts` -- both queries through `vendor_normalised_name()`
+- `adapters/db/vendor-directory-postgres.test.ts` -- 25 cases against real Postgres
+
+**Modified**
+
+- `_bmad/scripts/tests_touched.py` -- it could not see untracked test files, so it reported "no test
+  files changed" for a task whose test files were all new
+
+**Gates on this head:** lint clean, `next build` compiled, **1047 unit passed / 219 skipped**,
+**226 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
+clean, database suite run **three times** for stability after the flake.
+
+**Not proven by CI.** `verify:database` still does not run without the two protected variables, and
+this story is almost entirely database behaviour: the generated column, the unique index, the grants
+and the similarity ranking are all in the part CI will not execute.
+
+
 ### File List
 
 ### Change Log
+
+- 2026-08-05 — Story created. Split from epic story 1.6 as the first of four. Status -> ready-for-dev.
+- 2026-08-05 — Tasks 1-4 implemented test-first. A `vendor` table whose identity is a generated,
+  normalised column with a unique index; one normalisation shared by the database and the
+  application, with a corpus test proving they agree; and a directory port whose `resolve` decides by
+  indexed equality while `suggest` only ranks. Three facts measured against the live database changed
+  the design before any code was written: `E'\s+'` matches the letter `s` in a migration, Postgres
+  does not count NBSP as whitespace where JavaScript does, and `lower()` disagrees with
+  `toLowerCase()` on two real characters. Status -> review.
 
 - 2026-08-05 — Story created. Split from epic story 1.6 as the first of four. Status -> ready-for-dev.
