@@ -235,7 +235,23 @@ export async function extractDocument(
       }
 
       deps.onError?.(error, documentId)
-      await deps.repository.releaseExtractionClaim(claim).catch(() => undefined)
+
+      // Recorded, not merely released. A release leaves `extraction_state` at
+      // `held`, which `claimForExtraction` treats as immediately claimable, so
+      // the next poll would re-claim at once and spend another provider call.
+      // The cooldown applied to `settle`'s paths and this one skipped it —
+      // which is worst exactly here, where the throw can come from `replace`,
+      // *after* the provider has already been paid. Raised in review round 4.
+      //
+      // Swallowed deliberately, and the outer catch is not the reason. The
+      // error being handled is frequently a database error, so this write can
+      // fail too; letting it escape would reach the outer catch, which reports
+      // through `onError` a second time — the bookkeeping failure burying the
+      // original cause in the log. The claim's TTL expires on its own and frees
+      // the document without needing any write to succeed.
+      await deps.repository
+        .markExtractionState(documentId, 'provider_unavailable', { token: claim.token })
+        .catch(() => undefined)
 
       return { outcome: 'provider-unavailable', documentId }
     }

@@ -59,7 +59,7 @@ different situations and both were treated as one, so there was no assertion to 
 
 ## 2. Order
 
-The same five steps at each of the three moments. "Task" below means whichever diff is in scope.
+The same six steps at each of the three moments. "Task" below means whichever diff is in scope.
 
 1. The diff reaches green and the full suite passes.
 2. **Sensitivity check** — break the task's load-bearing assertion, confirm the test fails, restore,
@@ -72,7 +72,7 @@ The same five steps at each of the three moments. "Task" below means whichever d
 A diff is not finished because its tests pass. It is finished when both checks have run and what
 they found has been fixed or recorded.
 
-**A fix push is a diff.** It gets the same five steps, scoped to the fix. If fixing a finding
+**A fix push is a diff.** It gets the same six steps, scoped to the fix. If fixing a finding
 introduces another, that is exactly the case this gate exists to catch, and it is the case that
 actually happened eight times in a row.
 

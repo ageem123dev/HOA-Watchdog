@@ -629,6 +629,34 @@ whole context (24/24 files) and its three findings were all real — a better fi
 sharpening R1's mechanism, and once turning R3 from a patch into a decision. Its miss (R4) is the
 kind mutation testing also missed, because both only look where someone already thought to look.
 
+**The cooldown, three times over.** Round 3 added a retry cooldown: `markExtractionState` retains the
+claim for `provider_unavailable`, and the remaining expiry is the budget. Three separate defects then
+turned out to be the same defect — *a path that routes around the cooldown* — and each was found by a
+different check, which is the argument for running more than one.
+
+| Where | Found by | What it did |
+| --- | --- | --- |
+| `settle` released after marking | Argus, on the fix diff | Cleared the cooldown it had just written |
+| The generic `catch` released and left `held` | CodeRabbit round 4 | Left the row immediately re-claimable, *after* the provider had been paid |
+| The test asserting that release | the fix for the above | Locked the defect in, exactly as C6 had |
+
+The last row is the pattern worth naming: **twice now, a test I wrote to pin correct behaviour was
+the thing preventing a fix.** Both said "releases the claim so a retry need not wait", which was true
+when written and became wrong the moment a cooldown existed. Nothing flags a test whose premise has
+expired; only reading the paths together does.
+
+`markExtractionState` is now the sole authority for the claim lifecycle on every failure path. The
+one remaining `releaseExtractionClaim` call is the missing-bytes case (R3 above), which is a
+deliberate, recorded exception rather than an oversight.
+
+**A guard that proved nothing, written while fixing guards that prove nothing.** The first version of
+the "outage write itself fails" test asserted only the returned outcome — which is
+`provider-unavailable` whether or not the inner `.catch` is there, because the outer catch produces
+the same value. Removing the swallow left all 50 tests green. The test now asserts that `onError`
+fires **once** and carries the original cause, which is what actually differs: letting the second
+error escape buries the cause that matters under the bookkeeping failure. Caught by the mutation
+pass, not by review.
+
 ### Definition of Done
 
 **PASS.**
@@ -649,15 +677,20 @@ version of this line said 29 and 28, which reconciled with nothing: the tables h
 Four further defects were found by the local adversarial review afterwards (see Review Findings), and
 that is the more useful number — mutation testing only probes where a test already exists.
 
-**Gates on this head:** lint clean, `next build` compiled, **1017 unit passed / 156 skipped**,
+**Gates on this head:** lint clean, `next build` compiled, **1020 unit passed / 158 skipped**,
 **161 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
 clean. Counts moved during review: the suites grew as findings were fixed test-first, and the
 database count fell by one where a vacuous test was replaced rather than added to.
 
 **Not proven by CI, stated rather than implied.** `verify:database` still does not run without the
 two protected variables, and this story is the most database-dependent one yet: the claim race, the
-fence, the atomic state change and the check constraints are **all** in the 153 that CI will not
+fence, the atomic state change and the check constraints are **all** in the **158** that CI will not
 execute. A green pipeline here proves less about this story than about any before it.
+
+That 158 is measured, not estimated. Running the database suite with both variables unset — which is
+what CI does — gives `3 passed | 158 skipped (161)`. Review round 4 flagged the previous 153 as
+stale, which it was, and proposed 162/159; both of those are one too many. The number quoted here is
+whatever the runner reports.
 
 **Not covered at all:** component rendering. The live region, the polling lifecycle and the unmount
 behaviour are asserted by reading the code, not by rendering it, because that needs

@@ -424,12 +424,61 @@ describe('extractDocument', () => {
       expect(f.marked[0]?.state).toBe('unreadable')
     })
 
-    it('releases the claim when the bytes cannot be fetched', async () => {
+    it('records the outage when the bytes cannot be fetched, rather than only releasing', async () => {
+      // This test used to assert a bare release, and that is what made the
+      // cooldown skippable: releasing leaves `extraction_state` at `held`, which
+      // `claimForExtraction` treats as immediately claimable. The next poll
+      // would re-claim at once and spend another provider call, so the budget
+      // that caps provider cost applied to `settle`'s paths and to nothing else.
+      //
+      // A thrown store or database error is an outage like any other, and the
+      // state must say so durably. Raised in review round 4.
       const f = fakes({ storeThrows: true })
 
       await extractDocument(DOCUMENT_ID, f)
 
-      expect(f.released).toEqual([TOKEN])
+      expect(f.marked).toEqual([
+        { id: DOCUMENT_ID, state: 'provider_unavailable', token: TOKEN },
+      ])
+      expect(f.released).toEqual([])
+    })
+
+    it('records the outage when the write fails after the provider has been paid', async () => {
+      // The worst case for cost: the provider call already happened, so an
+      // unthrottled retry pays for the same document twice. `replace` throwing
+      // is exactly that window.
+      const f = fakes({ replaceThrows: true })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.marked).toEqual([
+        { id: DOCUMENT_ID, state: 'provider_unavailable', token: TOKEN },
+      ])
+      expect(f.released).toEqual([])
+    })
+
+    it('reports the original cause once when the outage write itself fails', async () => {
+      // The error being handled is often a database error, so the write that
+      // records it can fail too. Asserting only the returned outcome would be a
+      // guard that proves nothing: letting the second error escape reaches the
+      // outer catch, which returns the same `provider-unavailable` — the first
+      // draft of this test passed with the swallow removed.
+      //
+      // What actually differs is the reporting. Escaping means `onError` fires
+      // twice and the second call carries the bookkeeping failure, burying the
+      // cause that matters. One call, carrying the original.
+      const reported: unknown[] = []
+      const f = fakes({ storeThrows: true })
+      vi.mocked(f.repository.markExtractionState).mockRejectedValue(new Error('database also down'))
+
+      const outcome = await extractDocument(DOCUMENT_ID, {
+        ...f,
+        onError: (error) => reported.push(error),
+      })
+
+      expect(outcome).toMatchObject({ outcome: 'provider-unavailable' })
+      expect(reported).toHaveLength(1)
+      expect((reported[0] as Error).message).toBe('R2 said no')
     })
 
     it('does not release after a successful write, because the write cleared it', async () => {
