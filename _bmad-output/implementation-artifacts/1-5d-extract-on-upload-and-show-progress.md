@@ -88,6 +88,14 @@ from *could not be read*
   - [ ] Keep *held, not yet read* as the durable running state, or use a separate non-durable claim.
         **Do not add `extracting` as a fifth durable state** — a crash mid-extraction would strand
         documents in it with nothing to move them out
+  - [ ] **The claim needs a specification, not just a mention** — *raised in review of 1.5c, MR !10*.
+        Acquisition must be atomic **across application instances**, not merely within one process,
+        so it belongs in the database rather than in memory. It carries a **unique owner token**, so
+        a claim can only be released by the holder that took it. It **expires**, because a process
+        that dies mid-extraction must not hold a document forever, and an expired claim is
+        **recoverable** by the next poll. Release is **explicit** on both the success and failure
+        paths. A poll that loses the claim returns the current database state and **does not call the
+        provider**
   - [ ] **`extracting` is a rendered state, not a stored one** — *raised in review of 1.5c, MR !10*,
         which caught this file using it both ways. AC3's four states are what the *database* holds;
         AC4's staged progress is what the *surface* shows while a claim is live. The surface derives

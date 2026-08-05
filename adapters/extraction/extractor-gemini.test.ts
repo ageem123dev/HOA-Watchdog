@@ -273,7 +273,8 @@ describe('the Gemini extraction adapter', () => {
       // attached whenever the read won — and MAX_REPLY_BYTES bounds bytes, not
       // chunks, so an ordinary reply in small chunks retained one listener and
       // one pending promise per chunk.
-      const controller = new AbortController()
+      // A fake signal, because `AbortSignal` exposes no listener count. The
+      // real one is exercised by the two tests below.
       const added: unknown[] = []
       const removed: unknown[] = []
       const signal = {
@@ -283,10 +284,10 @@ describe('the Gemini extraction adapter', () => {
       } as unknown as AbortSignal
 
       for (let i = 0; i < 25; i += 1) await raceAbort(Promise.resolve(i), signal)
-      controller.abort()
 
       expect(added).toHaveLength(25)
       expect(removed).toHaveLength(25)
+      expect(removed).toEqual(added)
     })
 
     it('still rejects when the deadline wins', async () => {

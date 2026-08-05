@@ -106,23 +106,28 @@ describe('the extraction probe stays in step with the adapter', () => {
     ).toBe(true)
   })
 
-  it('does not drop the deadline as soon as fetch resolves', () => {
-    // The specific shape of the original defect: the only clear sitting between
-    // the fetch call and the body read.
+  it('clears the deadline from a finally, so a throw mid-read still releases it', () => {
+    // A genuinely different property from the test above, which only requires
+    // *some* clear after the read. A bare `clearTimeout` sitting after
+    // `response.json()` but outside any `finally` never runs when the read
+    // throws — the timer then survives the call and fires against nothing.
+    //
+    // The previous version of this test claimed to catch a clear stranded
+    // between `fetch` and the body read, but its only assertion repeated the
+    // one above, and the value it computed for that shape was used solely in
+    // the failure message. Raised in review, and correct.
     const body = probe.slice(probe.indexOf('async function ask'))
-    const fetchAt = body.indexOf('await fetch(')
     const jsonAt = body.indexOf('response.json()')
-    const between = [...body.matchAll(/clearTimeout\(timer\)/g)]
-      .map((m) => m.index ?? -1)
-      .filter((at) => at > fetchAt && at < jsonAt)
-    const after = [...body.matchAll(/clearTimeout\(timer\)/g)]
+    const lastClear = [...body.matchAll(/clearTimeout\(timer\)/g)]
       .map((m) => m.index ?? -1)
       .filter((at) => at > jsonAt)
+      .pop()
 
-    // A clear on the transport-error path is fine — that path never reaches the
-    // body. What must not happen is clearing there and nowhere afterwards.
-    expect(after.length, `clears between fetch and json: ${between.length}, after: ${after.length}`)
-      .toBeGreaterThan(0)
+    expect(lastClear, 'no clear runs after the body read').toBeDefined()
+    expect(
+      body.slice(jsonAt, lastClear).includes('finally'),
+      'the clear after the body read is not inside a finally, so a throw mid-read leaks the timer',
+    ).toBe(true)
   })
 
   it('carries the same document-kind vocabulary', () => {

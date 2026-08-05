@@ -708,6 +708,40 @@ round before. The lesson worth keeping is not "write better assertions" but that
 substring checks over source text are the specific form that keeps slipping through here: they read
 like behavioural claims and are not.
 
+### CodeRabbit round 4 — MR !10, 3 findings + 1 duplicate; 3 fixed, 1 declined
+
+**R16 (duplicate, Trivial) — a test whose name promised more than its assertion.** The second probe
+test claimed to catch a `clearTimeout` stranded between `fetch` and the body read, but its only
+assertion repeated the test above it, and the value computed for that shape was used **solely in the
+failure message**. Correct, and a fourth-round instance of the same theme.
+
+Replaced with a property the other test does not cover: the clear after the read must sit inside a
+`finally`, because a bare clear there never runs when the read throws and the timer then outlives the
+call. A mutation moving it outside the `finally` fails it.
+
+**R17 (Trivial) — dead code in the listener-count test.** An `AbortController` was created and
+aborted while the assertions ran against a separate fake signal, so it proved nothing and implied it
+did. Removed, and the fake's add/remove lists are now compared for identity rather than just length.
+
+**R18 (Major, on 1.5d) — the claim needed a specification rather than a mention.** Right, and cheap
+to fix now: atomic acquisition **across instances** (so it lives in the database, not memory), a
+unique owner token so only the holder can release it, expiry so a dead process cannot hold a document
+forever, recovery of expired claims, explicit release on both paths, and a losing poll that returns
+the current state **without calling the provider**.
+
+**R19 (Major) — DECLINED: make the probe's request path injectable and add runtime tests.**
+
+The suggestion is good and I am not taking it in this story. The probe is a live script whose value
+is that it makes a real call; splitting it into an injectable module plus a CLI entry is a refactor of
+the one deliverable that currently proves AD-9, at the fourth review round, in service of test
+coverage rather than behaviour. The risk of breaking the thing that works outweighs it here.
+
+**The limitation is real and stated rather than waved away:** the probe's own behaviour — stalled
+bodies, redirect refusal, credential forwarding — is covered by **source-parity assertions against
+the adapter, not by runtime tests of the probe itself**. Those assertions are textual, and this round
+is the second to show that textual checks read like behavioural ones and are not. Recorded as
+follow-up work alongside the `tsc --noEmit` gate and the CI database credentials.
+
 ### Definition of Done
 
 **PASS.**
