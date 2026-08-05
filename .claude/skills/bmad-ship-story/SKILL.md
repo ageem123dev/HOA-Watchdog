@@ -77,7 +77,7 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 ### 6 — Local adversarial review: the **integration** pass
 
-**Not the only review.** `bmad-dev-tdd` Step 9 now runs one on every task's own diff, alongside the sensitivity check — see `_bmad/custom/per-task-review.md`, which is the authoritative contract for both. This step is what per-task reviews structurally cannot be: a look at the whole change at once, where an interaction between task 2's schema and task 3's write path is visible.
+**Not the only review.** `_bmad/custom/review-gate.md` is the authoritative contract: **every diff that will reach `main` gets both checks** — each task's diff (Step 9 of `bmad-dev-tdd`), this whole-story pass, and **every review-fix push in Step 8e**. This step is what per-task reviews structurally cannot be: a look at the whole change at once, where an interaction between task 2's schema and task 3's write path is visible.
 
 **This step is not optional and has been skipped before.** Stories 1.5c and 1.5d were implemented, gated and nearly shipped without it, with per-task mutation testing silently standing in for it. It does not stand in for it: on 1.5d the review found **four** defects after 29 mutations had found none of them, one of which showed "Reading" to a treasurer forever for a document that had been read.
 
@@ -124,7 +124,9 @@ Converged = pipeline green AND every finding **fixed** (push → new head → ba
 
 **8d. Triage.** Fix real correctness/security/accessibility issues. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
 
-**8e. Apply.** Fix test-first, re-run lint+build+test, commit, push (auto-triggers re-review; force with `@coderabbitai review`).
+**8e. Apply.** Fix test-first, re-run lint+build+test, then **run the review gate on the fix diff before pushing** — sensitivity check plus one `argus_review` scoped to what the fix touched (`_bmad/custom/review-gate.md`). Then commit and push (auto-triggers re-review; force with `@coderabbitai review`).
+
+**A fix is the highest-risk diff in the story, not the lowest.** On story 1.5d, rounds 2 and 3 produced **8 findings and every one was in a fix from a previous round** — a swallowed 404, a stale read that reintroduced the bug it was fixing, a `NULL` token written against a check constraint. Fixes are written under time pressure, against a narrower model, on machinery with invariants already in place. Skipping the gate here is skipping it where it pays most.
 
 **8f. Reply per thread** — Fixed (what changed) or Skipped (why). **Write bodies to files** and post with `--field "body=$(cat file)"`.
 

@@ -1,20 +1,48 @@
-# Per-task review contract
+# The review gate
 
-Authoritative rule for what must run **after every task** in `bmad-dev-tdd`, not only at the end of a
-story.
+**One rule: every diff that will reach `main` gets both checks before it is pushed.**
+
+Not "every task" — that was the first version of this file and it was too narrow. There are three
+moments where a diff is created, and the rule is the same at all of them:
+
+| Moment | Scope of the checks |
+| --- | --- |
+| A task completes (`bmad-dev-tdd` Step 9) | that task's own diff |
+| A story is ready (`bmad-ship-story` Step 6) | `baseline_commit..HEAD` — the integration pass |
+| **A review fix is pushed (`bmad-ship-story` Step 8e)** | **the fix diff** |
+
+The third was missing, and section 1 explains why that turned out to be the worst one to omit.
 
 Loaded as a persistent fact by `_bmad/custom/bmad-dev-tdd.toml`, so it survives BMad reinstalls that
-overwrite `.claude/skills/bmad-dev-tdd/`. The step file carries a short pointer; **this file wins**
-if they ever disagree.
+overwrite `.claude/skills/`. The step files carry short pointers; **this file wins** if they ever
+disagree.
 
 ---
 
 ## 1. Two checks, not one, and they are not interchangeable
 
-Story 1.5d is the reason this file exists. Its four tasks ran 29 mutations and 28 were detected, which
+Story 1.5d is the reason this file exists. Its four tasks ran 28 mutations and 27 were detected, which
 looked like thorough verification. A local review afterwards found **four more defects**, one of
 which was user-visible and serious: a document that had been read successfully reported "Reading" to
 the treasurer on every later poll, forever.
+
+**And then the fixes turned out to be the dangerous part.** Across three CodeRabbit rounds on that
+story's merge request:
+
+| Round | Findings | Where they were |
+| --- | --- | --- |
+| 1 | 20 | the original code |
+| 2 | 2 | **both in round 1's fixes** |
+| 3 | 6 | **including a constraint violation in a fix from round 1** |
+
+Eight consecutive defects, every one of them introduced while repairing something else — a swallowed
+404, a stale read reintroducing the bug it was fixing, a `NULL` token written alongside a non-`NULL`
+expiry against a check constraint. None was caught by the person writing them, because nothing
+checked a fix.
+
+That is not an accident of that story. A fix is written under time pressure, against a narrower
+mental model than the original code, touching machinery that already has subtle invariants. It is a
+*higher*-risk context than first-draft code, and treating it as exempt has it exactly backwards.
 
 The two checks answer different questions and neither substitutes for the other:
 
@@ -31,7 +59,9 @@ different situations and both were treated as one, so there was no assertion to 
 
 ## 2. Order
 
-1. Task reaches green and the full suite passes.
+The same five steps at each of the three moments. "Task" below means whichever diff is in scope.
+
+1. The diff reaches green and the full suite passes.
 2. **Sensitivity check** — break the task's load-bearing assertion, confirm the test fails, restore,
    re-run. Existing `bmad-dev-tdd` Step 9 behaviour.
 3. **Adversarial review** — one `argus_review` call scoped to *this task's* diff.
@@ -39,20 +69,26 @@ different situations and both were treated as one, so there was no assertion to 
 5. Fix confirmed findings **test-first**: a regression test that fails against the pre-fix code.
 6. Only then tick the checkbox.
 
-A task is not complete because its tests pass. It is complete when both checks have run and what they
-found has been fixed or recorded.
+A diff is not finished because its tests pass. It is finished when both checks have run and what
+they found has been fixed or recorded.
+
+**A fix push is a diff.** It gets the same five steps, scoped to the fix. If fixing a finding
+introduces another, that is exactly the case this gate exists to catch, and it is the case that
+actually happened eight times in a row.
 
 ## 3. Scoping the per-task call
 
 `argus_review` costs ~10–18k input tokens of scaffolding per call before it reads anything, so the
-scope must be the task's own change, not the story's accumulated diff:
+scope must be the change in hand — the task's own diff, or the fix's — never the story's accumulated
+diff:
 
 ```shell
-diff = git diff <commit-at-task-start>..HEAD -- <paths this task touched>
+# per task, or per fix push
+diff = git diff <commit-at-start>..HEAD -- <paths this change touched>
 ```
 
-Capture the SHA at the start of each task. If the task is not yet committed, `git diff HEAD` over its
-paths is the same scope.
+Capture the SHA before starting a task, and before starting a round of review fixes. If the change is
+not yet committed, `git diff HEAD` over its paths is the same scope.
 
 Everything else follows `argus-review-routing.md` unchanged: `repo_root` is mandatory and absolute,
 pass `diff`/`diff_file` rather than `git_range`, one call per scope, never one per file.
@@ -87,9 +123,12 @@ individually. The final pass is the integration pass, and its scope should be st
 
 ## 6. Cost, stated plainly
 
-Roughly one `argus_review` call per task plus one per story. On story 1.5d that would have been five
-calls; the single whole-story call it did run cost ~392k tokens. Budget accordingly, and prefer
+Roughly one `argus_review` call per task, one per story, and one per round of review fixes. On story
+1.5d that is four tasks, one integration pass and three fix rounds — eight calls. The single
+whole-story call it did run cost ~392k tokens, so budget accordingly, and prefer
 `provider: "offline"` when the point is to test wiring rather than to get findings.
 
-If cost forces a choice, keep the **per-task** reviews. They catch defects while the task is still in
-mind and before later work is built on top of them, which is worth more than the integration pass.
+If cost ever forces a choice, drop the **integration pass** before the other two. The per-task and
+per-fix reviews catch defects while the change is still in mind and before anything is built on top
+of them; the integration pass mostly re-reads code that has already been through one. That ordering
+is the opposite of what it was in the first version of this file, and the fix data above is why.

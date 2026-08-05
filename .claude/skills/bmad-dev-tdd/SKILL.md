@@ -410,7 +410,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
     </check>
 
     <check if="{workflow.tdd.review_each_task} == true">
-      <critical>`_bmad/custom/per-task-review.md` is the authoritative contract for this block and is loaded as a persistent
+      <critical>`_bmad/custom/review-gate.md` is the authoritative contract for this block and is loaded as a persistent
         fact on activation. If this step file and that one ever disagree, that one wins — this one is overwritten by a BMad
         reinstall and that one is not</critical>
       <action>Run the adversarial review on THIS TASK'S diff — one `argus_review` call, scoped to the paths this task touched

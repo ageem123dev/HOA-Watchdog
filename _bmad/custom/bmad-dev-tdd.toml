@@ -12,19 +12,20 @@
 
 # Appends to the skill default. Loaded as foundational context on every activation.
 persistent_facts = [
-  "file:{project-root}/_bmad/custom/per-task-review.md",
+  "file:{project-root}/_bmad/custom/review-gate.md",
   "file:{project-root}/_bmad/custom/argus-review-routing.md",
 ]
 
 [workflow.tdd]
 
 # Step 9 runs the adversarial review on the task's own diff, alongside the
-# sensitivity check it already ran.
+# sensitivity check it already ran. `review-gate.md` extends the same rule to
+# every diff that will reach main, including review-fix pushes.
 #
 # Both, because they are blind to different things. Mutation testing asks "would
 # my tests notice this line changing" and can only probe where a test already
-# exists; it cannot ask about a distinction nobody drew. Story 1.5d ran 29
-# mutations with 28 detected and still shipped four defects into review, one of
+# exists; it cannot ask about a distinction nobody drew. Story 1.5d ran 28
+# mutations with 27 detected and still shipped four defects into review, one of
 # which showed "Reading" to the treasurer forever for a document that had been
-# read successfully.
+# read successfully -- and its fixes then produced eight more across two rounds.
 review_each_task = true
