@@ -1,3 +1,7 @@
+---
+baseline_commit: c9167f8d32e468251802066f4944cbac1737dab1
+---
+
 # Story 1.6a: Recognise known vendors
 
 Status: ready-for-dev
@@ -73,27 +77,27 @@ need vendor identity on the read path
 
 ## Tasks / Subtasks
 
-- [ ] **The `vendor` table** (AC: 1, 3, 6)
-  - [ ] Migration `009_vendor.sql`. `id uuid primary key default uuidv7()`, matching `document` and `extraction`
-  - [ ] `display_name text not null` — what a human typed or confirmed, shown in the UI verbatim
-  - [ ] A **normalised key** column, `generated always as (...) stored`, with a **unique index**. That
+- [x] **The `vendor` table** (AC: 1, 3, 6)
+  - [x] Migration `009_vendor.sql`. `id uuid primary key default uuidv7()`, matching `document` and `extraction`
+  - [x] `display_name text not null` — what a human typed or confirmed, shown in the UI verbatim
+  - [x] A **normalised key** column, `generated always as (...) stored`, with a **unique index**. That
         index is AC3: the database refuses the second spelling, application code cannot forget to check
-  - [ ] Length and emptiness constraints mirroring `extraction_vendor_name_length` — `btrim` with the
+  - [x] Length and emptiness constraints mirroring `extraction_vendor_name_length` — `btrim` with the
         explicit `E' \t\n'` character class, 1–200. A whitespace-only vendor name passes a bare
         `char_length` check; migration 006 learned this and the same trap is here
-  - [ ] `grant select on vendor to watchdog_reader;` — explicit, because 003 made future read access a
+  - [x] `grant select on vendor to watchdog_reader;` — explicit, because 003 made future read access a
         per-table decision. Say **why** in a comment, as 006 does: FR-6 compares against vendor history
-  - [ ] `create extension if not exists pg_trgm;` plus a GIN index on the normalised key for AC4's ranking
-  - [ ] `comment on table` / `on column` in the house style — what it is and what it must never become
+  - [x] `create extension if not exists pg_trgm;` plus a GIN index on the normalised key for AC4's ranking
+  - [x] `comment on table` / `on column` in the house style — what it is and what it must never become
 
-- [ ] **Normalisation, as one definition** (AC: 1, 3)
-  - [ ] `core/vendor/name.ts`: `normaliseVendorName(raw: string): string` — case-fold, trim, collapse
+- [x] **Normalisation, as one definition** (AC: 1, 3)
+  - [x] `core/vendor/name.ts`: `normaliseVendorName(raw: string): string` — case-fold, trim, collapse
         internal whitespace runs to a single space
-  - [ ] **The SQL generated column and this function must agree, and proving it is a task, not an
+  - [x] **The SQL generated column and this function must agree, and proving it is a task, not an
         assumption.** A database test runs a corpus through both and asserts identical output. This is
         the `AMOUNT_PATTERN` failure again in a new place: that value lived in three hand-written
         copies and one was silently wrong for weeks
-  - [ ] Corpus must include: tabs, newlines, non-breaking space (` `), a double space, leading and
+  - [x] Corpus must include: tabs, newlines, non-breaking space (` `), a double space, leading and
         trailing space, mixed case, and **at least one character whose case folding differs between
         JavaScript and Postgres**. `'İ'.toLowerCase()` is two code points in JS; `lower()` in Postgres
         is locale-dependent. Decide explicitly — restricting the fold to ASCII is a legitimate answer —
@@ -238,7 +242,130 @@ outward — `core/ports/boundary.test.ts` enforces it.
 
 ### Agent Model Used
 
+claude-opus-5[1m]
+
+### Test Design
+
+## Task 1 — the `vendor` table
+
+Measured against the live database before any code. **Three of these findings changed the design**, and
+none of them would have been visible by reasoning about it.
+
+**Finding 1 — `E'\\s+'` in a migration silently matches the letter `s`.**
+
+| Regex form | Result on `Evergreen  Landscaping` |
+| --- | --- |
+| `'\s+'` | `Evergreen\|Landscaping` — correct |
+| `E'\\s+'` | `Evergreen  Land\|caping` — **matched the letter s** |
+| `'[[:space:]]+'` | `Evergreen\|Landscaping` — correct |
+
+`standard_conforming_strings` is `on`. The migration uses an explicit bracket class, not `\s` in any
+form: it cannot be misread by a later editor, and `Landscaping` → `Land caping` is the kind of defect
+that produces plausible garbage rather than an error.
+
+**Finding 2 — Postgres and JavaScript disagree about what whitespace is.**
+
+| Character | PG `[[:space:]]` | JS `\s` |
+| --- | --- | --- |
+| space, tab, LF, CR, VT, FF, en space, ideographic space | yes | yes |
+| **NBSP U+00A0** | **no** | **yes** |
+| **narrow NBSP U+202F** | **no** | **yes** |
+| zero-width U+200B | no | no |
+
+**NBSP is what a PDF extractor emits.** With `lower()` + `[[:space:]]` in SQL and `.toLowerCase()` +
+`\s` in TS, `Evergreen<NBSP>Landscaping` normalises one way in the application and another in the
+database: the application believes it matched an existing vendor, the unique index does not fire, and
+one vendor acquires two identities. That is the exact harm this story exists to prevent.
+
+**Finding 3 — `lower()` and `toLowerCase()` disagree on two real characters.**
+`İ` (U+0130) folds to `i` in Postgres and to `i` + combining dot in JavaScript. `ΣΣ` folds to `σσ` and
+`σς`. Both are silent.
+
+**Decision.** The fold is **ASCII-only** in both engines — `translate()` in SQL, a bounded `[A-Z]`
+replacement in TS — and the whitespace set is an **explicit character class** naming NBSP and narrow
+NBSP alongside the ordinary ones. Identical in both, verifiable by running both over a corpus.
+
+The cost is real and accepted: `ÄKTA Bygg` and `äkta bygg` become two vendors rather than one. That is
+a **conservative** failure — it produces an extra quarantine item for a human in 1.6b–d, not a silent
+merge. Given this story's whole purpose, failing toward the human is the correct direction, and a
+locale-dependent fold that silently merges two vendors is not.
+
+### Behaviours and failure modes
+
+**B1 — the table stores a vendor and gives it an id.**
+*Correct if:* an insert returns a uuid and the row reads back. *Seam:* the database itself; this is a
+`test:db` behaviour, run against real Postgres like every other migration test here.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | `display_name` empty, or whitespace-only — `char_length('   ')` is 3, so a bare length check admits it | GUARD (check constraint) |
+| 2 | `display_name` past 200 — an OCR page or an injection payload arriving in a name field | GUARD (check constraint) |
+| 3 | `display_name` null | GUARD (`not null`) |
+| 4 | id collides | OUT-OF-SCOPE — `uuidv7()`, as `document` and `extraction` already rely on |
+
+**B2 — the normalised key is generated, and unique.**
+*Correct if:* inserting two spellings of one name raises **23505**, and the stored key equals the
+normalisation of the display name.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | Caller supplies the key directly and it disagrees with the name | GUARD — `generated always … stored`, which Postgres refuses to let a caller write |
+| 2 | Normalisation differs between SQL and TS (findings 2 and 3) | GUARD — corpus parity test over both |
+| 3 | Two spellings both insert | GUARD — unique index, asserted by 23505 |
+| 4 | Normalisation collapses two genuinely different vendors | GUARD — a test that `Evergreen Landscaping` and `Evergreen Landscape` remain distinct |
+
+**B3 — `watchdog_reader` may read a vendor and may not write one.**
+*Correct if:* a SELECT as that role succeeds and an INSERT fails with **42501**.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | Grant forgotten — migration 003 revoked default SELECT, so a new table is unreadable until granted | GUARD — connect as the role and select |
+| 2 | Over-granted to writable, breaking AD-4 | GUARD — connect as the role and be refused |
+| 3 | Asserted from `information_schema` rather than by connecting | GUARD — the catalog says what was *intended*; connecting proves what is *true*. `roles.test.ts` connects |
+
+**B4 — `pg_trgm` is available for 1.6c/d's ranking.**
+*Correct if:* `similarity()` is callable and the index exists.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | Extension missing on a deploy target | GUARD — `create extension if not exists`, plus a comment recording that this needs a privileged runner |
+| 2 | Migration runner lacks privilege | OUT-OF-SCOPE here, **verified** — the runner is `postgres` (superuser); `watchdog_writer` is refused with 42501 and does not need it |
+| 3 | Ranking accidentally wired into resolution | GUARD — AC5's test, in task 3 |
+
 ### Debug Log References
+
+**Tasks 1 and 2 were run as one red-green cycle.** They are separable on paper and not in practice:
+the assertion that matters is that the database and the application normalise a name *identically*,
+and that cannot be written against either half alone. Both tasks are complete; neither was skipped.
+
+**Red.** `core/vendor/name.ts` was bootstrapped as an identity function returning its input, so the
+19 failures were genuine assertion failures rather than a missing-import error. `migrations/vendor.test.ts`
+was red against a database with no `vendor` table.
+
+**Green.** 22 unit cases and 40 database cases. Suite moved 1021 -> 1047 unit and 161 -> 201 database.
+
+**One test was wrong and was corrected, not the code.** `does not reach for a backslash escape in its
+whitespace class` failed against the migration's own *comment*, which names the hazard in prose so the
+next person does not rediscover it. The check now strips comment lines, and a second test proves the
+predicate still fires on the shape it hunts -- otherwise stripping could hide the very thing it looks
+for.
+
+**Sensitivity check, both directions.** The parity corpus is the story's load-bearing assertion, so it
+was broken deliberately on each side:
+
+| Mutation | Result |
+| --- | --- |
+| NBSP removed from the application's separator set | 5 unit and 4 database cases fail |
+| NBSP removed from the database function | 3 database cases fail |
+
+**Adversarial review** (Argus, staged diff, 9/9 files, confidence 1.0, audit chain OK): no findings.
+
+**A defect found in the checking tool by using it.** The test-value pass reported "No test files
+changed" for this task, because `git diff` cannot see untracked files and every test file in a new
+story's first task is untracked. A checklist that silently omits the only tests in the diff is exactly
+the failure the tool exists to prevent. `tests_touched.py` now lists untracked test files as wholly
+new.
+
 
 ### Completion Notes List
 
