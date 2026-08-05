@@ -56,6 +56,20 @@ export interface HeldDocument {
   readonly extractionState: ExtractionState
 }
 
+/**
+ * A claim on a document while it is being extracted.
+ *
+ * Held in the database rather than in a process: two application instances
+ * share no memory, so an in-memory claim is invisible to the instance that
+ * matters. The token is what makes the finalising write safe — see
+ * `ExtractionRepository.replace`.
+ */
+export interface ExtractionClaim {
+  readonly documentId: string
+  /** Unique to this attempt. Only its holder may release or finish. */
+  readonly token: string
+}
+
 export interface DocumentRepository {
   record(document: NewDocument): Promise<RecordedDocument>
 
@@ -77,4 +91,30 @@ export interface DocumentRepository {
    * figures exist when they do not.
    */
   markExtractionState(id: string, state: Exclude<ExtractionState, 'read'>): Promise<void>
+
+  /**
+   * Take the right to extract this document, or return `null` if someone else
+   * holds it.
+   *
+   * **Before the provider call, not after.** A lock taken around the write
+   * serialises the cheap part and lets the expensive part run twice — story
+   * 1.5b shipped exactly that shape and it was found in review.
+   *
+   * A claim that has passed its expiry is available again: a process that dies
+   * mid-extraction must not hold a document forever. That deliberately creates
+   * a second claimant while the first may still be running, which is why the
+   * write is fenced on the token rather than trusting whoever arrives.
+   *
+   * Only `held` documents are claimable. Anything else has finished.
+   */
+  claimForExtraction(id: string, ttlSeconds: number): Promise<ExtractionClaim | null>
+
+  /**
+   * Give the claim back, so a retry need not wait out the expiry.
+   *
+   * Requires the matching token. A claim released by the wrong holder would let
+   * a stale claimant hand a live document to the next caller.
+   */
+  releaseExtractionClaim(claim: ExtractionClaim): Promise<void>
+
 }

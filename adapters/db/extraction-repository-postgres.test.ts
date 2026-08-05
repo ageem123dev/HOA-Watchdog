@@ -275,6 +275,123 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     })
   })
 
+  describe('the claim fences the write (story 1.5d)', () => {
+    const claimOf = async (documentId: string): Promise<string> => {
+      const { rows } = await admin.query<{ token: string }>(
+        `update document
+            set extraction_claim_token = gen_random_uuid(),
+                extraction_claim_expires_at = now() + interval '60 seconds'
+          where id = $1
+        returning extraction_claim_token as token`,
+        [documentId],
+      )
+      return rows[0]!.token
+    }
+
+    const countFor = async (documentId: string): Promise<number> => {
+      const { rows } = await admin.query<{ count: string }>(
+        'select count(*)::text as count from extraction where document_id = $1',
+        [documentId],
+      )
+      return Number(rows[0]!.count)
+    }
+
+    const stateOf = async (documentId: string): Promise<string> => {
+      const { rows } = await admin.query<{ extraction_state: string }>(
+        'select extraction_state from document where id = $1',
+        [documentId],
+      )
+      return rows[0]!.extraction_state
+    }
+
+    it('writes when the token is the live one', async () => {
+      const documentId = await newDocument()
+      const token = await claimOf(documentId)
+
+      await repository.replace(documentId, [record({ vendorName: 'Holder' })], { token })
+
+      expect(await countFor(documentId)).toBe(1)
+      expect(await stateOf(documentId)).toBe('read')
+    })
+
+    it('refuses a stale token (C4)', async () => {
+      // The finding from story 1.5c's review. Expiry creates a second claimant
+      // by design, so the first may still be running -- and without this the
+      // system would prefer the *staler* of two answers.
+      const documentId = await newDocument()
+      await claimOf(documentId)
+
+      await expect(
+        repository.replace(documentId, [record({ vendorName: 'Stale' })], {
+          token: '00000000-0000-4000-8000-000000000000',
+        }),
+      ).rejects.toMatchObject({ name: 'StaleExtractionClaimError' })
+    })
+
+    it('changes nothing at all when it refuses', async () => {
+      const documentId = await newDocument()
+      const token = await claimOf(documentId)
+      await repository.replace(documentId, [record({ vendorName: 'First' })], { token })
+
+      await expect(
+        repository.replace(documentId, [record({ vendorName: 'Stale' })], {
+          token: '00000000-0000-4000-8000-000000000000',
+        }),
+      ).rejects.toBeDefined()
+
+      const held = await repository.findByDocument(documentId)
+
+      expect(held).toHaveLength(1)
+      expect(held[0]?.vendorName).toBe('First')
+      expect(await stateOf(documentId)).toBe('read')
+    })
+
+    it('refuses the original holder once its claim has been taken over', async () => {
+      // The exact sequence the fence exists for: A claims, A's claim expires, B
+      // claims, A returns. A must not win.
+      const documentId = await newDocument()
+      const tokenA = await claimOf(documentId)
+      const tokenB = await claimOf(documentId)
+
+      expect(tokenB).not.toBe(tokenA)
+
+      await expect(
+        repository.replace(documentId, [record({ vendorName: 'Slow A' })], { token: tokenA }),
+      ).rejects.toMatchObject({ name: 'StaleExtractionClaimError' })
+
+      await repository.replace(documentId, [record({ vendorName: 'Fresh B' })], { token: tokenB })
+
+      const held = await repository.findByDocument(documentId)
+      expect(held[0]?.vendorName).toBe('Fresh B')
+    })
+
+    it('clears the claim when the write succeeds', async () => {
+      // A document that is `read` must not still look claimed, or the surface
+      // would render it as extracting forever.
+      const documentId = await newDocument()
+      const token = await claimOf(documentId)
+
+      await repository.replace(documentId, [record({ vendorName: 'Done' })], { token })
+
+      const { rows } = await admin.query<{ extraction_claim_token: string | null }>(
+        'select extraction_claim_token from document where id = $1',
+        [documentId],
+      )
+      expect(rows[0]?.extraction_claim_token).toBeNull()
+    })
+
+    it('still writes with no fence at all, for the upload-time path', async () => {
+      // The deterministic path parses at upload and races nothing, so it passes
+      // no token. Without this the fence could be made mandatory and would
+      // silently break CSV ingestion.
+      const documentId = await newDocument()
+
+      await repository.replace(documentId, [record({ vendorName: 'Tabular' })])
+
+      expect(await countFor(documentId)).toBe(1)
+    })
+  })
+
   describe('the document state moves with the records (story 1.5d)', () => {
     const stateOf = async (documentId: string): Promise<string> => {
       const { rows } = await admin.query<{ extraction_state: string }>(

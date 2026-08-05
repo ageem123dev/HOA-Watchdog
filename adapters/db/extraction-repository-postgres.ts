@@ -17,6 +17,23 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * new set lands, or the previous one is still there afterwards.
  */
 
+/**
+ * The claim that authorised this write is no longer the live one.
+ *
+ * Expiry creates a second claimant on purpose, so the original may still be
+ * running and may still return an answer. Refusing its write is what stops the
+ * system preferring the *staler* of two results — it is not an error in the
+ * ordinary sense, and a caller that sees it should report the current state
+ * rather than a failure.
+ */
+export class StaleExtractionClaimError extends Error {
+  override readonly name = 'StaleExtractionClaimError'
+
+  constructor(readonly documentId: string) {
+    super(`the extraction claim on ${documentId} is no longer held; this write was refused`)
+  }
+}
+
 let sharedPool: Pool | null = null
 
 /** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
@@ -58,7 +75,11 @@ export function createPostgresExtractionRepository(
   const pool = () => options.pool ?? getPool()
 
   return {
-    async replace(documentId: string, records: readonly ExtractionRecord[]): Promise<void> {
+    async replace(
+      documentId: string,
+      records: readonly ExtractionRecord[],
+      fence?: { readonly token: string },
+    ): Promise<void> {
       // An empty set is refused rather than obeyed. `replace(id, [])` reads
       // identically to "extraction found nothing", and obeying it would destroy
       // a good set on a caller's mistake. Clearing a document's records is a
@@ -83,7 +104,22 @@ export function createPostgresExtractionRepository(
         // present; a union of two sets is neither. The `document` row exists in
         // both cases, so locking it is what makes replacement serialise
         // regardless of what the document already holds.
-        await client.query('select 1 from document where id = $1 for update', [documentId])
+        // The fence is checked *inside* this transaction, in the same statement
+        // that takes the lock. Checked outside, or before `begin`, there would
+        // be a window in which the claim expires between the check and the
+        // write — which is the exact gap the fence exists to close.
+        const guarded = await client.query(
+          fence === undefined
+            ? 'select 1 from document where id = $1 for update'
+            : `select 1 from document
+                where id = $1 and extraction_claim_token = $2
+                for update`,
+          fence === undefined ? [documentId] : [documentId, fence.token],
+        )
+
+        if (fence !== undefined && guarded.rowCount === 0) {
+          throw new StaleExtractionClaimError(documentId)
+        }
 
         await client.query('delete from extraction where document_id = $1', [documentId])
 
@@ -110,7 +146,11 @@ export function createPostgresExtractionRepository(
         // to show or a full set of records still reading `held` -- and story
         // 1.5d's AC3 turns on those never disagreeing.
         await client.query(
-          "update document set extraction_state = 'read' where id = $1",
+          `update document
+              set extraction_state = 'read',
+                  extraction_claim_token = null,
+                  extraction_claim_expires_at = null
+            where id = $1`,
           [documentId],
         )
 

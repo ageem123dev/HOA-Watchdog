@@ -19,7 +19,21 @@ export interface ExtractionRepository {
    * An empty `records` is refused rather than treated as "delete everything" —
    * see the adapter for why.
    */
-  replace(documentId: string, records: readonly ExtractionRecord[]): Promise<void>
+  /**
+   * @param fence - the claim that authorises this write, when there is one.
+   *
+   * Deferred extraction passes it; the upload-time deterministic path does not,
+   * because nothing else is racing it. When present, the token is re-checked
+   * **inside** the transaction and a stale claimant is refused with
+   * `StaleExtractionClaimError` — expiry creates a second claimant by design, so
+   * the first may still be running, and without the fence the system would
+   * prefer the *staler* of two answers.
+   */
+  replace(
+    documentId: string,
+    records: readonly ExtractionRecord[],
+    fence?: { readonly token: string },
+  ): Promise<void>
 
   /** Every record held for a document, for verification and for the catalog. */
   findByDocument(documentId: string): Promise<readonly ExtractionRecord[]>

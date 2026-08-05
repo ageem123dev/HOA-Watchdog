@@ -70,6 +70,8 @@ function fakes(
     record: vi.fn(async () => ({ id: DOCUMENT_ID, alreadyHeld: false })),
     findById: vi.fn(async () => held),
     markExtractionState: vi.fn(async () => undefined),
+    claimForExtraction: vi.fn(async () => null),
+    releaseExtractionClaim: vi.fn(async () => undefined),
   }
 
   const store: DocumentStore = {

@@ -81,7 +81,7 @@ from *could not be read*
         exactly the mistake 1.5b had to correct by adding `figures-not-stored`
 
 - [ ] **Deferred extraction** (AC: 1, 3)
-  - [ ] 1.5c decided: store first, extract on a follow-up request the surface polls. No queue — that remains out of scope and is not to be added without asking
+  - [x] 1.5c decided: store first, extract on a follow-up request the surface polls. No queue — that remains out of scope and is not to be added without asking
   - [ ] The follow-up endpoint is authenticated and authorises the document against the caller. An endpoint that extracts any document by id is an access-control hole wearing a progress bar
   - [ ] **Claim the document before calling the provider** — *raised in review of 1.5c, MR !10*.
         1.5b's parent-row lock is taken *inside* `replace`, which is the wrong side of the expensive
@@ -89,10 +89,10 @@ from *could not be read*
         writes so that one silently overwrites the other. The claim must happen **before** extraction
         starts. A poll that loses the claim returns the current state rather than starting a second
         extraction
-  - [ ] Keep *held, not yet read* as the durable running state, or use a separate non-durable claim.
+  - [x] Keep *held, not yet read* as the durable running state, or use a separate non-durable claim.
         **Do not add `extracting` as a fifth durable state** — a crash mid-extraction would strand
         documents in it with nothing to move them out
-  - [ ] **The claim needs a specification, not just a mention** — *raised in review of 1.5c, MR !10*.
+  - [x] **The claim needs a specification, not just a mention** — *raised in review of 1.5c, MR !10*.
         Acquisition must be atomic **across application instances**, not merely within one process,
         so it belongs in the database rather than in memory. It carries a **unique owner token**, so
         a claim can only be released by the holder that took it. It **expires**, because a process
@@ -100,7 +100,7 @@ from *could not be read*
         **recoverable** by the next poll. Release is **explicit** on both the success and failure
         paths. A poll that loses the claim returns the current database state and **does not call the
         provider**
-  - [ ] **The token fences the write, not just the claim** — *raised in review of 1.5c, MR !10*.
+  - [x] **The token fences the write, not just the claim** — *raised in review of 1.5c, MR !10*.
         Expiry creates a second claimant by design, which means the first one is still running and
         may still return an answer. Holding a token at the start is therefore not enough: the owner
         token must be **re-checked inside the finalising transaction** — both the state transition
@@ -266,6 +266,47 @@ answer each time: one definition, and a test that fails when the copies disagree
 constant admits is accepted by the database, and a value it excludes is refused. Neither list is the
 other's copy; the SQL is read from disk.
 
+## Task 3 — the claim, and the fence
+
+**Behaviour C — one extraction runs per document, and only the holder may finish it**
+
+*If it ran correctly, how would I know?* Two polls arriving together produce **one** provider call.
+The loser gets the current state back and does not call the provider. A claim that expires can be
+taken by someone else, and when the original holder eventually returns, its write is **refused**
+rather than allowed to overwrite the fresher result.
+
+*How am I going to test this?* Against a real Postgres, with two connections. Acquisition has to be
+atomic across processes, so it is a single statement whose `returning` says who won — and that is
+only meaningful if two genuine connections race it. A fake cannot demonstrate this at all.
+
+*What else can go wrong?* The expensive call sits between claiming and writing, and every failure
+mode lives in that gap. Story 1.5b's parent-row lock is taken *inside* `replace`, which is the wrong
+side of it: two polls can both reach the provider, both get an answer, and then serialise only their
+writes — so the system pays twice and keeps whichever finished last.
+
+*Could this problem happen anywhere else?* It is the same shape as 1.5b's zero-rows concurrency bug,
+found in review: a lock that serialises the cheap part while the expensive part runs twice. The
+answer there was to lock the parent row; the answer here is to claim before spending.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| C1 | **Two polls both call the provider.** The lock is taken after the expensive part | GUARD | Two real connections race the claim; exactly one wins, asserted from both sides |
+| C2 | A claim is held in memory, so a second instance never sees it | GUARD | Acquisition is one SQL statement; the race test uses two separate connections |
+| C3 | **A dead process holds a document forever** | GUARD | Claims expire; an expired claim is taken by the next caller |
+| C4 | **The slow claimant overwrites the fresh result.** Expiry deliberately creates a second claimant, so the first is still running | GUARD | The finalising write is fenced on the owner token; a stale token is refused and changes nothing |
+| C5 | Anyone can release anyone's claim | GUARD | Release requires the matching token; a wrong token releases nothing |
+| C6 | A claim is never released, so a retry waits for expiry that need not happen | GUARD | Release on both the success and the failure path, asserted separately |
+| C7 | `extracting` becomes a fifth durable state, stranding documents when a process dies | Unrepresentable | The vocabulary has four values and the check refuses a fifth; "extracting" is derived from `held` **plus a live claim** |
+| C8 | A document already `read` is claimed and extracted again | GUARD | Only `held` documents are claimable |
+| C9 | The loser calls the provider anyway | GUARD | The losing path is asserted to make **no** provider call and to return the current state |
+| C10 | The fence is checked, then the write happens — with a gap between them | GUARD | The check is inside the same transaction as the write, asserted the way Task 2's state change was |
+| C11 | Clock skew between instances makes expiry inconsistent | OUT-OF-SCOPE | Expiry is evaluated by the database with `now()`, so there is one clock. Recorded because the obvious implementation — comparing against an application timestamp — would have several |
+
+**Inverse/cross-check.** The claim is asserted from both sides on every property: the winner sees a
+row and the loser sees none; the matching token releases and a wrong one does not; the fresh token
+writes and the stale token is refused. A guard checked in one direction only passes for an
+implementation that always answers that way.
+
 ### Debug Log References
 
 **Task 1 — red.** 24 failing against a stub whose `extractDocument` throws, so every red was an
@@ -328,7 +369,54 @@ line that says so. The hook was inserting a board member with `password_hash: 'x
 as well, because a pattern that cannot see a failed suite is a pattern that reports success for the
 wrong reason — which is the story's own subject matter.
 
+**Task 3 (claim mechanics) — sensitivity, five mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| An expired claim is never reclaimable | 1 |
+| Claimable regardless of state | 3 |
+| Any token may release any claim | 1 |
+| The fence is never enforced | 3 |
+| The claim survives a successful write | 1 |
+
+**The claim race is tested with two real connections through two repositories on two pools.** A fake
+cannot demonstrate atomicity across instances at all — that is the whole property — and a single
+connection would serialise the two attempts by accident and prove nothing.
+
+**One thing caught while writing the migration rather than after.** The first draft of 008 added a
+`document_claimable_idx` on `(uploaded_at) where extraction_state = 'held'` — byte-for-byte the
+predicate migration 007 already indexes. A duplicate index costs a write on every insert and update
+to that column and answers no query the first one cannot. Removed, with a comment saying why nothing
+is indexed there, so the absence reads as a decision rather than an oversight.
+
 ### Completion Notes List
+
+**Task 3 (in progress) — the claim is taken before the money is spent.** Story 1.5b's parent-row lock
+sits *inside* `replace`, which serialises the cheap part and lets the expensive part run twice: two
+pollers both call the provider, both get an answer, then queue politely to overwrite each other. The
+claim closes that by being acquired before the call, in one atomic statement whose `returning` says
+who won.
+
+**It lives in the database because two instances share no memory.** An in-memory claim is invisible
+to the instance that matters. Expiry is evaluated with the database's `now()` for the same reason:
+comparing against an application timestamp would give every instance its own clock, and skew would
+decide who owns a document.
+
+**Expiry deliberately creates a second claimant** — that is what stops a dead process holding a
+document forever — which is precisely why the write is fenced. The token is re-checked *inside* the
+finalising transaction, in the same statement that takes the row lock, so there is no window between
+checking and writing. A stale holder is refused with `StaleExtractionClaimError` and changes nothing:
+tested by claiming twice and having the first holder return late.
+
+**`extracting` is still not a durable state.** The document stays `held` for the whole run, and the
+surface derives "extracting" from `held` plus a live claim. A crash therefore leaves a claim that
+expires and a document that is still, accurately, held and waiting — rather than one stranded in a
+state with nothing to move it out.
+
+**Still open in this task:** the follow-up endpoint and its authorisation, wiring `extractDocument`
+to take and release the claim, and the transition definitions.
+
+### File List
 
 **Task 2 — the four states now exist where they can be trusted.** Before this migration, "has this
 been read?" was answered by looking for extraction rows, which distinguishes exactly one of the four
@@ -376,6 +464,7 @@ will read as narrower than the behaviour to the next person.
 
 **Added**
 
+- `migrations/008_document_extraction_claim.sql` — the claim, its expiry, and why no index is added
 - `migrations/007_document_extraction_state.sql` — the four states, a closed vocabulary, a partial index for the held query
 - `migrations/document-extraction-state.test.ts` — 20 tests: vocabulary parity, defaults, grants, and the state/rows agreement
 - `core/ingestion/extract-document.ts` — deferred extraction: read a held document, store what it says

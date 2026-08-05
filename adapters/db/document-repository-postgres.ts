@@ -2,6 +2,7 @@ import { Pool } from 'pg'
 
 import type {
   DocumentRepository,
+  ExtractionClaim,
   ExtractionState,
   HeldDocument,
   NewDocument,
@@ -134,6 +135,47 @@ export function createPostgresDocumentRepository(
         contentType: row.content_type,
         extractionState: row.extraction_state,
       }
+    },
+
+    async claimForExtraction(id: string, ttlSeconds: number): Promise<ExtractionClaim | null> {
+      // One statement, so acquisition is atomic across instances without a
+      // transaction to hold open across the provider call. Postgres evaluates
+      // the predicate and the write together, so two callers racing this cannot
+      // both match.
+      //
+      // `now()` is the database's clock deliberately. Comparing against a
+      // timestamp the application supplies would give every instance its own,
+      // and clock skew would decide who owns a document.
+      const { rows } = await pool().query<{ extraction_claim_token: string }>(
+        `update document
+            set extraction_claim_token = gen_random_uuid(),
+                extraction_claim_expires_at = now() + make_interval(secs => $2)
+          where id = $1
+            and extraction_state = 'held'
+            and (extraction_claim_token is null or extraction_claim_expires_at <= now())
+        returning extraction_claim_token`,
+        [id, ttlSeconds],
+      )
+
+      const row = rows[0]
+
+      // No row means someone else holds a live claim, or the document is not
+      // `held` and therefore has nothing left to extract. Both are "not yours",
+      // and the caller must not call the provider either way.
+      if (row === undefined) return null
+
+      return { documentId: id, token: row.extraction_claim_token }
+    },
+
+    async releaseExtractionClaim(claim: ExtractionClaim): Promise<void> {
+      // Matching token required. Without it, a stale claimant returning late
+      // would hand a live document to the next caller mid-extraction.
+      await pool().query(
+        `update document
+            set extraction_claim_token = null, extraction_claim_expires_at = null
+          where id = $1 and extraction_claim_token = $2`,
+        [claim.documentId, claim.token],
+      )
     },
 
     async markExtractionState(

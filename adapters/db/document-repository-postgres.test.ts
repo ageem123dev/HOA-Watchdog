@@ -267,4 +267,148 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await expect(repository.record(document)).rejects.toMatchObject({ code: '23503' })
   })
 
+
+  describe('claiming a document for extraction (story 1.5d)', () => {
+    let counter = 0
+    /** A fresh held document, returning its id. */
+    const heldDocument = async (): Promise<string> => {
+      counter += 1
+      const { id } = await repository.record(
+        newDocument(`claim-${Date.now()}-${counter}`, boardMemberId),
+      )
+      return id
+    }
+
+    const claimStateOf = async (id: string) => {
+      const { rows } = await admin.query<{
+        extraction_claim_token: string | null
+        expired: boolean | null
+      }>(
+        `select extraction_claim_token,
+                extraction_claim_expires_at <= now() as expired
+           from document where id = $1`,
+        [id],
+      )
+      return rows[0]!
+    }
+
+    it('gives the claim to exactly one of two callers racing it (C1, C2)', async () => {
+      // The property a fake cannot demonstrate. Acquisition must be atomic
+      // across *instances*, so this races two repositories on two pools.
+      const documentId = await heldDocument()
+      const poolA = new Pool({ connectionString: writerUrl, max: 1 })
+      const poolB = new Pool({ connectionString: writerUrl, max: 1 })
+
+      try {
+        const a = createPostgresDocumentRepository({ pool: poolA })
+        const b = createPostgresDocumentRepository({ pool: poolB })
+
+        const results = await Promise.all([
+          a.claimForExtraction(documentId, 60),
+          b.claimForExtraction(documentId, 60),
+        ])
+
+        const winners = results.filter((claim) => claim !== null)
+
+        expect(winners).toHaveLength(1)
+        expect(winners[0]!.documentId).toBe(documentId)
+      } finally {
+        await Promise.all([poolA.end(), poolB.end()])
+      }
+    }, 30_000)
+
+    it('refuses a second claim while the first is live', async () => {
+      const documentId = await heldDocument()
+
+      const held = await repository.claimForExtraction(documentId, 60)
+      const second = await repository.claimForExtraction(documentId, 60)
+
+      expect(held).not.toBeNull()
+      expect(second).toBeNull()
+    })
+
+    it('hands an expired claim to the next caller (C3)', async () => {
+      // A process that dies mid-extraction must not hold a document forever.
+      const documentId = await heldDocument()
+
+      const first = await repository.claimForExtraction(documentId, 0)
+      const second = await repository.claimForExtraction(documentId, 60)
+
+      expect(first).not.toBeNull()
+      expect(second).not.toBeNull()
+      expect(second!.token).not.toBe(first!.token)
+    })
+
+    it('gives each attempt its own token', async () => {
+      const one = await heldDocument()
+      const other = await heldDocument()
+
+      const a = await repository.claimForExtraction(one, 60)
+      const b = await repository.claimForExtraction(other, 60)
+
+      expect(a!.token).not.toBe(b!.token)
+    })
+
+    it.each(['read', 'unreadable', 'provider_unavailable'] as const)(
+      'does not claim a document that is %s (C8)',
+      async (state) => {
+        const documentId = await heldDocument()
+        await admin.query('update document set extraction_state = $2 where id = $1', [
+          documentId,
+          state,
+        ])
+
+        expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
+      },
+    )
+
+    it('sets an expiry alongside the token, never a token alone', async () => {
+      // The check constraint forbids one without the other. This asserts the
+      // adapter satisfies it rather than leaving the constraint to catch a bug
+      // in production.
+      const documentId = await heldDocument()
+
+      await repository.claimForExtraction(documentId, 60)
+      const claim = await claimStateOf(documentId)
+
+      expect(claim.extraction_claim_token).not.toBeNull()
+      expect(claim.expired).toBe(false)
+    })
+
+    describe('releasing it', () => {
+      it('frees the document for the next caller', async () => {
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.releaseExtractionClaim(claim!)
+
+        expect(await repository.claimForExtraction(documentId, 60)).not.toBeNull()
+      })
+
+      it('clears both columns, not just the token', async () => {
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.releaseExtractionClaim(claim!)
+
+        expect((await claimStateOf(documentId)).extraction_claim_token).toBeNull()
+      })
+
+      it('ignores a release from the wrong holder (C5)', async () => {
+        // A stale claimant returning late must not hand a live document to the
+        // next caller mid-extraction.
+        const documentId = await heldDocument()
+        const claim = await repository.claimForExtraction(documentId, 60)
+
+        await repository.releaseExtractionClaim({
+          documentId,
+          token: '00000000-0000-4000-8000-000000000000',
+        })
+
+        expect((await claimStateOf(documentId)).extraction_claim_token).toBe(claim!.token)
+        expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
+      })
+    })
+  })
+
 })
