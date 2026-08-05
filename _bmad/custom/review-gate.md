@@ -58,7 +58,7 @@ Mutation testing only probes where a test already exists. It cannot ask about a 
 drawn — which is precisely how the 1.5d defect survived: `claimForExtraction` returned `null` for two
 different situations and both were treated as one, so there was no assertion to mutate.
 
-**Run both. After every task. Before the task's checkbox is ticked.**
+**Run all three. On every diff that will reach `main`. Before it is pushed.**
 
 ## 2. Order
 
@@ -72,7 +72,20 @@ The same seven steps at each of the three moments. "Task" below means whichever 
 4. **Adversarial review** — one `argus_review` call scoped to *this task's* diff.
 5. Verify every finding against the real files (`argus-review-routing.md` §5 — mandatory).
 6. Fix confirmed findings **test-first**: a regression test that fails against the pre-fix code.
-7. Only then tick the checkbox.
+7. Only then close out the scope. Each moment has its own closing act, and only the first is a
+   checkbox — raised in review, because step 7 named the task's and left the other two undefined:
+   - **task diff** → tick the task's checkbox in the story file;
+   - **story integration** → write the result into the story's `### Review Findings`;
+   - **review-fix push** → push. The gate is what earns the push, so a fix that has not been
+     through it is not ready to go back to the reviewer.
+
+**Which engine satisfies step 4.** The call must be a real `argus_review`, and
+`argus-review-routing.md` allows three settings. `BMAD_REVIEW_ENGINE` unset or `argus` satisfies the
+gate, and so does `both`. **`claude` does not** — the Claude subagent layers are the same model
+family reviewing its own work, which is not the second opinion this step is for. If Argus is
+unreachable and the routing falls back to the Claude layers, that is **not** a satisfied gate: say so
+explicitly, and treat it as the §6 conversation rather than as a pass. Raised in review, which
+noticed the gate demanded a call the engine contract said was optional.
 
 A diff is not finished because its tests pass. It is finished when all three checks have run and what
 they found has been fixed or recorded.
@@ -168,7 +181,17 @@ Roughly one `argus_review` call per task, one per story, and one per round of re
 whole-story call it did run cost ~392k tokens, so budget accordingly, and prefer
 `provider: "offline"` when the point is to test wiring rather than to get findings.
 
-If cost ever forces a choice, drop the **integration pass** before the other two. The per-task and
-per-fix reviews catch defects while the change is still in mind and before anything is built on top
-of them; the integration pass mostly re-reads code that has already been through one. That ordering
-is the opposite of what it was in the first version of this file, and the fix data above is why.
+**No moment is droppable, and this paragraph used to say otherwise.** It read "if cost ever forces a
+choice, drop the integration pass" — which contradicted the one rule at the top of this file and
+would have let a story reach ready-to-merge with no cross-task check at all, silently. Raised in
+review, and correctly.
+
+If the budget genuinely cannot cover every moment, **stop and put it to the user** — name which
+moment you propose to skip, on which diff, and what that leaves unchecked. Skipping is then a
+decision someone made, not a shortcut nobody recorded. The one thing you may not do is proceed
+quietly and let a green pipeline imply a review that never ran.
+
+If the user does have to choose, the *least* costly omission is the **integration pass**: the
+per-task and per-fix reviews catch defects while the change is still in mind and before anything is
+built on top of them, whereas the integration pass largely re-reads code that has already been
+through one. That is guidance for the conversation, not permission to act alone.
