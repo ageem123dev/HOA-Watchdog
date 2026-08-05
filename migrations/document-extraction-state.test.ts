@@ -121,13 +121,13 @@ describeWithDatabase('document.extraction_state', () => {
   }
 
   describe('what a new document starts as (B4)', () => {
-    it('is held, without the inserter saying so', () => {
-      // The insert above names no state. Documents that predate this migration
-      // are in exactly the same position, so the default is the backfill.
-      expect(true).toBe(true)
-    })
-
-    it('really is held', async () => {
+    it('is held, without the inserter saying so', async () => {
+      // The insert names no state, so this is the default doing the work.
+      // Documents that predate this migration are in exactly the same position,
+      // which makes the default the backfill.
+      //
+      // Replaced an `expect(true).toBe(true)` that asserted nothing — raised in
+      // review, and the same empty-guard shape this project keeps finding.
       expect(await stateOf(await newDocument())).toBe('held')
     })
 

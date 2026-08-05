@@ -90,10 +90,6 @@ describe('extractionFeedback', () => {
   describe('an outage asks the treasurer for nothing', () => {
     const outage = () => extractionFeedback(outcomeOf('provider-unavailable'))
 
-    it('is marked retryable', () => {
-      expect(outage().retryable).toBe(true)
-    })
-
     it('does not blame the document', () => {
       // The mistake 1.5b shipped and had to undo: copy that sends a treasurer to
       // fix a document that was never the problem.
@@ -102,6 +98,13 @@ describe('extractionFeedback', () => {
 
     it('asks for no action', () => {
       expect(outage().message).not.toMatch(/try again|upload|retry|refresh|check/i)
+    })
+
+    it('promises nothing the system does not do', () => {
+      // Raised in review, and correct: this outcome is `settled`, so the
+      // surface stops polling — and nothing else retries. "It will be read
+      // shortly" was a promise with no mechanism behind it.
+      expect(outage().message).not.toMatch(/will be read|shortly|soon|automatically|queued/i)
     })
 
     it('reads differently from the unreadable case', () => {
@@ -113,23 +116,32 @@ describe('extractionFeedback', () => {
   })
 
   describe('the unreadable case', () => {
-    it('is not marked retryable, because retrying the same bytes cannot help', () => {
-      expect(extractionFeedback(outcomeOf('unreadable')).retryable).toBe(false)
-    })
-
     it('says what would help instead', () => {
       expect(extractionFeedback(outcomeOf('unreadable')).message).toMatch(/clearer scan|spreadsheet/i)
     })
   })
 
-  describe('a document already read by the deterministic path', () => {
-    it('reads as done rather than as an error', () => {
-      // A CSV is parsed at upload. Asking to extract it is a caller mistake, and
-      // the treasurer should never see a consequence of one.
+  describe('a document the deterministic path owns', () => {
+    it('is settled, because nothing here will run', () => {
+      expect(extractionFeedback(outcomeOf('no-provider-path')).settled).toBe(true)
+    })
+
+    it('does not claim the figures are recorded', () => {
+      // Raised in review. This outcome only means the content type belongs to
+      // the upload-time parser. It carries no evidence that the parse produced
+      // anything — for a spreadsheet whose parse failed it would be asserting
+      // that financial figures are stored when they are not.
       const feedback = extractionFeedback(outcomeOf('no-provider-path'))
 
-      expect(feedback.status).toBe(extractionFeedback(outcomeOf('read')).status)
-      expect(feedback.settled).toBe(true)
+      expect(`${feedback.status} ${feedback.message ?? ''}`).not.toMatch(
+        /figures .*recorded|are recorded/i,
+      )
+    })
+
+    it('says something different from a document this path actually read', () => {
+      expect(extractionFeedback(outcomeOf('no-provider-path')).message).not.toBe(
+        extractionFeedback(outcomeOf('read')).message,
+      )
     })
   })
 })

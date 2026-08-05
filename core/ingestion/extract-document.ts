@@ -81,20 +81,35 @@ export interface ExtractDocumentDependencies {
  * document while the treasurer is still watching.
  */
 /**
- * What a finished document reports when someone polls it again.
+ * The outcome for a document that has already finished.
  *
- * `claimForExtraction` returns null for two different situations — someone else
- * holds a live claim, and the work is already done — and they are not the same
- * answer. Treating both as `in-progress` showed "Reading" forever for a document
- * that had been read, because every later poll took the same branch. Found in
- * review.
+ * Built rather than cast. An earlier version wrote
+ * `{ outcome: settled, documentId } as ExtractionOutcome`, which produced a
+ * `read` result with **no `records` field** — something the type says cannot
+ * exist. The `as` silenced the compiler instead of answering it, and a consumer
+ * reading `.records` would have got `undefined`. Raised in review.
+ *
+ * The count is read back, because only the database knows it: this path did not
+ * do the extraction and has nothing to count.
  */
-const SETTLED_OUTCOME: Readonly<Record<ExtractionState, ExtractionOutcomeKind | null>> = {
-  // Still claimable, so a null claim here really does mean someone else has it.
-  held: null,
-  provider_unavailable: 'provider-unavailable',
-  read: 'read',
-  unreadable: 'unreadable',
+async function settledOutcome(
+  documentId: string,
+  state: ExtractionState,
+  deps: ExtractDocumentDependencies,
+): Promise<ExtractionOutcome | null> {
+  switch (state) {
+    case 'held':
+      // Still claimable, so a null claim really does mean someone else has it.
+      return null
+    case 'read': {
+      const records = await deps.extractions.findByDocument(documentId)
+      return { outcome: 'read', documentId, records: records.length }
+    }
+    case 'unreadable':
+      return { outcome: 'unreadable', documentId }
+    case 'provider_unavailable':
+      return { outcome: 'provider-unavailable', documentId }
+  }
 }
 
 const DEFAULT_CLAIM_TTL_SECONDS = 300
@@ -132,11 +147,9 @@ export async function extractDocument(
       // document that was read must not keep reporting `in-progress` to every
       // later poll. Only a `held` document that could not be claimed is
       // genuinely someone else's work in flight.
-      const settled = SETTLED_OUTCOME[document.extractionState]
+      const settled = await settledOutcome(documentId, document.extractionState, deps)
 
-      return settled === null
-        ? { outcome: 'in-progress', documentId }
-        : ({ outcome: settled, documentId } as ExtractionOutcome)
+      return settled ?? { outcome: 'in-progress', documentId }
     }
 
     const settle = async (
@@ -198,11 +211,14 @@ export async function extractDocument(
       // database knows what they decided.
       if (error instanceof StaleExtractionClaimError) {
         const current = await deps.repository.findById(documentId)
-        const settled = current === null ? null : SETTLED_OUTCOME[current.extractionState]
 
-        return settled === null
-          ? { outcome: 'in-progress', documentId }
-          : ({ outcome: settled, documentId } as ExtractionOutcome)
+        // The document vanished between claiming it and being refused. That is
+        // not "in progress" — there is nothing left to be in progress with.
+        if (current === null) return { outcome: 'not-found', documentId }
+
+        const settled = await settledOutcome(documentId, current.extractionState, deps)
+
+        return settled ?? { outcome: 'in-progress', documentId }
       }
 
       deps.onError?.(error, documentId)

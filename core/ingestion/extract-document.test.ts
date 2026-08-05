@@ -409,8 +409,30 @@ describe('extractDocument', () => {
     // else holds a live claim, and the document has finished. Reporting both as
     // `in-progress` means a document that was read successfully shows "Reading"
     // to the treasurer forever, because every later poll takes the same branch.
+    it('reports an already-read document with its record count, not a bare outcome', async () => {
+      // Raised in review. The first version built `{ outcome: 'read', documentId }`
+      // and forced it past the compiler with `as ExtractionOutcome` — producing a
+      // `read` result with no `records` field, which the type says is impossible.
+      // A cast that silences the checker is how that becomes a runtime surprise.
+      const f = fakes({
+        claimable: false,
+        document: {
+          id: DOCUMENT_ID,
+          storageKey: 'k',
+          contentType: 'application/pdf',
+          extractionState: 'read',
+        },
+      })
+      vi.mocked(f.extractions.findByDocument).mockResolvedValue([RECORD, RECORD])
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toEqual({
+        outcome: 'read',
+        documentId: DOCUMENT_ID,
+        records: 2,
+      })
+    })
+
     it.each([
-      ['read', 'read'],
       ['unreadable', 'unreadable'],
       ['provider_unavailable', 'provider-unavailable'],
     ] as const)('reports %s as %s rather than in-progress', async (state, expected) => {

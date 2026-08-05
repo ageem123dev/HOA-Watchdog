@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 
 import { EXTRACTION_OUTCOMES, type ExtractionOutcome } from '@/core/ingestion/extract-document'
-import { extractionFeedback } from '@/core/ingestion/extraction-feedback'
+import {
+  EXTRACTION_STATUS_UNAVAILABLE,
+  extractionFeedback,
+  type ExtractionFeedback,
+} from '@/core/ingestion/extraction-feedback'
 
 /**
  * What is happening to a document the upload stored but did not read.
@@ -48,8 +52,18 @@ function isOutcome(body: unknown): body is ExtractionOutcome {
   )
 }
 
+/**
+ * Statuses that will never become anything else by waiting.
+ *
+ * A refused request is not a slow one. 401 for an expired session and 400 for a
+ * malformed id do not change on their own, so retrying them is 40 requests over
+ * two minutes that all fail the same way.
+ */
+const PERMANENT_REFUSALS = new Set([400, 401, 403, 404, 405, 410, 422])
+
 export function ExtractionStatus({ documentId }: { readonly documentId: string }) {
   const [outcome, setOutcome] = useState<ExtractionOutcome | null>(null)
+  const [refused, setRefused] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -60,7 +74,10 @@ export function ExtractionStatus({ documentId }: { readonly documentId: string }
       attempts += 1
 
       try {
-        const response = await fetch(`/api/documents/${documentId}/extract`, { method: 'POST' })
+        const response = await fetch(
+          `/api/documents/${encodeURIComponent(documentId)}/extract`,
+          { method: 'POST' },
+        )
         const body: unknown = await response.json()
 
         // The unmount check is after the await, not before it: a component that
@@ -74,6 +91,17 @@ export function ExtractionStatus({ documentId }: { readonly documentId: string }
         // below, but the *render* then calls `extractionFeedback` on it where
         // nothing catches anything. Found in review.
         if (!response.ok || !isOutcome(body)) {
+          // A refused request is not a slow one. Retrying a 401 changes nothing
+          // and leaves the region reading "Waiting to be read", which tells the
+          // treasurer their document is queued when it was never looked at.
+          if (PERMANENT_REFUSALS.has(response.status)) {
+            setRefused(true)
+            return
+          }
+
+          // Anything else — a 5xx, or a 200 whose body is not an outcome — may
+          // be a deploy in flight, so it is worth asking again.
+
           if (attempts < MAX_ATTEMPTS) timer = setTimeout(() => void ask(), POLL_INTERVAL_MS)
           return
         }
@@ -101,15 +129,21 @@ export function ExtractionStatus({ documentId }: { readonly documentId: string }
     }
   }, [documentId])
 
-  const feedback = outcome === null ? null : extractionFeedback(outcome)
+  const feedback: ExtractionFeedback | null = refused
+    ? EXTRACTION_STATUS_UNAVAILABLE
+    : outcome === null
+      ? null
+      : extractionFeedback(outcome)
 
   return (
     /*
-      The region is always present and only its contents change. A live region
-      added at the same moment as its content is announced unreliably — the same
-      reasoning as the results table this sits inside.
+      **No live region here.** `UploadForm` already wraps the whole results table
+      in `role="status"`, and nesting one live region inside another lets a
+      screen reader suppress, duplicate or over-broaden the announcement. This
+      content is inside that region, so changes to it are announced by it.
+      Raised in review.
     */
-    <span role="status" aria-live="polite" style={styles.region}>
+    <span style={styles.region}>
       {feedback === null ? (
         <span style={styles.status}>Waiting to be read</span>
       ) : (

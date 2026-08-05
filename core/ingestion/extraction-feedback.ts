@@ -27,14 +27,22 @@ export interface ExtractionFeedback {
    * the region busy — not to decide what to say, which is `status`'s job.
    */
   readonly settled: boolean
-  /**
-   * True when trying again could plausibly help.
-   *
-   * Distinct from `settled`: an unreadable document is settled and retrying
-   * cannot help, while a provider outage is settled *for now* and retrying can.
-   */
-  readonly retryable: boolean
 }
+
+/**
+ * What to show when the *request* was refused, rather than the document read.
+ *
+ * A 401 for an expired session or a 400 for a malformed id says nothing about
+ * the document — so this deliberately does not describe one. It also does not
+ * claim the document is queued: an earlier version left "Waiting to be read" on
+ * screen after 40 futile retries, telling the treasurer their document was in a
+ * queue when the request had been refused. Raised in review.
+ */
+export const EXTRACTION_STATUS_UNAVAILABLE = Object.freeze({
+  status: 'Status unavailable',
+  message: 'We could not check this document just now. Reload the page to try again.',
+  settled: true,
+}) satisfies ExtractionFeedback
 
 export function extractionFeedback(outcome: ExtractionOutcome): ExtractionFeedback {
   switch (outcome.outcome) {
@@ -46,7 +54,6 @@ export function extractionFeedback(outcome: ExtractionOutcome): ExtractionFeedba
         status: 'Reading',
         message: 'Reading the figures out of this document.',
         settled: false,
-        retryable: false,
       }
 
     case 'read':
@@ -57,7 +64,6 @@ export function extractionFeedback(outcome: ExtractionOutcome): ExtractionFeedba
         status: 'Read',
         message: 'The figures from this document are recorded.',
         settled: true,
-        retryable: false,
       }
 
     case 'unreadable':
@@ -70,29 +76,37 @@ export function extractionFeedback(outcome: ExtractionOutcome): ExtractionFeedba
           'This document opened, but its figures could not be read reliably. ' +
           'Upload a clearer scan, or export it as a spreadsheet.',
         settled: true,
-        retryable: false,
       }
 
     case 'provider-unavailable':
       // Asks for nothing, exactly as `figures-not-stored` does. The document is
-      // fine, nothing is lost, and there is no action the treasurer can usefully
-      // take — telling them to try again would make our outage their errand.
+      // fine, and there is no action the treasurer can usefully take — telling
+      // them to try again would make our outage their errand.
+      //
+      // It also promises nothing. An earlier version said "it will be read
+      // shortly", which was false: this outcome is `settled`, the surface stops
+      // polling on it, and no background job picks the document up. What is
+      // true is that the document is kept and a later visit will try again,
+      // because `provider_unavailable` stays claimable. Raised in review.
       return {
         status: 'Waiting to be read',
-        message: 'This document could not be read just now. It will be read shortly.',
+        message: 'This document could not be read just now. Nothing has been lost.',
         settled: true,
-        retryable: true,
       }
 
     case 'no-provider-path':
-      // A spreadsheet or CSV, already read at upload by the deterministic
-      // parser. Reaching this state means something asked the wrong question,
-      // and the honest answer is that there is nothing to wait for.
+      // A spreadsheet or CSV: the upload-time parser owns it, so nothing here
+      // will ever run for it.
+      //
+      // This says only that, and deliberately not "the figures are recorded".
+      // The outcome knows the *content type*; it carries no evidence that the
+      // parse produced anything, so for a spreadsheet whose parse failed the
+      // old copy asserted that financial figures were stored when they were
+      // not. Raised in review.
       return {
-        status: 'Read',
-        message: 'The figures from this document are recorded.',
+        status: 'Nothing to read here',
+        message: 'This file was read when it was uploaded.',
         settled: true,
-        retryable: false,
       }
 
     case 'not-found':
@@ -100,7 +114,6 @@ export function extractionFeedback(outcome: ExtractionOutcome): ExtractionFeedba
         status: 'Not found',
         message: 'This document is no longer held.',
         settled: true,
-        retryable: false,
       }
 
     default: {
