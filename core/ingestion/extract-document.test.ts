@@ -500,6 +500,24 @@ describe('extractDocument', () => {
       expect(f.marked).toEqual([])
       expect(f.released).toEqual([])
     })
+
+    it('releases the claim when the bytes are simply absent, the one path that still does', async () => {
+      // The last `releaseExtractionClaim` call in this module, and it had no
+      // test at all. Not an oversight in writing it — an erosion. Two tests
+      // once asserted a release here and on neighbouring paths; both were
+      // re-specified to `released == []` when the retry cooldown made a
+      // release wrong for *those* paths, and this one lost its only cover as
+      // collateral. Deleting the call left all 1020 tests green.
+      //
+      // Absent bytes are deliberately not an outage: retrying cannot conjure
+      // them back, so the state stays `held` and the claim is handed back
+      // rather than converted into a cooldown that would cap nothing.
+      const f = fakes({ bytes: null })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'not-found' })
+      expect(f.released).toEqual([TOKEN])
+      expect(f.marked).toEqual([])
+    })
   })
 
   describe('what a poll reports once the work has finished (found in review)', () => {
