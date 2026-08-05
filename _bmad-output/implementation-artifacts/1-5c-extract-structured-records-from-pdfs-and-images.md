@@ -602,6 +602,63 @@ fakes the provider.
 - `_bmad-output/implementation-artifacts/1-5c-...md` — split, decisions, Test Design
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — 1.5c in-progress, 1.5d added
 
+### CodeRabbit round 1 — MR !10, 9 actionable findings, all acted on
+
+**R1 (Critical) — the schema pattern sent to the provider was broken, and my test could not see it.**
+The best finding this project has had. `totalAmount`'s rule existed in four places, and the adapter's
+copy was written as a template literal:
+
+```ts
+pattern: `^-?\d{1,${MAX_INTEGER_DIGITS}}(\.\d{1,${AMOUNT_SCALE}})?$`
+```
+
+A template literal swallows `\d`. The value actually sent was `^-?d{1,12}(.d{1,2})?$` — which
+**rejects `1450.00`** and **accepts `d.d`**. Measured, not deduced. It survived because my test
+asserted the pattern *contained* `"12"` and `"2"`, which it does.
+
+Fixed at the source: `AMOUNT_PATTERN` now lives in `core/extraction/record.ts` as the single
+statement of the rule, and the validator, the schema and the probe are compared against it. The
+replacement test runs the regex over a table of thirteen amounts and requires the schema and the
+validator to agree on every one. It fails six ways against the old pattern.
+
+**R2 (Major) — that assertion could not detect a broken pattern.** The same defect from the test's
+side, and correct. Substring checks on a regex prove nothing about what it matches.
+
+**R3 (Major) — the timeout bounded only the fetch phase.** Also correct, and a real hang.
+`clearTimeout` ran in the `finally` attached to `doFetch`, so the streaming body read that followed
+had no bound: a provider answering with headers and then dripping the body would hang for as long as
+the socket did. The deadline now spans the whole exchange, and `readBounded` races each read against
+the abort signal rather than trusting an injected `fetch` to wire one. The new test failed by
+**timing out after 10 seconds**, which is the defect stated precisely.
+
+**R4 (Minor) — a test checking the wrong file.** `it('does not import the adapter')` asserted that the
+*adapter* did not mention the probe. True, for unrelated reasons, and not the stated property. Now
+asserts the probe imports nothing from `adapters/` or `core/`.
+
+**R5 (Trivial) — the probe's copied constraints had no parity assertion.** Now three: the schema
+pattern and the check's regex literal are both compared to `AMOUNT_PATTERN`, and a behavioural test
+runs both over real amounts. Comparing source text to a runtime value needed decoding — the probe's
+source reads `\d` where the value is `\d` — which is the same escaping hazard in a third costume.
+
+**R6 (Trivial) — the boundary scan missed destructured reads.** Correct and worth having:
+`const { GEMINI_API_KEY } = process.env` never touches `env.NAME`, so the member pattern could not
+see the shortest way to read a credential in modern JavaScript. Added, with three tests and a
+mutation proving the new branch earns its keep (3 failures without it).
+
+**R7-R9 (Major, on the 1.5d story document) — folded into that story rather than declined.** All
+three are right, and all three are about work not yet built:
+
+- `document` has **no durable state column**, so the four states of AC3 are not representable at all —
+  *held*, *provider unavailable* and *could not be read* are all "no rows".
+- The state transition and the record replacement need **one transaction boundary**.
+- **The claim must be taken before the provider call.** 1.5b's parent-row lock sits *inside*
+  `replace`, which is the wrong side of the expensive call: two polls can both reach the provider and
+  then serialise their writes, one silently overwriting the other. This is the sharpest of the three
+  and I had not seen it.
+
+1.5d now carries a task group for the durable state and an explicit claim-before-extraction subtask,
+each marked with where it came from.
+
 ### Definition of Done
 
 **PASS.**

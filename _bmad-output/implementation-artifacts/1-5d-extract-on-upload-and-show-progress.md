@@ -62,11 +62,35 @@ from *could not be read*
   - [ ] Store through 1.5b's `ExtractionRepository.replace`, which is already transactional and refuses an empty set. Do not add a second way to write records
   - [ ] **`provider unavailable` is not `unreadable`.** One is retryable and not the document's fault; the other says the scan is bad. 1.5b made exactly this mistake with `failed` and had to add `figures-not-stored` — do not repeat it
 
+- [ ] **A durable extraction state on `document`** (AC: 1, 3) — *raised in review of 1.5c, MR !10*
+  - [ ] **The four states are not currently representable.** `document` has no state column, and
+        `ExtractionRepository.replace` touches only extraction rows. Extraction rows alone cannot
+        tell *held, not yet read* from *provider unavailable* from *could not be read* — all three
+        are "no rows". AC3 says a document with no rows is never successful, and today nothing can
+        express that
+  - [ ] A migration adding the state, with the same `check` discipline as migration 006 — a closed
+        vocabulary the database enforces, not a free-text column
+  - [ ] **One transaction boundary** covering the state transition *and* the record replacement, so
+        `read` is committed only with a complete validated set and neither failure path can leave a
+        state that disagrees with the rows
+  - [ ] Do **not** reuse `failed`: its copy tells the treasurer the document was not saved, which is
+        exactly the mistake 1.5b had to correct by adding `figures-not-stored`
+
 - [ ] **Deferred extraction** (AC: 1, 3)
   - [ ] 1.5c decided: store first, extract on a follow-up request the surface polls. No queue — that remains out of scope and is not to be added without asking
   - [ ] The follow-up endpoint is authenticated and authorises the document against the caller. An endpoint that extracts any document by id is an access-control hole wearing a progress bar
-  - [ ] Re-entrancy: two polls arriving together must not run extraction twice or store two sets. 1.5b's parent-row lock is the precedent, and the reason it exists
-  - [ ] Define the transitions between the four states, including the retry path out of *provider unavailable*
+  - [ ] **Claim the document before calling the provider** — *raised in review of 1.5c, MR !10*.
+        1.5b's parent-row lock is taken *inside* `replace`, which is the wrong side of the expensive
+        call: two polls can both reach the provider, both get an answer, and then serialise their
+        writes so that one silently overwrites the other. The claim must happen **before** extraction
+        starts. A poll that loses the claim returns the current state rather than starting a second
+        extraction
+  - [ ] Keep *held, not yet read* as the durable running state, or use a separate non-durable claim.
+        **Do not add `extracting` as a fifth durable state** — a crash mid-extraction would strand
+        documents in it with nothing to move them out
+  - [ ] Define the transitions between the four states explicitly: held → extracting → read *or*
+        could not be read; held/provider unavailable → extracting on retry; and *provider
+        unavailable* must never collapse into *could not be read*
 
 - [ ] **Surface: staged extraction progress** (AC: 3, 4)
   - [ ] UX-DR12's staged named extraction-progress state

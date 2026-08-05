@@ -238,6 +238,25 @@ describe('the Gemini extraction adapter', () => {
       expect(result).toMatchObject({ ok: false, refusal: 'unavailable' })
     })
 
+    it('bounds the body read too, not only the fetch phase', async () => {
+      // A provider can answer with headers promptly and then drip the body. The
+      // first version cleared the timer as soon as `fetch` resolved, so this
+      // case had no bound at all and would hang for as long as the socket did.
+      const neverEnding = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"candidates":'))
+          // and then nothing, forever
+        },
+      })
+      const fetchMock = vi.fn(async () => new Response(neverEnding, { status: 200 }))
+
+      const result = await extractorWith(fetchMock as unknown as typeof globalThis.fetch, 50).extract(
+        REQUEST,
+      )
+
+      expect(result).toMatchObject({ ok: false, refusal: 'unavailable' })
+    }, 10_000)
+
     it('passes an abort signal at all, so the bound has something to act on', async () => {
       const fetchMock = ok(providerReply([RECORD]))
 
@@ -402,14 +421,46 @@ describe('the Gemini extraction adapter', () => {
       expect(properties.documentNumber.maxLength).toBe(DOCUMENT_NUMBER_MAX_LENGTH)
     })
 
-    it('bounds the amount to the precision the column actually has (B3)', async () => {
-      // numeric(14,2): twelve integer digits and two decimals. A schema that
-      // permits more produces values the database refuses after the model has
-      // already been paid for them.
-      const pattern = (await recordSchema()).properties.totalAmount.pattern
+    describe('the amount pattern (B3)', () => {
+      // The previous version of this asserted the pattern *contained* "12" and
+      // "2". It passed against a pattern of `^-?d{1,12}(.d{1,2})?$` — a template
+      // literal had swallowed every backslash, so the schema being sent to the
+      // provider rejected `1450.00` and accepted `d.d`. Substring assertions
+      // cannot see that. These run the regex.
+      const AGREE: [string, boolean][] = [
+        ['1450.00', true],
+        ['0', true],
+        ['-250', true],
+        ['1450.5', true],
+        ['999999999999.99', true],
+        ['1450.000', false],
+        ['1,450.00', false],
+        ['$1450.00', false],
+        ['1450.', false],
+        ['d.d', false],
+        ['', false],
+        ['1e5', false],
+        ['9999999999999.99', false],
+      ]
 
-      expect(pattern).toContain(String(AMOUNT_PRECISION - AMOUNT_SCALE))
-      expect(pattern).toContain(String(AMOUNT_SCALE))
+      it.each(AGREE)('the schema pattern treats %s as valid=%s', async (amount, valid) => {
+        const pattern = (await recordSchema()).properties.totalAmount.pattern
+
+        expect(new RegExp(pattern).test(amount)).toBe(valid)
+      })
+
+      it.each(AGREE)('the validator agrees about %s (valid=%s)', (amount, valid) => {
+        // The schema and the validator are two statements of one rule, so each
+        // is the other's oracle across the whole table rather than on one case.
+        expect(validate({ ...RECORD, totalAmount: amount }).ok).toBe(valid)
+      })
+
+      it('bounds it to the precision the column actually has', async () => {
+        const pattern = (await recordSchema()).properties.totalAmount.pattern
+
+        expect(pattern).toContain(String(AMOUNT_PRECISION - AMOUNT_SCALE))
+        expect(pattern).toContain(String(AMOUNT_SCALE))
+      })
     })
 
     it('requires exactly the two fields the table declares not-null (B8)', async () => {

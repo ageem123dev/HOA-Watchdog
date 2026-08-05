@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { MAX_REPLY_BYTES } from '../adapters/extraction/extractor-gemini'
+import { AMOUNT_PATTERN } from '../core/extraction/record'
 
 const REPO_ROOT = join(__dirname, '..')
 
@@ -117,7 +118,70 @@ describe('the probe holds to the storage probe\'s standard', () => {
   })
 
   it('does not import the adapter, which would fire live calls under npm test', () => {
-    expect(adapter).not.toContain('verify-extraction')
+    // This previously asserted the *adapter* did not mention the probe, which
+    // is the reverse of the property it claims and was true for unrelated
+    // reasons. The probe is the file that must not import.
+    expect(probe).not.toMatch(/^\s*import\s.*from\s+['"][^'"]*adapters\//m)
+    expect(probe).not.toMatch(/^\s*import\s.*from\s+['"][^'"]*core\//m)
+  })
+
+  it('the adapter is importable here without firing anything', () => {
+    // Guards the direction that is safe, and keeps the import above honest.
     expect(MAX_REPLY_BYTES).toBeGreaterThan(0)
+  })
+})
+
+describe('the probe restates the amount rule, so it is compared here', () => {
+  // The rule lives in `core/extraction/record.ts`. The probe cannot import it —
+  // plain `.mjs` against TypeScript — so its copy is checked against the
+  // canonical one. Hand-writing this pattern is exactly how the adapter shipped
+  // `^-?d{1,12}(.d{1,2})?$` to the provider, a pattern that rejects `1450.00`
+  // and accepts `d.d`.
+  /**
+   * The string *value* the probe's literal denotes, not its source text.
+   *
+   * Source `'^-?\\d…'` denotes the value `^-?\d…`, so a raw text comparison
+   * against `AMOUNT_PATTERN` fails even when the two agree perfectly — and a
+   * regex built from the undecoded text matches a literal backslash. Decoding
+   * through JSON gets the value a reader of the file would expect.
+   */
+  const patternIn = (source: string): string | undefined => {
+    const raw = /pattern: '([^']+)'/.exec(source)?.[1]
+
+    return raw === undefined ? undefined : (JSON.parse(`"${raw}"`) as string)
+  }
+
+  it('uses the canonical pattern in the schema it sends', () => {
+    const probePattern = patternIn(probe)
+
+    expect(probePattern).toBeDefined()
+    expect(probePattern).toBe(AMOUNT_PATTERN)
+  })
+
+  it('and the same rule in the check it performs', () => {
+    // The probe also tests amounts with a regex literal. Both copies must agree
+    // with the canonical rule, not merely with each other.
+    const literal = /!\/(\^[^/]+)\/\.test\(record\.totalAmount\)/.exec(probe)?.[1]
+
+    expect(literal).toBeDefined()
+    expect(literal).toBe(AMOUNT_PATTERN)
+  })
+
+  it('agrees with the canonical rule on real amounts', () => {
+    // Behavioural, not textual: two patterns can differ in spelling and agree,
+    // or match textually and diverge. This is the assertion that would have
+    // caught the adapter's broken pattern.
+    const probePattern = new RegExp(patternIn(probe) ?? 'x^')
+
+    for (const [amount, valid] of [
+      ['1450.00', true],
+      ['-250', true],
+      ['1450.000', false],
+      ['$1450.00', false],
+      ['d.d', false],
+    ] as [string, boolean][]) {
+      expect(probePattern.test(amount), amount).toBe(valid)
+      expect(new RegExp(AMOUNT_PATTERN).test(amount), amount).toBe(valid)
+    }
   })
 })

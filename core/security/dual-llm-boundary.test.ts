@@ -274,6 +274,26 @@ describe('AD-10: the dual-LLM boundary', () => {
       expect(modulesReadingBothSides(fixture, manifest)).toEqual([])
     })
 
+    it.each([
+      ['destructured', 'const { NAME_A } = process.env; const { NAME_B } = process.env'],
+      ['destructured and renamed', 'const { NAME_A: a } = process.env, { NAME_B: b } = process.env'],
+      ['destructured together with others', 'const { PORT, NAME_A, NAME_B } = process.env'],
+    ])('flags a %s read', (_label, template) => {
+      // `const { GEMINI_API_KEY } = process.env` never touches `env.NAME`, so the
+      // first version of the scan could not see it at all.
+      const text = template
+        .replace(/NAME_A/g, manifest.sides.extraction.credentials[0]!)
+        .replace(/NAME_B/g, manifest.sides.reasoning.credentials[0]!)
+
+      expect(modulesReadingBothSides([{ path: 'app/x.ts', text }], manifest)).toHaveLength(1)
+    })
+
+    it('does not flag a destructure naming only one side', () => {
+      const text = `const { PORT, ${manifest.sides.extraction.credentials[0]} } = process.env`
+
+      expect(modulesReadingBothSides([{ path: 'app/x.ts', text }], manifest)).toEqual([])
+    })
+
     it('still flags bracket-notation reads, so the narrowing is not an escape hatch', () => {
       const sneaky = [
         {

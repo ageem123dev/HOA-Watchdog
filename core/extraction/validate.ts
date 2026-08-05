@@ -1,6 +1,5 @@
 import {
-  AMOUNT_PRECISION,
-  AMOUNT_SCALE,
+  AMOUNT_PATTERN,
   DOCUMENT_NUMBER_MAX_LENGTH,
   type ExtractionRecord,
   VENDOR_NAME_MAX_LENGTH,
@@ -60,7 +59,6 @@ export const UNREADABLE_MESSAGE =
   'Upload a clearer scan, or export it as a spreadsheet.'
 
 /** `numeric(14,2)` leaves twelve digits ahead of the point. */
-const MAX_INTEGER_DIGITS = AMOUNT_PRECISION - AMOUNT_SCALE
 
 /**
  * A decimal amount as written: no thousands separators, no currency symbol, no
@@ -71,7 +69,7 @@ const MAX_INTEGER_DIGITS = AMOUNT_PRECISION - AMOUNT_SCALE
  * cent the document never stated — and no database constraint can see it,
  * because the column has already coerced the value before any constraint runs.
  */
-const AMOUNT = new RegExp(`^-?\\d{1,${MAX_INTEGER_DIGITS}}(\\.\\d{1,${AMOUNT_SCALE}})?$`)
+const AMOUNT = new RegExp(AMOUNT_PATTERN)
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 

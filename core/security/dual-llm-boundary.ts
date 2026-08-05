@@ -170,11 +170,17 @@ export function boundaryViolations(manifest: DeployManifest): readonly BoundaryV
  * property, and a test pins both directions.
  */
 function readsEnvironmentVariable(text: string, name: string): boolean {
-  // `process.env.NAME`, `process.env['NAME']`, `env.NAME`, `env["NAME"]`.
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const access = String.raw`(?:process\s*\.\s*)?env\s*(?:\.\s*${escaped}\b|\[\s*['"\`]${escaped}['"\`]\s*\])`
 
-  return new RegExp(access).test(text)
+  // `process.env.NAME`, `process.env['NAME']`, `env.NAME`, `env["NAME"]`.
+  const member = String.raw`(?:process\s*\.\s*)?env\s*(?:\.\s*${escaped}\b|\[\s*['"\`]${escaped}['"\`]\s*\])`
+
+  // `const { NAME } = process.env`, `{ NAME: alias }`, `{ PORT, NAME }`.
+  // This form never touches `env.NAME`, so the member pattern cannot see it —
+  // and it is the shortest way to read a credential in modern JavaScript.
+  const destructured = String.raw`\{[^}]*\b${escaped}\b[^}]*\}\s*=\s*(?:process\s*\.\s*)?env\b`
+
+  return new RegExp(member).test(text) || new RegExp(destructured).test(text)
 }
 
 export function modulesReadingBothSides(

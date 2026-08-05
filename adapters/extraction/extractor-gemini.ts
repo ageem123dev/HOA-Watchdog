@@ -1,6 +1,5 @@
 import {
-  AMOUNT_PRECISION,
-  AMOUNT_SCALE,
+  AMOUNT_PATTERN,
   DOCUMENT_KINDS,
   DOCUMENT_NUMBER_MAX_LENGTH,
   SUPPORTED_CURRENCIES,
@@ -76,8 +75,6 @@ const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504])
  * rather than in `core/` — the shape is ours, the notation is theirs.
  */
 function responseSchema(): Record<string, unknown> {
-  const MAX_INTEGER_DIGITS = AMOUNT_PRECISION - AMOUNT_SCALE
-
   return {
     type: 'object',
     properties: {
@@ -96,8 +93,11 @@ function responseSchema(): Record<string, unknown> {
             issuedOn: { type: 'string', format: 'date', nullable: true },
             totalAmount: {
               type: 'string',
-              // Mirrors the validator's rule and the numeric(14,2) column.
-              pattern: `^-?\d{1,${MAX_INTEGER_DIGITS}}(\.\d{1,${AMOUNT_SCALE}})?$`,
+              // The canonical pattern, not a restatement of it. Written by hand
+              // here it was silently wrong: a template literal swallowed the
+              // backslashes, so the provider was sent `^-?d{1,12}(.d{1,2})?$` —
+              // which rejects `1450.00` and accepts `d.d`.
+              pattern: AMOUNT_PATTERN,
               nullable: true,
             },
             currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES] },
@@ -152,16 +152,31 @@ function toBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64')
 }
 
+class ExtractionAborted extends Error {
+  override readonly name = 'ExtractionAborted'
+}
+
+/** Rejects as soon as the deadline fires, so a read can be raced against it. */
+function abortion(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(new ExtractionAborted())
+      return
+    }
+    signal.addEventListener('abort', () => reject(new ExtractionAborted()), { once: true })
+  })
+}
+
 /**
  * Read at most `MAX_REPLY_BYTES`, and refuse rather than truncate.
  *
  * Truncating would hand the parser a prefix of valid JSON, which fails as
  * "invalid" and blames the document for a limit this code chose.
  */
-async function readBounded(response: Response): Promise<string | null> {
+async function readBounded(response: Response, signal: AbortSignal): Promise<string | null> {
   const body = response.body
 
-  if (body === null) return await response.text()
+  if (body === null) return await Promise.race([response.text(), abortion(signal)])
 
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
@@ -169,7 +184,11 @@ async function readBounded(response: Response): Promise<string | null> {
 
   try {
     for (;;) {
-      const { done, value } = await reader.read()
+      // Raced rather than awaited. A provider can answer with headers promptly
+      // and then drip the body, and an injected `fetch` may hand back a stream
+      // that is not wired to the abort signal at all — so the deadline is
+      // observed here explicitly instead of being assumed.
+      const { done, value } = await Promise.race([reader.read(), abortion(signal)])
       if (done) break
       if (value === undefined) continue
 
@@ -292,41 +311,59 @@ export function createGeminiExtractor(options: GeminiExtractorOptions = {}): Ext
         // Deliberately not inspecting the error. A transport error can carry the
         // request — headers included — and this is the path where the credential
         // would escape into a result or a log.
+        clearTimeout(timer)
         return { ok: false, refusal: 'unavailable' }
+      }
+
+      // The timer deliberately stays armed past this point. Clearing it as soon
+      // as `fetch` resolved left the body read below with no bound at all, so a
+      // provider that answered with headers and then dripped the body hung for
+      // as long as the socket did. The deadline covers the whole exchange.
+      try {
+        // `redirect: 'manual'` surfaces 3xx as a response rather than following
+        // it. Treating it as a refusal is the point: the alternative is handing
+        // the credential to whatever host the Location names.
+        if (response.status >= 300 && response.status < 400) {
+          return { ok: false, refusal: 'invalid' }
+        }
+
+        if (!response.ok) {
+          return {
+            ok: false,
+            refusal: RETRYABLE_STATUSES.has(response.status) ? 'unavailable' : 'invalid',
+          }
+        }
+
+        let text: string | null
+        try {
+          text = await readBounded(response, controller.signal)
+        } catch (error) {
+          // A deadline is the provider failing to answer, which is retryable and
+          // not the document's fault. Anything else read as a malformed body.
+          return {
+            ok: false,
+            refusal: error instanceof ExtractionAborted ? 'unavailable' : 'invalid',
+          }
+        }
+
+        if (text === null) return { ok: false, refusal: 'invalid' }
+
+        let payload: unknown
+        try {
+          payload = unwrap(text)
+        } catch {
+          // Malformed or truncated JSON. Never rethrown: the body can contain the
+          // request that produced it.
+          return { ok: false, refusal: 'invalid' }
+        }
+
+        const records = validateAll(payload)
+        if (records === null) return { ok: false, refusal: 'invalid' }
+
+        return { ok: true, records }
       } finally {
         clearTimeout(timer)
       }
-
-      // `redirect: 'manual'` surfaces 3xx as a response rather than following
-      // it. Treating it as a refusal is the point: the alternative is handing
-      // the credential to whatever host the Location names.
-      if (response.status >= 300 && response.status < 400) {
-        return { ok: false, refusal: 'invalid' }
-      }
-
-      if (!response.ok) {
-        return {
-          ok: false,
-          refusal: RETRYABLE_STATUSES.has(response.status) ? 'unavailable' : 'invalid',
-        }
-      }
-
-      const text = await readBounded(response).catch(() => null)
-      if (text === null) return { ok: false, refusal: 'invalid' }
-
-      let payload: unknown
-      try {
-        payload = unwrap(text)
-      } catch {
-        // Malformed or truncated JSON. Never rethrown: the body can contain the
-        // request that produced it.
-        return { ok: false, refusal: 'invalid' }
-      }
-
-      const records = validateAll(payload)
-      if (records === null) return { ok: false, refusal: 'invalid' }
-
-      return { ok: true, records }
     },
   }
 }
