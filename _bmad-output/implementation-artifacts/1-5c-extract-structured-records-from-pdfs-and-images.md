@@ -5,7 +5,7 @@ merge_request: 10
 
 # Story 1.5c: Extract structured records from PDFs and images
 
-Status: review
+Status: done
 
 > **Third of four stories from epic story 1.5.**
 > **1.5** built the deterministic path and the shared foundation — the `extraction` table, the record vocabulary, validation and the unreadable outcome. **1.5b** stores records and wires extraction into ingestion. **This story adds the provider path**: the extraction adapter, AD-9's schema enforcement at the API layer, and AD-10's vendor boundary.
@@ -805,3 +805,15 @@ will not run the one check that proves AD-9**. The evidence is the local run quo
   adapter, schema enforcement derived from the record vocabulary, the AD-10 boundary guard with a
   tracked deploy manifest, and the connectivity probe that proves AD-9 against the live provider.
   Status -> review.
+
+- 2026-08-05 — MR !10, five CodeRabbit rounds, 20 findings. Two were real defects: the `totalAmount`
+  pattern sent to the provider was `^-?d{1,12}(.d{1,2})?$` (a template literal had swallowed every
+  backslash, so it rejected `1450.00` and accepted `d.d`), and the request deadline was cleared before
+  the streaming body read, leaving it unbounded. Rounds 3-5 were about the quality of the tests
+  written for those fixes — three consecutive rounds on one assertion. One finding declined with its
+  limitation stated: making the probe injectable for runtime tests. Pipeline green on the final head.
+  Status -> done (ready to merge; the merge is the user's).
+
+- 2026-08-05 — Removed another session's work-in-progress (argus review routing, its code-review skill
+  edits and `.mcp.json`) that an overly broad `git add -A` had swept onto this branch. It is preserved
+  and pushed on `chore/argus-review-routing` rather than merged inside an unrelated story.
