@@ -337,6 +337,10 @@ So that the system has the records it needs, and I know immediately if a file co
 
 ### Story 1.5: Read a document into structured records
 
+**Delivered as four stories** — 1.5 (the parts), 1.5b (persistence), 1.5c (the provider path), 1.5d
+(deferred extraction and progress). That split was recorded only in `sprint-status.yaml` and the
+story files, so this section read as one story for three of them; noted here retroactively.
+
 As a treasurer,
 I want the system to read the figures out of an uploaded document,
 So that I do not have to key them in, and so nothing is recorded that could not be read reliably.
@@ -393,3 +397,30 @@ So that a misread name never silently becomes a new vendor and corrupts the comp
 **Given** an empty quarantine queue
 **When** it is viewed
 **Then** it states plainly that all vendors on uploaded invoices resolved to known records
+
+**Delivered as four stories.** Split on 2026-08-05, before any implementation. The ACs above are
+unchanged and remain the contract; each one is satisfied by exactly one story below, and none is
+satisfied twice.
+
+| Story | Scope | Epic ACs |
+| --- | --- | --- |
+| **1.6a — Recognise known vendors** | The `vendor` table and the matching rule. An extracted `vendor_name` resolves to a known vendor, or it does not. No pipeline change, no quarantine yet. | none directly — it is the mechanism the rest stand on, and its own ACs cover matching behaviour |
+| **1.6b — Hold unknown vendors for a human** | Pipeline integration: an unresolved vendor puts the document in quarantine and creates no vendor record. One held document must not delay any other in the batch. | AC1, AC4 |
+| **1.6c — See what is waiting** | The quarantine queue surface, read-only: each held item shown with its extracted vendor name and the source document, plus the empty state. | AC2, AC5 |
+| **1.6d — Resolve a held document** | Confirm as a new vendor, or match to an existing one. The document then completes processing and leaves the queue. | AC3 |
+
+**Why four.** Story 1.5d was 27 files and ~3,750 lines and drew four review rounds; smaller diffs are
+the point of the one-story-one-MR pipeline. The split also isolates the two surface stories, which
+are the first in the project to need component-rendering tests — `@testing-library/react` and `jsdom`
+are not yet dependencies, and that decision belongs to 1.6c rather than being discovered mid-story.
+
+**Matching is fuzzy, resolution is not.** Decided 2026-08-05. Similarity ranking (`pg_trgm` or
+equivalent) drives *suggestions* so the treasurer sees "did you mean" ordering in the queue. The
+**automatic** resolution threshold starts at normalised-exact — case-folded, trimmed, internal
+whitespace collapsed — because an automatic near-match that is wrong writes a false vendor identity
+into the comparison history silently, which is the exact harm this story exists to prevent. The
+threshold is a recorded, tunable decision in 1.6a, not a constant buried in a query.
+
+**Ordering note.** 1.6c is viewable before 1.6d exists: a queue you can read but not act on is a
+smaller, honestly shippable step. 1.6d must not ship before 1.6c, since resolving from a queue
+requires the queue.

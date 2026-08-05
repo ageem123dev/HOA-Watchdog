@@ -1,5 +1,5 @@
 # generated: 2026-07-30
-# last_updated: 2026-08-04
+# last_updated: 2026-08-05
 # project: HOA-Treasurer-Assistant
 # project_key: NOKEY
 # tracking_system: file-system
@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -61,7 +61,12 @@ development_status:
   1-5b-store-extracted-records-and-complete-ingestion: done
   1-5c-extract-structured-records-from-pdfs-and-images: done
   1-5d-extract-on-upload-and-show-progress: review
-  1-6-hold-unknown-vendors-for-a-human: backlog
+  # Epic story 1.6 is delivered as four stories; see epics.md for the AC mapping.
+  # Order matters: 1.6d resolves from the queue 1.6c builds.
+  1-6a-recognise-known-vendors: backlog
+  1-6b-hold-unknown-vendors-for-a-human: backlog
+  1-6c-see-what-is-waiting: backlog
+  1-6d-resolve-a-held-document: backlog
   epic-1-retrospective: optional
 
   epic-2: backlog
