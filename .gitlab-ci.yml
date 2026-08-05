@@ -53,3 +53,27 @@ verify:database:
     - if: $WATCHDOG_READER_DATABASE_URL && $WATCHDOG_WRITER_DATABASE_URL
       when: on_success
     - when: never
+
+# The extraction probe calls the real provider, so it needs a live credential and
+# cannot run on a fork or an untrusted pipeline. Opt-in on the same terms as
+# verify:database: define GEMINI_API_KEY and GEMINI_OCR_MODEL as *protected,
+# masked* CI/CD variables and this job runs on protected branches only.
+#
+# This is the only check that proves AD-9 end to end. Every unit test around the
+# extraction adapter injects `fetch`, so together they show that this code sends
+# a schema and revalidates the reply — not that the provider honours the schema.
+# The difference is the whole point: run locally on 2026-08-04 it asked for a
+# documentKind of "receipt", which the vocabulary does not contain, and the
+# provider returned "other". That is enforcement, not decoration.
+verify:extraction:
+  stage: verify
+  script:
+    - npm run verify:extraction
+  rules:
+    # Both names, for the reason verify:database gates on both of its own: the
+    # script needs the model selector as well as the key, so gating on the key
+    # alone lets the job start without what it requires and fail, reporting a
+    # broken build where the honest outcome is "skipped".
+    - if: $GEMINI_API_KEY && $GEMINI_OCR_MODEL
+      when: on_success
+    - when: never

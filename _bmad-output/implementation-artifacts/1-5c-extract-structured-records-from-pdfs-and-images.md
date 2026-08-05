@@ -86,10 +86,10 @@ a validated collection in memory, and says so rather than implying an upload pro
   - [x] No code path passes document bytes or raw extracted text toward the reasoning side
   - [x] **Prove the guard detects a violation** by planting one, as `core/ports/boundary.test.ts` does. A guard tested only against a clean tree cannot distinguish "nothing wrong" from "nothing checked"
 
-- [ ] **Connectivity probe** `scripts/verify-extraction.mjs` (AC: 4)
-  - [ ] The counterpart of `scripts/verify-storage.mjs`, and held to its standard: report **SKIP** rather than PASS when it cannot actually prove something
-  - [ ] Reach the provider; a schema-locked reply parses; a schema violation is refused
-  - [ ] Keep its client configuration in step with the adapter's — a probe that connects differently can report a healthy provider the application cannot use (a real 1.4 finding)
+- [x] **Connectivity probe** `scripts/verify-extraction.mjs` (AC: 4)
+  - [x] The counterpart of `scripts/verify-storage.mjs`, and held to its standard: report **SKIP** rather than PASS when it cannot actually prove something
+  - [x] Reach the provider; a schema-locked reply parses; a schema violation is refused
+  - [x] Keep its client configuration in step with the adapter's — a probe that connects differently can report a healthy provider the application cannot use (a real 1.4 finding)
 
 - [x] **Configuration** (AC: 1, 4)
   - [x] Add the credential and model variables to `.env.example` **by name only**
@@ -346,6 +346,41 @@ a planted violation of that same clause must fail. A guard exercised only agains
 distinguish "nothing wrong" from "nothing checked" — `core/ports/boundary.test.ts` established that
 technique here and this follows it.
 
+## Task 4 — the connectivity probe
+
+**Behaviour D — the only thing in this story that proves AD-9 end to end**
+
+*If it ran correctly, how would I know?* It reaches the real provider with a real credential, gets a
+schema-locked reply that parses into this project's records, and shows that a **schema violation is
+genuinely refused rather than silently coerced**. Every other test in this story fakes `fetch`, so
+none of them can tell a provider that honours `responseSchema` from one that ignores it.
+
+*How am I going to test this?* By running it against the live provider. Its own correctness — the
+SKIP paths, the parity with the adapter — is covered by a unit test that reads the script.
+
+*What else can go wrong?* The failure that matters is a probe that reports health the application
+cannot actually use. Story 1.4 hit exactly that: a probe connecting differently from the adapter.
+
+*Could this problem happen anywhere else?* `verify-storage.mjs` is the sibling and states the rule
+this one inherits: **a check that cannot run must not print PASS.**
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| D1 | **The probe connects differently from the adapter**, so it reports a healthy provider the app cannot reach | GUARD | A unit test reads both files and asserts the origin and the auth header match. `verify-storage.mjs` has only a comment saying "kept in step"; this is that comment made mechanical |
+| D2 | A check that could not run prints PASS | GUARD | Anything unprovable reports **SKIP**, inherited from the storage probe |
+| D3 | **A schema violation is silently coerced and the probe calls it a pass** | GUARD | The probe asks for an out-of-vocabulary `documentKind` and fails if that value comes back |
+| D4 | The credential appears in probe output | GUARD | Nothing prints the key; the header is set, never echoed |
+| D5 | The probe hangs and a pipeline waits forever | GUARD | Same abort-based bound as the adapter |
+| D6 | The probe writes something | Unrepresentable | It calls the model and touches no database, bucket or file |
+| D7 | Missing credentials produce a stack trace rather than an instruction | GUARD | Names what is missing and exits non-zero, as the storage probe does |
+| D8 | A 200 carrying valid JSON that is not records reads as success | GUARD | The reply is put through the same validator the adapter uses |
+| D9 | The probe runs in CI without credentials and reports a broken build | OUT-OF-SCOPE by design | Gated on the credential being a protected masked variable, exactly as `verify:database` is — an honest "not run" rather than a false red |
+
+**On what the probe can and cannot establish.** It proves the provider honours a schema *for the
+prompt it sends*. It is not a guarantee about every future document. That is the strongest claim
+available and it is worth more than the whole faked suite, which is why the story calls it a
+deliverable rather than a convenience.
+
 ### Debug Log References
 
 **Task 1 — red.** 33 failing against a stub whose `extract` throws, so every red was an assertion
@@ -440,7 +475,43 @@ graph it compiles — and `npx tsc --noEmit` went from the baseline 8 to 11. Rew
 back to 8. This is the second time in two stories that the untyped-tests gap has caught something
 real, which strengthens the case for the follow-up story F2 asks for.
 
+**Task 4 — the probe, run live on 2026-08-04.** Output verbatim:
+
+```
+provider: https://generativelanguage.googleapis.com
+model:    gemini-3.1-flash-lite
+
+  PASS  a schema-locked reply parses -- 1 record(s)
+  PASS  the reply conforms to the record vocabulary -- 1 record(s) inside the vocabulary
+  PASS  a schema violation is refused rather than coerced -- asked for "receipt", got "other"
+```
+
+**The third line is the story's strongest claim.** The model was *instructed* to set `documentKind`
+to exactly `"receipt"` — a value the vocabulary does not contain — and the reply came back `"other"`.
+The schema is enforced at the provider's API layer rather than merely sent. No faked test in this
+story could establish that, and until this ran, AD-9 was an assumption.
+
+**Parity is mechanical now, not aspirational.** `verify-storage.mjs` says it is "kept in step with"
+its adapter in a comment, which holds exactly until someone edits one file.
+`scripts/verify-extraction.test.ts` reads both files and compares the origin, the auth header, the
+environment names, the response format, the redirect policy and the vocabulary. 13 tests.
+
 ### Completion Notes List
+
+**Task 4 — the probe is the only thing here that proves AD-9.** Every unit test in this story injects
+`fetch`, so all of them together show that this code *sends* a schema and revalidates the reply.
+Whether the provider honours the schema is a different claim, and only a live call can settle it. It
+now has: asked for a `documentKind` outside the vocabulary, the provider returned one inside it.
+
+**It cannot import the adapter**, being plain `.mjs` against TypeScript, so the request shape is
+written twice. That duplication is the risk story 1.4 already got caught by — a probe that connects
+differently reports a provider the application cannot use — so the parity is a test rather than a
+comment.
+
+**CI gate added**, on the same terms as `verify:database`: gated on `GEMINI_API_KEY` **and**
+`GEMINI_OCR_MODEL` being protected masked variables, so an unset credential produces an honest
+"not run" rather than a false red. Neither is set today, so this job will not run in the MR
+pipeline — the evidence above is local, and the MR says so rather than implying coverage.
 
 **Task 3 — the guard's hardest requirement was being able to fail at all.** The reasoning side does
 not exist; epic 2 builds it. So every clause would pass by describing an empty world and keep passing
@@ -517,12 +588,16 @@ fakes the provider.
 - `core/security/dual-llm-boundary.ts` — AD-10's decision procedure
 - `core/security/dual-llm-boundary.test.ts` — 19 tests; every clause checked against a planted violation
 - `deploy-units.json` — the tracked deployment topology AD-10's third clause had nothing to read
+- `scripts/verify-extraction.mjs` — the live probe; the only end-to-end proof of AD-9
+- `scripts/verify-extraction.test.ts` — 13 tests keeping the probe in step with the adapter
 - `adapters/extraction/extractor-gemini.ts` — the only place the provider is constructed
 - `adapters/extraction/extractor-gemini.test.ts` — 36 tests, no network
 
 **Modified**
 
 - `.env.example` — `GEMINI_API_KEY` and `GEMINI_OCR_MODEL`, names only; the NFR-2 guard was run against them
+- `.gitlab-ci.yml` — the `verify:extraction` job, gated on both credentials
+- `package.json` — the `verify:extraction` script
 - `_bmad-output/implementation-artifacts/1-5c-...md` — split, decisions, Test Design
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — 1.5c in-progress, 1.5d added
 
