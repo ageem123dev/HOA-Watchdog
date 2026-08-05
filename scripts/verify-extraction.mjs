@@ -103,22 +103,31 @@ async function ask(prompt) {
       }),
     })
   } catch (error) {
+    clearTimeout(timer)
     throw new Error(`could not reach the provider (${error.name})`)
+  }
+
+  // The timer stays armed through the body read. Clearing it as soon as `fetch`
+  // resolved left `response.json()` unbounded, so a provider that answered with
+  // headers and then stalled mid-body would hang this script — and a probe that
+  // hangs in CI is worse than one that fails, because nothing reports it. The
+  // adapter had the same defect; fixing it there and not here is exactly the
+  // "could this happen anywhere else?" question going unasked.
+  try {
+    if (!response.ok) {
+      // The status alone. A body can echo the request.
+      throw new Error(`provider answered HTTP ${response.status}`)
+    }
+
+    const envelope = await response.json()
+    const text = envelope?.candidates?.[0]?.content?.parts?.[0]?.text
+
+    if (typeof text !== 'string') throw new Error('reply carried no text part')
+
+    return JSON.parse(text)
   } finally {
     clearTimeout(timer)
   }
-
-  if (!response.ok) {
-    // The status alone. A body can echo the request.
-    throw new Error(`provider answered HTTP ${response.status}`)
-  }
-
-  const envelope = await response.json()
-  const text = envelope?.candidates?.[0]?.content?.parts?.[0]?.text
-
-  if (typeof text !== 'string') throw new Error('reply carried no text part')
-
-  return JSON.parse(text)
 }
 
 console.log(`\nprovider: ${ORIGIN}`)

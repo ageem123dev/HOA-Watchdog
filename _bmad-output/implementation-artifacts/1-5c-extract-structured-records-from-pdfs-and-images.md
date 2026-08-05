@@ -492,10 +492,11 @@ to exactly `"receipt"` — a value the vocabulary does not contain — and the r
 The schema is enforced at the provider's API layer rather than merely sent. No faked test in this
 story could establish that, and until this ran, AD-9 was an assumption.
 
-**Parity is mechanical now, not aspirational.** `verify-storage.mjs` says it is "kept in step with"
-its adapter in a comment, which holds exactly until someone edits one file.
-`scripts/verify-extraction.test.ts` reads both files and compares the origin, the auth header, the
-environment names, the response format, the redirect policy and the vocabulary. 13 tests.
+**Parity is mechanical now, not aspirational.** The sibling probe `verify-storage.mjs` says it is
+"kept in step with" its adapter in a comment, which holds exactly until someone edits one file.
+`scripts/verify-extraction.test.ts` reads `verify-extraction.mjs` and the adapter and compares the
+origin, the auth header, the environment names, the response format, the redirect policy, the
+deadline's scope, the amount rule and the vocabulary. 18 tests.
 
 ### Completion Notes List
 
@@ -658,6 +659,38 @@ three are right, and all three are about work not yet built:
 
 1.5d now carries a task group for the durable state and an explicit claim-before-extraction subtask,
 each marked with where it came from.
+
+### CodeRabbit round 2 — MR !10, 5 findings, all acted on
+
+**Two of the five were defects in round 1's own fixes**, which is the useful thing about a second pass.
+
+**R10 (Major) — the deadline leaked a listener per chunk.** `raceAbort`'s first form attached a fresh
+`abort` listener on every call and left it attached whenever the read won. `MAX_REPLY_BYTES` bounds
+*bytes*, not *chunks*, so an ordinary reply arriving in small pieces retained one listener and one
+pending promise per chunk — a leak proportional to how the provider happened to frame its response.
+The helper now removes its listener in a `finally` on both branches.
+
+**R11 (Major) — releasing the reader's lock does not stop the stream.** When the deadline won,
+`readBounded` released the lock and left a stream that ignores the fetch signal still producing. It
+now cancels the reader before releasing. The deadline stopped *waiting* without stopping the *work*.
+
+**R12 (Major) — the probe had the identical timeout defect I had just fixed in the adapter.**
+`clearTimeout` ran before `response.json()`, so the probe could hang on a stalled body — and a probe
+that hangs in CI is worse than one that fails, because nothing reports it. This is precisely the
+fourth question the workflow asks — *could this same problem happen anywhere else?* — going unasked
+about the file sitting next to the one being fixed. The parity test now asserts the deadline outlives
+the body read.
+
+**R13 (Major, on 1.5d) — `extracting` was used as both a durable state and a rendered one.** The file
+forbade a fifth durable state in one subtask and put `extracting` in the transition graph two lines
+later. Corrected: AC3's four states are what the database holds; AC4's staged progress is what the
+surface shows while a claim is live, derived from `held` **plus an active claim**. A crash then leaves
+a document `held` and retryable rather than stranded in a state nothing clears.
+
+**R14 (Minor) — a paragraph named the sibling probe where it meant this story's.** Corrected, along
+with a test count that had gone stale.
+
+Sensitivity: both round-2 code fixes were mutated and both were detected.
 
 ### Definition of Done
 

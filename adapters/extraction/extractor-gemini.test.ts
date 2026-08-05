@@ -29,6 +29,7 @@ import {
   createGeminiExtractor,
   MAX_REPLY_BYTES,
   MissingExtractionConfigError,
+  raceAbort,
 } from './extractor-gemini'
 
 const ENV = Object.freeze({
@@ -264,6 +265,64 @@ describe('the Gemini extraction adapter', () => {
 
       expect(requestOf(fetchMock).init.signal).toBeInstanceOf(AbortSignal)
     })
+  })
+
+  describe('the deadline does not leak (round-2 review)', () => {
+    it('removes its abort listener when the work wins the race', async () => {
+      // The first version of this attached a listener per call and left it
+      // attached whenever the read won — and MAX_REPLY_BYTES bounds bytes, not
+      // chunks, so an ordinary reply in small chunks retained one listener and
+      // one pending promise per chunk.
+      const controller = new AbortController()
+      const added: unknown[] = []
+      const removed: unknown[] = []
+      const signal = {
+        aborted: false,
+        addEventListener: (_type: string, fn: unknown) => added.push(fn),
+        removeEventListener: (_type: string, fn: unknown) => removed.push(fn),
+      } as unknown as AbortSignal
+
+      for (let i = 0; i < 25; i += 1) await raceAbort(Promise.resolve(i), signal)
+      controller.abort()
+
+      expect(added).toHaveLength(25)
+      expect(removed).toHaveLength(25)
+    })
+
+    it('still rejects when the deadline wins', async () => {
+      const controller = new AbortController()
+      const pending = raceAbort(new Promise(() => undefined), controller.signal)
+
+      controller.abort()
+
+      await expect(pending).rejects.toMatchObject({ name: 'ExtractionAborted' })
+    })
+
+    it('rejects immediately on an already-aborted signal', async () => {
+      const controller = new AbortController()
+      controller.abort()
+
+      await expect(raceAbort(Promise.resolve('x'), controller.signal)).rejects.toMatchObject({
+        name: 'ExtractionAborted',
+      })
+    })
+
+    it('cancels the stream when the deadline fires, not merely the wait', async () => {
+      // Releasing the lock stops this code reading. It does not stop a stream
+      // that ignores the fetch signal from carrying on producing.
+      const cancel = vi.fn(async () => undefined)
+      const body = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          streamController.enqueue(new TextEncoder().encode('{"candidates":'))
+        },
+        cancel,
+      })
+      const fetchMock = vi.fn(async () => new Response(body, { status: 200 }))
+
+      await extractorWith(fetchMock as unknown as typeof globalThis.fetch, 50).extract(REQUEST)
+
+      expect(cancel).toHaveBeenCalled()
+    }, 10_000)
   })
 
   describe('unavailable versus invalid (A5, A6)', () => {

@@ -80,6 +80,23 @@ describe('the extraction probe stays in step with the adapter', () => {
     expect(probe).toContain('controller.abort()')
   })
 
+  it('keeps the deadline armed through the body read', () => {
+    // Raised in review: the probe cleared its timer before `response.json()`,
+    // so a provider that answered with headers and then stalled mid-body would
+    // hang the script. The adapter had the same defect and was fixed first —
+    // fixing one and not the other is the "could this happen anywhere else?"
+    // question going unasked.
+    const body = probe.slice(probe.indexOf('async function ask'))
+    const clears = [...body.matchAll(/clearTimeout\(timer\)/g)].length
+    const jsonAt = body.indexOf('response.json()')
+    const finallyAt = body.lastIndexOf('finally')
+
+    expect(clears).toBeGreaterThan(0)
+    expect(jsonAt).toBeGreaterThan(0)
+    // The last clear is in a `finally` that wraps the body read, not before it.
+    expect(finallyAt).toBeGreaterThan(jsonAt)
+  })
+
   it('carries the same document-kind vocabulary', () => {
     // The probe cannot import `record.ts` — it is plain `.mjs`. So the copy is
     // compared here instead, which is the only thing that keeps it honest.

@@ -88,9 +88,14 @@ from *could not be read*
   - [ ] Keep *held, not yet read* as the durable running state, or use a separate non-durable claim.
         **Do not add `extracting` as a fifth durable state** — a crash mid-extraction would strand
         documents in it with nothing to move them out
-  - [ ] Define the transitions between the four states explicitly: held → extracting → read *or*
-        could not be read; held/provider unavailable → extracting on retry; and *provider
-        unavailable* must never collapse into *could not be read*
+  - [ ] **`extracting` is a rendered state, not a stored one** — *raised in review of 1.5c, MR !10*,
+        which caught this file using it both ways. AC3's four states are what the *database* holds;
+        AC4's staged progress is what the *surface* shows while a claim is live. The surface derives
+        "extracting" from `held` **plus an active claim**, so a crash leaves a document `held` and
+        retryable rather than stranded in a state nothing clears
+  - [ ] Define the transitions over the four **durable** states: held → read *or* could not be read
+        *or* provider unavailable; provider unavailable → held on retry. *Provider unavailable* must
+        never collapse into *could not be read*
 
 - [ ] **Surface: staged extraction progress** (AC: 3, 4)
   - [ ] UX-DR12's staged named extraction-progress state

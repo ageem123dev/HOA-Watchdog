@@ -156,14 +156,28 @@ class ExtractionAborted extends Error {
   override readonly name = 'ExtractionAborted'
 }
 
-/** Rejects as soon as the deadline fires, so a read can be raced against it. */
-function abortion(signal: AbortSignal): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    if (signal.aborted) {
-      reject(new ExtractionAborted())
-      return
-    }
-    signal.addEventListener('abort', () => reject(new ExtractionAborted()), { once: true })
+/**
+ * Race a promise against the deadline, **removing the listener either way**.
+ *
+ * The obvious version of this attaches a fresh `abort` listener per call and
+ * leaves it attached when the other branch wins. `MAX_REPLY_BYTES` bounds bytes,
+ * not chunks, so a perfectly ordinary reply arriving in small chunks would
+ * retain one listener and one pending promise per chunk — a leak proportional to
+ * how the provider happened to frame its response. Found in review of the fix
+ * that introduced it.
+ */
+export function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new ExtractionAborted())
+
+  let onAbort: (() => void) | undefined
+
+  const deadline = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new ExtractionAborted())
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+
+  return Promise.race([work, deadline]).finally(() => {
+    if (onAbort !== undefined) signal.removeEventListener('abort', onAbort)
   })
 }
 
@@ -176,7 +190,7 @@ function abortion(signal: AbortSignal): Promise<never> {
 async function readBounded(response: Response, signal: AbortSignal): Promise<string | null> {
   const body = response.body
 
-  if (body === null) return await Promise.race([response.text(), abortion(signal)])
+  if (body === null) return await raceAbort(response.text(), signal)
 
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
@@ -188,7 +202,7 @@ async function readBounded(response: Response, signal: AbortSignal): Promise<str
       // and then drip the body, and an injected `fetch` may hand back a stream
       // that is not wired to the abort signal at all — so the deadline is
       // observed here explicitly instead of being assumed.
-      const { done, value } = await Promise.race([reader.read(), abortion(signal)])
+      const { done, value } = await raceAbort(reader.read(), signal)
       if (done) break
       if (value === undefined) continue
 
@@ -200,6 +214,12 @@ async function readBounded(response: Response, signal: AbortSignal): Promise<str
 
       chunks.push(value)
     }
+  } catch (error) {
+    // Cancel, then release. Releasing the lock alone leaves a stream that
+    // ignores the fetch signal still producing into a reader nobody reads —
+    // the deadline would have stopped waiting without stopping the work.
+    await reader.cancel().catch(() => undefined)
+    throw error
   } finally {
     reader.releaseLock()
   }
