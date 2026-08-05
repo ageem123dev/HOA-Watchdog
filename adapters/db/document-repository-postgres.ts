@@ -150,9 +150,14 @@ export function createPostgresDocumentRepository(
       const { rows } = await pool().query<{ extraction_claim_token: string }>(
         `update document
             set extraction_claim_token = gen_random_uuid(),
-                extraction_claim_expires_at = now() + make_interval(secs => $2)
+                extraction_claim_expires_at = now() + make_interval(secs => $2),
+                -- Claiming a retryable document returns it to the running
+                -- state, which means "we have it and have not read it" -- true
+                -- again the moment a retry starts. One state for in-flight
+                -- rather than two.
+                extraction_state = 'held'
           where id = $1
-            and extraction_state = 'held'
+            and extraction_state in ('held', 'provider_unavailable')
             and (extraction_claim_token is null or extraction_claim_expires_at <= now())
         returning extraction_claim_token`,
         [id, ttlSeconds],
@@ -160,9 +165,15 @@ export function createPostgresDocumentRepository(
 
       const row = rows[0]
 
-      // No row means someone else holds a live claim, or the document is not
-      // `held` and therefore has nothing left to extract. Both are "not yours",
+      // No row means someone else holds a live claim, or the document has
+      // finished with an outcome retrying cannot change. Both are "not yours",
       // and the caller must not call the provider either way.
+      //
+      // `provider_unavailable` is claimable on purpose: it means the document is
+      // fine and the infrastructure was not, so a retry is the whole point. It
+      // is the only failure state that is — `read` is done and `unreadable`
+      // needs a better scan, and re-running either would just spend money to
+      // reach the same answer.
       if (row === undefined) return null
 
       return { documentId: id, token: row.extraction_claim_token }

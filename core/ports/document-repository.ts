@@ -139,7 +139,12 @@ export interface DocumentRepository {
    * a second claimant while the first may still be running, which is why the
    * write is fenced on the token rather than trusting whoever arrives.
    *
-   * Only `held` documents are claimable. Anything else has finished.
+   * Claimable when `held`, and also when `provider_unavailable` — that state
+   * means the document was fine and the infrastructure was not, so retrying is
+   * the entire point of naming it separately. Claiming returns it to `held`.
+   *
+   * `read` and `unreadable` are not claimable: one is done, and the other needs
+   * a better scan rather than another attempt at the same bytes.
    */
   claimForExtraction(id: string, ttlSeconds: number): Promise<ExtractionClaim | null>
 

@@ -349,9 +349,11 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
       expect(a!.token).not.toBe(b!.token)
     })
 
-    it.each(['read', 'unreadable', 'provider_unavailable'] as const)(
+    it.each(['read', 'unreadable'] as const)(
       'does not claim a document that is %s (C8)',
       async (state) => {
+        // Done, or needing a better scan. Re-running either spends money to
+        // reach the same answer.
         const documentId = await heldDocument()
         await admin.query('update document set extraction_state = $2 where id = $1', [
           documentId,
@@ -361,6 +363,35 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
         expect(await repository.claimForExtraction(documentId, 60)).toBeNull()
       },
     )
+
+    it('does claim a document that is provider_unavailable, because that is retryable', async () => {
+      // The transition the story requires: provider unavailable -> held on
+      // retry. Without this the state would be terminal, and a document could
+      // be permanently lost to one bad afternoon at the provider.
+      const documentId = await heldDocument()
+      await admin.query(
+        "update document set extraction_state = 'provider_unavailable' where id = $1",
+        [documentId],
+      )
+
+      expect(await repository.claimForExtraction(documentId, 60)).not.toBeNull()
+    })
+
+    it('returns a retried document to held, so there is one running state', async () => {
+      const documentId = await heldDocument()
+      await admin.query(
+        "update document set extraction_state = 'provider_unavailable' where id = $1",
+        [documentId],
+      )
+
+      await repository.claimForExtraction(documentId, 60)
+
+      const { rows } = await admin.query<{ extraction_state: string }>(
+        'select extraction_state from document where id = $1',
+        [documentId],
+      )
+      expect(rows[0]?.extraction_state).toBe('held')
+    })
 
     it('sets an expiry alongside the token, never a token alone', async () => {
       // The check constraint forbids one without the other. This asserts the

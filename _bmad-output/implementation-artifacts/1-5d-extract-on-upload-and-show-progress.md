@@ -82,7 +82,7 @@ from *could not be read*
 
 - [ ] **Deferred extraction** (AC: 1, 3)
   - [x] 1.5c decided: store first, extract on a follow-up request the surface polls. No queue — that remains out of scope and is not to be added without asking
-  - [ ] The follow-up endpoint is authenticated and authorises the document against the caller. An endpoint that extracts any document by id is an access-control hole wearing a progress bar
+  - [x] The follow-up endpoint is authenticated and authorises the document against the caller. An endpoint that extracts any document by id is an access-control hole wearing a progress bar
   - [x] **Claim the document before calling the provider** — *raised in review of 1.5c, MR !10*.
         1.5b's parent-row lock is taken *inside* `replace`, which is the wrong side of the expensive
         call: two polls can both reach the provider, both get an answer, and then serialise their
@@ -107,12 +107,12 @@ from *could not be read*
         and `ExtractionRepository.replace` — so a claimant whose claim expired underneath it is
         rejected without touching records or durable state. Without the fence, the slow claimant
         overwrites the fresh result and the system prefers the *staler* of two answers
-  - [ ] **`extracting` is a rendered state, not a stored one** — *raised in review of 1.5c, MR !10*,
+  - [x] **`extracting` is a rendered state, not a stored one** — *raised in review of 1.5c, MR !10*,
         which caught this file using it both ways. AC3's four states are what the *database* holds;
         AC4's staged progress is what the *surface* shows while a claim is live. The surface derives
         "extracting" from `held` **plus an active claim**, so a crash leaves a document `held` and
         retryable rather than stranded in a state nothing clears
-  - [ ] Define the transitions over the four **durable** states: held → read *or* could not be read
+  - [x] Define the transitions over the four **durable** states: held → read *or* could not be read
         *or* provider unavailable; provider unavailable → held on retry. *Provider unavailable* must
         never collapse into *could not be read*
 
@@ -409,6 +409,29 @@ extraction adapter and imported by the document adapter — adapter reaching sid
 what is really a domain rule. Moved to `core/ports/document-repository.ts`, which both import from.
 "You no longer hold this" is a rule of the claim, not a detail of Postgres.
 
+**Task 3 (endpoint) — sensitivity, five mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| No authentication at all | **7** |
+| Loose session check (`!== undefined`) | 3 |
+| No uuid validation | 5 |
+| 503 for a provider outage | 2 |
+| 404 becomes 200 | 1 |
+
+**A gap in my own earlier work, found by writing the endpoint.** Task 3's first half made only `held`
+documents claimable, which quietly made `provider_unavailable` **terminal** — a document could be
+lost permanently to one bad afternoon at the provider, and the story's required transition
+(*provider unavailable → held on retry*) was impossible. Claiming now accepts it and returns the
+document to `held`, so there is one running state rather than two. The test that asserted
+`provider_unavailable` was unclaimable was **wrong**, not the code, and it is replaced by two that
+assert the retry works.
+
+**A parse error worth recording**, because it is a variant of a hazard this project keeps meeting: an
+SQL comment written inside a template literal contained backticks, which terminated the literal.
+Same family as the NUL and backspace bytes — content that means one thing to a reader and another to
+a parser. Swept the adapters for the pattern; this was the only instance.
+
 ### Completion Notes List
 
 **Task 3 (in progress) — the claim is taken before the money is spent.** Story 1.5b's parent-row lock
@@ -435,6 +458,25 @@ state with nothing to move it out.
 
 **Still open in this task:** the follow-up endpoint and its authorisation, wiring `extractDocument`
 to take and release the claim, and the transition definitions.
+
+**Task 3 (endpoint) — the access-control surface that looks like a progress bar.** It takes a
+document id and does expensive, chargeable work against the bytes behind it, so an unguarded version
+would let anyone spend the association's money reading documents they cannot otherwise see. Deny by
+default, and the session is checked for substance rather than for `undefined` — a callback supplying
+`null` or an empty string would pass a loose check and leave it open. A malformed id is refused
+before the database sees it, because letting Postgres reject it would surface as a 500 where the
+honest answer is 400.
+
+**Nothing but a missing document is an error.** `provider-unavailable`, `unreadable` and
+`in-progress` all answer 200 with the state. A poller receiving a 5xx for "we could not reach the
+provider just now" would report a broken server for a condition the server is handling correctly.
+
+**A decision, and the point at which it becomes wrong.** Any signed-in board member may trigger
+extraction, not only the uploader. Documents belong to the association rather than to whoever
+happened to upload them, there is exactly one association in this pilot (`board_member` has no
+organisation column), and restricting to the uploader would stop a colleague retrying a stuck
+extraction — a real workflow. **This becomes wrong the moment a second association exists**, and the
+test that records it says so, so it should fail rather than quietly widen.
 
 ### File List
 
@@ -484,6 +526,8 @@ will read as narrower than the behaviour to the next person.
 
 **Added**
 
+- `app/api/documents/[id]/extract/route.ts` — the deferred-extraction endpoint
+- `app/api/documents/[id]/extract/route.test.ts` — 21 tests, most of them about who may call it
 - `migrations/008_document_extraction_claim.sql` — the claim, its expiry, and why no index is added
 - `migrations/007_document_extraction_state.sql` — the four states, a closed vocabulary, a partial index for the held query
 - `migrations/document-extraction-state.test.ts` — 20 tests: vocabulary parity, defaults, grants, and the state/rows agreement
