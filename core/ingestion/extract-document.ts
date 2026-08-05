@@ -1,4 +1,8 @@
-import type { DocumentRepository } from '../ports/document-repository'
+import {
+  StaleExtractionClaimError,
+  type DocumentRepository,
+  type ExtractionState,
+} from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { Extractor } from '../ports/extractor'
@@ -76,6 +80,23 @@ export interface ExtractDocumentDependencies {
  * Long enough for a slow provider, short enough that a crashed run frees the
  * document while the treasurer is still watching.
  */
+/**
+ * What a finished document reports when someone polls it again.
+ *
+ * `claimForExtraction` returns null for two different situations — someone else
+ * holds a live claim, and the work is already done — and they are not the same
+ * answer. Treating both as `in-progress` showed "Reading" forever for a document
+ * that had been read, because every later poll took the same branch. Found in
+ * review.
+ */
+const SETTLED_OUTCOME: Readonly<Record<ExtractionState, ExtractionOutcomeKind | null>> = {
+  // Still claimable, so a null claim here really does mean someone else has it.
+  held: null,
+  provider_unavailable: 'provider-unavailable',
+  read: 'read',
+  unreadable: 'unreadable',
+}
+
 const DEFAULT_CLAIM_TTL_SECONDS = 300
 
 const TABULAR_TYPES: ReadonlySet<string> = new Set([
@@ -106,9 +127,17 @@ export async function extractDocument(
       deps.claimTtlSeconds ?? DEFAULT_CLAIM_TTL_SECONDS,
     )
 
-    // Someone else is reading it. Report where the document is; do not call the
-    // provider, and do not touch a claim that is not ours.
-    if (claim === null) return { outcome: 'in-progress', documentId }
+    if (claim === null) {
+      // Two situations, one null. If the document has finished, say so — a
+      // document that was read must not keep reporting `in-progress` to every
+      // later poll. Only a `held` document that could not be claimed is
+      // genuinely someone else's work in flight.
+      const settled = SETTLED_OUTCOME[document.extractionState]
+
+      return settled === null
+        ? { outcome: 'in-progress', documentId }
+        : ({ outcome: settled, documentId } as ExtractionOutcome)
+    }
 
     const settle = async (
       state: 'unreadable' | 'provider_unavailable',
@@ -128,6 +157,13 @@ export async function extractDocument(
 
       // A missing object is not a transient outage. Retrying cannot conjure the
       // bytes back, so telling the treasurer to wait would be a lie.
+      //
+      // The state stays `held`, which is the honest description of the row: we
+      // have it and we have not read it. It is also imperfect — a later poll
+      // will re-claim and re-fetch a document whose bytes are gone for good.
+      // None of AC3's four states says "the bytes have vanished", and inventing
+      // one here would put a fifth state in by the back door. Raised in review
+      // and recorded as a decision rather than patched around.
       if (bytes === null) {
         await deps.repository.releaseExtractionClaim(claim)
         return { outcome: 'not-found', documentId }
@@ -153,6 +189,22 @@ export async function extractDocument(
 
       return { outcome: 'read', documentId, records: result.records.length }
     } catch (error) {
+      // A refused write is not an outage. Expiry creates a second claimant by
+      // design, so being refused means someone fresher took over — and they may
+      // well have succeeded. Reporting `provider-unavailable` would tell the
+      // treasurer their document is waiting when it has just been read.
+      //
+      // Re-read rather than guess: the winner decides the outcome, and only the
+      // database knows what they decided.
+      if (error instanceof StaleExtractionClaimError) {
+        const current = await deps.repository.findById(documentId)
+        const settled = current === null ? null : SETTLED_OUTCOME[current.extractionState]
+
+        return settled === null
+          ? { outcome: 'in-progress', documentId }
+          : ({ outcome: settled, documentId } as ExtractionOutcome)
+      }
+
       deps.onError?.(error, documentId)
       await deps.repository.releaseExtractionClaim(claim).catch(() => undefined)
 

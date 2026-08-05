@@ -16,7 +16,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ACCEPTED_CONTENT_TYPES } from './acceptance'
 import type { ExtractionRecord } from '../extraction/record'
-import type { DocumentRepository, HeldDocument } from '../ports/document-repository'
+import {
+  StaleExtractionClaimError,
+  type DocumentRepository,
+  type HeldDocument,
+} from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { ExtractionResult, Extractor } from '../ports/extractor'
@@ -53,6 +57,7 @@ function fakes(
     result?: ExtractionResult
     storeThrows?: boolean
     replaceThrows?: boolean
+    replaceStale?: boolean
     claimable?: boolean
   } = {},
 ): Fakes {
@@ -97,6 +102,7 @@ function fakes(
 
   const extractions: ExtractionRepository = {
     replace: vi.fn(async (documentId: string, records: readonly ExtractionRecord[]) => {
+      if (options.replaceStale) throw new StaleExtractionClaimError(documentId)
       if (options.replaceThrows) throw new Error('database said no')
       if (records.length === 0) throw new RangeError('replace refuses an empty set')
       replaced.push({ documentId, records })
@@ -395,6 +401,79 @@ describe('extractDocument', () => {
 
       expect(f.marked).toEqual([])
       expect(f.released).toEqual([])
+    })
+  })
+
+  describe('what a poll reports once the work has finished (found in review)', () => {
+    // `claimForExtraction` returns null for two different situations: someone
+    // else holds a live claim, and the document has finished. Reporting both as
+    // `in-progress` means a document that was read successfully shows "Reading"
+    // to the treasurer forever, because every later poll takes the same branch.
+    it.each([
+      ['read', 'read'],
+      ['unreadable', 'unreadable'],
+      ['provider_unavailable', 'provider-unavailable'],
+    ] as const)('reports %s as %s rather than in-progress', async (state, expected) => {
+      const f = fakes({
+        claimable: false,
+        document: {
+          id: DOCUMENT_ID,
+          storageKey: 'k',
+          contentType: 'application/pdf',
+          extractionState: state,
+        },
+      })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: expected })
+    })
+
+    it('still reports in-progress when the document is held and someone else holds it', async () => {
+      // The other direction. Without this, the fix above could report the state
+      // for everything and never say in-progress at all.
+      const f = fakes({ claimable: false })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'in-progress' })
+    })
+  })
+
+  describe('a claim that lapsed under a slow holder (found in review)', () => {
+    it('does not report an outage when a fresher claimant already finished', async () => {
+      // The stale holder's write is refused, which is correct. Reporting that
+      // refusal as `provider-unavailable` tells the treasurer their document is
+      // waiting when it has in fact been read by the run that superseded this
+      // one.
+      const f = fakes({ replaceStale: true })
+      vi.mocked(f.repository.findById)
+        .mockResolvedValueOnce({
+          id: DOCUMENT_ID,
+          storageKey: 'documents/ab/cdef',
+          contentType: 'application/pdf',
+          extractionState: 'held',
+        })
+        .mockResolvedValueOnce({
+          id: DOCUMENT_ID,
+          storageKey: 'documents/ab/cdef',
+          contentType: 'application/pdf',
+          extractionState: 'read',
+        })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'read' })
+    })
+
+    it('re-reads the document rather than guessing what the winner did', async () => {
+      const f = fakes({ replaceStale: true })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.repository.findById).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not report a stale claim as an infrastructure failure', async () => {
+      const f = fakes({ replaceStale: true })
+
+      const outcome = await extractDocument(DOCUMENT_ID, f)
+
+      expect(outcome).not.toMatchObject({ outcome: 'provider-unavailable' })
     })
   })
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-import type { ExtractionOutcome } from '@/core/ingestion/extract-document'
+import { EXTRACTION_OUTCOMES, type ExtractionOutcome } from '@/core/ingestion/extract-document'
 import { extractionFeedback } from '@/core/ingestion/extraction-feedback'
 
 /**
@@ -30,6 +30,24 @@ const POLL_INTERVAL_MS = 3_000
  */
 const MAX_ATTEMPTS = 40
 
+/**
+ * Is this parsed body actually an outcome?
+ *
+ * Checked against the exported vocabulary rather than for the presence of a
+ * field, so a body carrying `outcome: "something-else"` is refused too. The
+ * endpoint and this component are versioned together today; they will not
+ * always be.
+ */
+function isOutcome(body: unknown): body is ExtractionOutcome {
+  if (typeof body !== 'object' || body === null) return false
+
+  const kind = (body as { outcome?: unknown }).outcome
+
+  return (
+    typeof kind === 'string' && (EXTRACTION_OUTCOMES as readonly string[]).includes(kind)
+  )
+}
+
 export function ExtractionStatus({ documentId }: { readonly documentId: string }) {
   const [outcome, setOutcome] = useState<ExtractionOutcome | null>(null)
 
@@ -43,12 +61,22 @@ export function ExtractionStatus({ documentId }: { readonly documentId: string }
 
       try {
         const response = await fetch(`/api/documents/${documentId}/extract`, { method: 'POST' })
-        const body = (await response.json()) as ExtractionOutcome
+        const body: unknown = await response.json()
 
         // The unmount check is after the await, not before it: a component that
         // sets state on a response that arrived after it left the page is the
         // classic React leak.
         if (cancelled) return
+
+        // A 401 answers `{ error: 'unauthenticated' }` and a 400 answers
+        // `{ error: 'not a document id' }`. Neither is an outcome, and putting
+        // one into state crashed the page: the throw inside this try is caught
+        // below, but the *render* then calls `extractionFeedback` on it where
+        // nothing catches anything. Found in review.
+        if (!response.ok || !isOutcome(body)) {
+          if (attempts < MAX_ATTEMPTS) timer = setTimeout(() => void ask(), POLL_INTERVAL_MS)
+          return
+        }
 
         setOutcome(body)
 

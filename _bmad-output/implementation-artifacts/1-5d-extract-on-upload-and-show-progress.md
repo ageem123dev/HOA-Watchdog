@@ -593,6 +593,63 @@ will read as narrower than the behaviour to the next person.
 - `core/ingestion/ingest.test.ts`, `core/ingestion/reading.test.ts` — fakes widened to the ports
 - `app/upload/upload-form.tsx` — renders extraction progress for documents stored but not read
 
+### Review Findings
+
+**Local adversarial review, `bmad-code-review` via the Argus MCP engine, 2026-08-05.**
+
+> Argus: `complex` · confidence `1` · context **24/24** files (selectivity 1.0) · 1 agy call,
+> 392,610 tokens · reflection converged · audit chain OK
+
+Scope: `b369034..4d77037`, code only — 21 files, 2,553 lines. The story document was excluded
+because it is this review's *spec*, loaded separately; reviewing it as a diff would be reviewing the
+prose against itself.
+
+Three findings returned, all **confirmed** against the real files. Verification also produced a
+fourth that Argus did not name.
+
+**R1 (high, confirmed) — an error body crashed the page.** `ExtractionStatus` cast the parsed
+response straight to `ExtractionOutcome` without checking `response.ok`. A 401 answers
+`{ error: 'unauthenticated' }`; that went into state, and the *render* then called
+`extractionFeedback` on it, hitting the exhaustive `never` guard and throwing where nothing catches.
+
+Argus described the crash as happening in the effect. Verification showed it is worse than that: the
+throw inside the effect **is** caught by the surrounding `try`, which masks it — but `setOutcome` has
+already run, so the next render throws in the component body and takes the page down. The guard now
+checks `response.ok` and validates the payload against `EXTRACTION_OUTCOMES`, so a body carrying an
+unknown outcome string is refused too.
+
+**R2 (medium, confirmed) — a refused write reported as an outage.** `StaleExtractionClaimError` fell
+into the generic `catch` and became `provider-unavailable`. But being refused means a *fresher*
+claimant took over, and it may well have succeeded: the treasurer would be told their document is
+waiting when it had just been read. It is now caught explicitly, and the document is **re-read** —
+the winner decides the outcome, and only the database knows what they decided.
+
+**R3 (info, confirmed → decision needed, not patched)** — when the object bytes are missing, the
+claim is released but the state stays `held`, so a later poll re-claims and re-fetches a document
+whose bytes are gone for good.
+
+The finding is right and the suggested fix is not available: **none of AC3's four states says "the
+bytes have vanished"**. `unreadable` claims the figures were untrustworthy, which is false;
+`provider_unavailable` is claimable and would churn identically. Inventing a fifth state here would
+put one in by the back door, against the story's own instruction. Left as `held` — the honest
+description of the row — with the limitation recorded in the code and raised here as a decision.
+
+**R4 (high, found during verification) — a finished document reported as still being read.**
+`claimForExtraction` returns null for two different situations: someone else holds a live claim, and
+*the work is already done*. Both returned `in-progress`, so a document that had been read reported
+"Reading" to the treasurer on every later poll, forever. The surface would never show a result for a
+successful extraction.
+
+Now mapped through the document's own state, with the opposite direction asserted too — a `held`
+document that could not be claimed still reports `in-progress`, so the fix cannot degenerate into
+reporting the state for everything.
+
+**On the engine.** This is the first real run of the Argus routing merged in `76249b3`. It saw the
+whole context (24/24 files) and its three findings were all real — a better first outing than the
+"verify before acting" discipline anticipated. That discipline still earned its place twice: once
+sharpening R1's mechanism, and once turning R3 from a patch into a decision. Its miss (R4) is the
+kind mutation testing also missed, because both only look where someone already thought to look.
+
 ### Definition of Done
 
 **PASS.**
@@ -604,7 +661,7 @@ will read as narrower than the behaviour to the next person.
 | AC3 — the four states are distinguishable and "no rows" is never success | Migration 007's closed vocabulary, `document-extraction-state.test.ts`, and `extraction-feedback.test.ts` asserting the outage and unreadable copy differ |
 | AC4 — progress is staged and never partial | `extraction-feedback.ts` and its 29 tests; no rendered string may contain a digit for any outcome, and the endpoint returns no record for the surface to display |
 
-**Sensitivity: 29 mutations across the four task groups, 28 detected on the first pass.** The one that
+**Sensitivity: 29 mutations across the four task groups, 28 detected on the first pass**, plus 4 defects found by the local review afterwards (see Review Findings) — which is the more useful number, because mutation testing only probes where a test already exists. The one that
 escaped is recorded in the Debug Log — moving `replace`'s state change after the commit, which needed
 a test asserting *where* the statement is issued rather than what the state ends up as.
 
