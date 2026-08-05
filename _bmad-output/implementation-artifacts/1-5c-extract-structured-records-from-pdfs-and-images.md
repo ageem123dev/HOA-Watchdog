@@ -1,10 +1,20 @@
+---
+baseline_commit: c894c032a67f3bbf5830a575f549f395c98bd25c
+---
+
 # Story 1.5c: Extract structured records from PDFs and images
 
-Status: backlog
+Status: in-progress
 
-> **Third of three stories from epic story 1.5.**
+> **Third of four stories from epic story 1.5.**
 > **1.5** built the deterministic path and the shared foundation — the `extraction` table, the record vocabulary, validation and the unreadable outcome. **1.5b** stores records and wires extraction into ingestion. **This story adds the provider path**: the extraction adapter, AD-9's schema enforcement at the API layer, and AD-10's vendor boundary.
+> **1.5d** then wires this story's provider path into ingestion and builds the staged-progress surface.
 > It redefines none of the above; it conforms to them and reuses the storage path 1.5b built.
+>
+> **Split from a seven-group story on 2026-08-04**, for the same reason 1.5 was split: the diff was
+> heading for the size that produced 17 findings on story 1.4. This story proves the provider works
+> and is properly bounded; 1.5d makes an upload use it. The acceptance criteria below were narrowed
+> to match — **none of them claims work that moved to 1.5d.**
 
 **Depends on 1.5 and 1.5b.** Do not start until both are merged — the record vocabulary and validator come from 1.5, and the repository this story's output is written through comes from 1.5b.
 
@@ -24,11 +34,13 @@ Epic story 1.5's ACs 1 and 4, plus the provider half of AC3.
 **When** extraction runs
 **Then** it is performed by the extraction provider with a machine-enforced output schema (`responseMimeType: application/json` plus `responseSchema`)
 **And** it returns a **validated collection** of structured records
-**And** **every record in that collection** is stored against the document
 
 A statement holds many figures and the `extraction` table is many-rows-per-document, so a singular
 reading of this criterion would licence a single-record port that drops rows or aggregates them
 without saying so.
+
+**Storing that collection is 1.5d's**, through the repository 1.5b already built. This story ends at
+a validated collection in memory, and says so rather than implying an upload produces rows.
 
 **AC2 — Schema-invalid provider output halts that document and stores nothing**
 
@@ -79,16 +91,6 @@ without saying so.
   - [ ] Reach the provider; a schema-locked reply parses; a schema violation is refused
   - [ ] Keep its client configuration in step with the adapter's — a probe that connects differently can report a healthy provider the application cannot use (a real 1.4 finding)
 
-- [ ] **Wire the provider path into ingestion** (AC: 1, 2)
-  - [ ] PDF and image route to the provider; CSV and Excel keep 1.5's deterministic path with no model call
-  - [ ] A test proves the model is not reachable for tabular types — the AC2 guarantee of 1.5 must survive this story
-
-- [ ] **Surface: staged extraction progress** (AC: 1, 2)
-  - [ ] UX-DR12's staged named extraction-progress state
-  - [ ] Live region for progress (UX-DR20)
-  - [ ] **Partial extraction is never displayed under any state** (UX-DR12, verbatim)
-  - [ ] Tokens only — `core/design/no-raw-values.test.ts` enforces this
-
 - [ ] **Configuration** (AC: 1, 4)
   - [ ] Add the credential and model variables to `.env.example` **by name only**
   - [ ] Check whether the new credential trips `core/security/forbidden-credentials.ts` before assuming it passes — see Dev Notes
@@ -113,40 +115,59 @@ The reasoning side is `claude-sonnet-5` with its own key, in the Python service,
 
 Check whether an extraction key trips it **before** assuming it passes. If it does, that is an AD-2 scope decision to raise — not a test to loosen.
 
-### When extraction runs — decide this early
+### When extraction runs — DECIDED
 
-1.5 kept parsing synchronous because it is fast and local. **This story makes that question real**: a model call is seconds, not milliseconds, and UX-DR12 asks for staged named progress, implying the treasurer watches it happen.
+**Decided: store first, extract on a follow-up request the surface polls.** Not synchronous, and no
+queue (a queue was out of scope and not to be added without asking).
 
-Three options in increasing cost: keep it synchronous and accept a slow upload for small batches;
-return after storage and extract on a follow-up request the surface polls; or introduce a job queue.
-**There is no queue in this project and adding one is a significant architectural addition — out of
-scope here, and not to be introduced without asking.**
+Why: a model call is seconds. A treasurer uploading twenty scanned invoices would hold one request
+open for minutes, which is also where serverless request limits bite. UX-DR12 asks for *staged named
+progress*, which presumes the treasurer watches it happen rather than staring at a stalled upload.
 
-**Choose between the first two before implementing, and write the choice here.** Listing options is
-planning; leaving them listed means ingestion and `app/upload` each pick one, and they will not pick
-the same one.
+The deciding evidence is that **1.5b already built the state this needs**. Its outcome vocabulary has
+`stored-not-read` — "held, no reader for this type yet" — which is exactly "held, not yet extracted".
+The deferred design costs a follow-up endpoint and reuses the rest.
 
-Whichever is chosen, the **durable states must be named and distinguishable**, because the surface
-renders a different thing for each and "no records" is otherwise indistinguishable from success:
+The durable states, named so the surface can render each and so "no rows" is never mistaken for
+success:
 
-- **held, not yet read** — bytes stored, extraction not started or still running
-- **read** — a validated set is stored
-- **could not be read** — extraction ran and its output failed validation; the previous set, if any, is untouched
-- **provider unavailable** — extraction could not run at all, which is retryable and is *not* the same as unreadable
+| State | Means |
+| --- | --- |
+| **held, not yet read** | bytes stored, extraction not started or still running (1.5b's `stored-not-read`) |
+| **read** | a validated set is stored (1.5b's `read`) |
+| **could not be read** | extraction ran, output failed validation; any previous set untouched (1.5b's `unreadable`) |
+| **provider unavailable** | extraction could not run at all — **retryable, and not the document's fault** |
 
-A document with no extraction rows is never "successful". Define the transitions between these
-states, and make the retry path explicit for the last one.
+The last is the only genuinely new one, and it must not collapse into "could not be read": one tells
+the treasurer their scan is bad, the other tells them to wait. 1.5b made exactly this mistake with
+`failed` and had to add `figures-not-stored` to fix it.
 
-### An open question this story must answer rather than inherit
+**Transitions and the retry path are 1.5d's**, which owns ingestion and the surface. This story only
+has to leave the port able to express "the provider was unreachable" distinctly from "the provider
+answered and the answer was invalid" — those are different return values, not one error.
 
-AD-8 says prompts carry row identifiers and tools resolve values; AD-10 forbids raw extracted text in
-the reasoning context. Neither says whether `/tools/*` returns **extracted field values**
-(`vendorName`, `totalAmount`) to the model, or only bounded identifiers the model cannot read.
+### The AD-8 question, answered rather than inherited
 
-Those are different security postures, and the difference stays invisible until epic 2 wires the
-agent. Decide it here — while the extraction side is being built and the answer is cheap — and write
-it into the port's contract with a test. If values cross, say what bounds them; if only identifiers
-cross, say what resolves them and where.
+**Decided (owner's call, 2026-08-04): tools may return validated field values.** A tool may hand the
+reasoning model typed, schema-validated, length-capped columns — `vendorName`, `documentNumber`,
+`issuedOn`, `totalAmount`, `currency`. It may **never** hand over raw document bytes or raw extracted
+text.
+
+This is the reading AD-8 already implies — *"prompts carry row identifiers and tools resolve values"*
+— and it is what lets the watchdog explain a finding to a board in its own words rather than citing
+row ids at volunteers.
+
+What bounds the values, which is the part that has to be true for this to be safe:
+
+- Every field crossing is one the `extraction` table constrains: a known `document_kind`, a
+  `numeric(14,2)` amount, a `date`, a currency from a closed set, and text columns capped at 200 and
+  64 characters (`core/extraction/record.ts`, enforced again by the database).
+- Nothing free-form crosses. There is no notes or description column in the record vocabulary, which
+  is what keeps a poisoned document from smuggling a paragraph of instructions through a value.
+- AD-8 still holds regardless: values are **data**, never string-interpolated into a prompt.
+
+**Write this into the port's contract with a test** — the port returns the record vocabulary and
+nothing else, so "raw text cannot cross" is a property of the type rather than of anyone's care.
 
 ### Non-negotiables
 

@@ -59,7 +59,8 @@ development_status:
   1-4-upload-a-document-and-see-it-accepted-or-rejected: done
   1-5-read-a-document-into-structured-records: done
   1-5b-store-extracted-records-and-complete-ingestion: done
-  1-5c-extract-structured-records-from-pdfs-and-images: backlog
+  1-5c-extract-structured-records-from-pdfs-and-images: in-progress
+  1-5d-extract-on-upload-and-show-progress: backlog
   1-6-hold-unknown-vendors-for-a-human: backlog
   epic-1-retrospective: optional
 
