@@ -96,6 +96,13 @@ from *could not be read*
         **recoverable** by the next poll. Release is **explicit** on both the success and failure
         paths. A poll that loses the claim returns the current database state and **does not call the
         provider**
+  - [ ] **The token fences the write, not just the claim** — *raised in review of 1.5c, MR !10*.
+        Expiry creates a second claimant by design, which means the first one is still running and
+        may still return an answer. Holding a token at the start is therefore not enough: the owner
+        token must be **re-checked inside the finalising transaction** — both the state transition
+        and `ExtractionRepository.replace` — so a claimant whose claim expired underneath it is
+        rejected without touching records or durable state. Without the fence, the slow claimant
+        overwrites the fresh result and the system prefers the *staler* of two answers
   - [ ] **`extracting` is a rendered state, not a stored one** — *raised in review of 1.5c, MR !10*,
         which caught this file using it both ways. AC3's four states are what the *database* holds;
         AC4's staged progress is what the *surface* shows while a claim is live. The surface derives

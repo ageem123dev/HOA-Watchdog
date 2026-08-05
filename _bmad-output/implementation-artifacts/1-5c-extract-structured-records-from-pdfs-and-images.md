@@ -742,6 +742,33 @@ the adapter, not by runtime tests of the probe itself**. Those assertions are te
 is the second to show that textual checks read like behavioural ones and are not. Recorded as
 follow-up work alongside the `tsc --noEmit` gate and the CI database credentials.
 
+### CodeRabbit round 5 — MR !10, 2 findings, both fixed. Converged.
+
+**R20 — the same assertion, wrong for a third time.** My check asked whether the word `finally`
+appeared anywhere between the body read and the clear. That passes for
+`finally { … } … clearTimeout(timer)`, where the clear sits *after* the block and still never runs on
+a throw. Fixed by finding the block and testing containment: locate the `finally`, brace-match to its
+close, require the clear to fall inside. A mutation placing the clear just past the closing brace
+fails it — and passed both previous versions.
+
+Three rounds on one assertion is the clearest lesson of this story. Each version was a *closer*
+approximation of the property and none of them was the property. Where something can be exercised, it
+should be; where only source text is available — as here, because the probe makes live calls at
+module scope — the check must be structural rather than positional, and it is worth expecting to get
+that wrong once.
+
+**R21 (on 1.5d) — the owner token must fence the write, not merely the claim.** Correct, and it
+follows from the expiry rule added last round: expiry *creates* a second claimant by design, which
+means the first is still running and may still return. Re-checking the token inside the finalising
+transaction — both the state change and `replace` — is what stops the slow claimant overwriting the
+fresh result. Without it the system would systematically prefer the **staler** of two answers.
+
+**Converged here.** Five rounds. The findings moved from real defects — a schema pattern that rejected
+every valid amount, an unbounded body read, a per-chunk listener leak — through the quality of the
+tests written for those fixes, to specification detail on a story not yet started. Everything is
+fixed or recorded with a reason. One item stands declined with its limitation stated: making the
+probe injectable for runtime tests.
+
 ### Definition of Done
 
 **PASS.**

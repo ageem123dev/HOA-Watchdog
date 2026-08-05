@@ -124,9 +124,34 @@ describe('the extraction probe stays in step with the adapter', () => {
       .pop()
 
     expect(lastClear, 'no clear runs after the body read').toBeDefined()
+
+    // Two earlier versions of this assertion approximated the property and were
+    // caught doing it: first comparing the position of a `finally` token, then
+    // asking whether the word appeared anywhere between the read and the clear.
+    // Both pass for `finally { … } … clearTimeout(timer)`, where the clear sits
+    // *after* the block and still never runs on a throw. So find the block and
+    // check containment.
+    const finallyAt = body.indexOf('finally', jsonAt)
+    expect(finallyAt, 'no finally follows the body read').toBeGreaterThan(-1)
+
+    const openedAt = body.indexOf('{', finallyAt)
+    let depth = 0
+    let closedAt = -1
+    for (let i = openedAt; i < body.length; i += 1) {
+      if (body[i] === '{') depth += 1
+      else if (body[i] === '}') {
+        depth -= 1
+        if (depth === 0) {
+          closedAt = i
+          break
+        }
+      }
+    }
+
+    expect(closedAt, 'the finally block is never closed').toBeGreaterThan(openedAt)
     expect(
-      body.slice(jsonAt, lastClear).includes('finally'),
-      'the clear after the body read is not inside a finally, so a throw mid-read leaks the timer',
+      lastClear! > openedAt && lastClear! < closedAt,
+      'the clear is outside the finally block, so a throw mid-read leaks the timer',
     ).toBe(true)
   })
 
