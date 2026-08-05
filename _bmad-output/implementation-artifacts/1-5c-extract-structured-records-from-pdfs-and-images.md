@@ -91,9 +91,9 @@ a validated collection in memory, and says so rather than implying an upload pro
   - [ ] Reach the provider; a schema-locked reply parses; a schema violation is refused
   - [ ] Keep its client configuration in step with the adapter's — a probe that connects differently can report a healthy provider the application cannot use (a real 1.4 finding)
 
-- [ ] **Configuration** (AC: 1, 4)
-  - [ ] Add the credential and model variables to `.env.example` **by name only**
-  - [ ] Check whether the new credential trips `core/security/forbidden-credentials.ts` before assuming it passes — see Dev Notes
+- [x] **Configuration** (AC: 1, 4)
+  - [x] Add the credential and model variables to `.env.example` **by name only**
+  - [x] Check whether the new credential trips `core/security/forbidden-credentials.ts` before assuming it passes — see Dev Notes
 
 ## Dev Notes
 
