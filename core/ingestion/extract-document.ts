@@ -23,6 +23,7 @@ export const EXTRACTION_OUTCOMES = [
   'provider-unavailable',
   'not-found',
   'no-provider-path',
+  'in-progress',
 ] as const
 
 export type ExtractionOutcomeKind = (typeof EXTRACTION_OUTCOMES)[number]
@@ -43,9 +44,20 @@ export type ExtractionOutcome =
   | { readonly outcome: 'not-found'; readonly documentId: string }
   /** A type the deterministic path owns. Asking to extract it is a caller error. */
   | { readonly outcome: 'no-provider-path'; readonly documentId: string }
+  /**
+   * Someone else holds the claim.
+   *
+   * Not a failure and not a queue position — the document is `held` and being
+   * read right now. This is the outcome the surface renders as "extracting",
+   * which is why that is not a durable state: it is `held` plus a live claim,
+   * observed from here.
+   */
+  | { readonly outcome: 'in-progress'; readonly documentId: string }
 
 export interface ExtractDocumentDependencies {
   readonly repository: DocumentRepository
+  /** How long a claim survives without its holder finishing. */
+  readonly claimTtlSeconds?: number
   readonly store: DocumentStore
   readonly extractions: ExtractionRepository
   readonly extractor: Extractor
@@ -60,6 +72,12 @@ export interface ExtractDocumentDependencies {
  * `ACCEPTED_CONTENT_TYPES`, so a type that can be uploaded can never fall
  * through both — which would be a document accepted and then never readable.
  */
+/**
+ * Long enough for a slow provider, short enough that a crashed run frees the
+ * document while the treasurer is still watching.
+ */
+const DEFAULT_CLAIM_TTL_SECONDS = 300
+
 const TABULAR_TYPES: ReadonlySet<string> = new Set([
   'text/csv',
   'application/vnd.ms-excel',
@@ -80,29 +98,66 @@ export async function extractDocument(
       return { outcome: 'no-provider-path', documentId }
     }
 
-    const bytes = await deps.store.get(document.storageKey)
+    // Claimed before a byte is fetched or a token is spent. A lock taken around
+    // the write would serialise the cheap part and let the expensive part run
+    // twice -- story 1.5b shipped that shape and it was caught in review.
+    const claim = await deps.repository.claimForExtraction(
+      documentId,
+      deps.claimTtlSeconds ?? DEFAULT_CLAIM_TTL_SECONDS,
+    )
 
-    // A missing object is not a transient outage. Retrying cannot conjure the
-    // bytes back, so telling the treasurer to wait would be a lie.
-    if (bytes === null) return { outcome: 'not-found', documentId }
+    // Someone else is reading it. Report where the document is; do not call the
+    // provider, and do not touch a claim that is not ours.
+    if (claim === null) return { outcome: 'in-progress', documentId }
 
-    const result = await deps.extractor.extract({ bytes, mediaType: document.contentType })
+    const settle = async (
+      state: 'unreadable' | 'provider_unavailable',
+      outcome: 'unreadable' | 'provider-unavailable',
+    ): Promise<ExtractionOutcome> => {
+      // Fenced, then released. Both are writes and both need the token: a
+      // holder whose claim lapsed could otherwise mark a document unreadable
+      // after a fresher run had already succeeded.
+      await deps.repository.markExtractionState(documentId, state, { token: claim.token })
+      await deps.repository.releaseExtractionClaim(claim)
 
-    if (!result.ok) {
-      // The distinction story 1.5c split the port's refusal in two to preserve.
-      return {
-        outcome: result.refusal === 'unavailable' ? 'provider-unavailable' : 'unreadable',
-        documentId,
-      }
+      return { outcome, documentId }
     }
 
-    // An empty collection is a content problem, not an infrastructure one.
-    // `replace` refuses `[]`, and reaching it would report this as an outage.
-    if (result.records.length === 0) return { outcome: 'unreadable', documentId }
+    try {
+      const bytes = await deps.store.get(document.storageKey)
 
-    await deps.extractions.replace(documentId, result.records)
+      // A missing object is not a transient outage. Retrying cannot conjure the
+      // bytes back, so telling the treasurer to wait would be a lie.
+      if (bytes === null) {
+        await deps.repository.releaseExtractionClaim(claim)
+        return { outcome: 'not-found', documentId }
+      }
 
-    return { outcome: 'read', documentId, records: result.records.length }
+      const result = await deps.extractor.extract({ bytes, mediaType: document.contentType })
+
+      if (!result.ok) {
+        // The distinction story 1.5c split the port's refusal in two to preserve.
+        return result.refusal === 'unavailable'
+          ? await settle('provider_unavailable', 'provider-unavailable')
+          : await settle('unreadable', 'unreadable')
+      }
+
+      // An empty collection is a content problem, not an infrastructure one.
+      // `replace` refuses `[]`, and reaching it would report this as an outage.
+      if (result.records.length === 0) return await settle('unreadable', 'unreadable')
+
+      // The fence goes with the write. `replace` clears the claim in the same
+      // transaction as the state change, which is why nothing releases it here:
+      // a second release could free a document a *later* claimant already holds.
+      await deps.extractions.replace(documentId, result.records, { token: claim.token })
+
+      return { outcome: 'read', documentId, records: result.records.length }
+    } catch (error) {
+      deps.onError?.(error, documentId)
+      await deps.repository.releaseExtractionClaim(claim).catch(() => undefined)
+
+      return { outcome: 'provider-unavailable', documentId }
+    }
   } catch (error) {
     // Everything that throws here is infrastructure: the object store, the
     // database, the transport. None of it is the document's fault, so none of

@@ -57,6 +57,27 @@ export interface HeldDocument {
 }
 
 /**
+ * The claim that authorised a write is no longer the live one.
+ *
+ * Expiry creates a second claimant on purpose, so the original may still be
+ * running and may still return an answer. Refusing its write is what stops the
+ * system preferring the *staler* of two results — it is not a fault in the
+ * ordinary sense, and a caller that sees it should report the document's current
+ * state rather than an error.
+ *
+ * Declared here rather than in an adapter because both write paths need it, and
+ * the concept belongs to the domain: "you no longer hold this" is a rule of the
+ * claim, not a detail of Postgres.
+ */
+export class StaleExtractionClaimError extends Error {
+  override readonly name = 'StaleExtractionClaimError'
+
+  constructor(readonly documentId: string) {
+    super(`the extraction claim on ${documentId} is no longer held; this write was refused`)
+  }
+}
+
+/**
  * A claim on a document while it is being extracted.
  *
  * Held in the database rather than in a process: two application instances
@@ -90,7 +111,20 @@ export interface DocumentRepository {
    * single transaction. A separate "mark it read" would be a way to claim
    * figures exist when they do not.
    */
-  markExtractionState(id: string, state: Exclude<ExtractionState, 'read'>): Promise<void>
+  /**
+   * @param fence - the claim that authorises this write, when there is one.
+   *
+   * Fenced for the same reason `replace` is, and it is easy to miss: expiry
+   * creates a second claimant, so a holder whose claim lapsed can return with a
+   * *failure* and mark a document unreadable after a fresher run already
+   * succeeded. Overwriting a success with a stale failure is the worse
+   * direction of the same bug.
+   */
+  markExtractionState(
+    id: string,
+    state: Exclude<ExtractionState, 'read'>,
+    fence?: { readonly token: string },
+  ): Promise<void>
 
   /**
    * Take the right to extract this document, or return `null` if someone else

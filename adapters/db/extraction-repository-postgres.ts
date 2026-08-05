@@ -1,6 +1,7 @@
 import { Pool, type PoolClient } from 'pg'
 
 import type { ExtractionRecord } from '../../core/extraction/record'
+import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import type { ExtractionRepository } from '../../core/ports/extraction-repository'
 import { readWriterDatabaseUrl } from '../auth/env'
 
@@ -16,23 +17,6 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * So the destructive part and the fallible part share a fate: either the whole
  * new set lands, or the previous one is still there afterwards.
  */
-
-/**
- * The claim that authorised this write is no longer the live one.
- *
- * Expiry creates a second claimant on purpose, so the original may still be
- * running and may still return an answer. Refusing its write is what stops the
- * system preferring the *staler* of two results — it is not an error in the
- * ordinary sense, and a caller that sees it should report the current state
- * rather than a failure.
- */
-export class StaleExtractionClaimError extends Error {
-  override readonly name = 'StaleExtractionClaimError'
-
-  constructor(readonly documentId: string) {
-    super(`the extraction claim on ${documentId} is no longer held; this write was refused`)
-  }
-}
 
 let sharedPool: Pool | null = null
 

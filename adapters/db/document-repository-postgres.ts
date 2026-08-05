@@ -8,6 +8,7 @@ import type {
   NewDocument,
   RecordedDocument,
 } from '../../core/ports/document-repository'
+import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import { readWriterDatabaseUrl } from '../auth/env'
 
 /**
@@ -181,12 +182,34 @@ export function createPostgresDocumentRepository(
     async markExtractionState(
       id: string,
       state: Exclude<ExtractionState, 'read'>,
+      fence?: { readonly token: string },
     ): Promise<void> {
       // Parameterised, so the closed vocabulary is enforced by
       // `document_extraction_state_known` rather than by string building here.
       // If a value ever escapes the type, the database refuses it with 23514
       // instead of storing a state nothing can render.
-      await pool().query('update document set extraction_state = $2 where id = $1', [id, state])
+      //
+      // The claim is cleared alongside the state: a document that has finished
+      // must not still look claimed, or the surface renders it as extracting
+      // forever.
+      const { rowCount } = await pool().query(
+        fence === undefined
+          ? `update document
+                set extraction_state = $2,
+                    extraction_claim_token = null,
+                    extraction_claim_expires_at = null
+              where id = $1`
+          : `update document
+                set extraction_state = $2,
+                    extraction_claim_token = null,
+                    extraction_claim_expires_at = null
+              where id = $1 and extraction_claim_token = $3`,
+        fence === undefined ? [id, state] : [id, state, fence.token],
+      )
+
+      if (fence !== undefined && rowCount === 0) {
+        throw new StaleExtractionClaimError(id)
+      }
     },
   }
 }

@@ -83,7 +83,7 @@ from *could not be read*
 - [ ] **Deferred extraction** (AC: 1, 3)
   - [x] 1.5c decided: store first, extract on a follow-up request the surface polls. No queue — that remains out of scope and is not to be added without asking
   - [ ] The follow-up endpoint is authenticated and authorises the document against the caller. An endpoint that extracts any document by id is an access-control hole wearing a progress bar
-  - [ ] **Claim the document before calling the provider** — *raised in review of 1.5c, MR !10*.
+  - [x] **Claim the document before calling the provider** — *raised in review of 1.5c, MR !10*.
         1.5b's parent-row lock is taken *inside* `replace`, which is the wrong side of the expensive
         call: two polls can both reach the provider, both get an answer, and then serialise their
         writes so that one silently overwrites the other. The claim must happen **before** extraction
@@ -388,6 +388,26 @@ connection would serialise the two attempts by accident and prove nothing.
 predicate migration 007 already indexes. A duplicate index costs a write on every insert and update
 to that column and answers no query the first one cannot. Removed, with a comment saying why nothing
 is indexed there, so the absence reads as a decision rather than an oversight.
+
+**Task 3 (wiring) — sensitivity, four mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| Claim after the provider call rather than before | 1 |
+| Drop the fence on the record write | 1 |
+| Drop the fence on the state write | 1 |
+| Never release the claim on a failure | 1 |
+
+**A hole found while writing the tests, not after.** The fence was on `replace` only. Marking a
+failure state is also a write, and the sequence that breaks it is the same one in reverse: A's claim
+expires, B claims and succeeds, then A returns with a *failure* and marks the document unreadable —
+overwriting a success with a stale failure. `markExtractionState` now takes the same fence, and a
+mutation removing it fails a test.
+
+**One piece of tidying worth naming.** `StaleExtractionClaimError` was first declared in the
+extraction adapter and imported by the document adapter — adapter reaching sideways into adapter for
+what is really a domain rule. Moved to `core/ports/document-repository.ts`, which both import from.
+"You no longer hold this" is a rule of the claim, not a detail of Postgres.
 
 ### Completion Notes List
 

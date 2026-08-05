@@ -24,6 +24,7 @@ import { extractDocument, type ExtractDocumentDependencies } from './extract-doc
 
 const DOCUMENT_ID = '018f3a2b-0000-7000-8000-0000000000aa'
 const SCAN_BYTES = new TextEncoder().encode('%PDF-1.7 a scanned invoice')
+const TOKEN = '018f3a2b-0000-7000-8000-0000000000ff'
 
 const RECORD: ExtractionRecord = {
   documentKind: 'invoice',
@@ -41,6 +42,8 @@ interface Fakes extends ExtractDocumentDependencies {
   readonly extracted: { bytes: Uint8Array; mediaType: string }[]
   readonly fetched: string[]
   readonly replaced: { documentId: string; records: readonly ExtractionRecord[] }[]
+  readonly released: string[]
+  readonly marked: { id: string; state: string; token?: string }[]
 }
 
 function fakes(
@@ -50,11 +53,14 @@ function fakes(
     result?: ExtractionResult
     storeThrows?: boolean
     replaceThrows?: boolean
+    claimable?: boolean
   } = {},
 ): Fakes {
   const extracted: { bytes: Uint8Array; mediaType: string }[] = []
   const fetched: string[] = []
   const replaced: { documentId: string; records: readonly ExtractionRecord[] }[] = []
+  const released: string[] = []
+  const marked: { id: string; state: string; token?: string }[] = []
 
   const held: HeldDocument | null =
     options.document === undefined
@@ -66,12 +72,18 @@ function fakes(
         }
       : options.document
 
+  const claim = options.claimable === false ? null : { documentId: DOCUMENT_ID, token: TOKEN }
+
   const repository: DocumentRepository = {
     record: vi.fn(async () => ({ id: DOCUMENT_ID, alreadyHeld: false })),
     findById: vi.fn(async () => held),
-    markExtractionState: vi.fn(async () => undefined),
-    claimForExtraction: vi.fn(async () => null),
-    releaseExtractionClaim: vi.fn(async () => undefined),
+    markExtractionState: vi.fn(async (id: string, state: string, fence?: { token: string }) => {
+      marked.push({ id, state, token: fence?.token })
+    }),
+    claimForExtraction: vi.fn(async () => claim),
+    releaseExtractionClaim: vi.fn(async (given) => {
+      released.push(given.token)
+    }),
   }
 
   const store: DocumentStore = {
@@ -100,7 +112,17 @@ function fakes(
     }),
   }
 
-  return { repository, store, extractions, extractor, extracted, fetched, replaced }
+  return {
+    repository,
+    store,
+    extractions,
+    extractor,
+    extracted,
+    fetched,
+    replaced,
+    released,
+    marked,
+  }
 }
 
 describe('extractDocument', () => {
@@ -269,6 +291,110 @@ describe('extractDocument', () => {
 
       expect(f.extractions.replace).not.toHaveBeenCalled()
       expect(outcome).toMatchObject({ outcome: 'unreadable' })
+    })
+  })
+
+  describe('the claim (story 1.5d task 3)', () => {
+    it('claims the document before calling the provider', async () => {
+      // The whole point. A lock taken around the write serialises the cheap
+      // part and lets the expensive part run twice.
+      const f = fakes()
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.repository.claimForExtraction).toHaveBeenCalledTimes(1)
+      const claimOrder = vi.mocked(f.repository.claimForExtraction).mock.invocationCallOrder[0]!
+      const extractOrder = vi.mocked(f.extractor.extract).mock.invocationCallOrder[0]!
+      expect(claimOrder).toBeLessThan(extractOrder)
+    })
+
+    it('does not call the provider when the claim is lost (C9)', async () => {
+      const f = fakes({ claimable: false })
+
+      const outcome = await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.extractor.extract).not.toHaveBeenCalled()
+      expect(f.store.get).not.toHaveBeenCalled()
+      expect(outcome).toMatchObject({ outcome: 'in-progress' })
+    })
+
+    it('does not claim a document with no provider path, so nothing is wasted', async () => {
+      const f = fakes({
+        document: { id: DOCUMENT_ID, storageKey: 'k', contentType: 'text/csv', extractionState: 'held' },
+      })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.repository.claimForExtraction).not.toHaveBeenCalled()
+    })
+
+    it('fences the write with the token it holds (C4)', async () => {
+      const f = fakes()
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.extractions.replace).toHaveBeenCalledWith(DOCUMENT_ID, expect.anything(), {
+        token: TOKEN,
+      })
+    })
+
+    it('fences the failure states too', async () => {
+      // The hole the fence would otherwise leave open: A's claim expires, B
+      // claims and succeeds, then A returns with a failure and marks the
+      // document unreadable — overwriting B's success. Marking is a write and
+      // needs the same fence the record write has.
+      const f = fakes({ result: { ok: false, refusal: 'invalid' } })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.marked).toEqual([{ id: DOCUMENT_ID, state: 'unreadable', token: TOKEN }])
+    })
+
+    it.each([
+      ['invalid', 'unreadable'],
+      ['unavailable', 'provider_unavailable'],
+    ])('records the durable state after a %s refusal', async (refusal, state) => {
+      const f = fakes({ result: { ok: false, refusal: refusal as 'invalid' | 'unavailable' } })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.marked[0]?.state).toBe(state)
+    })
+
+    it('releases the claim after a failure, so a retry need not wait for expiry (C6)', async () => {
+      const f = fakes({ result: { ok: false, refusal: 'unavailable' } })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.released).toEqual([TOKEN])
+    })
+
+    it('releases the claim when the bytes cannot be fetched', async () => {
+      const f = fakes({ storeThrows: true })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.released).toEqual([TOKEN])
+    })
+
+    it('does not release after a successful write, because the write cleared it', async () => {
+      // `replace` clears the claim in the same transaction as the state change.
+      // Releasing again would be a second write that could free a document a
+      // *later* claimant already holds.
+      const f = fakes()
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.released).toEqual([])
+    })
+
+    it('does not mark a state when it never held the claim', async () => {
+      const f = fakes({ claimable: false })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.marked).toEqual([])
+      expect(f.released).toEqual([])
     })
   })
 
