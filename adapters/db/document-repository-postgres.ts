@@ -2,6 +2,7 @@ import { Pool } from 'pg'
 
 import type {
   DocumentRepository,
+  HeldDocument,
   NewDocument,
   RecordedDocument,
 } from '../../core/ports/document-repository'
@@ -107,6 +108,22 @@ export function createPostgresDocumentRepository(
       }
 
       return { id: row.id, alreadyHeld: true }
+    },
+
+    async findById(id: string): Promise<HeldDocument | null> {
+      // Only what deferred extraction needs: where the bytes are and how to
+      // read them. The filename and uploader are the surface's business, and a
+      // narrower row is one fewer thing to accidentally hand to a model.
+      const { rows } = await pool().query<{
+        id: string
+        storage_key: string
+        content_type: string
+      }>('select id, storage_key, content_type from document where id = $1', [id])
+
+      const row = rows[0]
+      if (row === undefined) return null
+
+      return { id: row.id, storageKey: row.storage_key, contentType: row.content_type }
     },
   }
 }

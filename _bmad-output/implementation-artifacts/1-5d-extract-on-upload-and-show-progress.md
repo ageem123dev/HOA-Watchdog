@@ -1,6 +1,10 @@
+---
+baseline_commit: b369034e84b7df7fd93f1d3a8f65d061447e1d5a
+---
+
 # Story 1.5d: Extract on upload and show progress
 
-Status: backlog
+Status: in-progress
 
 > **Fourth of four stories from epic story 1.5.**
 > **1.5** built the deterministic path and the shared foundation. **1.5b** stores records and wires
@@ -56,11 +60,11 @@ from *could not be read*
 
 ## Tasks / Subtasks
 
-- [ ] **Wire the provider path into ingestion** (AC: 1, 2)
-  - [ ] PDF and image route to the provider; CSV and Excel keep 1.5's deterministic path with no model call
-  - [ ] A test proves the model is not reachable for tabular types — the guarantee of 1.5 must survive this story
-  - [ ] Store through 1.5b's `ExtractionRepository.replace`, which is already transactional and refuses an empty set. Do not add a second way to write records
-  - [ ] **`provider unavailable` is not `unreadable`.** One is retryable and not the document's fault; the other says the scan is bad. 1.5b made exactly this mistake with `failed` and had to add `figures-not-stored` — do not repeat it
+- [x] **Wire the provider path into ingestion** (AC: 1, 2)
+  - [x] PDF and image route to the provider; CSV and Excel keep 1.5's deterministic path with no model call
+  - [x] A test proves the model is not reachable for tabular types — the guarantee of 1.5 must survive this story
+  - [x] Store through 1.5b's `ExtractionRepository.replace`, which is already transactional and refuses an empty set. Do not add a second way to write records
+  - [x] **`provider unavailable` is not `unreadable`.** One is retryable and not the document's fault; the other says the scan is bad. 1.5b made exactly this mistake with `failed` and had to add `figures-not-stored` — do not repeat it
 
 - [ ] **A durable extraction state on `document`** (AC: 1, 3) — *raised in review of 1.5c, MR !10*
   - [ ] **The four states are not currently representable.** `document` has no state column, and
@@ -184,7 +188,116 @@ app/api/                             # NEW — the follow-up extraction endpoint
 
 ### Test Design
 
+## Task 1 — the provider path, reachable from ingestion
+
+**Behaviour A — a stored document is read through the provider, or refused in a way that says whose fault it is**
+
+*If it ran correctly, how would I know?* Given a document already stored, the operation fetches its
+bytes, sends them through `Extractor`, and either produces a validated collection stored against that
+document, or a refusal that distinguishes *the provider could not answer* from *the answer could not
+be trusted*. A CSV never reaches the provider at all.
+
+*How am I going to test this?* Every port is injected, so the fake extractor records whether it was
+called and with what. The most important assertion in this task is a **negative** one — that the
+extractor is not called for tabular types — and a negative assertion is only worth anything if the
+same test would notice a call. It would: the fake counts.
+
+*What else can go wrong?* Two shapes dominate. **Misattribution** — fetching the wrong bytes and
+storing records against a document they did not come from, which is silent and permanent. And
+**blame** — telling a treasurer their scan is bad during a provider outage, which sends them to
+re-scan a document that was fine.
+
+*Could this problem happen anywhere else?* The blame shape is the third occurrence in this epic.
+1.5b shipped `failed` saying "not saved" when the bytes were saved, and had to add
+`figures-not-stored`. 1.5c split the port's refusal into `unavailable` and `invalid` precisely so
+this story could tell them apart. This is where that distinction has to survive contact with a
+surface.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| A1 | **A CSV or spreadsheet reaches the model.** 1.5's AC2 guarantee, and a per-document cost | GUARD | The fake extractor is asserted **not called** for every tabular content type; the fake counts calls, so the assertion can fail |
+| A2 | **`unavailable` collapses into `unreadable`**, blaming the document for an outage | GUARD | A provider refusal of `unavailable` yields a distinct outcome from `invalid`; both are asserted, not just one |
+| A3 | **The wrong bytes are fetched**, attaching records to a document they did not come from | GUARD | The key passed to the store is recomputed in the test from the document's own record, not read back from the call |
+| A4 | Records are stored when extraction failed | GUARD | `replace` is asserted **not called** on both refusal paths |
+| A5 | An empty collection reaches `replace`, which refuses it — surfacing a content problem as an outage | GUARD | Zero records yields `invalid`; `replace` never sees `[]` |
+| A6 | The store cannot return the bytes, and this reads as an unreadable document | GUARD | A storage failure is `unavailable`, not `invalid` — the document is fine, the infrastructure is not |
+| A7 | Raw bytes or raw text move toward the reasoning side | Unrepresentable | The port returns `ExtractionRecord[]`; there is no free-form field to carry them (1.5c) |
+| A8 | A document whose type has a deterministic reader is extracted twice — once by each path | GUARD | Routing is exclusive: a type is tabular **or** provider-backed, never both, asserted over the whole accepted-type list |
+| A9 | Two callers extract the same document at once | OUT-OF-SCOPE | Task 3 owns the claim. Recorded here so it is deliberate: this task's operation is not safe to call concurrently and does not pretend to be |
+| A10 | Extraction runs at upload time and holds the request open | OUT-OF-SCOPE | 1.5c decided deferred. This task builds the operation; Task 3 decides when it runs |
+
+**Inverse/cross-check.** The records handed to `replace` are compared against what the injected
+extractor returned, and the storage key against one recomputed from the document record — both
+derived independently in the test rather than read back from the code under test.
+
 ### Debug Log References
+
+**Task 1 — red.** 24 failing against a stub whose `extractDocument` throws, so every red was an
+assertion failure rather than a missing symbol.
+
+**Task 1 — sensitivity, six mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| Let tabular types reach the provider | **4** |
+| Collapse `unavailable` into `unreadable` | 1 |
+| Collapse `invalid` into `provider-unavailable` | 1 |
+| Fetch a fixed storage key instead of the document's | 1 |
+| Allow an empty collection through to `replace` | 1 |
+| Treat missing bytes as present | 1 |
+
+**Both directions of the refusal split are asserted**, which matters more than it looks: a test that
+only checks `unavailable → provider-unavailable` passes for an implementation that returns
+`provider-unavailable` always. Both mutations above are single-test failures precisely because the
+opposite assertion exists.
+
+**Two ports had to grow, and it is worth saying why they had not before.** `DocumentStore` was
+write-only and `DocumentRepository` could only `record` — nothing had ever read a document back,
+because until this story every read happened in the same request that wrote it. Deferred extraction
+is the first caller that comes back later, and that is what turns "store it" into "store it and be
+able to find it again".
+
+Both return `null` rather than throwing for the absent case. A missing object and an unreachable
+bucket are different situations — one means this document can never be extracted, the other means
+try later — and a caller that cannot tell them apart tells the treasurer the wrong thing.
+
+### Completion Notes List
+
+**Task 1 — the operation, not yet the schedule.** `extractDocument` reads a held document through the
+provider and stores what it says. When it runs is Task 3's decision; this task only had to make the
+path exist and make it safe to call.
+
+**The tabular guarantee is checked before the bytes are fetched**, so asking to extract a spreadsheet
+costs nothing and — the part that matters — cannot reach the model. Story 1.5's AC2 is a promise that
+costs money per document to break.
+
+**Routing is proven exhaustive, not just correct.** A test asserts the tabular set and the
+provider-backed set together are exactly `ACCEPTED_CONTENT_TYPES`. A type in neither would be
+uploadable and never readable; a type in both could be read twice. Neither list can drift from what
+upload accepts without failing that test.
+
+**`provider-unavailable` is broader than its name**, and this is a deliberate consequence of AC3
+fixing exactly four durable states. It covers a failed object-store read and a failed write as well
+as a provider outage. What the treasurer needs to know is identical in all three: nothing is lost,
+this is retryable, and it is not their document. Recorded rather than smoothed over, because the name
+will read as narrower than the behaviour to the next person.
+
+### File List
+
+**Added**
+
+- `core/ingestion/extract-document.ts` — deferred extraction: read a held document, store what it says
+- `core/ingestion/extract-document.test.ts` — 25 tests, no network
+
+**Modified**
+
+- `core/ports/document-store.ts` — `get`, because nothing had ever read a document back
+- `core/ports/document-repository.ts` — `findById` and the `HeldDocument` shape
+- `adapters/storage/document-store-s3.ts` — `get`, mapping a missing key to `null` rather than a throw
+- `adapters/db/document-repository-postgres.ts` — `findById`, selecting only what extraction needs
+- `core/ingestion/ingest.test.ts`, `core/ingestion/reading.test.ts` — fakes widened to the ports
+
+### Change Log
 
 ### Completion Notes List
 

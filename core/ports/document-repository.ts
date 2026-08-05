@@ -29,6 +29,29 @@ export interface RecordedDocument {
   readonly alreadyHeld: boolean
 }
 
+/**
+ * A document as it is held, for the deferred extraction pass to work from.
+ *
+ * Deliberately not the whole row. Extraction needs to find the bytes and know
+ * how to read them, and nothing else — the filename and uploader are the
+ * surface's business.
+ */
+export interface HeldDocument {
+  readonly id: string
+  readonly storageKey: string
+  /** Normalised, so routing can decide deterministic-versus-provider on it. */
+  readonly contentType: string
+}
+
 export interface DocumentRepository {
   record(document: NewDocument): Promise<RecordedDocument>
+
+  /**
+   * The document with this id, or `null` if there is none.
+   *
+   * Null rather than a throw: a caller asking for a document that does not
+   * exist is an ordinary outcome of a stale link or a deleted upload, and the
+   * follow-up endpoint has to answer it with a 404 rather than a 500.
+   */
+  findById(id: string): Promise<HeldDocument | null>
 }

@@ -64,12 +64,14 @@ function fakes(
       findByDocument: vi.fn(async () => []),
     },
     store: {
+      get: vi.fn(async () => null),
       put: vi.fn(async (document: StoredDocument) => {
         if (options.failStoreFor?.(document)) throw new Error('R2 said no')
         stored.push(document)
       }),
     },
     repository: {
+      findById: vi.fn(async () => null),
       // `destructiveCalls` stays empty by construction now that the port has no
       // destructive method. It is still asserted, so re-introducing one without
       // a place for it in the ordering fails these tests rather than passing
