@@ -1,0 +1,56 @@
+{
+  "$comment": [
+    "The declared deployment topology, and the input to AD-10's boundary guard in",
+    "core/security/dual-llm-boundary.test.ts. It is tracked config, not documentation:",
+    "changing it changes what the test suite permits.",
+    "",
+    "AD-10 requires the extraction model and the reasoning model to be a vendor boundary —",
+    "different vendor, different credential, different deploy unit. The third clause had",
+    "nothing in this repository to read, which is why this file exists. A guard over an",
+    "absent file passes for the wrong reason.",
+    "",
+    "The reasoning unit is declared before it is built. That is deliberate: writing the",
+    "guard now is what makes epic 2 edit a tracked file, in a commit someone reviews, if it",
+    "ever wants to put both sides in one place."
+  ],
+  "units": [
+    {
+      "name": "web",
+      "runtime": "node",
+      "description": "The Next.js gateway. Ingests uploads and calls the extraction provider.",
+      "deployed": true,
+      "responsibilities": ["ingestion", "extraction", "surface"],
+      "credentials": [
+        "WATCHDOG_WRITER_DATABASE_URL",
+        "WATCHDOG_READER_DATABASE_URL",
+        "AUTH_SECRET",
+        "R2_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_BUCKET",
+        "GEMINI_API_KEY",
+        "GEMINI_OCR_MODEL"
+      ]
+    },
+    {
+      "name": "agent",
+      "runtime": "python",
+      "description": "The CrewAI reasoning service. Does not exist yet — epic 2 builds it.",
+      "deployed": false,
+      "responsibilities": ["reasoning"],
+      "credentials": ["ANTHROPIC_API_KEY"]
+    }
+  ],
+  "sides": {
+    "extraction": {
+      "responsibility": "extraction",
+      "credentials": ["GEMINI_API_KEY"],
+      "origin": "https://generativelanguage.googleapis.com"
+    },
+    "reasoning": {
+      "responsibility": "reasoning",
+      "credentials": ["ANTHROPIC_API_KEY"],
+      "origin": "https://api.anthropic.com"
+    }
+  }
+}

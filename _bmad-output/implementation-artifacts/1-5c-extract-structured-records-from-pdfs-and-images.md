@@ -78,13 +78,13 @@ a validated collection in memory, and says so rather than implying an upload pro
   - [x] The reply is validated again with 1.5's `core/extraction/validate.ts`. Both halves are required; either alone is half the rule
   - [x] Schema sent and schema validated derive from **one** definition — assert it, do not maintain two
 
-- [ ] **The AD-10 boundary guard** (AC: 3)
-  - [ ] A guard test in `core/security/`, shaped like `nfr2-guard.test.ts` — it must fail the pipeline, not live in a convention
-  - [ ] Extraction and reasoning credentials are distinct names; no module reads both
-  - [ ] **Assert the providers differ, not only the credentials.** Distinct key names prove nothing about which endpoint is called — pin the extraction origin and the reasoning origin as separate values and fail if they converge. AC3 says different *providers*
-  - [ ] **And different deploy units**, which is AD-10's third clause and the one nothing yet checks. Credentials, origins and content flow can all be correct while both run in the same unit, which is the arrangement AD-10 exists to prevent. Add a configuration check that fails on a planted same-unit deployment — the extraction adapter belongs to the Node gateway and the reasoning agent to the Python service, and a deploy config placing them together must break the pipeline, not a code review
-  - [ ] No code path passes document bytes or raw extracted text toward the reasoning side
-  - [ ] **Prove the guard detects a violation** by planting one, as `core/ports/boundary.test.ts` does. A guard tested only against a clean tree cannot distinguish "nothing wrong" from "nothing checked"
+- [x] **The AD-10 boundary guard** (AC: 3)
+  - [x] A guard test in `core/security/`, shaped like `nfr2-guard.test.ts` — it must fail the pipeline, not live in a convention
+  - [x] Extraction and reasoning credentials are distinct names; no module reads both
+  - [x] **Assert the providers differ, not only the credentials.** Distinct key names prove nothing about which endpoint is called — pin the extraction origin and the reasoning origin as separate values and fail if they converge. AC3 says different *providers*
+  - [x] **And different deploy units**, which is AD-10's third clause and the one nothing yet checks. Credentials, origins and content flow can all be correct while both run in the same unit, which is the arrangement AD-10 exists to prevent. Add a configuration check that fails on a planted same-unit deployment — the extraction adapter belongs to the Node gateway and the reasoning agent to the Python service, and a deploy config placing them together must break the pipeline, not a code review
+  - [x] No code path passes document bytes or raw extracted text toward the reasoning side
+  - [x] **Prove the guard detects a violation** by planting one, as `core/ports/boundary.test.ts` does. A guard tested only against a clean tree cannot distinguish "nothing wrong" from "nothing checked"
 
 - [ ] **Connectivity probe** `scripts/verify-extraction.mjs` (AC: 4)
   - [ ] The counterpart of `scripts/verify-storage.mjs`, and held to its standard: report **SKIP** rather than PASS when it cannot actually prove something
@@ -306,6 +306,46 @@ technique here, third copy.
 independent statements of one shape, so each is used as the other's oracle over the whole vocabulary
 rather than on one example.
 
+## Task 3 — the AD-10 boundary guard
+
+**Behaviour C — the dual-LLM boundary is enforced by a failing test, not by a convention**
+
+*If it ran correctly, how would I know?* A planted violation breaks the suite. That is the only
+signal that means anything here, because **the reasoning side does not exist yet** — every check
+would otherwise pass by describing an empty world, and keep passing right up until epic 2 merges the
+two sides.
+
+*How am I going to test this?* Two surfaces. A declared **deploy manifest** the guard reads, and the
+repository's own source, scanned for a module that reaches for both credentials. Violations are
+planted into a copy of the manifest rather than into the repo, so the negative case is real without
+committing a broken tree.
+
+*What else can go wrong?* The dominant risk is not a missed violation — it is a guard that cannot
+fail. AD-10 has three clauses (vendor, credential, deploy unit) and the third had nothing to read:
+there is **no deploy configuration in this repository at all**. A check over an absent file is the
+purest form of the vacuous guard, and this project has now found nine of those.
+
+*Could this problem happen anywhere else?* It is the same shape as `nfr2-guard.test.ts`, which
+enforces an *absence*. That file solves it by naming exactly which surfaces it can and cannot see.
+This one has to do the same, and additionally prove its own inputs are non-empty.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| C1 | **The whole guard passes vacuously** because the reasoning side does not exist yet | GUARD | The manifest must declare *both* an extraction and a reasoning credential; if either set is empty the guard **fails**, rather than finding no conflict among nothing |
+| C2 | The deploy manifest is deleted or renamed and the check quietly reads nothing | GUARD | A missing or unparsable manifest is a failure, never a skip |
+| C3 | **Both roles land in one deploy unit** — AD-10's third clause, and the arrangement it exists to prevent | GUARD | A unit declaring both responsibilities fails; proven by planting one |
+| C4 | One unit holds both credentials, even with the roles nominally separate | GUARD | A unit whose credential list spans both sides fails; proven by planting one |
+| C5 | **Distinct credentials, same vendor.** Two keys pointing at one provider satisfies "different credential" and violates "different vendor" | GUARD | The declared origins must differ by host; planting a converged origin fails |
+| C6 | A single module reads both credentials, so the boundary is one import away from gone | GUARD | Source scan across `core/`, `adapters/`, `app/`, `scripts/`; a planted module that reads both fails it |
+| C7 | Raw bytes or raw extracted text reach the reasoning side | Unrepresentable **and** GUARD | The port returns only the constrained record vocabulary (Task 1), and C6's scan covers the import path. Recorded as partly structural because the reasoning side cannot yet be inspected |
+| C8 | The guard is narrowed later to make a failure go away | OUT-OF-SCOPE for code, addressed in prose | Same standing as `nfr2-guard.test.ts`: narrowing it is an architecture change needing a new AD, and the file says so |
+| C9 | The manifest describes units that do not match reality | OUT-OF-SCOPE | Nothing in the repo deploys anything today. Recorded as a real limit: this guard binds the *declared* topology, and its value is that epic 2 must change a tracked file to break it |
+
+**Inverse/cross-check.** Every clause is checked in both directions: the real manifest must pass, and
+a planted violation of that same clause must fail. A guard exercised only against a clean tree cannot
+distinguish "nothing wrong" from "nothing checked" — `core/ports/boundary.test.ts` established that
+technique here and this follows it.
+
 ### Debug Log References
 
 **Task 1 — red.** 33 failing against a stub whose `extract` throws, so every red was an assertion
@@ -360,7 +400,70 @@ because they disagree with `record.ts`. They fail because the tests compare agai
 constants rather than against literals — a test asserting `maxLength === 255` would have passed the
 drifted version happily.
 
+**Task 3 — sensitivity, eight mutations, all detected.**
+
+| Mutation | Failures |
+| --- | --- |
+| Drop the vacuity check | 1 |
+| Drop the empty-units check | 1 |
+| Drop shared-unit (AD-10's third clause) | 2 |
+| Drop shared-credential | 1 |
+| Drop converged-origin | 2 |
+| Accept an unparsable origin | 1 |
+| Make the source scan find nothing ever | 2 |
+| Revert the scan to matching bare mentions | 2 |
+
+The last one matters as much as the others: it pins the narrowing described below in **both**
+directions, so the scan cannot quietly go back to flagging documentation.
+
+**A real false positive, found by running the guard rather than by reasoning about it.** The first
+version matched a credential name anywhere in a file and immediately flagged
+`core/security/forbidden-credentials.test.ts` — which lists both names in a fixture of credentials
+NFR-2 must *permit*, and reads neither. Narrowed to actual environment access
+(`process.env.NAME`, `env['NAME']`). That is not narrowing a guard to make a failure go away; it is
+the difference between the property meant and the property written, and `forbidden-credentials.ts`
+warns in its own header that a detector flagging legitimate names "gets deleted by the first
+developer it inconveniences". Two tests now pin the distinction.
+
+**Two self-inflicted defects worth recording.**
+
+*A control byte in source, for the third time in this epic.* Building the regex through a shell
+heredoc into Python produced a literal `0x08` where `` was intended — the same class of corruption
+as the NUL bytes in stories 1.2 and 1.5, and again invisible in an editor. Fixed by writing the
+repair script to disk with a raw string rather than piping escapes through two interpreters. A
+repo-wide sweep of every tracked file now reports **zero** NUL, backspace, vertical-tab or form-feed
+bytes.
+
+*Three type errors that only `tsc` could see.* The `planted` helper mutated `draft.units[0]` on a
+`readonly` array. Every test passed — Vitest does not type-check, and `next build` only checks the
+graph it compiles — and `npx tsc --noEmit` went from the baseline 8 to 11. Rewritten functionally,
+back to 8. This is the second time in two stories that the untyped-tests gap has caught something
+real, which strengthens the case for the follow-up story F2 asks for.
+
 ### Completion Notes List
+
+**Task 3 — the guard's hardest requirement was being able to fail at all.** The reasoning side does
+not exist; epic 2 builds it. So every clause would pass by describing an empty world and keep passing
+until the exact commit it was written to catch. `deploy-units.json` exists because AD-10's third
+clause — *different deploy unit* — had **nothing in this repository to read**: there is no deploy
+configuration at all. A check over an absent file is the purest vacuous guard, so the manifest is
+tracked config, and a `vacuous` violation fires if either side stops declaring a credential or the
+unit list empties.
+
+**Three clauses, checked as three things.** Distinct credentials prove nothing about which endpoint
+they authenticate against, so the origins are compared by host; distinct origins prove nothing about
+where the code runs, so responsibilities and credential holdings are compared per unit. Every clause
+is exercised against the real manifest *and* a planted violation of that same clause.
+
+**What this cannot see, stated rather than implied.** It reads the tracked manifest and this
+repository's source. It cannot see the runtime topology of a hosting account, and nothing here
+deploys anything today. Its value is narrower and real: for epic 2 to put both models in one unit it
+must edit a tracked file, in a commit someone reviews, and this test fails until it does.
+
+**The bytes-never-cross clause is structural, not scanned.** The port returns only the constrained
+record vocabulary (Task 1), so there is no type through which raw text could pass. The source scan
+covers the credential path. Neither can inspect a reasoning service that does not exist, and the
+story says as much.
 
 **Task 2 — the schema is derived, not restated.** Every enum and bound in `responseSchema()` reads
 from `core/extraction/record.ts`. Writing them out again would have made it a third statement of a
@@ -411,6 +514,9 @@ fakes the provider.
 **Added**
 
 - `core/ports/extractor.ts` — the port: bytes and a media type in, a record collection or a typed refusal out
+- `core/security/dual-llm-boundary.ts` — AD-10's decision procedure
+- `core/security/dual-llm-boundary.test.ts` — 19 tests; every clause checked against a planted violation
+- `deploy-units.json` — the tracked deployment topology AD-10's third clause had nothing to read
 - `adapters/extraction/extractor-gemini.ts` — the only place the provider is constructed
 - `adapters/extraction/extractor-gemini.test.ts` — 36 tests, no network
 
