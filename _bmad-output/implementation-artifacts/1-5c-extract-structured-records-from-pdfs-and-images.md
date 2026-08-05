@@ -692,6 +692,22 @@ with a test count that had gone stale.
 
 Sensitivity: both round-2 code fixes were mutated and both were detected.
 
+### CodeRabbit round 3 — MR !10, 1 finding, fixed
+
+**R15 (Minor) — the test written for round 2's probe fix proved less than it claimed.** It compared
+the position of the last `finally` against `response.json()`, which sounds like "the deadline outlives
+the body read" and is not: a `clearTimeout` left immediately after `fetch()` passes it as long as
+*some* later `finally` exists for any reason at all.
+
+Replaced with the property that actually has to hold — at least one `clearTimeout` occurs **after**
+the body is read — plus a second test naming the original defect's exact shape. Restoring that defect
+now fails **2** tests; under the old assertion it failed none.
+
+Third round, third instance of the same shape, and this one is a test written *for* a fix from the
+round before. The lesson worth keeping is not "write better assertions" but that positional and
+substring checks over source text are the specific form that keeps slipping through here: they read
+like behavioural claims and are not.
+
 ### Definition of Done
 
 **PASS.**

@@ -86,15 +86,43 @@ describe('the extraction probe stays in step with the adapter', () => {
     // hang the script. The adapter had the same defect and was fixed first —
     // fixing one and not the other is the "could this happen anywhere else?"
     // question going unasked.
+    //
+    // The first version of this assertion compared the position of the last
+    // `finally` against `response.json()`, which is a weaker claim than it
+    // sounds: a clear left immediately after `fetch()` still passes it as long
+    // as some later `finally` exists for any reason at all. Raised in review
+    // too, and correctly. What actually has to be true is that a clear happens
+    // **after** the body is read — that is what "still armed during the read"
+    // means.
     const body = probe.slice(probe.indexOf('async function ask'))
-    const clears = [...body.matchAll(/clearTimeout\(timer\)/g)].length
+    const clears = [...body.matchAll(/clearTimeout\(timer\)/g)].map((m) => m.index ?? -1)
     const jsonAt = body.indexOf('response.json()')
-    const finallyAt = body.lastIndexOf('finally')
 
-    expect(clears).toBeGreaterThan(0)
     expect(jsonAt).toBeGreaterThan(0)
-    // The last clear is in a `finally` that wraps the body read, not before it.
-    expect(finallyAt).toBeGreaterThan(jsonAt)
+    expect(clears.length).toBeGreaterThan(0)
+    expect(
+      clears.some((at) => at > jsonAt),
+      'no clearTimeout runs after the body read, so the deadline is dropped before it',
+    ).toBe(true)
+  })
+
+  it('does not drop the deadline as soon as fetch resolves', () => {
+    // The specific shape of the original defect: the only clear sitting between
+    // the fetch call and the body read.
+    const body = probe.slice(probe.indexOf('async function ask'))
+    const fetchAt = body.indexOf('await fetch(')
+    const jsonAt = body.indexOf('response.json()')
+    const between = [...body.matchAll(/clearTimeout\(timer\)/g)]
+      .map((m) => m.index ?? -1)
+      .filter((at) => at > fetchAt && at < jsonAt)
+    const after = [...body.matchAll(/clearTimeout\(timer\)/g)]
+      .map((m) => m.index ?? -1)
+      .filter((at) => at > jsonAt)
+
+    // A clear on the transport-error path is fine — that path never reaches the
+    // body. What must not happen is clearing there and nowhere afterwards.
+    expect(after.length, `clears between fetch and json: ${between.length}, after: ${after.length}`)
+      .toBeGreaterThan(0)
   })
 
   it('carries the same document-kind vocabulary', () => {
