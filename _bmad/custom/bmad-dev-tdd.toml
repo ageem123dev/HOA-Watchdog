@@ -1,0 +1,30 @@
+# Team overrides for the bmad-dev-tdd skill.
+# Merged over .claude/skills/bmad-dev-tdd/customize.toml by
+# _bmad/scripts/resolve_customization.py. Arrays append; scalars override.
+#
+# This file exists so that "run the adversarial review after every task, not just
+# at the end of the story" survives a BMad reinstall. The edit to
+# .claude/skills/bmad-dev-tdd/SKILL.md is overwritten whenever the module is
+# reinstalled; this file is not, and the contract it loads below re-establishes
+# the rule on its own.
+
+[workflow]
+
+# Appends to the skill default. Loaded as foundational context on every activation.
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/per-task-review.md",
+  "file:{project-root}/_bmad/custom/argus-review-routing.md",
+]
+
+[workflow.tdd]
+
+# Step 9 runs the adversarial review on the task's own diff, alongside the
+# sensitivity check it already ran.
+#
+# Both, because they are blind to different things. Mutation testing asks "would
+# my tests notice this line changing" and can only probe where a test already
+# exists; it cannot ask about a distinction nobody drew. Story 1.5d ran 29
+# mutations with 28 detected and still shipped four defects into review, one of
+# which showed "Reading" to the treasurer forever for a document that had been
+# read successfully.
+review_each_task = true
