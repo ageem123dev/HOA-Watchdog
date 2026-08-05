@@ -4,7 +4,7 @@ baseline_commit: c894c032a67f3bbf5830a575f549f395c98bd25c
 
 # Story 1.5c: Extract structured records from PDFs and images
 
-Status: in-progress
+Status: review
 
 > **Third of four stories from epic story 1.5.**
 > **1.5** built the deterministic path and the shared foundation — the `extraction` table, the record vocabulary, validation and the unreadable outcome. **1.5b** stores records and wires extraction into ingestion. **This story adds the provider path**: the extraction adapter, AD-9's schema enforcement at the API layer, and AD-10's vendor boundary.
@@ -601,4 +601,39 @@ fakes the provider.
 - `_bmad-output/implementation-artifacts/1-5c-...md` — split, decisions, Test Design
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — 1.5c in-progress, 1.5d added
 
+### Definition of Done
+
+**PASS.**
+
+| AC | Satisfied by |
+| --- | --- |
+| AC1 — extracted by the provider under a machine-enforced schema, returning a validated collection | `responseSchema` + `responseMimeType` on the request, revalidated through `core/extraction/validate.ts`; the port returns a collection and the "many records" case is tested. **Proven end to end by the probe**, not only by faked tests |
+| AC2 — schema-invalid output halts and stores nothing | Every malformed shape yields `invalid`; one bad record refuses the whole set, as the tabular path does. Nothing is stored because storing is 1.5d's |
+| AC3 — the dual-LLM boundary is a vendor boundary | `core/security/dual-llm-boundary.test.ts`, every clause checked against a planted violation; raw text cannot cross because the port's return type has no free-form field |
+| AC4 — the provider is proven, not assumed | `scripts/verify-extraction.mjs`, run live: asked for `"receipt"`, got `"other"` |
+
+**Test-first discipline held.** Task 1 went red against a stub whose `extract` throws, so all 33 reds
+were assertion failures rather than missing symbols. Tasks 2–4 were red before green likewise.
+
+**Sensitivity: 25 mutations run across the four tasks, 25 detected — but only after fixing three of
+my own tests that were not detecting theirs.** The origin test, the reply-bound test and, in the
+boundary guard, a scan that flagged a legitimate fixture. Recorded in the Debug Log rather than
+quietly corrected, because all three passed against broken code first.
+
+**Gates on this head:** lint clean, `next build` compiled, **857 unit passed / 111 skipped**,
+`npx tsc --noEmit` at the pre-existing **8** (unchanged from baseline; 3 of my own were introduced
+and fixed), repo-wide control-byte sweep clean.
+
+**Not proven by CI, stated rather than implied.** `verify:extraction` is gated on `GEMINI_API_KEY`
+and `GEMINI_OCR_MODEL` being protected masked variables, and they are not set — so **the MR pipeline
+will not run the one check that proves AD-9**. The evidence is the local run quoted in the Debug Log.
+`verify:database` remains gated the same way and equally unrun.
+
 ### Change Log
+
+- 2026-08-04 — Split from a seven-group story; 1.5d takes ingestion wiring and the staged-progress
+  surface. Two deferred decisions settled: tools may return validated field values, and extraction
+  runs after storage on a polled follow-up. Tasks 1-5 implemented test-first: the extractor port and
+  adapter, schema enforcement derived from the record vocabulary, the AD-10 boundary guard with a
+  tracked deploy manifest, and the connectivity probe that proves AD-9 against the live provider.
+  Status -> review.
