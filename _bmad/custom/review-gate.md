@@ -1,6 +1,9 @@
 # The review gate
 
-**One rule: every diff that will reach `main` gets both checks before it is pushed.**
+**One rule: every diff that will reach `main` gets all three checks before it is pushed.**
+
+The three are the **sensitivity check**, the **test-value pass** (§2a) and the **adversarial
+review**. Each is blind to what the others see, which is why none of them replaces another.
 
 Not "every task" — that was the first version of this file and it was too narrow. There are three
 moments where a diff is created, and the rule is the same at all of them:
@@ -59,22 +62,59 @@ different situations and both were treated as one, so there was no assertion to 
 
 ## 2. Order
 
-The same six steps at each of the three moments. "Task" below means whichever diff is in scope.
+The same seven steps at each of the three moments. "Task" below means whichever diff is in scope.
 
 1. The diff reaches green and the full suite passes.
 2. **Sensitivity check** — break the task's load-bearing assertion, confirm the test fails, restore,
    re-run. Existing `bmad-dev-tdd` Step 9 behaviour.
-3. **Adversarial review** — one `argus_review` call scoped to *this task's* diff.
-4. Verify every finding against the real files (`argus-review-routing.md` §5 — mandatory).
-5. Fix confirmed findings **test-first**: a regression test that fails against the pre-fix code.
-6. Only then tick the checkbox.
+3. **Test-value pass** — §2a below. The tests in the diff are reviewed as work product, not as
+   evidence.
+4. **Adversarial review** — one `argus_review` call scoped to *this task's* diff.
+5. Verify every finding against the real files (`argus-review-routing.md` §5 — mandatory).
+6. Fix confirmed findings **test-first**: a regression test that fails against the pre-fix code.
+7. Only then tick the checkbox.
 
-A diff is not finished because its tests pass. It is finished when both checks have run and what
+A diff is not finished because its tests pass. It is finished when all three checks have run and what
 they found has been fixed or recorded.
 
-**A fix push is a diff.** It gets the same six steps, scoped to the fix. If fixing a finding
+**A fix push is a diff.** It gets the same seven steps, scoped to the fix. If fixing a finding
 introduces another, that is exactly the case this gate exists to catch, and it is the case that
 actually happened eight times in a row.
+
+## 2a. The test-value pass
+
+**The tests in a fix diff are the half nobody re-reads.** Every other step here treats the suite as
+the instrument and the production code as the subject. This step turns the instrument around.
+
+Run `python3 _bmad/scripts/tests_touched.py <range>` to get the list — over a checklist, not over
+memory. Then answer both questions for each case. They catch different things and **only one is
+mechanical**:
+
+| Defect | Symptom | Mutation finds it? |
+| --- | --- | --- |
+| **Vacuous** | Passes whether or not the code is right | **Yes** — break the code, the test stays green |
+| **Expired premise** | Asserts what a *later* decision made wrong | **No** |
+
+**A mutation cannot see an expired premise, and this is the whole reason the step exists.** Such a
+test is *strongly* sensitive: break the code and it fails loudly. It looks like the best test in the
+suite. Story 1.5d shipped two of them in a row — both asserting "releases the claim so a retry need
+not wait", true when written and wrong the moment a retry cooldown existed — and each one **blocked
+the fix it should have driven**. One was caught by an adversarial review reading the pair together,
+the other by CodeRabbit. Neither by the suite, which stayed green throughout.
+
+So for each touched case, in writing:
+
+1. **Vacuous?** Break the code it covers. If the test still passes, it proves nothing.
+2. **Expired?** Name the requirement it encodes, then check that requirement against every decision
+   made *after* the test was written — especially decisions made later in the same story, which is
+   where the premise silently rots.
+
+**Then check the other direction: what lost its cover?** Re-specifying a test can strip the only
+coverage from a behaviour that is still correct, and the suite gets *greener*, so nothing complains.
+The same story, one round later: after two tests were correctly re-specified from "asserts a release"
+to "asserts no release", the one remaining legitimate release had no test at all — deleting the call
+left **all 1020 tests green**. A cheap sweep for this: grep the diff's test files for the concept
+that changed, and confirm each surviving assertion is one you still mean.
 
 ## 3. Scoping the per-task call
 
