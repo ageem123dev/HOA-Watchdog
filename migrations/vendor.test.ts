@@ -300,12 +300,16 @@ describeWithDatabase('vendor', () => {
       expect(Number(rows[0].far)).toBeLessThan(0.2)
     })
 
-    it('has an index the ranking can use', async () => {
+    it('has a unique index on the identity, which is the one that must exist', async () => {
+      // The trigram index this used to assert was never reachable: an explicit
+      // `similarity(...) >= floor` cannot use one, so the test proved only that
+      // an unused object existed. The index that carries a rule is this one.
       const { rows } = await writer.query(
-        "select indexdef from pg_indexes where tablename = 'vendor' and indexdef ilike '%gin%'",
+        "select indexdef from pg_indexes where tablename = 'vendor' and indexname = 'vendor_normalised_name_key'",
       )
 
       expect(rows).toHaveLength(1)
+      expect(rows[0].indexdef).toMatch(/unique/i)
     })
   })
 })

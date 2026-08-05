@@ -85,10 +85,22 @@ create table vendor (
 -- one vendor collide here with 23505 even if every caller forgets to look.
 create unique index vendor_normalised_name_key on vendor (normalised_name);
 
--- Ranking for the quarantine queue. Separate from the unique index above and
--- deliberately so: that one decides identity, this one only orders candidates
--- for a human to choose between.
-create index vendor_normalised_name_trgm_idx on vendor using gin (normalised_name gin_trgm_ops);
+-- No trigram index, deliberately, and this is the second thing a reader will
+-- want to change.
+--
+-- A GIN index on gin_trgm_ops is only reachable through the `%` operator, and
+-- `%` takes its cutoff from pg_trgm.similarity_threshold -- a session setting
+-- another connection or a pooler can change. The adapter uses an explicit
+-- `similarity(...) >= floor` instead, which is deterministic and, measured on
+-- this database with enable_seqscan off, does not use such an index at all.
+--
+-- So the index would have been an object nothing reads, with a test asserting
+-- it existed: a guard that proves nothing. An association has tens of vendors
+-- and a sequential scan over them is not worth a hidden dependency on a GUC.
+--
+-- When that stops being true, the change is: switch the adapter to `%`, and pin
+-- pg_trgm.similarity_threshold on every pooled connection so the cutoff stays
+-- visible in the code rather than in whatever the session happens to hold.
 
 -- Migration 003 revoked default SELECT for watchdog_reader, so read access is an
 -- explicit decision per table rather than something a new table inherits.

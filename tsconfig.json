@@ -37,6 +37,8 @@
     "app/**/*.tsx",
     "core/**/*.ts",
     "adapters/**/*.ts",
+    "migrations/**/*.ts",
+    "scripts/**/*.ts",
     "*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"

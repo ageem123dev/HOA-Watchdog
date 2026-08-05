@@ -1,5 +1,6 @@
 ---
 baseline_commit: c9167f8d32e468251802066f4944cbac1737dab1
+merge_request: 15
 ---
 
 # Story 1.6a: Recognise known vendors
@@ -366,6 +367,31 @@ story's first task is untracked. A checklist that silently omits the only tests 
 the failure the tool exists to prevent. `tests_touched.py` now lists untracked test files as wholly
 new.
 
+
+### Review Findings
+
+**Whole-story adversarial review (Argus, `c9167f8..HEAD`, 12/12 files, confidence 0.95).** This is the
+pass that per-task reviews structurally cannot be, and it found two things neither of them could —
+both about the shape of the change rather than any one file.
+
+**R1 (medium, confirmed by measurement) — an index nothing could use.** The migration created a GIN
+trigram index; the adapter filters with an explicit `similarity(...) >= floor`. Those cannot meet: a
+GIN trigram index is only reachable through the `%` operator. Checked with `enable_seqscan = off`, the
+explicit predicate still plans a sequential scan while `%` uses the index.
+
+So the story was shipping an unused database object **and a test asserting it existed** — a guard that
+proves nothing, which is this project's signature defect and one I wrote while looking for it.
+
+Resolved by removing the index rather than by switching to `%`. `%` takes its cutoff from
+`pg_trgm.similarity_threshold`, a session setting a pooler can change, and trading a deterministic
+filter for a hidden GUC dependency is the wrong way round at this scale — an association has tens of
+vendors. The migration records the upgrade path for when that stops being true. The test now asserts
+the unique index, which is the one that actually carries a rule.
+
+**R2 (low, confirmed) — the migration tests were never type-checked.** `tsconfig.json` included
+`app/`, `core/` and `adapters/` but not `migrations/`, so `migrations/vendor.test.ts` sat outside
+`tsc --noEmit` entirely. Adding `migrations/**/*.ts` and `scripts/**/*.ts` costs **zero** new errors —
+the count stays at the pre-existing 8 — so this was pure uncovered surface.
 
 ### Completion Notes List
 
