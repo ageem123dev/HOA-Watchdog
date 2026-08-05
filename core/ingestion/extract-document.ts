@@ -163,11 +163,17 @@ export async function extractDocument(
       state: 'unreadable' | 'provider_unavailable',
       outcome: 'unreadable' | 'provider-unavailable',
     ): Promise<ExtractionOutcome> => {
-      // Fenced, then released. Both are writes and both need the token: a
-      // holder whose claim lapsed could otherwise mark a document unreadable
-      // after a fresher run had already succeeded.
+      // Fenced, and *not* separately released.
+      //
+      // `markExtractionState` owns the claim from here: it clears both columns
+      // for a terminal state and retains them for `provider_unavailable`, where
+      // the remaining expiry is the retry cooldown. Releasing afterwards
+      // cleared what it had just written, so the cooldown capped nothing —
+      // found by reviewing the fix diff, which nothing had been doing.
+      //
+      // The fence still matters: a holder whose claim lapsed could otherwise
+      // mark a document unreadable after a fresher run had already succeeded.
       await deps.repository.markExtractionState(documentId, state, { token: claim.token })
-      await deps.repository.releaseExtractionClaim(claim)
 
       return { outcome, documentId }
     }

@@ -392,12 +392,36 @@ describe('extractDocument', () => {
       expect(f.marked[0]?.state).toBe(state)
     })
 
-    it('releases the claim after a failure, so a retry need not wait for expiry (C6)', async () => {
+    it('does not release the claim after a provider outage, so the cooldown survives', async () => {
+      // C6 originally required a release on every failure path, "so a retry
+      // need not wait for expiry". Round 3 then added a cooldown that caps how
+      // often one document can cost a provider call — and the two collided:
+      // `markExtractionState` retains the claim as the cooldown, and the
+      // release immediately cleared it, so the budget did nothing at all.
+      //
+      // The cooldown wins for this state. `markExtractionState` owns claim
+      // clearing now: it clears for the terminal states and retains for the
+      // retryable one, which is one place making the decision instead of two.
       const f = fakes({ result: { ok: false, refusal: 'unavailable' } })
 
       await extractDocument(DOCUMENT_ID, f)
 
-      expect(f.released).toEqual([TOKEN])
+      expect(f.released).toEqual([])
+      expect(f.marked).toEqual([
+        { id: DOCUMENT_ID, state: 'provider_unavailable', token: TOKEN },
+      ])
+    })
+
+    it('does not release separately after an unreadable result either', async () => {
+      // Marking a terminal state already clears the claim, so a second write
+      // would be a release that matches nothing — and could free a document a
+      // *later* claimant already holds if the token were ever reused.
+      const f = fakes({ result: { ok: false, refusal: 'invalid' } })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.released).toEqual([])
+      expect(f.marked[0]?.state).toBe('unreadable')
     })
 
     it('releases the claim when the bytes cannot be fetched', async () => {
