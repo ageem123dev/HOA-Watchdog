@@ -18,7 +18,17 @@ If zero findings remain after triage (all dismissed or none raised): state that 
 
 ### 2. Write findings to the story file
 
-If `{spec_file}` exists and contains a Tasks/Subtasks section, append a `### Review Findings` subsection. Write all findings in this order:
+If `{spec_file}` exists and contains a Tasks/Subtasks section, append a `### Review Findings` subsection.
+
+Directly under the heading, write one italic provenance line — the bullet formats below are
+unchanged and remain the contract downstream consumers read:
+
+`*Engine: {review_engine}. <N> finding(s) verified against source: <C> confirmed, <NR> not reproduced, <D> disagreed.*`
+
+When `{review_engine}` = `argus`, append to that same line:
+`*Argus: complexity <complexity>, confidence <confidence>, context <files_selected>/<files_discovered> files.*`
+
+Then write all findings in this order:
 
 1. **`decision-needed`** findings (unchecked):
    `- [ ] [Review][Decision] <Title> — <Detail>`
@@ -36,9 +46,30 @@ Also append each `defer` finding to `{deferred_work_file}` under a heading `## D
 Announce what was written:
 
 > **Code review complete.** <D> `decision-needed`, <P> `patch`, <W> `defer`, <R> dismissed as noise.
+> Engine: `{review_engine}`.
 
 If `{spec_file}` is set, add: `Findings written to the review findings section in {spec_file}.`
 Otherwise add: `Findings are listed above. No story file was provided, so nothing was persisted.`
+
+**Then report the verification pass.** Every finding the engine raised is accounted for here —
+what was confirmed against the real file, what could not be reproduced, and what was
+reproduced but disagreed with. Do not present unverified findings as results, and do not omit
+the rejected ones: a reviewer that raised five findings of which three did not survive
+verification is a different signal from one that raised two.
+
+> **Verified against source:** <C> confirmed · <NR> not reproduced · <DIS> disagreed
+>
+> | # | Finding | Location | Status | Reason |
+> |---|---------|----------|--------|--------|
+> | 1 | <title> | <file>:<line> | confirmed | — |
+> | 2 | <title> | <file>:<line> | not-reproduced | <one line> |
+> | 3 | <title> | <file>:<line> | disagree | <one line> |
+
+When `{review_engine}` = `argus`, add the metadata line beneath it:
+
+> Argus: complexity `<complexity>` · confidence `<confidence>` · context
+> `<files_selected>/<files_discovered>` files (`<selectivity>`) · `<agy_calls>` agy call(s),
+> `<agy_tokens>` tokens. Findings are a second opinion confirmed against source, above.
 
 ### 4. Resolve decision-needed findings
 
