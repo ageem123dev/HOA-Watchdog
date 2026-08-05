@@ -53,6 +53,15 @@ function getPool(): Pool {
   return sharedPool
 }
 
+/**
+ * How long a document rests after the provider could not be reached.
+ *
+ * Not a punishment and not a queue — just a floor on how often one document can
+ * cost a provider call. Short enough that a treasurer reloading the page a
+ * minute later gets a real retry.
+ */
+const RETRY_COOLDOWN_SECONDS = 60
+
 export interface PostgresDocumentRepositoryOptions {
   /** Injected by tests; production uses the shared pool. */
   readonly pool?: Pool
@@ -203,19 +212,42 @@ export function createPostgresDocumentRepository(
       // The claim is cleared alongside the state: a document that has finished
       // must not still look claimed, or the surface renders it as extracting
       // forever.
+      // `provider_unavailable` keeps its claim for a cooldown rather than
+      // clearing it.
+      //
+      // That state stays claimable on purpose — it is the retryable one — but
+      // nothing capped how often. An authenticated caller could POST the
+      // endpoint repeatedly and buy a fresh provider call every time, because
+      // the poller stopping is a client-side courtesy and not a server-side
+      // limit. Holding the claim until the cooldown expires makes the existing
+      // machinery do the capping: the document is simply not claimable yet.
+      // Raised in review.
+      //
+      // It does not render as "extracting" while it cools: the surface derives
+      // that from `held` plus a live claim, and this row is no longer `held`.
+      const cooling = state === 'provider_unavailable'
+
       const { rowCount } = await pool().query(
         fence === undefined
           ? `update document
                 set extraction_state = $2,
-                    extraction_claim_token = null,
-                    extraction_claim_expires_at = null
+                    extraction_claim_token = case when $3 then extraction_claim_token else null end,
+                    extraction_claim_expires_at = case
+                      when $3 then now() + make_interval(secs => $4)
+                      else null
+                    end
               where id = $1`
           : `update document
                 set extraction_state = $2,
-                    extraction_claim_token = null,
-                    extraction_claim_expires_at = null
-              where id = $1 and extraction_claim_token = $3`,
-        fence === undefined ? [id, state] : [id, state, fence.token],
+                    extraction_claim_token = case when $3 then extraction_claim_token else null end,
+                    extraction_claim_expires_at = case
+                      when $3 then now() + make_interval(secs => $4)
+                      else null
+                    end
+              where id = $1 and extraction_claim_token = $5`,
+        fence === undefined
+          ? [id, state, cooling, RETRY_COOLDOWN_SECONDS]
+          : [id, state, cooling, RETRY_COOLDOWN_SECONDS, fence.token],
       )
 
       if (fence !== undefined && rowCount === 0) {

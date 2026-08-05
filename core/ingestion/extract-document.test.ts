@@ -314,6 +314,29 @@ describe('extractDocument', () => {
       expect(claimOrder).toBeLessThan(extractOrder)
     })
 
+    it('claims for a positive, non-trivial length of time', async () => {
+      // Nothing checked the second argument. If it regressed to 0 or undefined
+      // every claim would be immediately expirable, defeating the fence this
+      // whole suite exists to protect — and every test here would still pass.
+      // Raised in review.
+      const f = fakes()
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      const [, ttl] = vi.mocked(f.repository.claimForExtraction).mock.calls[0]!
+
+      expect(typeof ttl).toBe('number')
+      expect(ttl).toBeGreaterThan(30)
+    })
+
+    it('honours an explicit claim TTL', async () => {
+      const f = fakes()
+
+      await extractDocument(DOCUMENT_ID, { ...f, claimTtlSeconds: 90 })
+
+      expect(f.repository.claimForExtraction).toHaveBeenCalledWith(DOCUMENT_ID, 90)
+    })
+
     it('does not call the provider when the claim is lost (C9)', async () => {
       const f = fakes({ claimable: false })
 

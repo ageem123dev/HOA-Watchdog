@@ -47,7 +47,7 @@ found has been fixed or recorded.
 `argus_review` costs ~10–18k input tokens of scaffolding per call before it reads anything, so the
 scope must be the task's own change, not the story's accumulated diff:
 
-```
+```shell
 diff = git diff <commit-at-task-start>..HEAD -- <paths this task touched>
 ```
 
@@ -60,16 +60,24 @@ pass `diff`/`diff_file` rather than `git_range`, one call per scope, never one p
 **Exclude story and planning documents.** They are the review's *spec*, loaded separately; reviewing
 them as a diff is reviewing the prose against itself.
 
-## 4. When a task's diff is trivial
+## 4. When a task's diff is exempt
 
-Skip the review call — and say so — when the task changed only:
+The review may be skipped **only** when the task's diff is entirely one of:
 
-- documentation, comments or story files
-- test fixtures with no production change
-- fewer than ~20 lines with no new branch, no new state and no new external call
+1. documentation, comments, or story and planning files
+2. test fixtures or test-only changes with **no** production change
 
-Say which of these applied. A skipped check that is never mentioned reads exactly like a check that
-passed, which is the failure mode this whole file exists to prevent.
+Nothing else. In particular there is **no size exemption**. An earlier version of this file allowed
+skipping "fewer than ~20 lines with no new branch, no new state and no new external call", and that
+was wrong in the way this project keeps finding things wrong: a rule whose own conditions are the
+judgement it is meant to remove. Deciding a diff has "no new state" is exactly the reasoning the
+review exists to check, and the smallest diffs in this story were among the most dangerous — the
+change that made `provider_unavailable` terminal was two lines, and it could have lost a document
+permanently.
+
+**State which of the two categories applied, in the completion notes, every time.** A skipped check
+nobody mentions reads exactly like a check that passed — which is the failure this whole file exists
+to prevent.
 
 ## 5. The whole-story pass still happens
 
