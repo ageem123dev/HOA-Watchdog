@@ -147,7 +147,14 @@ export async function extractDocument(
       // document that was read must not keep reporting `in-progress` to every
       // later poll. Only a `held` document that could not be claimed is
       // genuinely someone else's work in flight.
-      const settled = await settledOutcome(documentId, document.extractionState, deps)
+      // Re-read rather than reusing the state fetched above: another worker can
+      // settle or delete the document in the window between that read and this
+      // claim returning null, and reporting the stale value would resurrect the
+      // very "Reading forever" bug this branch exists to fix. Raised in review.
+      const current = await deps.repository.findById(documentId)
+      if (current === null) return { outcome: 'not-found', documentId }
+
+      const settled = await settledOutcome(documentId, current.extractionState, deps)
 
       return settled ?? { outcome: 'in-progress', documentId }
     }

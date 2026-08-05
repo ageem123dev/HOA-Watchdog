@@ -472,6 +472,44 @@ describe('extractDocument', () => {
       expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: expected })
     })
 
+    it('re-reads the state after losing the claim, rather than trusting a stale read', async () => {
+      // The window: findById says `held`, another worker finishes, and only then
+      // does claimForExtraction return null. Reporting the first read would
+      // resurrect the "Reading forever" bug this branch exists to fix. Raised in
+      // review.
+      const f = fakes({ claimable: false })
+      vi.mocked(f.repository.findById)
+        .mockResolvedValueOnce({
+          id: DOCUMENT_ID,
+          storageKey: 'k',
+          contentType: 'application/pdf',
+          extractionState: 'held',
+        })
+        .mockResolvedValueOnce({
+          id: DOCUMENT_ID,
+          storageKey: 'k',
+          contentType: 'application/pdf',
+          extractionState: 'read',
+        })
+      vi.mocked(f.extractions.findByDocument).mockResolvedValue([RECORD])
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'read', records: 1 })
+    })
+
+    it('reports not-found when the document disappears while the claim is lost', async () => {
+      const f = fakes({ claimable: false })
+      vi.mocked(f.repository.findById)
+        .mockResolvedValueOnce({
+          id: DOCUMENT_ID,
+          storageKey: 'k',
+          contentType: 'application/pdf',
+          extractionState: 'held',
+        })
+        .mockResolvedValueOnce(null)
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'not-found' })
+    })
+
     it('still reports in-progress when the document is held and someone else holds it', async () => {
       // The other direction. Without this, the fix above could report the state
       // for everything and never say in-progress at all.

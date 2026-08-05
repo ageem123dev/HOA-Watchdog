@@ -1,4 +1,4 @@
-import type { ExtractionOutcome } from './extract-document'
+import { EXTRACTION_OUTCOMES, type ExtractionOutcome } from './extract-document'
 
 /**
  * What the treasurer is told while, and after, a document is read.
@@ -43,6 +43,55 @@ export const EXTRACTION_STATUS_UNAVAILABLE = Object.freeze({
   message: 'We could not check this document just now. Reload the page to try again.',
   settled: true,
 }) satisfies ExtractionFeedback
+
+/**
+ * What a poll should do with an HTTP status and a parsed body.
+ *
+ * Pulled into `core/` so it can be tested without a DOM. The component that
+ * used to decide this had no test harness, and it decided two things wrongly:
+ * it retried permanent refusals forty times, and — after that was fixed — it
+ * swallowed the endpoint's **valid 404 `not-found` outcome** as a refused
+ * request, so the treasurer saw "Status unavailable" for a document that had
+ * simply gone. Both raised in review.
+ *
+ * A body that *is* an outcome is always believed, whatever the status carrying
+ * it. The status only decides what to do when the body is not one.
+ */
+export type PollDecision =
+  | { readonly kind: 'outcome'; readonly outcome: ExtractionOutcome }
+  /** No point asking again: the request itself was refused and will be next time. */
+  | { readonly kind: 'refused' }
+  /** Might work later — a 5xx, or a body that is not an outcome yet. */
+  | { readonly kind: 'retry' }
+
+/**
+ * Statuses that will never become anything else by waiting.
+ *
+ * `404` is deliberately absent: the endpoint answers 404 for a document that is
+ * gone, and that arrives with a real outcome in the body, handled above.
+ */
+const PERMANENT_REFUSALS: ReadonlySet<number> = new Set([400, 401, 403, 405, 410, 422])
+
+export function pollDecision(status: number, body: unknown): PollDecision {
+  if (isExtractionOutcome(body)) return { kind: 'outcome', outcome: body }
+  if (PERMANENT_REFUSALS.has(status)) return { kind: 'refused' }
+
+  return { kind: 'retry' }
+}
+
+/**
+ * Is this parsed body an outcome?
+ *
+ * Checked against the vocabulary rather than for the presence of a field, so a
+ * body carrying `outcome: "something-else"` is refused too.
+ */
+export function isExtractionOutcome(body: unknown): body is ExtractionOutcome {
+  if (typeof body !== 'object' || body === null) return false
+
+  const kind = (body as { outcome?: unknown }).outcome
+
+  return typeof kind === 'string' && (EXTRACTION_OUTCOMES as readonly string[]).includes(kind)
+}
 
 export function extractionFeedback(outcome: ExtractionOutcome): ExtractionFeedback {
   switch (outcome.outcome) {

@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { EXTRACTION_OUTCOMES, type ExtractionOutcome } from './extract-document'
-import { extractionFeedback } from './extraction-feedback'
+import { extractionFeedback, pollDecision } from './extraction-feedback'
 
 const DOCUMENT_ID = '018f3a2b-0000-7000-8000-0000000000aa'
 
@@ -18,6 +18,49 @@ const outcomeOf = (kind: (typeof EXTRACTION_OUTCOMES)[number]): ExtractionOutcom
   kind === 'read'
     ? { outcome: 'read', documentId: DOCUMENT_ID, records: 3 }
     : ({ outcome: kind, documentId: DOCUMENT_ID } as ExtractionOutcome)
+
+describe('pollDecision', () => {
+  const outcome = { outcome: 'read', documentId: DOCUMENT_ID, records: 2 }
+
+  it('believes a valid outcome on a 200', () => {
+    expect(pollDecision(200, outcome)).toEqual({ kind: 'outcome', outcome })
+  })
+
+  it('believes the endpoint’s 404 not-found, rather than treating it as refused', () => {
+    // The endpoint answers 404 with a real outcome for a document that has
+    // gone. An earlier version listed 404 among the permanent refusals, so the
+    // treasurer saw "Status unavailable" instead of "Not found" and the
+    // existing feedback for that case was unreachable. Raised in review.
+    const gone = { outcome: 'not-found', documentId: DOCUMENT_ID }
+
+    expect(pollDecision(404, gone)).toEqual({ kind: 'outcome', outcome: gone })
+  })
+
+  it.each([400, 401, 403, 405, 410, 422])('refuses %i outright', (status) => {
+    // Retrying these changes nothing: 40 requests over two minutes that all
+    // fail the same way, then a region still reading "Waiting to be read".
+    expect(pollDecision(status, { error: 'nope' })).toEqual({ kind: 'refused' })
+  })
+
+  it.each([500, 502, 503, 504])('retries %i, which may pass later', (status) => {
+    expect(pollDecision(status, { error: 'boom' })).toEqual({ kind: 'retry' })
+  })
+
+  it('retries a 404 whose body is not an outcome', () => {
+    // A 404 from a proxy or a wrong route is not the endpoint's not-found.
+    expect(pollDecision(404, { error: 'no route' })).toEqual({ kind: 'retry' })
+  })
+
+  it.each([
+    ['an unknown outcome string', { outcome: 'invented' }],
+    ['no outcome field', { error: 'unauthenticated' }],
+    ['null', null],
+    ['a string', 'nope'],
+    ['an array', []],
+  ])('does not treat %s as an outcome', (_label, body) => {
+    expect(pollDecision(200, body).kind).not.toBe('outcome')
+  })
+})
 
 describe('extractionFeedback', () => {
   it('has an outcome vocabulary to test against', () => {
