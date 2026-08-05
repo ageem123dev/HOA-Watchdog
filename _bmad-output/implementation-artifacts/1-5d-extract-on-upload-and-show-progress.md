@@ -4,7 +4,7 @@ baseline_commit: b369034e84b7df7fd93f1d3a8f65d061447e1d5a
 
 # Story 1.5d: Extract on upload and show progress
 
-Status: in-progress
+Status: review
 
 > **Fourth of four stories from epic story 1.5.**
 > **1.5** built the deterministic path and the shared foundation. **1.5b** stores records and wires
@@ -80,7 +80,7 @@ from *could not be read*
   - [x] Do **not** reuse `failed`: its copy tells the treasurer the document was not saved, which is
         exactly the mistake 1.5b had to correct by adding `figures-not-stored`
 
-- [ ] **Deferred extraction** (AC: 1, 3)
+- [x] **Deferred extraction** (AC: 1, 3)
   - [x] 1.5c decided: store first, extract on a follow-up request the surface polls. No queue — that remains out of scope and is not to be added without asking
   - [x] The follow-up endpoint is authenticated and authorises the document against the caller. An endpoint that extracts any document by id is an access-control hole wearing a progress bar
   - [x] **Claim the document before calling the provider** — *raised in review of 1.5c, MR !10*.
@@ -593,6 +593,36 @@ will read as narrower than the behaviour to the next person.
 - `core/ingestion/ingest.test.ts`, `core/ingestion/reading.test.ts` — fakes widened to the ports
 - `app/upload/upload-form.tsx` — renders extraction progress for documents stored but not read
 
+### Definition of Done
+
+**PASS.**
+
+| AC | Satisfied by |
+| --- | --- |
+| AC1 — an uploaded PDF or image ends up with its records stored, and moves held → read | `extractDocument` stores through 1.5b's `replace`, which sets `extraction_state = 'read'` in the same transaction; asserted in `adapters/db/extraction-repository-postgres.test.ts` against a real database |
+| AC2 — the deterministic path never reaches the model | Asserted by name for all three tabular types, in both directions, plus a test that the tabular and provider-backed sets together are exactly `ACCEPTED_CONTENT_TYPES` |
+| AC3 — the four states are distinguishable and "no rows" is never success | Migration 007's closed vocabulary, `document-extraction-state.test.ts`, and `extraction-feedback.test.ts` asserting the outage and unreadable copy differ |
+| AC4 — progress is staged and never partial | `extraction-feedback.ts` and its 29 tests; no rendered string may contain a digit for any outcome, and the endpoint returns no record for the surface to display |
+
+**Sensitivity: 29 mutations across the four task groups, 28 detected on the first pass.** The one that
+escaped is recorded in the Debug Log — moving `replace`'s state change after the commit, which needed
+a test asserting *where* the statement is issued rather than what the state ends up as.
+
+**Gates on this head:** lint clean, `next build` compiled, **987 unit passed / 150 skipped**,
+**153 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
+clean.
+
+**Not proven by CI, stated rather than implied.** `verify:database` still does not run without the
+two protected variables, and this story is the most database-dependent one yet: the claim race, the
+fence, the atomic state change and the check constraints are **all** in the 153 that CI will not
+execute. A green pipeline here proves less about this story than about any before it.
+
+**Not covered at all:** component rendering. The live region, the polling lifecycle and the unmount
+behaviour are asserted by reading the code, not by rendering it, because that needs
+`@testing-library/react` and `jsdom` and adding dependencies is the repository owner's decision. The
+logic those tests would exercise is fully covered in `core/`; the wiring between it and the DOM is
+not.
+
 ### Change Log
 
 ### Completion Notes List
@@ -600,3 +630,9 @@ will read as narrower than the behaviour to the next person.
 ### File List
 
 ### Change Log
+
+- 2026-08-05 — Tasks 1-4 implemented test-first. Deferred extraction end to end: the extractor port
+  wired into a new `extractDocument`, a durable four-state column on `document` moved in the same
+  transaction as the records it describes, a database-held claim taken *before* the provider call and
+  fencing the write against a stale holder, an authenticated follow-up endpoint, and a staged-progress
+  surface that has no figure available to display partially. Status -> review.
