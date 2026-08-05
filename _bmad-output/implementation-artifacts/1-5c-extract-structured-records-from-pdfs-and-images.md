@@ -64,14 +64,14 @@ a validated collection in memory, and says so rather than implying an upload pro
 
 ## Tasks / Subtasks
 
-- [ ] **Extraction port and adapter** `core/ports/extractor.ts`, `adapters/extraction/` (AC: 1, 3)
-  - [ ] Narrow port — take bytes and a media type, return **a collection of candidate records** or a refusal. Nothing provider-shaped crosses it (AD-16's lesson)
-  - [ ] **A collection, not one record.** A statement holds many figures, and 1.5's `extraction` table is many-rows-per-document. A single-record port either loses rows or forces an unstated aggregation. Validation is all-or-nothing across the set, as it is on the tabular path
-  - [ ] The adapter is the only place the provider is constructed, and the only file that knows the request shape
-  - [ ] `fetch` against the REST API — **no SDK dependency** (decided; see Dev Notes)
-  - [ ] **A fixed HTTPS origin, and redirects refused** (`redirect: 'manual'`). The request carries a credential, and a redirect followed blindly can carry that credential somewhere else
-  - [ ] Injected client for tests; lazy construction so `next build` needs no credential (1.4's `env.ts` and S3 notes)
-  - [ ] Bounded timeouts — and note 1.4's lesson: `requestTimeout` without `throwOnRequestTimeout` only logs. Whatever the transport, prove the bound actually bounds
+- [x] **Extraction port and adapter** `core/ports/extractor.ts`, `adapters/extraction/` (AC: 1, 3)
+  - [x] Narrow port — take bytes and a media type, return **a collection of candidate records** or a refusal. Nothing provider-shaped crosses it (AD-16's lesson)
+  - [x] **A collection, not one record.** A statement holds many figures, and 1.5's `extraction` table is many-rows-per-document. A single-record port either loses rows or forces an unstated aggregation. Validation is all-or-nothing across the set, as it is on the tabular path
+  - [x] The adapter is the only place the provider is constructed, and the only file that knows the request shape
+  - [x] `fetch` against the REST API — **no SDK dependency** (decided; see Dev Notes)
+  - [x] **A fixed HTTPS origin, and redirects refused** (`redirect: 'manual'`). The request carries a credential, and a redirect followed blindly can carry that credential somewhere else
+  - [x] Injected client for tests; lazy construction so `next build` needs no credential (1.4's `env.ts` and S3 notes)
+  - [x] Bounded timeouts — and note 1.4's lesson: `requestTimeout` without `throwOnRequestTimeout` only logs. Whatever the transport, prove the bound actually bounds
 
 - [ ] **Schema enforcement at the API layer** (AC: 1, 2)
   - [ ] The request carries `responseMimeType: application/json` **and** `responseSchema` — AD-9 requires enforcement at the extractor, not only after the reply
@@ -219,10 +219,126 @@ app/upload/                          # UPDATE — staged extraction progress
 
 ### Test Design
 
+## Task 1 — the extractor port and adapter
+
+**Behaviour A — bytes and a media type go to the provider; a validated collection or a refusal comes back**
+
+*If it ran correctly, how would I know?* A PDF's bytes reach a pinned HTTPS origin carrying the
+credential, and the reply becomes either a collection of records in this project's own vocabulary or
+a refusal that says which kind of failure it was. Nothing provider-shaped is visible above the
+adapter.
+
+*How am I going to test this?* `fetch` is injected, so every test supplies its own and inspects the
+request it was handed — URL, method, headers, body — without a network. That also makes the
+credential observable, which matters because one of the failure modes below is leaking it.
+
+*What else can go wrong?* Below. The two that worry me most are the ones this project has already
+been bitten by: a bound that reports a breach and then proceeds (1.4's `requestTimeout`), and a guard
+asserted against a clean tree so it cannot distinguish "nothing wrong" from "nothing checked".
+
+*Could this problem happen anywhere else?* The S3 adapter is the sibling — same shape of lazy
+construction, same credential handling. Any finding here should be checked against it.
+
+| # | Failure mode | Class | Test |
+| --- | --- | --- | --- |
+| A1 | Missing credential crashes `next build`, which has no secrets | GUARD | Construction with no env does not throw; the first *call* throws a named error listing every missing variable |
+| A2 | **A redirect carries the credential to another host.** The request is authenticated, and `fetch` follows 3xx by default | GUARD | `redirect: 'manual'`; a 3xx reply is a refusal, and the adapter never issues a second request to the `Location` |
+| A3 | The origin is configurable and something points it at an attacker | GUARD | Origin is pinned in code; the request URL starts with the fixed HTTPS origin, and no env var can move it |
+| A4 | **A timeout that does not bound.** 1.4's `requestTimeout` logged a warning and let the request continue | GUARD | A `fetch` that never settles causes the call to reject within the bound, and the abort signal is observed as actually aborted |
+| A5 | The provider is unreachable and this reads as "your document is bad" | GUARD | A network rejection yields `unavailable`, never `invalid` — the distinction 1.5d's retry path depends on |
+| A6 | A 429 or 5xx is treated as a permanent content failure | GUARD | 429 and 503 yield `unavailable`; a 400 is a request bug and yields `invalid` with no retry advice |
+| A7 | Reply is not JSON, or is truncated JSON | GUARD | Both yield `invalid`; the parse never throws out of the adapter |
+| A8 | Reply is well-formed JSON that is not the record shape | GUARD | Revalidated through 1.5's `validate.ts`; one bad record refuses the **whole set**, as the tabular path does |
+| A9 | **The credential appears in an error, a log, or a thrown message** | GUARD | Every rejection path is asserted not to contain the key, including the one that stringifies a failed response |
+| A10 | A single record is returned where a statement holds many | Unrepresentable | The port's return type is a collection; there is no single-record shape to accidentally use |
+| A11 | Provider-shaped data leaks above the port (AD-16's lesson) | Unrepresentable | The port returns `ExtractionRecord[]` from 1.5's vocabulary — no candidate, no confidence, no vendor envelope |
+| A12 | An enormous reply is materialised before anything checks it | GUARD | The response body is bounded, and the bound is proven on both sides as `MAX_WORKBOOK_CELLS` is |
+| A13 | Retry storms the provider on a failure that will not succeed | OUT-OF-SCOPE | No retry in this story. 1.5d owns the retry path, and it retries from a stored document rather than in-adapter |
+| A14 | Schema is sent but never checked, or checked but never sent | GUARD | Task 2's subject; listed here so it is not assumed handled by this task |
+
+**Inverse/cross-check.** The request body is decoded back from what the injected `fetch` received and
+asserted to carry the same media type and byte length that went in — recomputed in the test rather
+than read from the adapter's own view of what it sent.
+
+**On the fake-provider exposure the story warns about.** Every test here fakes `fetch`, so none of
+them proves the provider actually honours `responseSchema` — only that this code sends it and
+revalidates the reply. That is what AC4's probe is for, and it is why the probe is a deliverable
+rather than a convenience. Saying so here so the coverage is not mistaken for more than it is.
+
 ### Debug Log References
+
+**Task 1 — red.** 33 failing against a stub whose `extract` throws, so every red was an assertion
+failure rather than a missing symbol. 811 unit tests green overall on completion.
+
+**Task 1 — sensitivity, nine mutations. Seven detected on the first pass; two were not, and both
+were my own tests proving less than they claimed.**
+
+| Mutation | Failures | Reading |
+| --- | --- | --- |
+| Drop `redirect: 'manual'` | 1 | |
+| Move the key into the query string | 1 | |
+| Map every failure to `invalid` | **5** | The unavailable/invalid split is load-bearing, as 1.5d needs |
+| Skip invalid records instead of refusing the set | 1 | All-or-nothing holds |
+| Allow the empty set through | 1 | |
+| Never abort on timeout | 1 | The bound genuinely bounds — 1.4's lesson |
+| Keep only the first record | 1 | The collection is real |
+| **Read the origin from `process.env`** | **0 → 1** | See below |
+| **Remove the reply byte bound** | **0 → 1** | See below |
+
+**The origin test proved less than it claimed, twice over.** It planted `GEMINI_ORIGIN` in the
+*injected* env only, so an adapter reading the real `process.env` sailed past it. Planting in
+`process.env` too still did not catch it, because the mutation binds `ORIGIN` at **module scope** —
+already evaluated by the time any test body runs. Only `vi.resetModules()` plus a fresh dynamic
+import catches that, and now does.
+
+**The reply-bound test was refusing for the wrong reason.** It sent one record with a 6 MB
+`vendorName`, which the 200-character cap refuses on its own — so it passed with the byte bound
+removed entirely. Replaced with 25,000 individually **valid** records, where the only thing that can
+refuse the reply is the bound, plus an assertion that `MAX_REPLY_BYTES` is not merely zero.
+
+Both are the same shape this project keeps meeting: a guard that passes whether or not the thing it
+guards against is present. Eighth and ninth instances, and the first found by running a mutation on a
+security control rather than on business logic.
 
 ### Completion Notes List
 
+**Task 1 — the port is where AD-8 stops being a matter of care.** `Extractor` returns
+`ExtractionRecord[]` from 1.5's vocabulary: a known kind, a `numeric(14,2)` amount, a date, a
+currency from a closed set, and two text columns capped at 200 and 64 characters. There is no
+free-form field, so there is nowhere for a poisoned document to smuggle a paragraph of instructions
+through a value. "Raw extracted text never crosses" is a property of the type rather than of anyone
+remembering it.
+
+**Two refusals, not one.** `unavailable` means the provider could not answer — the document is fine
+and 1.5d's retry applies. `invalid` means it answered and the answer could not be trusted — retrying
+changes nothing. 1.5b collapsed exactly this pair into `failed` and had to add `figures-not-stored`
+to separate them again; two names from the start here.
+
+**The origin is pinned in code and the model is not.** An environment-configurable origin plus an
+attached credential is an exfiltration primitive, not a configuration option. Changing the model
+stays configuration.
+
+**Nothing is inspected on the transport-error path.** A `fetch` error can carry the request, headers
+included, so that branch returns a refusal without touching the error — the one place a credential
+would otherwise escape into a log or a result.
+
+**Deliberately not done here:** `responseSchema` on the request (Task 2, which must derive the sent
+schema and the validated schema from one definition), the AD-10 guard (Task 3), and the probe
+(Task 4) — which remains the only thing that can prove AD-9 end to end, since every test in this task
+fakes the provider.
+
 ### File List
+
+**Added**
+
+- `core/ports/extractor.ts` — the port: bytes and a media type in, a record collection or a typed refusal out
+- `adapters/extraction/extractor-gemini.ts` — the only place the provider is constructed
+- `adapters/extraction/extractor-gemini.test.ts` — 36 tests, no network
+
+**Modified**
+
+- `.env.example` — `GEMINI_API_KEY` and `GEMINI_OCR_MODEL`, names only; the NFR-2 guard was run against them
+- `_bmad-output/implementation-artifacts/1-5c-...md` — split, decisions, Test Design
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — 1.5c in-progress, 1.5d added
 
 ### Change Log

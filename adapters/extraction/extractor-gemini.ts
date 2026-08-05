@@ -1,0 +1,266 @@
+import type { ExtractionRecord } from '../../core/extraction/record'
+import { validate } from '../../core/extraction/validate'
+import type { Extractor, ExtractionRequest, ExtractionResult } from '../../core/ports/extractor'
+
+/**
+ * The extraction provider, reached over its REST API.
+ *
+ * This is the only file that knows the provider's request shape, and the only
+ * place it is constructed. Everything above sees `core/ports/extractor.ts` —
+ * this project's record vocabulary and a refusal, never a vendor envelope.
+ *
+ * **No SDK.** `responseMimeType` and `responseSchema` are plain body fields, so
+ * an SDK would buy typed construction and retry at the cost of a dependency on
+ * the data plane. Timeouts and error mapping are written here instead, as they
+ * were for object storage.
+ *
+ * Three properties are load-bearing and each has a test that fails without it:
+ *
+ * **The origin is pinned in code.** Not read from the environment, because an
+ * environment-configurable origin plus an attached credential is an
+ * exfiltration primitive rather than a configuration option. The *model* is
+ * configurable; where the request goes is not.
+ *
+ * **Redirects are refused.** The request carries the credential, and `fetch`
+ * follows 3xx by default — straight to whatever host the `Location` names.
+ *
+ * **The timeout aborts.** Story 1.4 shipped a `requestTimeout` that logged a
+ * warning and let the request continue: a bound that announces the breach and
+ * then does nothing, which is worse than no bound because it reads like one.
+ */
+
+/** Pinned. Deliberately not configurable — see the note above. */
+const ORIGIN = 'https://generativelanguage.googleapis.com'
+
+const REQUIRED_VARS = ['GEMINI_API_KEY', 'GEMINI_OCR_MODEL'] as const
+
+/**
+ * Generous for a page of figures, and far below what would strain the process.
+ * Bounded while reading rather than after: a cap applied to an already-buffered
+ * body has paid for the allocation it exists to prevent — the mistake made, and
+ * caught in review, on the workbook decoder in story 1.5b.
+ */
+export const MAX_REPLY_BYTES = 2_000_000
+
+/** A whole request, not a socket idle gap. A scan is seconds, not minutes. */
+const DEFAULT_TIMEOUT_MS = 60_000
+
+/** Retrying these can succeed; the document is not at fault. */
+const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504])
+
+export class MissingExtractionConfigError extends Error {
+  override readonly name = 'MissingExtractionConfigError'
+
+  constructor(readonly missing: readonly string[]) {
+    // Names only. A configuration error is the one most likely to be pasted
+    // into an issue, so it must never echo a value.
+    super(
+      `Document extraction is not configured: ${missing.join(', ')} ${
+        missing.length === 1 ? 'is' : 'are'
+      } missing. Copy .env.example to .env.local and fill in the values.`,
+    )
+  }
+}
+
+export interface GeminiExtractorOptions {
+  /** Defaults to `process.env`, read at call time — never at construction. */
+  readonly env?: Readonly<Record<string, string | undefined>>
+  /** Injected by tests; production uses the platform `fetch`. */
+  readonly fetch?: typeof globalThis.fetch
+  readonly timeoutMs?: number
+}
+
+interface ExtractionConfig {
+  readonly apiKey: string
+  readonly model: string
+}
+
+function readConfig(env: Readonly<Record<string, string | undefined>>): ExtractionConfig {
+  // Every missing name at once. Configuring two variables one failed deploy at
+  // a time is a slow way to learn the second one.
+  const missing = REQUIRED_VARS.filter((name) => !env[name]?.trim())
+
+  if (missing.length > 0) throw new MissingExtractionConfigError(missing)
+
+  return { apiKey: env.GEMINI_API_KEY!.trim(), model: env.GEMINI_OCR_MODEL!.trim() }
+}
+
+function toBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64')
+}
+
+/**
+ * Read at most `MAX_REPLY_BYTES`, and refuse rather than truncate.
+ *
+ * Truncating would hand the parser a prefix of valid JSON, which fails as
+ * "invalid" and blames the document for a limit this code chose.
+ */
+async function readBounded(response: Response): Promise<string | null> {
+  const body = response.body
+
+  if (body === null) return await response.text()
+
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined) continue
+
+      total += value.byteLength
+      if (total > MAX_REPLY_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const joined = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    joined.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+
+  return new TextDecoder().decode(joined)
+}
+
+/** The provider wraps its JSON answer in a candidate envelope. */
+function unwrap(text: string): unknown {
+  const envelope: unknown = JSON.parse(text)
+
+  if (typeof envelope !== 'object' || envelope === null) return undefined
+
+  const candidates = (envelope as { candidates?: unknown }).candidates
+  if (!Array.isArray(candidates) || candidates.length === 0) return undefined
+
+  const parts = (candidates[0] as { content?: { parts?: unknown } })?.content?.parts
+  if (!Array.isArray(parts) || parts.length === 0) return undefined
+
+  const inner = (parts[0] as { text?: unknown })?.text
+  if (typeof inner !== 'string') return undefined
+
+  return JSON.parse(inner)
+}
+
+/**
+ * All-or-nothing across the set, exactly as the tabular path is.
+ *
+ * A statement read half-correctly and stored as if complete is worse than one
+ * refused: the treasurer has no way to see which half.
+ */
+function validateAll(payload: unknown): readonly ExtractionRecord[] | null {
+  if (typeof payload !== 'object' || payload === null) return null
+
+  const records = (payload as { records?: unknown }).records
+  if (!Array.isArray(records)) return null
+
+  // An empty collection is not an empty success. 1.5b's repository refuses an
+  // empty set, and reaching it would report a content problem as an outage.
+  if (records.length === 0) return null
+
+  const validated: ExtractionRecord[] = []
+
+  for (const candidate of records) {
+    const result = validate(candidate)
+    if (!result.ok) return null
+    validated.push(result.record)
+  }
+
+  return validated
+}
+
+export function createGeminiExtractor(options: GeminiExtractorOptions = {}): Extractor {
+  const doFetch = options.fetch ?? globalThis.fetch
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+
+  return {
+    async extract(request: ExtractionRequest): Promise<ExtractionResult> {
+      // Read at call time, so constructing this adapter needs no secrets and
+      // `next build` can evaluate the module.
+      const config = readConfig(options.env ?? process.env)
+
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+      let response: Response
+
+      try {
+        response = await doFetch(
+          `${ORIGIN}/v1beta/models/${encodeURIComponent(config.model)}:generateContent`,
+          {
+            method: 'POST',
+            // In a header, never the query string: a key in a URL lands in
+            // access logs, proxy logs and error reports.
+            headers: {
+              'content-type': 'application/json',
+              'x-goog-api-key': config.apiKey,
+            },
+            redirect: 'manual',
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    {
+                      inline_data: {
+                        mime_type: request.mediaType,
+                        data: toBase64(request.bytes),
+                      },
+                    },
+                  ],
+                },
+              ],
+              generationConfig: { responseMimeType: 'application/json' },
+            }),
+          },
+        )
+      } catch {
+        // Deliberately not inspecting the error. A transport error can carry the
+        // request — headers included — and this is the path where the credential
+        // would escape into a result or a log.
+        return { ok: false, refusal: 'unavailable' }
+      } finally {
+        clearTimeout(timer)
+      }
+
+      // `redirect: 'manual'` surfaces 3xx as a response rather than following
+      // it. Treating it as a refusal is the point: the alternative is handing
+      // the credential to whatever host the Location names.
+      if (response.status >= 300 && response.status < 400) {
+        return { ok: false, refusal: 'invalid' }
+      }
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          refusal: RETRYABLE_STATUSES.has(response.status) ? 'unavailable' : 'invalid',
+        }
+      }
+
+      const text = await readBounded(response).catch(() => null)
+      if (text === null) return { ok: false, refusal: 'invalid' }
+
+      let payload: unknown
+      try {
+        payload = unwrap(text)
+      } catch {
+        // Malformed or truncated JSON. Never rethrown: the body can contain the
+        // request that produced it.
+        return { ok: false, refusal: 'invalid' }
+      }
+
+      const records = validateAll(payload)
+      if (records === null) return { ok: false, refusal: 'invalid' }
+
+      return { ok: true, records }
+    },
+  }
+}
