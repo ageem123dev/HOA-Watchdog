@@ -818,10 +818,16 @@ will not run the one check that proves AD-9**. The evidence is the local run quo
   abort listener per chunk, and the deadline released the reader's lock without cancelling the
   stream, so it stopped waiting without stopping the work.
 
-  Rounds 3-5 were about the quality of the tests written for the fixes — three consecutive rounds on
-  a single assertion. One finding declined with its limitation stated: making the probe injectable
-  for runtime tests. Pipeline green on the final head. Status -> done (ready to merge; the merge is
-  the user's).
+  Rounds 3-5 found no further defects in the shipped code. They covered three things: the probe's
+  timeout assertion, which took three attempts to state as a property rather than an arrangement;
+  dead code in the listener-count test, where an `AbortController` was created and aborted while
+  every assertion ran against a separate fake signal; and two specification additions to story
+  1.5d — the claim requirements (atomic across instances, owner token, expiry, recovery, explicit
+  release) and then fencing the finalising write with that token, since expiry deliberately creates
+  a second claimant while the first may still return.
+
+  One finding declined with its limitation stated: making the probe injectable for runtime tests.
+  Pipeline green on the final head. Status -> done (ready to merge; the merge is the user's).
 
 - 2026-08-05 — Removed another session's work-in-progress (argus review routing, its code-review skill
   edits and `.mcp.json`) that an overly broad `git add -A` had swept onto this branch. It is preserved
