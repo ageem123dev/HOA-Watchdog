@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:db": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run migrations/ adapters/db/",
     "migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "verify:extraction": "node --env-file-if-exists=.env.local scripts/verify-extraction.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1100.0",

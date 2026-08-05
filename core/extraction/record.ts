@@ -32,6 +32,22 @@ export const AMOUNT_PRECISION = 14
 export const AMOUNT_SCALE = 2
 
 /**
+ * The one statement of what a `totalAmount` may look like.
+ *
+ * It lived in three places before: the validator's regex, the extraction
+ * schema sent to the provider, and the connectivity probe. Two were written by
+ * hand and one of those was **wrong** — a template literal swallowed every
+ * backslash, so the schema the provider received read `^-?d{1,12}(.d{1,2})?$`,
+ * which rejects `1450.00` and accepts `d.d`. It went unnoticed because the test
+ * asserted the pattern *contained* "12".
+ *
+ * A plain string, not a `RegExp`, because it has to travel to the provider as
+ * JSON as well as compile locally. Anything needing to match calls
+ * `new RegExp(AMOUNT_PATTERN)`.
+ */
+export const AMOUNT_PATTERN = `^-?\\d{1,${AMOUNT_PRECISION - AMOUNT_SCALE}}(\\.\\d{1,${AMOUNT_SCALE}})?$`
+
+/**
  * What a document was read to say.
  *
  * `totalAmount` is a **decimal string**, never a number. A binary float cannot
