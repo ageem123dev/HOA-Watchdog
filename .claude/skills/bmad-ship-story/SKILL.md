@@ -72,14 +72,19 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 The first review finds the most, and every round moved off the MR is a pipeline not billed. Story 1.6b took 8 rounds and ~11 pushes.
 
-1. Ask the user to run **CodeRabbit → Start Review** in VS Code against base `main`. It is started by hand; ask once and STOP until findings arrive.
-2. `coderabbit.agentType` = **"Claude Code Extension"** delivers findings to this session via **Fix with AI**. That handoff is the signal a review ran — no detection needed.
-3. Otherwise read `%APPDATA%\Code\User\globalStorage\coderabbit.coderabbit-vscode\<hash>.json`, keyed `${repoRoot}-${branch}-REVIEWS`. **Confirm a review exists for this branch before concluding anything is clean** — 8c's precondition applies here identically.
-4. Fix test-first, run the review gate on the fix diff (8e), commit, repeat until the IDE review is clean.
+1. Ask the user for **CodeRabbit → Start Review**, base `main`, scope **committed changes**. It is started by hand and does **not** re-trigger on a push; ask once per round and STOP until it finishes (~11 min for a 3-file diff).
+2. Read the record at `%APPDATA%\Code\User\workspaceStorage\{ws}\coderabbit.coderabbit-vscode\{sha256}.json` — `{ws}` is the directory whose `workspace.json` names this repo, `{sha256}` hashes `{repoRoot}-{branch}-reviews` with `repoRoot` as a Windows path (`c:\Users\magee\repos\HOA-Treasurer-Assistant`). It is **workspaceStorage, not globalStorage**.
+3. **Accept it only if `status` is `completed` AND `headCommitId` == your `HEAD` AND `baseCommitId` == `origin/main`.** The key alone also matches a clean review taken before your last fix commit, which would pass unreviewed code as converged — 8c's precondition, in a new place.
+4. **Check `fileReviewMap`'s keys against `git diff --name-only main...HEAD`** less `path_filters`. A wrong checkout yields an empty review that reads as clean; that happened on this step's first run, with the tree on `main`.
+5. Findings: `fileReviewMap[path].comments[]` (`severity`, `startLine`, `comment`), totalled in `additionalDetails.counts`.
+6. Fix test-first, run the review gate on the fix diff (8e), commit, request a new review, repeat until the counts are zero.
+7. **Push before Step 5.** `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
+
+`coderabbit.agentType: "Claude Code Extension"` routes **Fix with AI** into this session, but decide convergence from the stored record — a handoff proves findings arrived, never that none remain.
 
 IDE reviews are their own rate pool — **1/hr on the OSS plan**, so a multi-round story waits hours. Under `/loop` that is the cadence; do not spin.
 
-Unverified until the first run: whether the extension reads repo `.coderabbit.yaml` (so whether `path_filters` and `path_instructions` apply here).
+Confirmed on the first run: the extension honours repo `.coderabbit.yaml` `path_filters` (all three unfiltered files were reviewed, none excluded).
 
 ### 5 — Merge request to main
 
