@@ -146,9 +146,15 @@ describeWithDatabase('resolving a held document', () => {
 
       const result = await createVendorResolution().confirmAsNew(documentId, name)
 
+      // Asserted rather than narrowed with a ternary. Passing `null` on the
+      // unexpected branch reported a `display_name` mismatch, which names the
+      // wrong failure — the outcome was wrong, not the name. Raised in review.
+      expect(result.outcome).toBe('created')
+      if (result.outcome === 'already-resolved') throw new Error('unreachable')
+
       const { rows } = await writer.query<{ display_name: string }>(
         'select display_name from vendor where id = $1',
-        [result.outcome === 'already-resolved' ? null : result.vendorId],
+        [result.vendorId],
       )
       expect(rows[0]?.display_name).toBe(name)
     })

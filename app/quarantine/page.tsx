@@ -6,6 +6,7 @@ import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import type { SuggestionsByName } from '@/core/quarantine/queue-view'
 import { toQueueView } from '@/core/quarantine/queue-view'
+import { mapWithLimit } from '@/core/quarantine/bounded'
 import { resolutionMessage } from '@/core/quarantine/resolution-message'
 import { distinctNamesForSuggestions, suggestionKey } from '@/core/quarantine/suggestions'
 import { confirmHeld, matchHeld } from './actions'
@@ -22,6 +23,16 @@ export const metadata = { title: 'Waiting on you — Fiduciary Watchdog' }
  * honest answer.
  */
 const SUGGESTIONS_PER_NAME = 5
+
+/**
+ * How many suggestion queries run at once.
+ *
+ * `Promise.all` over the distinct names opened one per name, against a pool that
+ * holds five — a burst on every render, bounded only by how long the queue
+ * happens to be. Raised in review. Four leaves a connection spare for the
+ * queue read itself.
+ */
+const SUGGESTION_CONCURRENCY = 4
 
 /**
  * The quarantine queue (epic story 1.6, AC2 and AC5).
@@ -59,11 +70,10 @@ export default async function QuarantinePage({
   // in from a request -- it also throws on a limit that is not a non-negative
   // integer.
   const directory = createVendorDirectory()
-  const entries = await Promise.all(
-    distinctNamesForSuggestions(held).map(
-      async (name) =>
-        [suggestionKey(name), await directory.suggest(name, SUGGESTIONS_PER_NAME)] as const,
-    ),
+  const entries = await mapWithLimit(
+    distinctNamesForSuggestions(held),
+    SUGGESTION_CONCURRENCY,
+    async (name) => [suggestionKey(name), await directory.suggest(name, SUGGESTIONS_PER_NAME)] as const,
   )
   const suggestions: SuggestionsByName = Object.fromEntries(entries)
 

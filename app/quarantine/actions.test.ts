@@ -218,3 +218,31 @@ describe('what the treasurer is told', () => {
     )
   })
 })
+
+describe('when the adapter throws', () => {
+  it('still tells the treasurer something', async () => {
+    // Reachable from an ordinary page: a vendor deleted between render and
+    // submit makes `matchToExisting` throw. Left to escape, the throw replaces
+    // AC5's sentence with a framework error page — the one outcome the redirect
+    // was added to prevent.
+    auth.mockResolvedValue(SIGNED_IN)
+    matchToExisting.mockRejectedValueOnce(new Error('no vendor with id v2'))
+    const { matchHeld } = await actions()
+
+    await expect(
+      matchHeld(form({ documentId: 'doc-1', extractedName: 'Acme', vendorId: 'v2' })),
+    ).rejects.toThrow('NEXT_REDIRECT:/quarantine?resolved=refused')
+  })
+
+  it('does not swallow the redirect itself', async () => {
+    // `redirect` signals control flow by throwing, so a catch wrapped around it
+    // would turn every successful resolution into a reported failure. Only the
+    // port call is guarded.
+    auth.mockResolvedValue(SIGNED_IN)
+    const { confirmHeld } = await actions()
+
+    await expect(confirmHeld(form({ documentId: 'doc-1', extractedName: 'Acme' }))).rejects.toThrow(
+      'NEXT_REDIRECT:/quarantine?resolved=created',
+    )
+  })
+})

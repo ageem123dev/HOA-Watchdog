@@ -410,6 +410,43 @@ one story 1.6b's guard was rebuilt around.
 
 ### Review Findings
 
+**IDE round 1** on `06e51c0` — 17 comments, **8 on this story**. Six fixed, one skipped, three belong
+to another branch.
+
+*Two concurrency defects in the adapter, both real and both invisible to a runtime test.* The vendor
+check was a bare `select`, proving only that the row existed when read — a concurrent delete before
+commit clears the hold pointing at a vendor that is gone, which is the failure the check exists to
+prevent arriving one step later. Now `for key share`, the weakest lock that blocks deletion. And
+`begin` inherited `default_transaction_isolation`: `confirmAsNew`'s conflict-then-select is only
+correct under `read committed`, and under `repeatable read` it would roll back a correct
+confirmation. Now stated in the SQL. Neither can be forced deterministically from a test — the
+interleaving that exposes them is the one the database is free not to produce — so both are asserted
+in the query text, the same two-instrument answer story 1.6c reached for its ordering tiebreak.
+
+*A thrown adapter error reached the treasurer as a framework error page.* A vendor deleted between
+render and submit makes `matchToExisting` throw, and the throw skipped the redirect that AC5's
+sentence depends on. The port call is now wrapped and reported as `refused` — the catch is around
+`run()` only, because `redirect` signals control flow by throwing and wrapping it would turn every
+success into a reported failure.
+
+*Unbounded suggestion queries.* `Promise.all` opened one per distinct name against a pool of five, on
+every render. Now bounded at four, leaving one spare for the queue read.
+
+**And the fix contained the next defect**, which is the pattern this project keeps meeting: the
+bounded helper did not stop its remaining workers when one failed, so after `Promise.all` had already
+rejected the others kept taking work, and a second failure would have become an unhandled rejection
+with nobody left to receive it. Reproduced (`expected 6 to be less than or equal to 2`), fixed, and
+the guard verified by removing it.
+
+**Skipped, with the reason already recorded before implementation:** persisting a document-to-vendor
+link. The story's Dev Notes explain it — the ingest path discards the resolved id today, so a column
+written only here would be populated for documents that were once held and empty for every other,
+leaving each later reader to guess which half to trust. It belongs in one change that fills it from
+both paths.
+
+**Ingest:** 4 reviews compared cumulatively, recall 0.12, confirmed_rate 0.67, 11 lessons written.
+
+
 ### Completion Notes List
 
 **Tasks 4 and 5.** The action checks the session itself and asserts the port is never touched without
@@ -505,6 +542,9 @@ Adversarial review (Argus) clean on both task diffs.
 - `app/quarantine/page.test.tsx` (modified — outcome-reporting cases)
 - `core/quarantine/resolution-message.ts` (new)
 - `core/quarantine/resolution-message.test.ts` (new)
+- `core/quarantine/bounded.ts` (new)
+- `core/quarantine/bounded.test.ts` (new)
+- `adapters/db/vendor-resolution-sql.test.ts` (new)
 
 ### Change Log
 

@@ -84,15 +84,25 @@ export async function matchToExistingVendor(formData: FormData): Promise<Resolve
  * sort, and is indistinguishable from somebody else having answered first. The
  * treasurer is told which of those happened.
  */
-async function resolveAndReport(
-  run: () => Promise<ResolveResult>,
-): Promise<never> {
-  const result = await run()
+async function resolveAndReport(run: () => Promise<ResolveResult>): Promise<never> {
+  // The catch wraps the port call and nothing else. `redirect` signals control
+  // flow by throwing, so wrapping it too would turn every successful resolution
+  // into a reported failure.
+  //
+  // The adapter throws for a vendor that no longer exists, which an ordinary
+  // queue page reaches whenever one is deleted between render and submit. Left
+  // to escape, it replaces AC5's sentence with a framework error page — the
+  // outcome the redirect exists to prevent. Raised in review.
+  let result: ResolveResult
+
+  try {
+    result = await run()
+  } catch {
+    result = { outcome: 'refused' }
+  }
 
   revalidatePath(QUARANTINE_ROUTE)
 
-  // `redirect` throws to unwind, so nothing after it runs — including, notably,
-  // any accidental second write.
   redirect(`${QUARANTINE_ROUTE}?resolved=${result.outcome}`)
 }
 

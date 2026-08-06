@@ -57,7 +57,13 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promi
   const client = await getPool().connect()
 
   try {
-    await client.query('begin')
+    // Stated, not inherited. `default_transaction_isolation` is server
+    // configuration, and `confirmAsNew`'s conflict-then-select is only correct
+    // under `read committed`: it needs a fresh snapshot to see the row that won
+    // the race. Under `repeatable read` that select uses the transaction
+    // snapshot, cannot see the concurrently committed vendor, and rolls back a
+    // confirmation that was correct. Raised in review.
+    await client.query('begin isolation level read committed')
     const result = await work(client)
     await client.query('commit')
     return result
@@ -162,8 +168,17 @@ export function createVendorResolution(): VendorResolution {
         // A malformed id raises 22P02 from here and is left to escape: that is a
         // fault at the call site, not a treasurer's mistake, and reporting it as
         // "no such vendor" would hide a bug in whatever built the form.
+        //
+        // `for key share` and not a bare select: without the lock this proves
+        // only that the vendor existed at the moment it was read. A concurrent
+        // transaction may delete it before this one commits, and the hold is
+        // then cleared pointing at a vendor that is gone — the failure this
+        // check exists to prevent, reached one step later. Raised in review.
+        // The weakest lock that blocks deletion; it does not block other
+        // readers, and two treasurers resolving different documents onto the
+        // same vendor do not queue behind each other.
         const { rows } = await client.query<{ id: string }>(
-          'select id from vendor where id = $1',
+          'select id from vendor where id = $1 for key share',
           [vendorId],
         )
 
