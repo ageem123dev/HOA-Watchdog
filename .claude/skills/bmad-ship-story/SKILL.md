@@ -72,15 +72,15 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 The first review finds the most, and every round moved off the MR is a pipeline not billed. Story 1.6b took 8 rounds and ~11 pushes.
 
-1. **Run `argus_review` on this commit first** (`git_range: main...HEAD`). `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on that commit, so reviewing second teaches nothing.
+1. **Run `argus_review` on this commit first** (`git_range: origin/main...HEAD`). `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on that commit, so reviewing second teaches nothing. `origin/main`, not `main` — a stale local `main` silently changes the base.
 2. Ask the user for **CodeRabbit → Start Review**, base `main`, scope **committed changes**. It is started by hand and does **not** re-trigger on a push; ask once per round and STOP until it finishes (~11 min for a 3-file diff).
 3. Read the record at `%APPDATA%\Code\User\workspaceStorage\{ws}\coderabbit.coderabbit-vscode\{sha256}.json` — `{ws}` is the directory whose `workspace.json` names this repo, `{sha256}` hashes `{repoRoot}-{branch}-reviews` with `repoRoot` as a Windows path (`c:\Users\magee\repos\HOA-Treasurer-Assistant`). It is **workspaceStorage, not globalStorage**.
-4. **Accept it only if `status` is `completed` AND `headCommitId` == your `HEAD` AND `baseCommitId` == `origin/main`.** The key alone also matches a clean review taken before your last fix commit, which would pass unreviewed code as converged — 8c's precondition, in a new place.
-5. **Check `fileReviewMap`'s keys against `git diff --name-only main...HEAD`** less `path_filters`. A wrong checkout yields an empty review that reads as clean; that happened on this step's first run, with the tree on `main`.
+4. **Accept it only if `status` is `completed` AND `headCommitId` == `git rev-parse HEAD` AND `baseCommitId` == `git rev-parse origin/main`.** Both stored values are 40-char SHAs, not ref names. The key alone also matches a clean review taken before your last fix commit, which would pass unreviewed code as converged — 8c's precondition, in a new place.
+5. **Check `fileReviewMap`'s keys against `git diff --name-only origin/main...HEAD`** less `path_filters`. A wrong checkout yields an empty review that reads as clean; that happened on this step's first run, with the tree on `main`.
 6. Findings: `fileReviewMap[path].comments[]` (`severity`, `startLine`, `comment`), totalled in `additionalDetails.counts`.
 7. **`argus_ingest` once the review is read**, every round. It scores the Argus run from step 1 against this review and writes only Argus's *misses* to `.argus/memory.jsonl`; its own unconfirmed findings are deliberately not reinforced. Severities come from committed `argus.config.json` (critical + major). `dry_run: true` to preview. Ingest before fixing — a later round reviews different code and cannot score this one.
-8. Fix test-first, run the review gate on the fix diff (8e), commit, request a new review, repeat until the counts are zero.
-9. **Push before Step 5.** `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
+8. Fix test-first, run the review gate on the fix diff (8e), commit, then **go back to step 1** — `argus_review` on the *fix* commit before requesting the next CodeRabbit review. Skipping it leaves that round with no SHA to join on, so step 7 silently scores nothing. Repeat until the counts are zero.
+9. **Push before Section 5** (*Merge request to main*, not step 5 above). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
 
 `coderabbit.agentType: "Claude Code Extension"` routes **Fix with AI** into this session, but decide convergence from the stored record — a handoff proves findings arrived, never that none remain.
 
