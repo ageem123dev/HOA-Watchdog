@@ -68,10 +68,34 @@ Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode
 
 Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`) and `git push -u origin story/{story_key}`.
 
+### 4b — First CodeRabbit review, in the IDE, before the MR exists
+
+The first review finds the most, and every round moved off the MR is a pipeline not billed. Story 1.6b took 8 rounds and ~11 pushes.
+
+**One base for the whole step: local `main`, fast-forwarded at item 2.** The extension bases on it and cannot be told otherwise, so Argus and the diff checks use it too; mixing in `origin/main` means Argus and CodeRabbit score different diffs the moment anyone merges upstream mid-round.
+
+1. **Run `argus_review` on this commit first** (`git_range: main...HEAD`). `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on that commit, so reviewing second teaches nothing.
+2. Ask the user for **CodeRabbit → Start Review**, base `main`, scope **committed changes**. Fast-forward local `main` first (Section 2 does). Started by hand, and it does **not** re-trigger on a push; ask once per round and STOP until it finishes (~8–11 min for a handful of files).
+3. Read the record at `%APPDATA%\Code\User\workspaceStorage\{ws}\coderabbit.coderabbit-vscode\{sha256}.json` — `{ws}` is the directory whose `workspace.json` names this repo, `{sha256}` hashes `{repoRoot}-{branch}-reviews`. Derive `{repoRoot}` from `git rev-parse --show-toplevel` as a Windows path with a lower-case drive letter (`c:\Users\...`), which is the form the extension hashes; do not hard-code it. It is **workspaceStorage, not globalStorage**.
+4. **Accept it only if `status` is `completed` AND `headCommitId` == `git rev-parse HEAD` AND `baseCommitId` == `git rev-parse main`.** Both stored values are 40-char SHAs, not ref names. The key alone also matches a clean review taken before your last fix commit, which would pass unreviewed code as converged — 8c's precondition, in a new place.
+5. **Reconcile the file lists, and fail on empty.** Let `A` = `git diff --name-only main...HEAD` and `D` = `A` less `path_filters`. **If `A` is empty, stop — you are on the wrong branch.** An empty list matches an empty `fileReviewMap` and reads as clean; that is how this step's first run passed with the tree on `main`. **If `A` is non-empty but `D` is empty**, the branch touches only excluded paths — a docs-only close-out — so there is nothing to review: skip the round, and do not record it as clean. Otherwise check both directions, neither of which is equality:
+   - **Every path in `D` must appear in *some* round's `fileReviewMap` on this branch, not necessarily this one.** Re-reviews are incremental — round 2 here skipped `.coderabbit.yaml` and `.gitlab-ci.yml` because they had not changed since round 1. Union the rounds; a path in no round is unreviewed.
+   - **Paths reviewed but not in `D` mean the scope leaked.** The extension picks up uncommitted and untracked files whatever the scope setting says — round 2 pulled in `.mcp.json`, `.gitignore` and `.claude/commands/`. Their findings are real but belong to another branch; triage them separately and do not fix them here.
+6. Findings: `fileReviewMap[path].comments[]` (`severity`, `startLine`, `comment`), totalled in `additionalDetails.counts`.
+7. **`argus_ingest` once the review is read**, every round. It scores the Argus run from step 1 against this review and writes only Argus's *misses* to `.argus/memory.jsonl`; its own unconfirmed findings are deliberately not reinforced. Severities come from committed `argus.config.json` (critical + major). **Call it with the default `dry_run: false`** — that is the call that writes; `dry_run: true` previews and writes nothing, so a run that only ever previews learns nothing. Ingest before fixing — a later round reviews different code and cannot score this one.
+8. Fix test-first, run 8e's *gate* on the fix diff — sensitivity check and test-value pass — but neither 8e's `argus_review`, which step 1 is about to run on the committed SHA where it can actually be joined, nor 8e's push, which belongs at step 9. Commit, then **go back to step 1** — `argus_review` on the *fix* commit before requesting the next CodeRabbit review. Skipping it leaves that round with no SHA to join on, so step 7 silently scores nothing. Repeat until the counts are zero.
+9. **Push before Section 5** (*Merge request to main*, not step 5 above). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
+
+`coderabbit.agentType: "Claude Code Extension"` routes **Fix with AI** into this session, but decide convergence from the stored record — a handoff proves findings arrived, never that none remain.
+
+IDE reviews are their own rate pool — **1/hr on the OSS plan**, so a multi-round story waits hours. Under `/loop` that is the cadence; do not spin.
+
+Confirmed on the first run: the extension honours repo `.coderabbit.yaml` `path_filters` (all three unfiltered files were reviewed, none excluded).
+
 ### 5 — Merge request to main
 
 1. Existing? `glab api "projects/{enc}/merge_requests?source_branch={branch}&state=opened&target_branch=main"`. Filter on the target: an open MR from this branch to anything else must **stop the run** — it gets no CodeRabbit review (see 3), and opening a second MR from the same source is worse. Report it and let the user close or retarget it.
-2. Else write the description to a scratch file `{description_file}` and run `glab mr create --source-branch {branch} --target-branch main --title "{story_id}: {title}" --description "$(cat {description_file})" --yes`. **The body must come from a file** — backticks in a double-quoted bash string get command-substituted. `{description_file}` is a scratch path you choose, not `story_file` and not a literal `file`.
+2. Else write the description to a scratch file `{description_file}` and run `glab mr create --source-branch {branch} --target-branch main --title "{story_id}: {title}" --description "$(cat {description_file})" --yes`. **The body must come from a file** — backticks in a double-quoted bash string get command-substituted. `--title` is exposed the same way and is not file-backed: strip or escape backtick, `$`, `"` and `\` in `{title}` before interpolating it. `{description_file}` is a scratch path you choose, not `story_file` and not a literal `file`.
 3. **Must target `main`.** `.coderabbit.yaml` sets `auto_review.base_branches: [main]`; any other target gets no review at all.
 4. Record `mr_iid`/`mr_url`, report the URL, and write `merge_request: {mr_iid}` into the story frontmatter — the epic loop uses it to verify the merge rather than trusting a status word.
 

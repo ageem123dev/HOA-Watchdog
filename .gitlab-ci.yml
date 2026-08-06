@@ -1,19 +1,14 @@
-# The three gates, on GitLab.
+# The three gates, on GitLab. `.github/workflows/ci.yml` does not run here; it is
+# kept so the repository can move back or mirror without losing it.
 #
-# `.github/workflows/ci.yml` does not run here — it is kept so the repository can
-# move back or mirror without losing it, but GitLab reads this file.
-#
-# Story 1.1's rule stands: no `allow_failure` on any gate. A pipeline that can go
-# green with a failing test is worse than no pipeline, because it is believed.
+# No `allow_failure` on any gate (story 1.1). A pipeline that can go green with a
+# failing test is worse than no pipeline, because it is believed.
 
 stages: [verify]
 
-# One pipeline per change, not two.
-#
-# Without this, a push to a branch with an open merge request creates a `push`
-# pipeline *and* a `merge_request_event` pipeline, both running the same jobs on
-# the same commit. Every commit on story 1.6b was billed twice for identical
-# work.
+# One pipeline per change, not two. Without this, a push to a branch with an open
+# merge request creates a `push` pipeline *and* a `merge_request_event` pipeline
+# on the same commit -- every commit on story 1.6b was billed twice.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -22,7 +17,7 @@ workflow:
 
 default:
   image: node:24
-  # A lockfile-exact install, and the cache is keyed on it so a dependency change
+  # Lockfile-exact install, cache keyed on the lockfile so a dependency change
   # cannot be served a stale tree.
   cache:
     key:
@@ -36,26 +31,18 @@ verify:
   script:
     - npm run lint
     - npm run build
-    # The whole suite, on merge requests as well as main.
+    # The whole suite, on merge requests as well as main. Two attempts at making
+    # this cheaper were both wrong: dropping `npm test` left no gate at all, and
+    # running the suite only on `main` was post-merge detection, because
+    # CI_COMMIT_BRANCH is unset in a merge-request pipeline.
     #
-    # Two earlier attempts at making this cheaper were both wrong. Removing
-    # `npm test` left no gate at all -- a local run is not a gate, because
-    # nothing stops a branch merging without one. Running the full suite only on
-    # `main` looked like a fix and was not: CI_COMMIT_BRANCH is unset in a
-    # merge-request pipeline, so the suite ran *after* GitLab updated main. That
-    # is post-merge detection wearing a gate's clothes.
+    # The suite was never the cost. Measured on story 1.6b: ~46s of a job is
+    # `npm ci` plus the image pull, against ~25s for the whole suite. The money
+    # went on two pipelines per commit, fixed by `workflow` above.
     #
-    # It turns out the suite was never the expensive part. Measured on story
-    # 1.6b's branch: ~46s of a job is npm ci and the image pull, 19s build, 10s
-    # lint, and the full suite about 25s more than the security subset. The
-    # money went on running *two* pipelines per commit and on running any
-    # pipeline at all for the six commits that touched only documents. Both are
-    # fixed above, and together they cut this branch from roughly 47 job-minutes
-    # to 13 -- with the whole suite still running before every merge.
-    #
-    # core/security within it carries the NFR-2 assertion that AD-2 requires of
-    # CI: no banking, payment-processor or external-accounting credential in this
-    # deploy unit. If it fails, remove the credential -- removing the check is an
+    # core/security within it carries the NFR-2 assertion AD-2 requires of CI: no
+    # banking, payment-processor or external-accounting credential in this deploy
+    # unit. If it fails, remove the credential -- removing the check is an
     # architecture change, not a fix.
     - npm test
 
@@ -63,63 +50,47 @@ verify:
     - if: $CI_COMMIT_BRANCH == 'main'
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
 
-# Path-based skipping was tried here and removed. The idea was to skip `verify`
-# for commits that change no code, and on story 1.6b's branch that was six of
-# fourteen commits -- about eight minutes of runner time.
-#
-# It leaked three times in three review rounds: first `.env*`, which the NFR-2
-# guard reads and which is exactly the change that must never skip; then
-# `.github/`, `.claude/` and `_bmad/`. GitLab's `changes` fires when *any* listed
-# path is touched, so it can only be written as an allow-list, and every gap in
-# an allow-list fails *open* and in silence. A skipped job looks the same as a
-# passing one on the merge request page.
-#
-# It is also worth much less than it was. Review rounds are now answered with a
-# single commit (`bmad-ship-story` Step 8e), so a commit that touches only
-# documents is rare -- most carry code and docs together and would run anyway.
-#
-# The saving that mattered is the `workflow` block above: one pipeline per
-# commit rather than two. That is half the bill, and it cannot fail open.
+# Path-based skipping was tried here and removed. It leaked three times in three
+# review rounds: first `.env*`, which the NFR-2 guard reads and is exactly the
+# change that must never skip, then `.github/`, `.claude/` and `_bmad/`. The rule
+# was a positive one -- run `verify` when a listed path changed -- so every gap in
+# the list failed *open* and in silence, and a skipped job looks the same as a
+# passing one on the merge request page. (`changes` with `when: never` can express
+# the inverse; that is not what was written here, and inverting it only moves the
+# gaps.)
 
 # The database and storage tests need live credentials, so they cannot run on a
-# fork or an untrusted pipeline. They are opt-in: define WATCHDOG_WRITER_DATABASE_URL
-# and WATCHDOG_READER_DATABASE_URL as *protected, masked* CI/CD variables and this
-# job runs on protected branches only.
+# fork or an untrusted pipeline. Opt-in: define WATCHDOG_WRITER_DATABASE_URL and
+# WATCHDOG_READER_DATABASE_URL as *protected, masked* CI/CD variables.
 #
-# These are the tests that prove AD-4 — that the SELECT-only role the LLM query
+# These are the tests that prove AD-4 -- that the SELECT-only role the LLM query
 # path uses genuinely cannot write. Without them that guarantee is only asserted.
 verify:database:
   stage: verify
   script:
     - npm run test:db
   rules:
-    # Both URLs, not just the reader. The suite needs the writer connection too,
+    # Both URLs, not just the reader: the suite needs the writer connection too,
     # so gating on the reader alone lets the job start without what it requires
-    # and fail — reporting a broken build where the honest outcome is "skipped".
+    # and fail, reporting a broken build where the honest outcome is "skipped".
     - if: $WATCHDOG_READER_DATABASE_URL && $WATCHDOG_WRITER_DATABASE_URL
       when: on_success
     - when: never
 
-# The extraction probe calls the real provider, so it needs a live credential and
-# cannot run on a fork or an untrusted pipeline. Opt-in on the same terms as
-# verify:database: define GEMINI_API_KEY and GEMINI_OCR_MODEL as *protected,
-# masked* CI/CD variables and this job runs on protected branches only.
+# The extraction probe calls the real provider. Opt-in on the same terms: define
+# GEMINI_API_KEY and GEMINI_OCR_MODEL as *protected, masked* CI/CD variables.
 #
-# This is the only check that proves AD-9 end to end. Every unit test around the
-# extraction adapter injects `fetch`, so together they show that this code sends
-# a schema and revalidates the reply — not that the provider honours the schema.
-# The difference is the whole point: run locally on 2026-08-04 it asked for a
-# documentKind of "receipt", which the vocabulary does not contain, and the
-# provider returned "other". That is enforcement, not decoration.
+# The only check that proves AD-9 end to end. Every unit test around the
+# extraction adapter injects `fetch`, so together they show that this code sends a
+# schema and revalidates the reply -- not that the provider honours the schema.
+# Run locally on 2026-08-04 it asked for a documentKind of "receipt", which the
+# vocabulary does not contain, and the provider returned "other".
 verify:extraction:
   stage: verify
   script:
     - npm run verify:extraction
   rules:
-    # Both names, for the reason verify:database gates on both of its own: the
-    # script needs the model selector as well as the key, so gating on the key
-    # alone lets the job start without what it requires and fail, reporting a
-    # broken build where the honest outcome is "skipped".
+    # Both names, for the reason verify:database gates on both of its own.
     - if: $GEMINI_API_KEY && $GEMINI_OCR_MODEL
       when: on_success
     - when: never
