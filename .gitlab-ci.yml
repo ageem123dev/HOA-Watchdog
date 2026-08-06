@@ -8,6 +8,18 @@
 
 stages: [verify]
 
+# One pipeline per change, not two.
+#
+# Without this, a push to a branch with an open merge request creates a `push`
+# pipeline *and* a `merge_request_event` pipeline, both running the same jobs on
+# the same commit. Every commit on story 1.6b was billed twice for identical
+# work.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == 'main'
+    - when: never
+
 default:
   image: node:24
   # A lockfile-exact install, and the cache is keyed on it so a dependency change
@@ -24,13 +36,27 @@ verify:
   script:
     - npm run lint
     - npm run build
-    # The suite includes core/security/nfr2-guard.test.ts, which asserts that no
-    # banking, payment-processor, or external-accounting credential exists in
-    # this deploy unit's environment or tracked configuration. That assertion
-    # enforces NFR-2 by way of AD-2 ("the air-gap is an absence, not a
-    # permission"), which names a CI check as its mechanism. If it fails, remove
-    # the credential — removing the check is an architecture change, not a fix.
-    - npm test
+    # The security suite only, not the whole of `npm test`.
+    #
+    # The full suite runs locally on every change, and paying a runner to repeat
+    # ~1,100 tests that were green a minute earlier buys very little. What it did
+    # buy is stated plainly below, because this is a real reduction and not a
+    # free one.
+    #
+    # core/security/ stays, and is the reason this is not simply deleted.
+    # nfr2-guard.test.ts asserts that no banking, payment-processor or external
+    # accounting credential exists in this deploy unit's environment or tracked
+    # configuration. NFR-2 by way of AD-2 ("the air-gap is an absence, not a
+    # permission") names *a CI check* as the mechanism, so that assertion has to
+    # run somewhere nobody can skip. If it fails, remove the credential —
+    # removing the check is an architecture change, not a fix.
+    #
+    # What is given up: a test that passes on a developer's machine and fails on
+    # a clean checkout — a missing file that only exists locally, a dependency
+    # not in the lockfile — now reaches `main`. `npm ci` plus `npm run build`
+    # still catch most of that shape, and `build` remains the only gate that
+    # type-checks at all.
+    - npm test -- core/security
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH
