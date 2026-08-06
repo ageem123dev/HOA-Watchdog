@@ -7,17 +7,23 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
-    # 0 disables the pause. The default is 5: automatic reviews stop after five
-    # reviewed commits on a branch until someone asks for one by hand.
+    # Automatic reviews pause after this many reviewed commits on a branch, until
+    # somebody asks for one by hand. The default of 5 is too low for this
+    # pipeline: a story answers each round of findings with a fix push, and every
+    # push is meant to draw a re-review. Stories 1.5d and 1.6b both went quiet
+    # part-way through and needed `@coderabbitai review` to restart.
     #
-    # That default fits a branch that is pushed once and reviewed once. It does
-    # not fit this pipeline, where a story answers each round of findings with a
-    # fix push and every push is meant to draw a re-review. Stories 1.5d and
-    # 1.6b both went quiet part-way through and needed `@coderabbitai review` to
-    # restart — which reads exactly like "reviewed and clean" if you are not
-    # watching for it, and that is the one failure mode the review loop must not
-    # have.
-    auto_pause_after_reviewed_commits: 0
+    # Why that is worse than a delay: a paused review looks exactly like a clean
+    # one from outside. "No open findings" and "green pipeline" are both true
+    # *before* any review has run, which is the false-clean the ship-story
+    # convergence rule exists to refuse.
+    #
+    # Raised rather than disabled, deliberately. Zero would remove the ceiling
+    # entirely, and a story that keeps finding defects in its own fixes should
+    # eventually stop and get a human rather than loop. 10 clears a normal
+    # story — 1.6b took 8 pushes, which is the worst so far — while still
+    # bounding a runaway.
+    auto_pause_after_reviewed_commits: 10
     base_branches:
       - main
   path_instructions:
