@@ -52,10 +52,12 @@ verify:
 
 # Path-based skipping was tried here and removed. It leaked three times in three
 # review rounds: first `.env*`, which the NFR-2 guard reads and is exactly the
-# change that must never skip, then `.github/`, `.claude/` and `_bmad/`. GitLab's
-# `changes` fires when any listed path is touched, so it can only be written as an
-# allow-list, and every gap in an allow-list fails *open* and in silence -- a
-# skipped job looks the same as a passing one on the merge request page.
+# change that must never skip, then `.github/`, `.claude/` and `_bmad/`. The rule
+# was a positive one -- run `verify` when a listed path changed -- so every gap in
+# the list failed *open* and in silence, and a skipped job looks the same as a
+# passing one on the merge request page. (`changes` with `when: never` can express
+# the inverse; that is not what was written here, and inverting it only moves the
+# gaps.)
 
 # The database and storage tests need live credentials, so they cannot run on a
 # fork or an untrusted pipeline. Opt-in: define WATCHDOG_WRITER_DATABASE_URL and
