@@ -7,6 +7,17 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # 0 disables the pause. The default is 5: automatic reviews stop after five
+    # reviewed commits on a branch until someone asks for one by hand.
+    #
+    # That default fits a branch that is pushed once and reviewed once. It does
+    # not fit this pipeline, where a story answers each round of findings with a
+    # fix push and every push is meant to draw a re-review. Stories 1.5d and
+    # 1.6b both went quiet part-way through and needed `@coderabbitai review` to
+    # restart — which reads exactly like "reviewed and clean" if you are not
+    # watching for it, and that is the one failure mode the review loop must not
+    # have.
+    auto_pause_after_reviewed_commits: 0
     base_branches:
       - main
   path_instructions:
