@@ -1,3 +1,7 @@
+---
+baseline_commit: b57140974ae3b83cac7cb39080362947acca3a55
+---
+
 # Story 1.6b: Hold unknown vendors for a human
 
 Status: ready-for-dev
@@ -59,21 +63,21 @@ derives "extracting" from `held` plus a live claim
 
 ## Tasks / Subtasks
 
-- [ ] **The `quarantine_item` table** (AC: 1, 5)
-  - [ ] Migration `010_quarantine_item.sql`. `id uuid primary key default uuidv7()`, matching the others
-  - [ ] `document_id uuid not null references document (id) on delete cascade` — an item without its
+- [x] **The `quarantine_item` table** (AC: 1, 5)
+  - [x] Migration `010_quarantine_item.sql`. `id uuid primary key default uuidv7()`, matching the others
+  - [x] `document_id uuid not null references document (id) on delete cascade` — an item without its
         document is debris that still satisfies a foreign key, exactly as migration 006 argues
-  - [ ] `extracted_name text not null` — the name **as read**, not normalised. 1.6c shows the treasurer
+  - [x] `extracted_name text not null` — the name **as read**, not normalised. 1.6c shows the treasurer
         what the document actually said; the normalised form is a comparison key, not a display value
-  - [ ] Bound it the way `009_vendor.sql` does, and reuse that reasoning: `char_length(extracted_name)
+  - [x] Bound it the way `009_vendor.sql` does, and reuse that reasoning: `char_length(extracted_name)
         <= 200` for how much is stored, plus a trimmed `>= 1` for whether anything is there. **Do not**
         write `char_length(btrim(...)) between 1 and 200` — that shape lets `'x'` plus 300 trailing
         spaces through, which is the defect 1.6a fixed twice
-  - [ ] AC5 is a **unique constraint**, not application logic: one open item per
+  - [x] AC5 is a **unique constraint**, not application logic: one open item per
         `(document_id, normalised extracted_name)`. Re-extraction must not stack items
-  - [ ] `grant select on quarantine_item to watchdog_reader;` — explicit, because migration 003
+  - [x] `grant select on quarantine_item to watchdog_reader;` — explicit, because migration 003
         revoked the default. Say why in a comment: 1.6c reads the queue
-  - [ ] `comment on table` / `on column` in the house style
+  - [x] `comment on table` / `on column` in the house style
 
 - [ ] **A port for holding** (AC: 1, 5)
   - [ ] `core/ports/quarantine.ts` — `hold(documentId, extractedName)` and enough to read back for
@@ -213,7 +217,81 @@ the database, and `core/` keeps importing nothing outward (`core/ports/boundary.
 
 ### Test Design
 
+## Task 1 — the `quarantine_item` table
+
+**The shape, decided here.** Columns: `id`, `document_id`, `extracted_name`, a **generated**
+`normalised_name`, `created_at`. Nothing else.
+
+`normalised_name` is `generated always as (vendor_normalised_name(extracted_name)) stored`, reusing
+migration 009's function rather than a second rule. That matters beyond tidiness: AC5 asks that
+re-extraction not stack items, and "the same name" has to mean the same thing to quarantine as it does
+to the vendor table. Two definitions would let a document be held twice for one vendor under two
+spellings, which is the *original* defect wearing a different hat.
+
+**No `resolved_at`, deliberately.** Resolution is 1.6d. Adding a column now means guessing its
+semantics — and the uniqueness rule depends on that guess, because "one open item per document and
+name" is a different constraint from "one item ever". 1.6d decides, and can make the index partial
+then. Building it now would be a guard with no test behind it.
+
+**B1 — an item is stored against a document.**
+*Correct if:* the insert returns a uuid and the row reads back with the name as extracted.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | `extracted_name` empty or whitespace-only — `char_length('   ')` is 3 | GUARD (check) |
+| 2 | `extracted_name` over-long, padded to look short | GUARD (check, **009's two-part shape**, not 006's) |
+| 3 | `document_id` referencing nothing | GUARD (foreign key) |
+| 4 | the document is deleted, leaving the item | GUARD (`on delete cascade`) |
+| 5 | the name is stored normalised, losing what the document said | GUARD — 1.6c must show the treasurer the actual text |
+
+**B2 — holding twice holds once (AC5).**
+*Correct if:* a second insert for the same document and the same name under a different spelling
+raises **23505**.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | Second spelling of one name inserts a second row | GUARD — unique on `(document_id, normalised_name)` |
+| 2 | Uniqueness is global rather than per document — two documents from the same unknown vendor, and only the first is held | GUARD — a test with **two** documents and one name, both of which must hold |
+| 3 | Uniqueness keyed on the raw name, so quarantine and vendor disagree about sameness | GUARD — key on the generated column |
+
+**B3 — the reader may read the queue and may not write it.**
+*Correct if:* SELECT as `watchdog_reader` succeeds; INSERT, UPDATE and DELETE each raise **42501**.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | Grant forgotten — migration 003 revoked the default, so 1.6c would find the queue unreadable | GUARD |
+| 2 | Over-granted, so the LLM query path could create or clear a hold | GUARD — AD-8 puts a human in this loop; a write grant here removes them |
+| 3 | Asserted from `information_schema` rather than by connecting | GUARD — connect, as `roles.test.ts` does |
+
 ### Debug Log References
+
+**Task 1.** Red against a database with no `quarantine_item` (42P01), green after `010` applied.
+253 database cases, up from 230.
+
+**One test was wrong and was corrected, not the code — and it was a repeat.** The check for "does not
+use the bound shape 009 replaced" matched the migration's own *comment*, which names that shape in
+prose so the next person does not rediscover it. This is the identical mistake 009's backslash check
+made one story earlier, made again by the person who fixed it. Comments are stripped now, with a
+positive control proving the predicate still fires — the same repair, applied a second time.
+
+**Sensitivity, both directions.** The composite unique index is the subtle part, so it was broken each
+way:
+
+| Mutation | Result |
+| --- | --- |
+| Unique on the name alone, ignoring the document | "still holds two different documents for the same unknown vendor" fails |
+| Unique on the raw name rather than the normalised one | "refuses a second spelling" fails |
+
+Each mutation is caught by exactly the test written for it, which is what makes the composite index
+worth having rather than a single column plus a comment.
+
+**Adversarial review** (Argus, staged diff, 6/6 files, confidence 1.0): one finding, **not
+reproduced**. It held that `__dirname` throws under ESM because `package.json` sets
+`"type": "module"`. It does not: these are `.ts` files run through Vitest's transform, four other test
+files in the repo already use `__dirname` — two of them predating this story — and all 253 cases pass.
+The finding was reasoned from `package.json` without running anything, and changing working code to
+satisfy it would have introduced the defect it imagined.
+
 
 ### Completion Notes List
 
