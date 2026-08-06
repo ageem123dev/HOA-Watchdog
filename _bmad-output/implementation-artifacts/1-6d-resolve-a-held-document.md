@@ -4,7 +4,7 @@ baseline_commit: 4be6c9d6c5740605a6a0168e98a40f187632675a
 
 # Story 1.6d: Resolve a held document
 
-Status: ready-for-dev
+Status: review
 
 > **Last of four stories from epic story 1.6.**
 > **1.6a** built the matching rule, **1.6b** held unresolved vendors, **1.6c** made the queue
@@ -94,25 +94,25 @@ vendor is created
         ordering is explainable, and requires an explicit choice.
   - [x] Decide and record where suggestions are fetched — per item inside the queue read, or a
         second call. Watch the N+1: a queue of thirty items must not make thirty round trips.
-- [ ] **Task 4 — The surface** (AC1, AC2, AC4, AC6)
-  - [ ] Server actions in `app/quarantine/`, following `app/upload/actions.ts` for the established
+- [x] **Task 4 — The surface** (AC1, AC2, AC4, AC6)
+  - [x] Server actions in `app/quarantine/`, following `app/upload/actions.ts` for the established
         `'use server'` shape.
-  - [ ] Each row gains: confirm-as-new, and a choice among suggestions. Tokens only —
+  - [x] Each row gains: confirm-as-new, and a choice among suggestions. Tokens only —
         `core/design/no-raw-values.test.ts` scans everything under `app/`.
-  - [ ] **The action re-checks the session itself.** A server action is a separate entry point from
+  - [x] **The action re-checks the session itself.** A server action is a separate entry point from
         the page; the page's guard does not cover it (AC6). Assert the write is refused before
         anything is written, as `app/quarantine/page.test.tsx` asserts for the read.
-  - [ ] Rendering tests via the harness 1.6c added: `// @vitest-environment jsdom`, and explicit
+  - [x] Rendering tests via the harness 1.6c added: `// @vitest-environment jsdom`, and explicit
         `afterEach(cleanup)` — there is no `globals: true`, so renders otherwise accumulate.
-- [ ] **Task 5 — Retire the expired assertion** (AC1)
-  - [ ] `app/quarantine/queue-list.test.tsx` asserts `offers no control that could resolve
+- [x] **Task 5 — Retire the expired assertion** (AC1)
+  - [x] `app/quarantine/queue-list.test.tsx` asserts `offers no control that could resolve
         anything` — zero buttons, forms, inputs, links. **This story makes that premise false**, and
         it is the exact case `_bmad/custom/review-gate.md` calls an *expired* test: it will fail
         loudly, look like a regression, and tempt a weakening.
-  - [ ] Replace it, do not delete it. The property worth keeping is that the queue offers exactly
+  - [x] Replace it, do not delete it. The property worth keeping is that the queue offers exactly
         the controls this story adds and no others — an allow-list, since story 1.6c's review showed
         a deny-list passes anything nobody listed.
-  - [ ] Say so in the commit body. A reviewer seeing a deleted "no controls" test needs to know it
+  - [x] Say so in the commit body. A reviewer seeing a deleted "no controls" test needs to know it
         was superseded rather than dropped.
 
 ## Dev Notes
@@ -326,7 +326,67 @@ queue is a human work list and if it ever grows past that, the fix is a batched 
 | F3 | Omitting the argument changes `view.items`, breaking story 1.6c's assertions on a shape that is still correct | GUARD - suggestions live beside `items`, not inside them; 1.6c's tests must keep passing untouched |
 | F4 | A candidate is marked selected or defaulted | GUARD - the view carries no selection at all, so there is nothing for a surface to preselect |
 
+## Tasks 4 and 5 - the surface, and the assertion it invalidates
+
+Taken together because they are one change: the queue gains controls, and story 1.6c's
+`offers no control that could resolve anything` is the assertion that says it has none. Splitting
+them would leave a commit where the suite is red on purpose.
+
+### Behaviour G - the resolve action (AC1, AC2, AC6)
+
+1. **Correct-run signal:** a signed-in member's submission reaches the port and returns its outcome;
+   an unauthenticated one is refused with nothing written.
+2. **How to test it:** the action is a module import, so `vi.mock` supplies `auth` and the
+   resolution port. The assertion that matters for AC6 is *ordering* - refused before the port is
+   touched, exactly as `app/quarantine/page.test.tsx` asserts for the read.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| G1 | The action trusts the page's guard. A server action is its own entry point and is reachable without ever rendering the page, so a page-only check protects nothing | GUARD - assert the port is never called when there is no session |
+| G2 | The session is checked *after* the resolution, so an unauthenticated caller still writes | GUARD - assert call ordering, not merely the refusal |
+| G3 | A vendor id arrives from the form and is passed through unchecked, letting a caller match a document to any vendor id they care to type | GUARD-at-the-boundary is the adapter's `select id from vendor` - this is data from a trusted-but-authenticated user, and the adapter already refuses an id that names nothing. Recorded here so the next reader does not add a second check in a third place |
+| G4 | `already-resolved` is rendered as a failure, so a treasurer who double-clicks is told something went wrong | GUARD - the outcome is surfaced as an ordinary result |
+| G5 | The action throws on a port error and the surface shows a stack trace | PROPAGATE - Next renders the error boundary; nothing here should swallow a genuine fault into a friendly message that hides it |
+
+### Behaviour H - the queue offers exactly these controls (AC1, AC2, AC4)
+
+1. **Correct-run signal:** each row renders a confirm-as-new control and one control per candidate,
+   and nothing else.
+2. **How to test it:** rendering tests through the 1.6c harness.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| H1 | A candidate is preselected, or the most similar is marked as the default | GUARD - AC4; assert no control is checked, selected or marked default |
+| H2 | The retired assertion is *deleted* rather than replaced, losing the only check on what the queue offers | GUARD - Task 5; replaced with an allow-list of exactly the controls this story adds |
+| H3 | The allow-list is written as another deny-list ("no `select`"), which passes anything nobody listed - the failure story 1.6c's review found | GUARD - count the controls, do not enumerate the forbidden ones |
+| H4 | The empty state grows a control | GUARD - assert zero controls when nothing is waiting |
+
 ### Debug Log References
+
+**Tasks 4-5 red.** An action with no session check failed five assertions, all of the form "the port
+was called anyway". The replacement control assertion failed on counts, because no controls existed.
+
+**The component stopped being testable, and the suite said so.** Importing the actions into
+`QueueList` pulled `next-auth` in through `'use server'`, and the whole rendering file failed to load
+with `Cannot find module 'next/server'`. The actions became props: the page supplies them, the
+component stays presentational, and the tests need no server at all. That is the test-design
+reference's rule applied literally — when the honest answer is "I cannot test this without standing
+up the world", the design is wrong, and the fix is the design.
+
+**Sensitivity, and one that did not bite.** Checking the session *after* resolving failed the
+ordering assertions immediately. Preselecting the top candidate with
+`autoFocus={candidate.score > 0.5}` **passed** — because React sets `autoFocus` as a DOM property and
+the test queried the `[autofocus]` attribute. A guard that proved nothing, inside the test written to
+catch exactly that. Rewritten against `document.activeElement` and element properties; the same
+mutation now fails with `expected <button …> to be <body>`.
+
+**Two type errors of my own after the refactor.** `tsc` went 8 -> 14: four test call sites my edit
+missed, and a `ResolveAction` returning `Promise<unknown>` where React's `formAction` accepts only
+`void`. Both fixed; back to 8. Lint and build were green throughout, which is the third story running
+where `tsc --noEmit` was the only gate that saw the problem.
+
 
 **Task 1 red.** All five structural assertions failed on empty sets; the comment-stripping control
 passed, correctly, since it runs against a sample string rather than the file.
@@ -351,6 +411,42 @@ one story 1.6b's guard was rebuilt around.
 ### Review Findings
 
 ### Completion Notes List
+
+**Tasks 4 and 5.** The action checks the session itself and asserts the port is never touched without
+one (G1, G2) — a server action is its own entry point and the page's guard does not reach it. Missing
+form fields are a refusal rather than a coerced string (`String(null)` is `"null"`, which would have
+deleted a hold for an impossible document id and reported success). A submission with no candidate
+chosen is refused, never guessed at: guessing is the automatic near-matching this epic exists to
+prevent, wearing a form's clothes.
+
+Story 1.6c's `offers no control that could resolve anything` was **replaced, not deleted** (H2). Its
+premise expired the moment resolving became possible. The replacement counts the controls a row
+offers rather than enumerating forbidden ones (H3), because 1.6c's own review showed a deny-list
+passes anything nobody listed.
+
+**Review findings, all three acted on.** The inline `'use server'` wrappers moved out of the page and
+into `actions.ts`, which declares it at file scope — the lint failure Argus attributed to them did not
+reproduce here, but a module-scope inline directive is a shape Next.js does not promise to support.
+The `as never` cast in the mocks was replaced with mocks typed against the port's own outcomes, since
+a cast that admits `already-resolved` would equally admit a wrong shape. And the match path gained
+the session cases the confirm path already had — two entry points to one guard need the same
+coverage, or the untested one is where it rots.
+
+**AC5's wording, finished rather than waived.** An earlier pass stopped at "the row disappears",
+which is feedback of a sort and is indistinguishable from somebody else having answered first — so it
+met AC5's substance and not its words. The wrappers now redirect with the outcome and the page renders
+a sentence for it. No client component was needed; `useActionState` would have been the heavier
+answer to a question a query parameter settles.
+
+The message mapping is a pure function with an allow-list of four outcomes, because the parameter
+arrives from a URL anybody can type. An unrecognised value renders nothing rather than being echoed
+back onto the page above the association's records — covered by a test using a `<script>` payload.
+
+**One process slip, recorded.** `resolution-message.ts` was written before its test, so no red was
+ever observed for it. Verified after the fact by mutation instead: replacing the mapping with
+`return outcome ?? null` fails four of the six cases, including the URL-injection one. That is
+evidence the tests discriminate, but it is not the same as having watched them fail first.
+
 
 **Task 3.** Suggestions ride beside `items`, not inside them, so story 1.6c's allow-list on the held
 item shape stays true and untouched — this story had no business editing an assertion that is still
@@ -401,6 +497,14 @@ Adversarial review (Argus) clean on both task diffs.
 - `core/quarantine/suggestions.test.ts` (new)
 - `core/quarantine/queue-view.ts` (modified — suggestions beside `items`)
 - `core/quarantine/queue-view.test.ts` (modified — suggestion cases appended)
+- `app/quarantine/actions.ts` (new)
+- `app/quarantine/actions.test.ts` (new)
+- `app/quarantine/queue-list.tsx` (modified — controls, actions as props)
+- `app/quarantine/queue-list.test.tsx` (modified — expired assertion replaced)
+- `app/quarantine/page.tsx` (modified — suggestions fetched, actions passed, outcome reported)
+- `app/quarantine/page.test.tsx` (modified — outcome-reporting cases)
+- `core/quarantine/resolution-message.ts` (new)
+- `core/quarantine/resolution-message.test.ts` (new)
 
 ### Change Log
 
