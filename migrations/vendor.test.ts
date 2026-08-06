@@ -157,6 +157,42 @@ describeWithDatabase('vendor', () => {
       ).resolves.toBeDefined()
     })
 
+    it('refuses a long name that only looks short once collapsed', async () => {
+      // The bound existed to stop a page of OCR text landing in a name field,
+      // and measuring it on the *normalised* value handed that straight back:
+      // 'x' + 300 spaces + 'y' collapses to three characters, so a 302-character
+      // display name was accepted. Verified against the database before this
+      // test was written. Raised in review.
+      const padded = `x${' '.repeat(300)}y`
+
+      await expect(
+        writer.query('insert into vendor (display_name) values ($1)', [padded]),
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION })
+    })
+
+    it.each([
+      ['a trailing run', `x${' '.repeat(300)}`],
+      ['a leading run', `${' '.repeat(300)}x`],
+    ])('refuses a long name padded by %s', async (_label, padded) => {
+      // The first fix for this measured the trimmed length, which closed the
+      // internal-run case and left these two: btrim removes the ends, so 301
+      // characters trimmed to one and were stored. Found by reviewing the fix,
+      // which is where this story keeps finding things.
+      await expect(
+        writer.query('insert into vendor (display_name) values ($1)', [padded]),
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION })
+    })
+
+    it('still accepts a name whose separators are ordinary', async () => {
+      // The other side of it. A bound measured on the raw string must not start
+      // refusing names that merely contain spaces.
+      const ordinary = named('Evergreen Landscaping and Tree Surgery')
+
+      await expect(
+        writer.query('insert into vendor (display_name) values ($1)', [ordinary]),
+      ).resolves.toBeDefined()
+    })
+
     it('refuses a missing name', async () => {
       await expect(
         writer.query('insert into vendor (display_name) values (null)'),
@@ -310,6 +346,12 @@ describeWithDatabase('vendor', () => {
 
       expect(rows).toHaveLength(1)
       expect(rows[0].indexdef).toMatch(/unique/i)
+
+      // Which column, not just which name. Recreated on `display_name` the
+      // index would still be unique and still be called this, while two
+      // spellings of one vendor could coexist again -- the exact thing it is
+      // here to stop. Raised in review.
+      expect(rows[0].indexdef).toMatch(/\(\s*normalised_name\s*\)\s*$/i)
     })
   })
 })

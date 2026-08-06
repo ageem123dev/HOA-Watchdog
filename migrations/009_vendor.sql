@@ -68,16 +68,30 @@ create table vendor (
 
   created_at      timestamptz not null default now(),
 
-  -- Bounded through the normalised form, so the whitespace-only case and the
-  -- length case are one constraint rather than two that can disagree.
-  -- char_length('   ') is 3: a bare length check calls a vendor made of spaces
-  -- a valid vendor. Migration 006 learned that on extraction.vendor_name.
+  -- Two measurements, because they answer two different questions and each one
+  -- alone leaves a hole. This took three attempts and every one was found by a
+  -- review of the previous fix rather than by the suite.
   --
-  -- The upper bound matches VENDOR_NAME_MAX_LENGTH, which extraction already
-  -- enforces on the column this resolves from. A page of OCR text or an
-  -- injection payload arriving in a name field stops here.
+  --   char_length(display_name) <= 200  -- how much is actually stored
+  --   char_length(btrim(...))   >= 1    -- whether anything is actually there
+  --
+  -- Measuring the *normalised* value was the first attempt: normalisation
+  -- collapses internal runs, so 'x' plus three hundred spaces plus 'y' counted
+  -- as three characters and a 302-character name was stored.
+  --
+  -- Measuring the *trimmed* value was the second: btrim removes the ends, so
+  -- 'x' plus three hundred trailing spaces counted as one and 301 characters
+  -- were stored. Closing the middle had left both edges open.
+  --
+  -- The upper bound is about the string as stored -- a page of OCR text or an
+  -- injection payload landing in a name field -- so it belongs on the raw
+  -- value. The lower bound is about whether a name exists at all, and
+  -- char_length('   ') is 3, so that one has to trim first.
   constraint vendor_display_name_length check (
-    char_length(vendor_normalised_name(display_name)) between 1 and 200
+    char_length(display_name) <= 200
+    and char_length(
+      btrim(display_name, ' ' || chr(9) || chr(10) || chr(13) || chr(11) || chr(12) || chr(160) || chr(8239))
+    ) >= 1
   )
 );
 
@@ -88,11 +102,15 @@ create unique index vendor_normalised_name_key on vendor (normalised_name);
 -- No trigram index, deliberately, and this is the second thing a reader will
 -- want to change.
 --
--- A GIN index on gin_trgm_ops is only reachable through the `%` operator, and
--- `%` takes its cutoff from pg_trgm.similarity_threshold -- a session setting
--- another connection or a pooler can change. The adapter uses an explicit
--- `similarity(...) >= floor` instead, which is deterministic and, measured on
--- this database with enable_seqscan off, does not use such an index at all.
+-- gin_trgm_ops supports several predicates -- `%`, word-similarity operators,
+-- and LIKE/ILIKE acceleration -- but *not* the one this adapter uses. An
+-- explicit `similarity(...) >= floor` cannot be answered from a trigram index:
+-- measured on this database with enable_seqscan off, it still plans a
+-- sequential scan while `%` uses the index.
+--
+-- `%` was the alternative and it takes its cutoff from
+-- pg_trgm.similarity_threshold, a session setting another connection or a
+-- pooler can change. The explicit floor is deterministic; that was the trade.
 --
 -- So the index would have been an object nothing reads, with a test asserting
 -- it existed: a guard that proves nothing. An association has tens of vendors
