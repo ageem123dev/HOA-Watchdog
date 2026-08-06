@@ -5,7 +5,7 @@ merge_request: 15
 
 # Story 1.6a: Recognise known vendors
 
-Status: review
+Status: done
 
 > **First of four stories from epic story 1.6.**
 > Epic 1.6 was split before any implementation (see `epics.md`, "Delivered as four stories").
@@ -393,6 +393,48 @@ the unique index, which is the one that actually carries a rule.
 `tsc --noEmit` entirely. Adding `migrations/**/*.ts` and `scripts/**/*.ts` costs **zero** new errors —
 the count stays at the pre-existing 8 — so this was pure uncovered surface.
 
+**Merge-request review, round 1 (CodeRabbit) — 4 findings, 2 Major.**
+
+**One was already stale.** It asked for an index-supported trigram predicate; the index had been
+removed four minutes earlier by the integration pass, for the reason the finding itself gives. It
+also names why the alternative was rejected — *"ensure `pg_trgm.similarity_threshold` cannot exceed
+`$2`"* — which cannot be ensured from inside the query.
+
+**One was a genuine Major, and mine.** The display-name bound measured the *normalised* name, and
+normalisation collapses internal separator runs, so `'x'` + 300 spaces + `'y'` counted as three
+characters and a **302-character** name was stored. Reproduced against the database before the fix.
+
+**The fix then had the same hole one position over.** Measuring the *trimmed* name closed the middle
+and left both ends open: `'x'` + 300 trailing spaces counted as one and **301** characters were
+stored. Found by the gate on the fix, not by the suite.
+
+The constraint now measures two things because they answer two questions — `char_length(display_name)
+<= 200` for how much is stored, `char_length(btrim(...)) >= 1` for whether anything is there. Both
+halves are load-bearing: removing either fails four tests, and removing the substance half lets an
+empty-named vendor exist, at which point `resolve('')` resolves to it.
+
+The two Minor findings were both real: the index test asserted uniqueness but not *which column*, so
+it would have passed with the index rebuilt on `display_name`; and a comment claimed a `gin_trgm_ops`
+index is reachable only through `%`, which is too broad.
+
+**Round 2 — targeted, and clean.** Rather than ask for a general re-read, the request named the two
+things most likely to be wrong: whether a *third* input shape defeats the two-part bound, and whether
+the two normalisation implementations can disagree on any input the corpus misses. Neither was found.
+The upper bound applies before trimming or normalising, so nothing over 200 characters can pass; and
+both implementations use the same eight separators, the same trimming, the same collapse and the same
+ASCII-only fold.
+
+**Stated rather than glossed:** that review's own caveat is *"Database verification was not run in
+this review environment. Static inspection found no new issue."* This story is almost entirely
+database behaviour, so a static-only pass is worth less here than it would be elsewhere. What it does
+not cover is covered by 230 database tests run locally against real Postgres, twice.
+
+**One edge it surfaced without raising.** JavaScript can hold a NUL, which Postgres `text` cannot
+store, so `resolve` raises `22021` for such a name rather than returning `unresolved`. Confirmed by
+probe. Left as PROPAGATE and documented on the port rather than guarded: an extracted name reaches
+this port from `extraction.vendor_name`, a column that cannot hold those bytes either, so it is
+unreachable from stored data. Recorded for 1.6b to re-confirm when it wires the first caller.
+
 ### Completion Notes List
 
 **All four tasks complete; every AC has a test that fails when the behaviour is removed.**
@@ -471,5 +513,8 @@ and the similarity ranking are all in the part CI will not execute.
   the design before any code was written: `E'\s+'` matches the letter `s` in a migration, Postgres
   does not count NBSP as whitespace where JavaScript does, and `lower()` disagrees with
   `toLowerCase()` on two real characters. Status -> review.
+- 2026-08-06 — Review round 1 fixed: the display-name bound measured the wrong string, twice. It
+  now bounds the raw length and separately requires substance. Round 2 attacked both the bound and
+  the normalisation parity directly and found nothing further. Status -> done.
 
 - 2026-08-05 — Story created. Split from epic story 1.6 as the first of four. Status -> ready-for-dev.

@@ -45,7 +45,18 @@ export type VendorResolution =
   | { readonly outcome: 'unresolved' }
 
 export interface VendorDirectory {
-  /** Normalised-exact, or nothing. Never a near match. */
+  /**
+   * Normalised-exact, or nothing. Never a near match.
+   *
+   * **Propagates rather than swallowing.** A name JavaScript can hold but
+   * Postgres cannot store — a NUL, most concretely — raises `22021` instead of
+   * returning `unresolved`, because "we do not know this vendor" and "that is
+   * not storable text" are different facts and only one of them is safe to act
+   * on. No guard is added here: an extracted name reaches this port from
+   * `extraction.vendor_name`, a column that cannot hold such bytes either, so
+   * the case is unreachable from stored data. Story 1.6b, which is what first
+   * calls this from ingestion, should confirm that still holds for its caller.
+   */
   resolve(extractedName: string): Promise<VendorResolution>
 
   /**
