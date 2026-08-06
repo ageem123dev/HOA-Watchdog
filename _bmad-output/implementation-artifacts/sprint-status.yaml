@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: 2026-08-05
+last_updated: '2026-08-06'
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -65,7 +65,7 @@ development_status:
   # Order matters: 1.6d resolves from the queue 1.6c builds.
   1-6a-recognise-known-vendors: done
   1-6b-hold-unknown-vendors-for-a-human: done
-  1-6c-see-what-is-waiting: backlog
+  1-6c-see-what-is-waiting: in-progress
   1-6d-resolve-a-held-document: backlog
   epic-1-retrospective: optional
 
