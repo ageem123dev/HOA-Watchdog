@@ -53,6 +53,20 @@ function declaredMethods(source: string): string[] {
   return [...stripComments(source).matchAll(/^\s*([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1] ?? '')
 }
 
+/**
+ * Every name the port declares, however it declares it.
+ *
+ * Fields and methods together, because the two forbidden names are forbidden as
+ * *data*, not as a syntax. `storageKey(): string` hands out a storage key just
+ * as effectively as `readonly storageKey: string`, and checking only fields let
+ * both pass. Raised in review.
+ */
+function declaredNames(source: string): string[] {
+  return [...declaredFields(source).map((f) => f.name), ...declaredMethods(source)].map((name) =>
+    name.toLowerCase(),
+  )
+}
+
 /** Lines of the form `readonly name:` or `name?:` — a property declaration. */
 function declaredFields(source: string): { name: string; optional: boolean }[] {
   return [
@@ -115,7 +129,7 @@ describe('the quarantine queue port', () => {
     // Migration 010: the folded form is a comparison key and no use to a human.
     // AC1 asks for the name as the document said it, and a type that offers both
     // invites a surface to show the wrong one.
-    const names = declaredFields(portSource()).map((f) => f.name.toLowerCase())
+    const names = declaredNames(portSource())
 
     expect(names).not.toContain('normalisedname')
     expect(names).not.toContain('normalizedname')
@@ -125,9 +139,18 @@ describe('the quarantine queue port', () => {
     // AD-10: no caller may receive a storage key. The adapter joins `document`
     // for its filename and the key sits on the same row, one careless `select *`
     // away.
-    const names = declaredFields(portSource()).map((f) => f.name.toLowerCase())
+    const names = declaredNames(portSource())
 
     expect(names).not.toContain('storagekey')
+  })
+
+  it('sees a forbidden name declared as a method, not only as a field', () => {
+    // The control for the fix above. Checking fields alone, both cases passed
+    // against a port that handed out a storage key through a method — a guard
+    // that proves nothing, which is the defect shape this project keeps meeting.
+    const leaky = ['export interface HeldItem {', '  storageKey(): string', '}']
+
+    expect(declaredNames(leaky.join('\n'))).toContain('storagekey')
   })
 
   it('declares no optional field', () => {

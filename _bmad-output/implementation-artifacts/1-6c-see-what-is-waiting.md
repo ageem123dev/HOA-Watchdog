@@ -429,6 +429,28 @@ Restored, re-ran, green.
 
 ### Review Findings
 
+**IDE round 1** on `cc0b553` — 24 comments, 20 of them LGTM. Four findings, **one on this story**.
+
+*The port test checked fields but not methods* (minor, confirmed and fixed). `does not hand out the
+normalised name` and `does not hand out a storage key` read only property declarations, so a future
+`storageKey(): string` would have handed out a storage key with both tests green. The two names are
+forbidden as *data*, not as a syntax. Both now check fields and methods together, with a control
+proving the combined check catches the method form — verified by adding one to the port and watching
+it fail.
+
+*Three findings belong to `.mcp.json` and `.claude/commands/argus-review.md`*, which are uncommitted
+files from another branch that the extension pulled in regardless of scope. Not fixed here; relayed.
+One is worth acting on soon: `argus-review.md` interpolates `$ARGUMENTS` into a shell command with no
+escaping, so `;` or `$(...)` in an argument runs.
+
+**Corrected a claim this round falsified.** `bmad-ship-story` recorded that the extension honours
+`.coderabbit.yaml` `path_filters`. It does not — this review covered `_bmad-output/**`, which the
+config excludes. The original evidence was a branch containing no excluded paths, which is absence of
+exclusion rather than evidence of filtering.
+
+**Ingest:** 3 reviews compared cumulatively, recall 0.22, confirmed_rate 0.67, 6 lessons written.
+
+
 ### Completion Notes List
 
 **Task 6.** The link is shown unconditionally. `EXPERIENCE.md` says the queue is entered from the

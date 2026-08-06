@@ -90,7 +90,7 @@ The first review finds the most, and every round moved off the MR is a pipeline 
 
 IDE reviews are their own rate pool — **1/hr on the OSS plan**, so a multi-round story waits hours. Under `/loop` that is the cadence; do not spin.
 
-Confirmed on the first run: the extension honours repo `.coderabbit.yaml` `path_filters` (all three unfiltered files were reviewed, none excluded).
+**The extension ignores `.coderabbit.yaml` `path_filters`.** Story 1.6c's review covered `_bmad-output/**`, which the file excludes. An earlier note here claimed the opposite on the strength of a branch that happened to contain no excluded paths — absence of exclusion is not evidence of filtering. Expect the IDE round to review more than the merge request will.
 
 ### 5 — Merge request to main
 
