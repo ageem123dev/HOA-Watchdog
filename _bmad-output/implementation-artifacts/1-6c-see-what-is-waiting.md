@@ -91,19 +91,19 @@ database happens to return
         that the new adapter connects as the reader at all — write that one: query `current_user`
         through the adapter's own pool and assert it is `watchdog_reader`. Without it, the adapter
         could quietly use the writer URL and every other test would still pass.
-- [ ] **Task 3 — The view model, in `core/`** (AC1, AC2, AC5, AC6)
-  - [ ] `core/quarantine/queue-view.ts` — a pure function from `readonly HeldItem[]` to the shape the
+- [x] **Task 3 — The view model, in `core/`** (AC1, AC2, AC5, AC6)
+  - [x] `core/quarantine/queue-view.ts` — a pure function from `readonly HeldItem[]` to the shape the
         page renders. Node-tested, no DOM.
-  - [ ] It decides the empty case, groups nothing, and sorts nothing (Task 2's query owns order —
+  - [x] It decides the empty case, groups nothing, and sorts nothing (Task 2's query owns order —
         re-sorting here would make two definitions of "first").
-- [ ] **Task 4 — Test harness for rendering** (AC1, AC2)
-  - [ ] Add `jsdom` and `@testing-library/react` (v16+, required for React 19) as dev dependencies.
-  - [ ] **Widen `vitest.config.ts` `include` to cover `.test.tsx`** — it is currently `.test.ts` only.
+- [x] **Task 4 — Test harness for rendering** (AC1, AC2)
+  - [x] Add `jsdom` and `@testing-library/react` (v16+, required for React 19) as dev dependencies.
+  - [x] **Widen `vitest.config.ts` `include` to cover `.test.tsx`** — it is currently `.test.ts` only.
         Without this a component test file is silently never collected: it passes by not running,
         which is this project's recurring defect wearing a new hat.
-  - [ ] Keep `environment: 'node'` as the default; opt in per file with a
+  - [x] Keep `environment: 'node'` as the default; opt in per file with a
         `// @vitest-environment jsdom` docblock, so the ~1083 node tests are unaffected.
-  - [ ] No `@vitejs/plugin-react` — `tsconfig.json` sets `"jsx": "react-jsx"`, so esbuild transforms
+  - [x] No `@vitejs/plugin-react` — `tsconfig.json` sets `"jsx": "react-jsx"`, so esbuild transforms
         JSX already. Verify rather than assume: a trivial rendering test must fail for the right
         reason before Task 5 starts.
 - [ ] **Task 5 — The surface** (AC1, AC2, AC3, AC4)
@@ -335,6 +335,28 @@ independent means - once by reading through the adapter, and once by a direct SQ
 asserting the same sequence. If the adapter's `order by` disagreed with the database's own idea of
 the order, one of the two would have to move.
 
+## Task 3 - the view model
+
+### Behaviour E - `toQueueView(items)` (AC1, AC2, AC5, AC6)
+
+1. **Correct-run signal:** given held items it returns them in the order received, marked non-empty;
+   given none it returns an empty view the surface can render a sentence from.
+2. **How to test it:** a pure function over plain data. No seams needed, which is the point of
+   putting the decision here rather than inside a server component that cannot be rendered without
+   a database.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| E1 | It re-sorts, so the query's order and the view's order are two answers to "which is first" (AC6) | GUARD - a test passing deliberately unsorted input and asserting it comes back untouched |
+| E2 | Emptiness is decided by the caller instead, so two surfaces could disagree about what "empty" means | GUARD - the flag is part of the returned value |
+| E3 | It mutates or aliases the input array, so a caller's list changes underneath it | GUARD - assert the input is unchanged and the output is not the same reference |
+| E4 | It de-duplicates by document, collapsing AC5's two-names-one-document case | GUARD |
+| E5 | It invents a display fallback for a blank name, presenting something the document never said | GUARD - the database forbids blank names, and inventing "(unknown)" here would put words in a document's mouth. Pass it through |
+
+**Cross-check:** the count on the view is verified against the input length independently of the
+items array, so a view that dropped an item while reporting the old count cannot pass.
+
 ### Debug Log References
 
 **Task 2 red.** Both suites first failed on a missing module, which is not a valid red. A naive stub
@@ -370,6 +392,35 @@ Restored, re-ran, green.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 4.** `jsdom@29` and `@testing-library/react@16` added; `include` widened to
+`**/*.test.{ts,tsx}`; `environment: 'node'` left as the default with per-file opt-in. No
+`@vitejs/plugin-react` was needed, as predicted — verified by rendering JSX rather than assumed.
+
+The glob widening is load-bearing and was proven so: reverted, `npm test -- rendering-harness`
+reports **"No test files found"**. The tests do not fail, they cease to exist, which is
+indistinguishable from a clean run.
+
+**Review finding, confirmed and fixed test-first.** `tsconfig.json` included `core/**/*.ts` but not
+`core/**/*.tsx`, so the new harness was invisible to the compiler — `tsc --listFiles` confirmed it.
+`npm run build` is this project's only type-check, so that file had none. Fixed, and guarded by
+`tsconfig-coverage.test.ts`, which sweeps every source file against the include patterns rather than
+asserting the one pattern that was missing. It carries its own two controls: that the sweep found
+files at all, and that the glob converter treats `**/` and `*` the way TypeScript does.
+
+**Pre-existing, not introduced here:** `npm audit` reports 3 high-severity advisories in `sharp`,
+which arrives via `next@16.2.12` — pinned at HEAD before this story. The fix moves Next outside its
+stated range, which is a dependency decision rather than something to slip into a UI story.
+
+
+**Task 3.** `toQueueView` decides emptiness once (E2) and does nothing else: no re-ordering (E1), no
+grouping (E4), no invented placeholder for a name the database already forbids being blank (E5). It
+copies the array so a caller cannot sort the adapter's result in place (E3). `count` is cross-checked
+against `items.length` in the same test, so a view that dropped an item while reporting the old count
+cannot pass.
+
+Sensitivity: forcing `isEmpty: false` failed `reports an empty queue as empty`. Argus: no findings.
+
 
 **Task 2.** `readReaderDatabaseUrl()` mirrors its writer sibling and reports its own variable name
 (C1), trims (C2), and stays call-time so `next build` needs no credentials (C3). The adapter is the
@@ -427,6 +478,13 @@ Adversarial review (Argus, `gemini-3.1-pro-high`): no findings, confidence 1.0.
 - `adapters/db/quarantine-queue-postgres.ts` (new)
 - `adapters/db/quarantine-queue-postgres.test.ts` (new)
 - `adapters/db/quarantine-queue-connection.test.ts` (new)
+- `core/quarantine/queue-view.ts` (new)
+- `core/quarantine/queue-view.test.ts` (new)
+- `vitest.config.ts` (modified — include widened to `.test.{ts,tsx}`)
+- `package.json` / `package-lock.json` (modified — `jsdom`, `@testing-library/react`)
+- `core/design/rendering-harness.test.tsx` (new)
+- `tsconfig.json` (modified — `core/**/*.tsx`)
+- `tsconfig-coverage.test.ts` (new)
 
 
 ### Change Log
