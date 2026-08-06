@@ -60,43 +60,26 @@ verify:
     - npm test
 
   rules:
-    # Always on main: whatever is merged gets the full check, with no dependence
-    # on the path list below being complete.
     - if: $CI_COMMIT_BRANCH == 'main'
-    # On a merge request, only when something executable changed. Six of the
-    # fourteen commits on story 1.6b's branch touched nothing but story
-    # documents and config, and each one still paid for a full job.
-    #
-    # Written as "run when code changes" rather than "skip when docs change",
-    # because GitLab's `changes` fires when *any* listed path is touched -- a
-    # skip-list would wrongly skip a commit that changed a document and a source
-    # file together.
-    #
-    # The risk this accepts: a new top-level directory absent from this list
-    # would skip CI on a branch. The `main` rule above is what stops that
-    # reaching production unchecked, and it is why that rule is first.
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
-        - app/**/*
-        - core/**/*
-        - adapters/**/*
-        - migrations/**/*
-        - scripts/**/*
-        - catalog/**/*
-        - tools/**/*
-        - agent/**/*
-        - "*.ts"
-        - "*.mjs"
-        - "*.json"
-        - "*.mts"
-        - .gitlab-ci.yml
-        # The NFR-2 guard scans every `.env*` file on disk, tracked or not, so a
-        # merge request that touches only one of them is exactly the change that
-        # must not skip verification -- it is how a banking credential would
-        # arrive. Raised in review, and it is the risk this rule's own comment
-        # predicted, arriving as a file rather than a directory.
-        - ".env*"
-        - "**/.env*"
+
+# Path-based skipping was tried here and removed. The idea was to skip `verify`
+# for commits that change no code, and on story 1.6b's branch that was six of
+# fourteen commits -- about eight minutes of runner time.
+#
+# It leaked three times in three review rounds: first `.env*`, which the NFR-2
+# guard reads and which is exactly the change that must never skip; then
+# `.github/`, `.claude/` and `_bmad/`. GitLab's `changes` fires when *any* listed
+# path is touched, so it can only be written as an allow-list, and every gap in
+# an allow-list fails *open* and in silence. A skipped job looks the same as a
+# passing one on the merge request page.
+#
+# It is also worth much less than it was. Review rounds are now answered with a
+# single commit (`bmad-ship-story` Step 8e), so a commit that touches only
+# documents is rare -- most carry code and docs together and would run anyway.
+#
+# The saving that mattered is the `workflow` block above: one pipeline per
+# commit rather than two. That is half the bill, and it cannot fail open.
 
 # The database and storage tests need live credentials, so they cannot run on a
 # fork or an untrusted pipeline. They are opt-in: define WATCHDOG_WRITER_DATABASE_URL
