@@ -103,6 +103,19 @@ def run(*args: str) -> str:
     return result.stdout
 
 
+def untracked(pathspec: list[str]) -> list[str]:
+    """Test files git has never seen.
+
+    `git diff` cannot show these, so a brand-new test file was invisible here --
+    and the first task of any new story is exactly when every test file is new.
+    A checklist that silently omits the only tests in the diff is the failure
+    this script exists to prevent, found by running it on its own author's work.
+    """
+    args = ["git", "ls-files", "--others", "--exclude-standard", "--"]
+    args += pathspec or DEFAULT_PATHSPEC
+    return [line for line in run(*args).splitlines() if TEST_FILE.search(line)]
+
+
 def changed_lines(
     git_range: str, pathspec: list[str]
 ) -> tuple[dict[str, set[int]], set[str]]:
@@ -206,6 +219,12 @@ def main() -> int:
     pathspec = rest[1:] if rest[:1] == ["--"] else rest
 
     touched, deleted = changed_lines(git_range, pathspec)
+
+    # Every case in an untracked file is new, so the whole file is the checklist.
+    for path in untracked(pathspec):
+        length = len(Path(path).read_text(encoding="utf8", errors="replace").splitlines())
+        touched[path] = set(range(1, length + 1))
+
     if not touched and not deleted:
         print(f"No test files changed in {git_range}.")
         return 0

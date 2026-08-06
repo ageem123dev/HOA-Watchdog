@@ -63,7 +63,7 @@ development_status:
   1-5d-extract-on-upload-and-show-progress: done
   # Epic story 1.6 is delivered as four stories; see epics.md for the AC mapping.
   # Order matters: 1.6d resolves from the queue 1.6c builds.
-  1-6a-recognise-known-vendors: backlog
+  1-6a-recognise-known-vendors: done
   1-6b-hold-unknown-vendors-for-a-human: backlog
   1-6c-see-what-is-waiting: backlog
   1-6d-resolve-a-held-document: backlog
