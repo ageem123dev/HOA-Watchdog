@@ -5,7 +5,7 @@ merge_request: 19
 
 # Story 1.6c: See what is waiting
 
-Status: review
+Status: done
 
 > **Third of four stories from epic story 1.6.**
 > **1.6a** built the mechanism: a `vendor` table, one normalisation rule, and a directory whose
@@ -430,6 +430,16 @@ Restored, re-ran, green.
 
 ### Review Findings
 
+**Converged after one merge-request round**, against story 1.6b's eight. CodeRabbit confirmed the fix
+on the thread and resolved it; pipeline green on `5f9c6c6`; zero open threads.
+
+The clean signal arrived in the *summary comment* rather than a standalone review note — the summary
+is edited in place, so its `created_at` of 20:00:56 predates a head pushed at 20:30 while its body
+covers `290cbb85 -> 5f9c6c63`. `bmad-ship-story` 8b says a summary carries no `Commits` block; this
+one does. Convergence was taken from the thread reply and resolution instead, which are unambiguous
+statements about the current head.
+
+
 **Merge-request round 1** on `290cbb8` — **1 actionable comment**, against story 1.6b's eight rounds.
 Pipeline green.
 
@@ -646,6 +656,9 @@ Adversarial review (Argus, `gemini-3.1-pro-high`): no findings, confidence 1.0.
 
 ### Change Log
 
+- 2026-08-06 — One merge-request review round, one finding, fixed. Fixing it exposed two more defects
+  in the same file, both caught by the sensitivity check rather than review: a control deleted by the
+  rewrite, and a control that had never tested anything since the day it was written. Status -> done.
 - 2026-08-06 — Implemented test-first across six tasks. 45 new tests: the port's negative shape, the
   reader-backed adapter, the view model, the rendering harness, the surface, and the route in. Every
   task's diff passed a sensitivity check and an Argus review. Four defects were found by the tests
