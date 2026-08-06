@@ -6,6 +6,9 @@ import {
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { Extractor } from '../ports/extractor'
+import type { Quarantine } from '../ports/quarantine'
+import type { VendorDirectory } from '../ports/vendor-directory'
+import { normaliseVendorName } from '../vendor/name'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -65,6 +68,10 @@ export interface ExtractDocumentDependencies {
   readonly store: DocumentStore
   readonly extractions: ExtractionRepository
   readonly extractor: Extractor
+  /** Asked whether a name is a vendor we already know. Never asked to create one. */
+  readonly vendors: VendorDirectory
+  /** Where a name nobody recognises goes to wait for a human (AD-8). */
+  readonly quarantine: Quarantine
   readonly onError?: (error: unknown, documentId: string) => void
 }
 
@@ -119,6 +126,51 @@ const TABULAR_TYPES: ReadonlySet<string> = new Set([
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ])
+
+/**
+ * Text Postgres cannot store at all.
+ *
+ * Narrow on purpose: a NUL is the one character `text` refuses outright, and a
+ * guard that rejected more would start refusing real vendor names -- accents,
+ * dashes and apostrophes all belong in one.
+ *
+ * This makes an existing impossibility explicit rather than inventing a rule.
+ * `extraction.vendor_name` would refuse the same record, and so would
+ * `quarantine_item.extracted_name`; without the check the failure arrives as an
+ * opaque 22021 from whichever write happened to run first.
+ */
+function isStorable(value: string): boolean {
+  return !value.includes('\u0000')
+}
+
+/**
+ * The distinct vendor names a reading produced, in the order first seen.
+ *
+ * Distinct by the *normalised* form, so one vendor spelled two ways on one
+ * document is one question rather than two. The spelling kept is the first,
+ * because that is what a treasurer will be shown and any of them is equally
+ * true of the document.
+ *
+ * A null is not a name. A statement genuinely has no vendor and migration 006
+ * allows it; treating that as unresolved would quarantine every bank statement
+ * the pilot ingests.
+ */
+function distinctVendorNames(records: readonly { readonly vendorName: string | null }[]): string[] {
+  const seen = new Set<string>()
+  const names: string[] = []
+
+  for (const record of records) {
+    if (record.vendorName === null) continue
+
+    const key = normaliseVendorName(record.vendorName)
+    if (seen.has(key)) continue
+
+    seen.add(key)
+    names.push(record.vendorName)
+  }
+
+  return names
+}
 
 export async function extractDocument(
   documentId: string,
@@ -207,6 +259,31 @@ export async function extractDocument(
       // An empty collection is a content problem, not an infrastructure one.
       // `replace` refuses `[]`, and reaching it would report this as an outage.
       if (result.records.length === 0) return await settle('unreadable', 'unreadable')
+
+      const vendorNames = distinctVendorNames(result.records)
+
+      // A name the store cannot hold means the provider's answer cannot be
+      // trusted, which is what `unreadable` says. Reporting an outage instead
+      // would promise a retry that cannot help -- the same bytes yield the same
+      // NUL every time -- and blaming infrastructure for a content problem is
+      // the mistake story 1.5b made and 1.5c split the refusal in two to fix.
+      if (!vendorNames.every(isStorable)) return await settle('unreadable', 'unreadable')
+
+      // Held *before* the records are stored, and the order is load-bearing.
+      //
+      // `replace` moves the document to `read`, which settles it: no later poll
+      // looks at it again. So records stored with the hold still missing is
+      // silent and permanent, and nobody finds out. The other way round leaves
+      // the document `held`, so the next poll re-extracts, holds again -- a
+      // no-op, the database enforces that -- and stores. It heals itself.
+      for (const name of vendorNames) {
+        const resolution = await deps.vendors.resolve(name)
+
+        // AD-8: unknown vendors reach a human and are never created here.
+        if (resolution.outcome === 'unresolved') {
+          await deps.quarantine.hold(documentId, name)
+        }
+      }
 
       // The fence goes with the write. `replace` clears the claim in the same
       // transaction as the state change, which is why nothing releases it here:

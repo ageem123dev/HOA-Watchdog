@@ -24,9 +24,12 @@ import {
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { ExtractionResult, Extractor } from '../ports/extractor'
+import type { Quarantine } from '../ports/quarantine'
+import type { VendorDirectory } from '../ports/vendor-directory'
 import { extractDocument, type ExtractDocumentDependencies } from './extract-document'
 
 const DOCUMENT_ID = '018f3a2b-0000-7000-8000-0000000000aa'
+const OTHER_DOCUMENT_ID = '018f3a2b-0000-7000-8000-0000000000bb'
 const SCAN_BYTES = new TextEncoder().encode('%PDF-1.7 a scanned invoice')
 const TOKEN = '018f3a2b-0000-7000-8000-0000000000ff'
 
@@ -48,6 +51,10 @@ interface Fakes extends ExtractDocumentDependencies {
   readonly replaced: { documentId: string; records: readonly ExtractionRecord[] }[]
   readonly released: string[]
   readonly marked: { id: string; state: string; token?: string }[]
+  /** Every (document, name) handed to the quarantine port, in order. */
+  readonly quarantined: { documentId: string; extractedName: string }[]
+  /** Every name resolution was asked about, so "never held" cannot pass vacuously. */
+  readonly resolved: string[]
 }
 
 function fakes(
@@ -59,6 +66,9 @@ function fakes(
     replaceThrows?: boolean
     replaceStale?: boolean
     claimable?: boolean
+    /** Names the directory recognises. Everything else comes back unresolved. */
+    knownVendors?: string[]
+    holdThrows?: boolean
   } = {},
 ): Fakes {
   const extracted: { bytes: Uint8Array; mediaType: string }[] = []
@@ -66,6 +76,8 @@ function fakes(
   const replaced: { documentId: string; records: readonly ExtractionRecord[] }[] = []
   const released: string[] = []
   const marked: { id: string; state: string; token?: string }[] = []
+  const quarantined: { documentId: string; extractedName: string }[] = []
+  const resolvedNames: string[] = []
 
   const held: HeldDocument | null =
     options.document === undefined
@@ -110,6 +122,28 @@ function fakes(
     findByDocument: vi.fn(async () => []),
   }
 
+  const known = new Set((options.knownVendors ?? []).map((name) => name.trim().toLowerCase()))
+
+  const vendors: VendorDirectory = {
+    resolve: vi.fn(async (extractedName: string) => {
+      resolvedNames.push(extractedName)
+      return known.has(extractedName.trim().toLowerCase())
+        ? ({ outcome: 'resolved', vendorId: 'vendor-id-for-' + extractedName.trim() } as const)
+        : ({ outcome: 'unresolved' } as const)
+    }),
+    suggest: vi.fn(async () => {
+      throw new Error('suggest ranks candidates for a human and must not be reached from ingestion')
+    }),
+  }
+
+  const quarantine: Quarantine = {
+    hold: vi.fn(async (documentId: string, extractedName: string) => {
+      if (options.holdThrows) throw new Error('quarantine said no')
+      quarantined.push({ documentId, extractedName })
+    }),
+    heldNames: vi.fn(async () => quarantined.map((item) => item.extractedName)),
+  }
+
   const extractor: Extractor = {
     extract: vi.fn(async (request) => {
       extracted.push({ bytes: request.bytes, mediaType: request.mediaType })
@@ -123,11 +157,15 @@ function fakes(
     store,
     extractions,
     extractor,
+    vendors,
+    quarantine,
     extracted,
     fetched,
     replaced,
     released,
     marked,
+    quarantined,
+    resolved: resolvedNames,
   }
 }
 
@@ -675,6 +713,245 @@ describe('extractDocument', () => {
 
       expect(f.extractor.extract).not.toHaveBeenCalled()
       expect(f.extractions.replace).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe('vendors nobody recognises wait for a human (story 1.6b)', () => {
+  const KNOWN = 'Evergreen Landscaping'
+  const withVendor = (vendorName: string | null): ExtractionResult => ({
+    ok: true,
+    records: [{ ...RECORD, vendorName }],
+  })
+
+  describe('holding', () => {
+    it('holds the document for a name it does not recognise', async () => {
+      const f = fakes({ result: withVendor('Someone Unheard Of'), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.quarantined).toEqual([
+        { documentId: DOCUMENT_ID, extractedName: 'Someone Unheard Of' },
+      ])
+    })
+
+    it('holds nothing for a name it recognises', async () => {
+      // Paired with the test above deliberately. On its own, "nothing was held"
+      // passes just as happily against code that never asks.
+      const f = fakes({ result: withVendor(KNOWN), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.resolved).toEqual([KNOWN])
+      expect(f.quarantined).toEqual([])
+    })
+
+    it('holds the name as the document said it, not folded', async () => {
+      // A treasurer is being asked to recognise this. The normalised form is a
+      // comparison key and is no use to them.
+      const spelled = '  EverGREEN   Gardens '
+      const f = fakes({ result: withVendor(spelled), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.quarantined[0]?.extractedName).toBe(spelled)
+    })
+
+    it('does not hold a document that has no vendor at all', async () => {
+      // A statement has none, and migration 006 allows the null. Holding these
+      // would quarantine every bank statement the pilot ingests.
+      const f = fakes({ result: withVendor(null), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.resolved).toEqual([])
+      expect(f.quarantined).toEqual([])
+    })
+
+    it('asks once for a name that appears on several records', async () => {
+      const f = fakes({
+        result: {
+          ok: true,
+          records: [
+            { ...RECORD, vendorName: 'Repeated Vendor' },
+            { ...RECORD, vendorName: 'Repeated Vendor' },
+            { ...RECORD, vendorName: 'Repeated  vendor' },
+          ],
+        },
+        knownVendors: [KNOWN],
+      })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.quarantined).toHaveLength(1)
+    })
+
+    it('holds only the names that did not resolve', async () => {
+      const f = fakes({
+        result: {
+          ok: true,
+          records: [
+            { ...RECORD, vendorName: KNOWN },
+            { ...RECORD, vendorName: 'Unknown Roofing' },
+            { ...RECORD, vendorName: null },
+          ],
+        },
+        knownVendors: [KNOWN],
+      })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.quarantined.map((item) => item.extractedName)).toEqual(['Unknown Roofing'])
+    })
+
+    it('still reports the document as read, because extraction succeeded', async () => {
+      // Quarantine is not a fifth extraction state. The provider answered and
+      // the records validated; it is vendor resolution that is pending.
+      const f = fakes({ result: withVendor('Someone Unheard Of'), knownVendors: [KNOWN] })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'read', records: 1 })
+    })
+  })
+
+  describe('the order of the two writes', () => {
+    it('holds before storing records, so a failure between them can recover', async () => {
+      // Not symmetric. `replace` moves the document to `read`, which settles it
+      // and stops any later poll, so records stored with no hold is silent and
+      // permanent. A hold with no records leaves the document `held`, so the
+      // next poll re-extracts, holds again as a no-op, and stores. It heals.
+      const order: string[] = []
+      const f = fakes({ result: withVendor('Someone Unheard Of'), knownVendors: [KNOWN] })
+
+      vi.mocked(f.quarantine.hold).mockImplementation(async () => {
+        order.push('hold')
+      })
+      vi.mocked(f.extractions.replace).mockImplementation(async () => {
+        order.push('replace')
+      })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(order).toEqual(['hold', 'replace'])
+    })
+
+    it('does not store records when the hold fails', async () => {
+      // The consequence of that order, asserted rather than assumed.
+      const f = fakes({
+        result: withVendor('Someone Unheard Of'),
+        knownVendors: [KNOWN],
+        holdThrows: true,
+      })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.replaced).toEqual([])
+    })
+
+    it('reports a failed hold as retryable, not as a bad document', async () => {
+      const f = fakes({
+        result: withVendor('Someone Unheard Of'),
+        knownVendors: [KNOWN],
+        holdThrows: true,
+      })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({
+        outcome: 'provider-unavailable',
+      })
+    })
+  })
+
+  describe('a name the database could never store', () => {
+    const UNSTORABLE = 'Ever\u0000green'
+
+    it('is unreadable, not an outage', async () => {
+      // The provider answered and its answer cannot be trusted, which is what
+      // `unreadable` means. Reporting `provider-unavailable` would promise a
+      // retry that cannot help: the same bytes yield the same NUL every time.
+      const f = fakes({ result: withVendor(UNSTORABLE), knownVendors: [KNOWN] })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'unreadable' })
+    })
+
+    it('is not handed to resolution at all', async () => {
+      const f = fakes({ result: withVendor(UNSTORABLE), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.resolved).toEqual([])
+    })
+
+    it('stores nothing and holds nothing', async () => {
+      const f = fakes({ result: withVendor(UNSTORABLE), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.replaced).toEqual([])
+      expect(f.quarantined).toEqual([])
+    })
+
+    it('accepts every other awkward character, so the guard is narrow', async () => {
+      // A guard that refuses too much is its own defect: these are all storable
+      // and all plausible in a real vendor name.
+      const awkward = 'Café Äkta — O’Brien & Sons'
+      const f = fakes({ result: withVendor(awkward), knownVendors: [KNOWN] })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'read' })
+      expect(f.quarantined).toHaveLength(1)
+    })
+  })
+
+  describe('the deterministic path is untouched', () => {
+    it.each(TABULAR)('never resolves a vendor for %s', async (contentType) => {
+      const f = fakes({
+        document: {
+          id: DOCUMENT_ID,
+          storageKey: 'documents/ab/cdef',
+          contentType,
+          extractionState: 'held' as const,
+        },
+        knownVendors: [KNOWN],
+      })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.resolved).toEqual([])
+      expect(f.quarantined).toEqual([])
+    })
+  })
+
+  describe('one held document does not delay any other (AC3)', () => {
+    it('holds the unresolved one and lets the rest through', async () => {
+      // Both documents run through the *same* quarantine and directory, so this
+      // would fail if extraction ever became set-shaped -- one call deciding
+      // for a batch, where a single unknown name stops everything behind it.
+      // It passes trivially today because extraction is per document, and that
+      // is exactly why it is worth asserting: nothing else records the
+      // guarantee, and a later change could take it away silently.
+      const held = fakes({ result: withVendor('Someone Unheard Of'), knownVendors: [KNOWN] })
+      const clear = {
+        ...fakes({ result: withVendor(KNOWN), knownVendors: [KNOWN] }),
+        quarantine: held.quarantine,
+        vendors: held.vendors,
+      }
+
+      const heldOutcome = await extractDocument(DOCUMENT_ID, held)
+      const clearOutcome = await extractDocument(OTHER_DOCUMENT_ID, clear)
+
+      expect(heldOutcome).toMatchObject({ outcome: 'read' })
+      expect(clearOutcome).toMatchObject({ outcome: 'read' })
+      expect(held.quarantined).toEqual([
+        { documentId: DOCUMENT_ID, extractedName: 'Someone Unheard Of' },
+      ])
+    })
+
+    it('stores the records of the document that was held, too', async () => {
+      // Holding is not withholding. The figures were read and they are kept;
+      // what waits is who the vendor is.
+      const f = fakes({ result: withVendor('Someone Unheard Of'), knownVendors: [KNOWN] })
+
+      await extractDocument(DOCUMENT_ID, f)
+
+      expect(f.replaced).toHaveLength(1)
     })
   })
 })

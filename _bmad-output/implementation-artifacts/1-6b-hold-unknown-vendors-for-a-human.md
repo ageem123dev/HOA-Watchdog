@@ -4,7 +4,7 @@ baseline_commit: b57140974ae3b83cac7cb39080362947acca3a55
 
 # Story 1.6b: Hold unknown vendors for a human
 
-Status: ready-for-dev
+Status: review
 
 > **Second of four stories from epic story 1.6.**
 > **1.6a** built the mechanism: a `vendor` table, one normalisation, and a directory whose `resolve`
@@ -79,30 +79,30 @@ derives "extracting" from `held` plus a live claim
         revoked the default. Say why in a comment: 1.6c reads the queue
   - [x] `comment on table` / `on column` in the house style
 
-- [ ] **A port for holding** (AC: 1, 5)
-  - [ ] `core/ports/quarantine.ts` — `hold(documentId, extractedName)` and enough to read back for
+- [x] **A port for holding** (AC: 1, 5)
+  - [x] `core/ports/quarantine.ts` — `hold(documentId, extractedName)` and enough to read back for
         tests. The queue-reading shape belongs to 1.6c; do not build its surface here
-  - [ ] `hold` is **idempotent** — AC5 lives in the database, and the port must not defeat it by
+  - [x] `hold` is **idempotent** — AC5 lives in the database, and the port must not defeat it by
         turning a duplicate into an error the caller has to interpret
-  - [ ] Never returns or accepts a vendor id. This port is for names that have *no* vendor
+  - [x] Never returns or accepts a vendor id. This port is for names that have *no* vendor
 
-- [ ] **Wire resolution into extraction** (AC: 1, 2, 3, 4)
-  - [ ] In `core/ingestion/extract-document.ts`, after `extract` succeeds and **before** the outcome is
+- [x] **Wire resolution into extraction** (AC: 1, 2, 3, 4)
+  - [x] In `core/ingestion/extract-document.ts`, after `extract` succeeds and **before** the outcome is
         returned, resolve each distinct non-null `vendorName` in the validated records
-  - [ ] Unresolved → `hold`. Resolved → nothing
-  - [ ] **A statement has no vendor** (`vendorName` is null, and `006_extraction.sql` allows it).
+  - [x] Unresolved → `hold`. Resolved → nothing
+  - [x] **A statement has no vendor** (`vendorName` is null, and `006_extraction.sql` allows it).
         A null is not an unresolved vendor and must not be held — that would quarantine every bank
         statement the pilot ingests
-  - [ ] **Order matters.** `replace` moves the state to `read` in one transaction; the hold is a
+  - [x] **Order matters.** `replace` moves the state to `read` in one transaction; the hold is a
         separate write. Decide and test what happens if the hold fails *after* records are stored — a
         document silently not held is worse than one held twice, because AC5 makes twice impossible
-  - [ ] The extractor is still not called for tabular types, and `resolve` must not change that
+  - [x] The extractor is still not called for tabular types, and `resolve` must not change that
 
-- [ ] **The adapter, and the batch guarantee** (AC: 1, 2, 3, 5)
-  - [ ] `adapters/db/quarantine-postgres.ts`, following `vendor-directory-postgres.ts`
-  - [ ] Database tests: an item is created for an unknown name, none for a known one, and a second
+- [x] **The adapter, and the batch guarantee** (AC: 1, 2, 3, 5)
+  - [x] `adapters/db/quarantine-postgres.ts`, following `vendor-directory-postgres.ts`
+  - [x] Database tests: an item is created for an unknown name, none for a known one, and a second
         extraction of the same document does not add a second item
-  - [ ] **AC3 needs a test that would fail if documents were processed as a set** — two documents, one
+  - [x] **AC3 needs a test that would fail if documents were processed as a set** — two documents, one
         unresolved, and the other must reach `read`. Extraction is per-document today, so the risk is
         not that it breaks now but that it is never asserted and a later change makes it a set
 
@@ -263,7 +263,103 @@ raises **23505**.
 | 2 | Over-granted, so the LLM query path could create or clear a hold | GUARD — AD-8 puts a human in this loop; a write grant here removes them |
 | 3 | Asserted from `information_schema` rather than by connecting | GUARD — connect, as `roles.test.ts` does |
 
+## Tasks 2 and 3 — the port, and wiring resolution into extraction
+
+Task 2 declares an interface and has no behaviour of its own, so its tests arrive with the code that
+uses it. Both tasks are complete; neither was skipped.
+
+### Two decisions, and neither is obvious
+
+**Decision 1 — hold *before* storing records, not after.**
+
+`replace` moves the document to `read` in its own transaction. The hold is a separate write, and the
+two cannot share a transaction without one port reaching into the other's. So one of them happens
+first, and the failure between them decides which.
+
+| Order | If the second write fails | Recoverable? |
+| --- | --- | --- |
+| `replace` then `hold` | State is `read`, so the document is **settled** and no poll retries it. Records are stored, nothing is held, and nobody finds out | **No.** Silent, and needs a human who does not know to look |
+| `hold` then `replace` | State is still `held`, so the next poll re-extracts, holds again (a no-op, AC5), and replaces | **Yes.** Converges on its own |
+
+The story asked which failure is worse and the answer is not symmetric: "read but not held" is
+undetectable, "held but not read" heals itself. Hold first.
+
+**Decision 2 — a name Postgres cannot store makes the document `unreadable`.**
+
+1.6a left `resolve` propagating `22021` for such text, and this story established the path is
+reachable: `validate()` accepts `'Ever\0green'`, and the caller here holds a validated record in
+memory rather than a stored column.
+
+The three candidates the story named, and why the third wins:
+
+- **Propagate** — the generic catch reports `provider-unavailable`, which is *retryable*. The same
+  bytes produce the same NUL every time, so it would retry until the cooldown gave up, blaming
+  infrastructure for a content problem. That is precisely the mistake story 1.5b made and 1.5c split
+  the port's refusal in two to fix.
+- **Guard and hold it** — impossible on its own terms: `quarantine_item.extracted_name` cannot store
+  the name either. The guard would have to reject rather than hold.
+- **`unreadable`** — the provider answered and its answer cannot be trusted, which is exactly what
+  that outcome means. Retrying cannot help, and it does not blame the document's infrastructure.
+
+Worth being clear that the guard **makes an existing impossibility explicit** rather than inventing a
+rule: `replace` would refuse the same record at `extraction.vendor_name`. Without the guard the
+failure is an opaque database error on a different path; with it, the treasurer gets 1.5c's
+unreadable-document copy.
+
+**B1 — an unresolved name holds the document.**
+*Correct if:* `hold` is called with the document and the name as extracted, and no vendor is created.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | `vendorName` is null — a statement has no vendor | GUARD. Holding these would quarantine every bank statement the pilot ingests |
+| 2 | Several records carry the same unknown name | GUARD — hold once per distinct name, not once per record |
+| 3 | A record resolves and another does not | GUARD — hold only the unresolved one |
+| 4 | The name contains text Postgres cannot store | GUARD → `unreadable`, per decision 2 |
+| 5 | `hold` throws | PROPAGATE — the outer catch already reports it, and decision 1 makes it recoverable |
+| 6 | Resolution is asked for a tabular document | OUT-OF-SCOPE — those return before the provider is reached; a test already asserts the extractor is never called for them |
+
+**B2 — a resolved name holds nothing.**
+*Correct if:* `hold` is never called, and the document reaches `read` as before.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | Resolution is never called at all, so nothing is ever held | GUARD — assert the unknown case in the same suite, or "never held" passes vacuously |
+| 2 | A near match resolves | GUARD — 1.6a pins this, and a test here proves the caller did not widen it |
+
 ### Debug Log References
+
+**Tasks 2 to 4.** Task 2 declares an interface and has no behaviour of its own, so its tests arrived
+with the code that uses it. All three are complete.
+
+**Red.** 11 failing on the wiring, all assertion failures; the 57 pre-existing cases in that file kept
+passing, so extending the fakes did not disturb them.
+
+**`next build` caught what the suite could not.** Adding two dependencies to
+`ExtractDocumentDependencies` left `app/api/.../extract/route.ts` constructing an incomplete object.
+The full unit suite passed — Vitest does not type-check — and `next build` failed with the two missing
+properties named. That is the third time on this project that build has caught what lint and tests
+both passed.
+
+**Sensitivity: every decision in the wiring, broken in turn.**
+
+| Mutation | Result |
+| --- | --- |
+| Store records before holding | 3 fail |
+| Hold every name, resolved or not | 3 fail |
+| Treat a missing vendor as a name | 1 fails |
+| Drop the unstorable-name guard | 3 fail |
+| Distinct by raw spelling rather than normalised | 1 fails |
+
+Restored: 70 passing. Each mutation is caught by the test written for that decision, which is what
+separates a decision from an accident.
+
+**Adversarial review** (Argus, staged diff, 10/10 files, confidence 1.0): no findings.
+
+**One thing to carry into 1.6c.** The core tests prove batch independence with two documents sharing
+one quarantine and one directory, which would fail if extraction ever became set-shaped. It passes
+trivially today because extraction is per document — the point is that nothing else records the
+guarantee, so a later change could remove it silently.
+
 
 **Task 1.** Red against a database with no `quarantine_item` (42P01), green after `010` applied.
 253 database cases, up from 230.
@@ -295,9 +391,64 @@ satisfy it would have introduced the defect it imagined.
 
 ### Completion Notes List
 
+**All five ACs have a test that fails when the behaviour is removed.**
+
+| AC | Proved by |
+| --- | --- |
+| AC1 unresolved holds, creates nothing | an item recorded with the name as extracted; no vendor row is ever written from this path |
+| AC2 recognised holds nothing | asserted *beside* the unknown case, so "nothing held" cannot pass against code that never asks |
+| AC3 one held document delays no other | two documents through one shared quarantine and directory |
+| AC4 not a fifth extraction state | a held document still returns `read`, and the migration says so in its own comment |
+| AC5 re-reading does not accumulate | `on conflict do nothing` on the composite index, proved by holding a second *spelling* |
+
+**The two decisions this story had to make, and what they turned on.**
+
+*Hold before storing.* The two writes cannot share a transaction, so one goes first, and the failure
+between them is not symmetric: `replace` settles the document at `read`, so records-without-a-hold is
+silent and permanent, while a hold-without-records leaves it `held` and the next poll heals it.
+
+*A name Postgres cannot store makes the document `unreadable`.* 1.6a left this propagating and asked
+this story to re-confirm the path was unreachable. It is not: `validate()` accepts a NUL and this
+caller holds a validated record in memory. Reporting an outage would promise a retry that cannot help
+— the same bytes yield the same NUL — and would blame infrastructure for a content problem, which is
+the mistake 1.5b made and 1.5c split the port's refusal in two to fix.
+
+**Out of scope, deliberately.** No queue surface (1.6c), no resolution (1.6d), no vendor creation
+anywhere. `suggest` is never called from ingestion, and the fake throws if it is — ranking candidates
+is for a human to choose between, and reaching it from here would be automatic near-matching by
+another name.
+
+**Gates on this head:** lint clean, `next build` compiled, **1050 unit passed / 251 skipped**,
+**263 database passed**, `npx tsc --noEmit` at the pre-existing **8**, repo-wide control-byte sweep
+clean.
+
+**Not proven by CI.** `verify:database` does not run without the two protected variables, and the
+generated column, composite unique index, grants and cascade are all in the part CI will not execute.
+
+
 ### File List
+
+**Added**
+
+- `migrations/010_quarantine_item.sql` — the table, the composite unique index, the grant
+- `migrations/quarantine-item.test.ts` — constraints, grants proved by connecting, cascade, both index directions
+- `core/ports/quarantine.ts` — `hold` and `heldNames`, narrow on purpose
+- `adapters/db/quarantine-postgres.ts` — idempotency deferred to the database
+- `adapters/db/quarantine-postgres.test.ts` — including a second spelling absorbed
+
+**Modified**
+
+- `core/ingestion/extract-document.ts` — resolve, hold, then store
+- `core/ingestion/extract-document.test.ts` — fakes gained a directory and a quarantine
+- `app/api/documents/[id]/extract/route.ts` — the two new collaborators
+
 
 ### Change Log
 
 - 2026-08-06 — Story created. Second of the four stories epic story 1.6 was split into. Status ->
   ready-for-dev.
+- 2026-08-06 — Tasks 1-4 implemented test-first. A `quarantine_item` table whose identity reuses
+  migration 009's normalisation, so quarantine and the vendor table cannot disagree about whether
+  two spellings are one name; a narrow port; and ingestion that resolves each distinct vendor name
+  and holds the ones it does not know — before storing records, because that failure heals and the
+  other does not. Status -> review.

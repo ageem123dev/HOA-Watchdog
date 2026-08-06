@@ -2,6 +2,8 @@ import { auth } from '@/adapters/auth/auth'
 import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { createGeminiExtractor } from '@/adapters/extraction/extractor-gemini'
+import { createQuarantine } from '@/adapters/db/quarantine-postgres'
+import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
 import { extractDocument } from '@/core/ingestion/extract-document'
 
@@ -34,6 +36,8 @@ const documentStore = createS3DocumentStore()
 const documentRepository = createPostgresDocumentRepository()
 const extractionRepository = createPostgresExtractionRepository()
 const extractor = createGeminiExtractor()
+const vendors = createVendorDirectory()
+const quarantine = createQuarantine()
 
 /** Lower-case canonical UUID, which is what `uuidv7()` produces. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -66,6 +70,8 @@ export async function POST(
     store: documentStore,
     extractions: extractionRepository,
     extractor,
+    vendors,
+    quarantine,
     onError: (error) => {
       // The treasurer gets a state; an operator gets the cause. Discarding it
       // would make a provider outage look like a bad scan in the logs too.
