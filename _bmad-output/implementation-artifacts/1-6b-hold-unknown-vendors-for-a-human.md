@@ -5,7 +5,7 @@ merge_request: 16
 
 # Story 1.6b: Hold unknown vendors for a human
 
-Status: review
+Status: done
 
 > **Second of four stories from epic story 1.6.**
 > **1.6a** built the mechanism: a `vendor` table, one normalisation, and a directory whose `resolve`
@@ -423,6 +423,44 @@ contract for length and blankness, and guards only what that contract does not c
 that returns unvalidated records breaks that, and the existing tests on `validate` are what would keep
 it honest.
 
+**Merge-request review: 8 rounds, 12 findings.** The story's own code stopped changing after round
+4; rounds 5 to 8 were findings against changes made *during* the review.
+
+| Round | Findings | Where |
+| --- | --- | --- |
+| 1 | 5 | the story, plus a CI failure my own gate command hid |
+| 2 | 2 | assertions weaker than they looked |
+| 3 | 1 | a collaborator asserted by shape, not identity |
+| 4 | 1 | a guard I had removed, which was reachable after all |
+| 5 | 2 | the CI change and a contradiction in the skill |
+| 6 | 1 | the CI "fix" was post-merge detection, not a gate |
+| 7 | 1 | the path filter skipped `.env*` |
+| 8 | 1 | the path filter skipped tooling paths — filter removed |
+
+**The two findings that mattered most were both integration faults, and both were mine.**
+
+*The upload path bypassed quarantine entirely.* `ingest.ts` finishes extraction for spreadsheets and
+called `replace` directly — no resolution, no hold. Epic AC1 is about extraction *completing*, not
+about which parser did it, so uploading the invoices as CSV was a way to put vendors into the system
+with nobody asked. A test of mine had recorded that bypass as intended behaviour. The rule now lives
+in one module used by both paths.
+
+*A guard that trusted its caller.* `isStorableName` checked only for a NUL, reasoning that `validate()`
+already bounds length and blankness. True, and the wrong place to rest: AD-8 says extracted values are
+untrusted and this is the boundary. Widened — and the fix then ran over the *deduplicated* names, so an
+NBSP-padded duplicate collapsed onto a plain name and vanished before the guard. Then I removed it from
+the upload path as unreachable, and round 4 showed `acceptance.ts` scans only the first 8192 bytes for
+a NUL, so it is reachable. Restored, with a test that puts the NUL past byte 8192.
+
+**A pattern worth naming.** Twice I dismissed a finding by reasoning that an input could not reach the
+code, and both times I was wrong. "That cannot get here" is the moment to go and measure, not to
+conclude.
+
+**My own gate hid a CI failure.** Two new route imports left `route.test.ts` unable to load, and the
+gate command grepped `^ +Tests ` only — so `1050 passed` was reported while `Test Files 1 failed` sat
+one line above. That is the defect recorded from story 1.5b, repeated because a `tr -d` pipe was added
+and the `Test Files` half dropped. 21 route tests had not been running.
+
 ### Completion Notes List
 
 **All five ACs have a test that fails when the behaviour is removed.**
@@ -486,3 +524,7 @@ generated column, composite unique index, grants and cascade are all in the part
   two spellings are one name; a narrow port; and ingestion that resolves each distinct vendor name
   and holds the ones it does not know — before storing records, because that failure heals and the
   other does not. Status -> review.
+- 2026-08-06 — 8 review rounds, 12 findings, all fixed or agreed as follow-ups. The rule was
+  extended to the upload-time path after review found spreadsheets bypassed it entirely, and the
+  storability guard was corrected three times before it matched the constraints it stands in for.
+  CI now runs one pipeline per commit rather than two, with the full suite intact. Status -> done.
