@@ -86,13 +86,13 @@ vendor is created
         treat it as success.
   - [x] Database tests scoped per test, as `quarantine-queue-postgres.test.ts` does. Its first
         version scoped per *file* and the tests stopped being independent.
-- [ ] **Task 3 — Suggestions for the queue** (AC4)
-  - [ ] Extend the read so each held item can carry ranked candidates from
+- [x] **Task 3 — Suggestions for the queue** (AC4)
+  - [x] Extend the read so each held item can carry ranked candidates from
         `VendorDirectory.suggest()`. Trigram similarity, most similar first.
-  - [ ] **Nothing preselected.** `suggest`'s own doc comment says a caller treating the first entry
+  - [x] **Nothing preselected.** `suggest`'s own doc comment says a caller treating the first entry
         as an answer has reintroduced automatic near-matching. The surface shows a score so the
         ordering is explainable, and requires an explicit choice.
-  - [ ] Decide and record where suggestions are fetched — per item inside the queue read, or a
+  - [x] Decide and record where suggestions are fetched — per item inside the queue read, or a
         second call. Watch the N+1: a queue of thirty items must not make thirty round trips.
 - [ ] **Task 4 — The surface** (AC1, AC2, AC4, AC6)
   - [ ] Server actions in `app/quarantine/`, following `app/upload/actions.ts` for the established
@@ -288,6 +288,44 @@ quarantine row's absence. The two are independent readings of "resolved", and a 
 one while breaking the other -- creating a duplicate vendor, or clearing the wrong hold -- is exactly
 what a single assertion would miss.
 
+## Task 3 - suggestions
+
+**Where they attach, decided before writing any.** Not on `HeldItem`, and not as a new method on
+`QuarantineQueue`: story 1.6c pins both with allow-lists, and widening them would make this story
+edit assertions that are still true. Suggestions ride on the *view* instead, keyed by normalised
+name — `toQueueView(items, suggestions)` gains a lookup, and `view.items` keeps the exact shape 1.6c
+asserts.
+
+**The N+1 is answered by deduplication, not by batching.** Two documents held for the same vendor
+name are one question asked twice, so the page asks `suggest()` once per *distinct normalised name*.
+On a queue where every name differs this is still one call per item, which is the honest cost; the
+queue is a human work list and if it ever grows past that, the fix is a batched query, not a cache.
+
+### Behaviour E - `distinctNamesForSuggestions(items)` (AC4)
+
+1. **Correct-run signal:** one entry per distinct normalised name, carrying the first spelling seen.
+2. **How to test it:** a pure function over plain data, node-tested.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| E1 | Deduplicates on the raw name, so `Acme` and `ACME  ` ask twice for one question — and the two answers arrive under different keys, so one row silently shows none | GUARD - dedupe on `normaliseVendorName`, the same rule the database indexes |
+| E2 | Returns the normalised form as the name to look up, so `suggest()` ranks against a folded string rather than what the document said | GUARD - keep the first spelling, return it verbatim |
+| E3 | An empty queue produces a call with an empty list, or `undefined` | GUARD - zero-one-many |
+
+### Behaviour F - the view carries suggestions (AC4)
+
+1. **Correct-run signal:** a row can find its candidates; a row with none renders without them.
+2. **How to test it:** `toQueueView` with a supplied map, node-tested.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| F1 | Suggestions are looked up by raw name, so a row whose spelling differs from the key finds nothing and quietly offers no candidates (the same defect as E1, one layer down) | GUARD - look up by normalised name on both sides |
+| F2 | The view re-sorts candidates, so the ranking `suggest()` computed is replaced by an alphabetical one that looks equally plausible | GUARD - order preserved, tested with a deliberately non-alphabetical input |
+| F3 | Omitting the argument changes `view.items`, breaking story 1.6c's assertions on a shape that is still correct | GUARD - suggestions live beside `items`, not inside them; 1.6c's tests must keep passing untouched |
+| F4 | A candidate is marked selected or defaulted | GUARD - the view carries no selection at all, so there is nothing for a surface to preselect |
+
 ### Debug Log References
 
 **Task 1 red.** All five structural assertions failed on empty sets; the comment-stripping control
@@ -314,6 +352,26 @@ one story 1.6b's guard was rebuilt around.
 
 ### Completion Notes List
 
+**Task 3.** Suggestions ride beside `items`, not inside them, so story 1.6c's allow-list on the held
+item shape stays true and untouched — this story had no business editing an assertion that is still
+correct (F3). Lookups fold on both sides using the same rule the database indexes under (E1, F1); a
+row whose spelling differs by a space would otherwise offer no candidates, which on the page is
+indistinguishable from a name resembling nothing. Ranking is preserved, not re-sorted (F2), and the
+view carries no selection at all, so there is nothing for a surface to preselect (F4, AC4).
+
+The N+1 is answered by deduplicating on the folded name — two documents held for one vendor are one
+question — and where every name differs the cost is one call per row. Recorded rather than hidden:
+if the queue outgrows that, the answer is a batched query, not a cache.
+
+**Review finding, confirmed and fixed test-first.** `suggestions[key] ?? []` on a plain object
+returns `Object.prototype` members for a name folding to `constructor`, `toString` and friends — a
+function where the caller expects an array, and `?? []` never fires because the value is not nullish.
+Reproduced (`expected [Function Object] to deeply equal []`), fixed with `Object.hasOwn`, and covered
+for every prototype member rather than the one that was named. "No vendor is called that" is the
+reasoning this project has been wrong about twice, and AD-8 is explicit that an extracted name is
+untrusted data.
+
+
 **Task 1.** Two operations and no third, with the outcome type doing the work a comment would
 otherwise do: `matchToExisting` cannot return `created`, so AC2's "no vendor is created" is a
 property of the type rather than a promise. `already-resolved` is a returned variant, not a throw
@@ -339,6 +397,10 @@ Adversarial review (Argus) clean on both task diffs.
 - `core/ports/vendor-resolution.test.ts` (new)
 - `adapters/db/vendor-resolution-postgres.ts` (new)
 - `adapters/db/vendor-resolution-postgres.test.ts` (new)
+- `core/quarantine/suggestions.ts` (new)
+- `core/quarantine/suggestions.test.ts` (new)
+- `core/quarantine/queue-view.ts` (modified — suggestions beside `items`)
+- `core/quarantine/queue-view.test.ts` (modified — suggestion cases appended)
 
 ### Change Log
 
