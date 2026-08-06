@@ -90,6 +90,13 @@ verify:
         - "*.json"
         - "*.mts"
         - .gitlab-ci.yml
+        # The NFR-2 guard scans every `.env*` file on disk, tracked or not, so a
+        # merge request that touches only one of them is exactly the change that
+        # must not skip verification -- it is how a banking credential would
+        # arrive. Raised in review, and it is the risk this rule's own comment
+        # predicted, arriving as a file rather than a directory.
+        - ".env*"
+        - "**/.env*"
 
 # The database and storage tests need live credentials, so they cannot run on a
 # fork or an untrusted pipeline. They are opt-in: define WATCHDOG_WRITER_DATABASE_URL
