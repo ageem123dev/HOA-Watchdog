@@ -8,6 +8,7 @@ import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { Extractor } from '../ports/extractor'
 import type { Quarantine } from '../ports/quarantine'
 import type { VendorDirectory } from '../ports/vendor-directory'
+import { VENDOR_NAME_MAX_LENGTH } from '../extraction/record'
 import { normaliseVendorName } from '../vendor/name'
 
 /**
@@ -128,19 +129,40 @@ const TABULAR_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Text Postgres cannot store at all.
+ * A vendor name `quarantine_item` would refuse.
  *
- * Narrow on purpose: a NUL is the one character `text` refuses outright, and a
- * guard that rejected more would start refusing real vendor names -- accents,
- * dashes and apostrophes all belong in one.
+ * Three checks, one per clause of `quarantine_item_name_length`, each reusing a
+ * definition that already exists rather than restating it:
  *
- * This makes an existing impossibility explicit rather than inventing a rule.
- * `extraction.vendor_name` would refuse the same record, and so would
- * `quarantine_item.extracted_name`; without the check the failure arrives as an
- * opaque 22021 from whichever write happened to run first.
+ *   a NUL          `text` refuses it outright
+ *   over 200       the same bound `extraction.vendor_name` enforces
+ *   blank once trimmed   normalising it to nothing means it is nothing
+ *
+ * Length is counted in **code points**, because `char_length` counts those and
+ * JavaScript's `.length` counts UTF-16 units -- 200 astral characters are 400
+ * by the wrong measure, and guarding on it would refuse a name the table would
+ * store happily.
+ *
+ * Widened after review. The first version checked only the NUL, on the reasoning
+ * that `validate()` already bounds length and blankness so a conforming
+ * extractor cannot produce the other two. That reasoning is correct and is still
+ * the wrong place to rest: AD-8 says extracted values are untrusted data, this
+ * is the boundary they cross, and "the caller will not send that" is exactly the
+ * assumption the boundary exists to stop depending on. Two reviewers raised it
+ * independently and the first analysis dismissed it.
+ *
+ * The cost of getting it wrong is not a crash. A name the table refuses raises
+ * 23514 inside the hold, which the generic handler reports as an outage --
+ * retryable -- so the document re-fails on every poll and pays for a provider
+ * call each time.
  */
-function isStorable(value: string): boolean {
-  return !value.includes('\u0000')
+function isStorableName(value: string): boolean {
+  if (value.includes('\u0000')) return false
+  if ([...value].length > VENDOR_NAME_MAX_LENGTH) return false
+
+  // Normalising trims with the same separator set the constraint uses, so an
+  // empty result is exactly `char_length(btrim(...)) = 0`.
+  return normaliseVendorName(value) !== ''
 }
 
 /**
@@ -260,14 +282,30 @@ export async function extractDocument(
       // `replace` refuses `[]`, and reaching it would report this as an outage.
       if (result.records.length === 0) return await settle('unreadable', 'unreadable')
 
-      const vendorNames = distinctVendorNames(result.records)
-
+      // Checked across **every** record, before anything is deduplicated.
+      //
+      // Deduplication keys on the normalised name and keeps the first spelling,
+      // and normalisation folds NBSP -- so 'Acme' plus three hundred NBSPs
+      // collapses onto a plain 'Acme' and vanishes from the list. It does not
+      // vanish from `replace`, which stores every record, and migration 006
+      // trims only space, tab and newline, so that name measures 304 there and
+      // raises 23514. The generic handler reports that as a retryable outage, so
+      // the document re-fails on every poll and pays for a provider call each
+      // time. Raised in review, against the previous fix for this same guard.
+      //
       // A name the store cannot hold means the provider's answer cannot be
-      // trusted, which is what `unreadable` says. Reporting an outage instead
-      // would promise a retry that cannot help -- the same bytes yield the same
-      // NUL every time -- and blaming infrastructure for a content problem is
-      // the mistake story 1.5b made and 1.5c split the refusal in two to fix.
-      if (!vendorNames.every(isStorable)) return await settle('unreadable', 'unreadable')
+      // trusted, which is what `unreadable` says. Blaming infrastructure for a
+      // content problem is the mistake story 1.5b made and 1.5c split the port's
+      // refusal in two to fix.
+      const everyVendorName = result.records
+        .map((record) => record.vendorName)
+        .filter((name): name is string => name !== null)
+
+      if (!everyVendorName.every(isStorableName)) return await settle('unreadable', 'unreadable')
+
+      // Only now, and for a different question: how many distinct names does
+      // this document put in front of a human?
+      const vendorNames = distinctVendorNames(result.records)
 
       // Held *before* the records are stored, and the order is load-bearing.
       //

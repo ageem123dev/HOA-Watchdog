@@ -316,17 +316,24 @@ describeWithDatabase('quarantine_item', () => {
     })
 
     it('refuses the reader an update', async () => {
+      // Scoped, though the privilege check runs before any row is touched and
+      // 42501 raises either way. If the grant is ever widened, the unqualified
+      // version rewrites every row in the table -- the test that catches the
+      // regression would also cause the damage. Raised in review.
       await expect(
-        reader.query('update quarantine_item set extracted_name = $1', [named('Renamed')]),
+        reader.query('update quarantine_item set extracted_name = $1 where document_id = $2', [
+          named('Renamed'),
+          documentId,
+        ]),
       ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
     })
 
     it('refuses the reader a delete', async () => {
       // The one that matters most: clearing a hold is how a human's decision
       // gets skipped, and the LLM path must not be able to do it.
-      await expect(reader.query('delete from quarantine_item')).rejects.toMatchObject({
-        code: INSUFFICIENT_PRIVILEGE,
-      })
+      await expect(
+        reader.query('delete from quarantine_item where document_id = $1', [documentId]),
+      ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
     })
   })
 })

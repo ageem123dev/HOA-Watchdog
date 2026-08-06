@@ -28,6 +28,8 @@ vi.mock('@/adapters/db/document-repository-postgres', () => ({
 vi.mock('@/adapters/db/extraction-repository-postgres', () => ({
   createPostgresExtractionRepository: () => ({}),
 }))
+vi.mock('@/adapters/db/quarantine-postgres', () => ({ createQuarantine: () => ({}) }))
+vi.mock('@/adapters/db/vendor-directory-postgres', () => ({ createVendorDirectory: () => ({}) }))
 vi.mock('@/adapters/extraction/extractor-gemini', () => ({ createGeminiExtractor: () => ({}) }))
 vi.mock('@/adapters/storage/document-store-s3', () => ({ createS3DocumentStore: () => ({}) }))
 

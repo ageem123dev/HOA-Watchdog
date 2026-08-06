@@ -889,6 +889,77 @@ describe('vendors nobody recognises wait for a human (story 1.6b)', () => {
       expect(f.quarantined).toEqual([])
     })
 
+    it.each([
+      ['a name past the length the table will store', 'x'.repeat(201)],
+      ['a name that is blank once trimmed', ' \u00a0\u202f\t '],
+    ])('refuses %s the same way', async (_label, name) => {
+      // The guard has to match `quarantine_item_name_length`, not just the one
+      // shape validation misses. It refuses a NUL, a name over 200 characters
+      // and a name that is blank after trimming; a guard covering only the
+      // first lets the other two reach `hold`, raise 23514, and be reported as
+      // retryable -- so the document re-fails on every poll and pays for a
+      // provider call each time. Raised in review by two reviewers
+      // independently, after the first analysis wrongly dismissed it.
+      const f = fakes({ result: withVendor(name), knownVendors: [KNOWN] })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'unreadable' })
+      expect(f.resolved).toEqual([])
+      expect(f.quarantined).toEqual([])
+      expect(f.replaced).toEqual([])
+    })
+
+    it('sees an unstorable name even when another record hides it', async () => {
+      // The hole the first fix opened. `distinctVendorNames` dedupes by the
+      // NORMALISED key and keeps the first spelling, and normalisation treats
+      // NBSP as a separator -- so 'Acme' plus three hundred NBSPs collapses to
+      // the same key as a plain 'Acme' and disappears before the guard runs.
+      //
+      // It does not disappear from `replace`, which stores every record. And
+      // migration 006's bound trims only space, tab and newline, so the padded
+      // name measures 304 there -- verified against the database -- raising
+      // 23514, which the generic handler calls a retryable outage. The document
+      // then re-fails on every poll and pays for a provider call each time.
+      //
+      // So the guard has to see every name, not the deduplicated set.
+      const padded = 'Acme Supplies' + '\u00a0'.repeat(300)
+      const f = fakes({
+        result: {
+          ok: true,
+          records: [
+            { ...RECORD, vendorName: 'Acme Supplies' },
+            { ...RECORD, vendorName: padded },
+          ],
+        },
+        knownVendors: [KNOWN],
+      })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'unreadable' })
+      expect(f.replaced).toEqual([])
+      expect(f.quarantined).toEqual([])
+    })
+
+    it('accepts a name exactly at the length the table allows', async () => {
+      // The other side of the bound. Without this, a guard one character too
+      // strict passes every test above.
+      const f = fakes({ result: withVendor('y'.repeat(200)), knownVendors: [KNOWN] })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'read' })
+      expect(f.quarantined).toHaveLength(1)
+    })
+
+    it('counts characters the way the database does, not UTF-16 units', async () => {
+      // `char_length` counts code points; JavaScript's `.length` counts UTF-16
+      // units, so 200 astral characters are 400 by the wrong measure. Guarding
+      // on `.length` would refuse a name the table would happily store.
+      const astral = String.fromCodePoint(0x1f600).repeat(200)
+
+      expect(astral.length).toBe(400)
+
+      const f = fakes({ result: withVendor(astral), knownVendors: [KNOWN] })
+
+      expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'read' })
+    })
+
     it('accepts every other awkward character, so the guard is narrow', async () => {
       // A guard that refuses too much is its own defect: these are all storable
       // and all plausible in a real vendor name.
