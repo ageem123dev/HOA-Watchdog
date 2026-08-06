@@ -4,6 +4,8 @@ import { auth } from '@/adapters/auth/auth'
 import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
+import { createQuarantine } from '@/adapters/db/quarantine-postgres'
+import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
 import {
   MAX_FILES_PER_UPLOAD,
@@ -99,6 +101,8 @@ export async function uploadDocuments(
     repository: documentRepository,
     extractions: extractionRepository,
     workbooks: workbookDecoder,
+    vendors: createVendorDirectory(),
+    quarantine: createQuarantine(),
     // The real error goes to the server log, never to the page — its text can
     // name a bucket, a path, or a library. The treasurer gets the per-file
     // outcome instead.

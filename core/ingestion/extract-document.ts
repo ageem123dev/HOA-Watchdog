@@ -8,8 +8,7 @@ import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { Extractor } from '../ports/extractor'
 import type { Quarantine } from '../ports/quarantine'
 import type { VendorDirectory } from '../ports/vendor-directory'
-import { VENDOR_NAME_MAX_LENGTH } from '../extraction/record'
-import { normaliseVendorName } from '../vendor/name'
+import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -128,72 +127,6 @@ const TABULAR_TYPES: ReadonlySet<string> = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ])
 
-/**
- * A vendor name `quarantine_item` would refuse.
- *
- * Three checks, one per clause of `quarantine_item_name_length`, each reusing a
- * definition that already exists rather than restating it:
- *
- *   a NUL          `text` refuses it outright
- *   over 200       the same bound `extraction.vendor_name` enforces
- *   blank once trimmed   normalising it to nothing means it is nothing
- *
- * Length is counted in **code points**, because `char_length` counts those and
- * JavaScript's `.length` counts UTF-16 units -- 200 astral characters are 400
- * by the wrong measure, and guarding on it would refuse a name the table would
- * store happily.
- *
- * Widened after review. The first version checked only the NUL, on the reasoning
- * that `validate()` already bounds length and blankness so a conforming
- * extractor cannot produce the other two. That reasoning is correct and is still
- * the wrong place to rest: AD-8 says extracted values are untrusted data, this
- * is the boundary they cross, and "the caller will not send that" is exactly the
- * assumption the boundary exists to stop depending on. Two reviewers raised it
- * independently and the first analysis dismissed it.
- *
- * The cost of getting it wrong is not a crash. A name the table refuses raises
- * 23514 inside the hold, which the generic handler reports as an outage --
- * retryable -- so the document re-fails on every poll and pays for a provider
- * call each time.
- */
-function isStorableName(value: string): boolean {
-  if (value.includes('\u0000')) return false
-  if ([...value].length > VENDOR_NAME_MAX_LENGTH) return false
-
-  // Normalising trims with the same separator set the constraint uses, so an
-  // empty result is exactly `char_length(btrim(...)) = 0`.
-  return normaliseVendorName(value) !== ''
-}
-
-/**
- * The distinct vendor names a reading produced, in the order first seen.
- *
- * Distinct by the *normalised* form, so one vendor spelled two ways on one
- * document is one question rather than two. The spelling kept is the first,
- * because that is what a treasurer will be shown and any of them is equally
- * true of the document.
- *
- * A null is not a name. A statement genuinely has no vendor and migration 006
- * allows it; treating that as unresolved would quarantine every bank statement
- * the pilot ingests.
- */
-function distinctVendorNames(records: readonly { readonly vendorName: string | null }[]): string[] {
-  const seen = new Set<string>()
-  const names: string[] = []
-
-  for (const record of records) {
-    if (record.vendorName === null) continue
-
-    const key = normaliseVendorName(record.vendorName)
-    if (seen.has(key)) continue
-
-    seen.add(key)
-    names.push(record.vendorName)
-  }
-
-  return names
-}
-
 export async function extractDocument(
   documentId: string,
   deps: ExtractDocumentDependencies,
@@ -282,30 +215,10 @@ export async function extractDocument(
       // `replace` refuses `[]`, and reaching it would report this as an outage.
       if (result.records.length === 0) return await settle('unreadable', 'unreadable')
 
-      // Checked across **every** record, before anything is deduplicated.
-      //
-      // Deduplication keys on the normalised name and keeps the first spelling,
-      // and normalisation folds NBSP -- so 'Acme' plus three hundred NBSPs
-      // collapses onto a plain 'Acme' and vanishes from the list. It does not
-      // vanish from `replace`, which stores every record, and migration 006
-      // trims only space, tab and newline, so that name measures 304 there and
-      // raises 23514. The generic handler reports that as a retryable outage, so
-      // the document re-fails on every poll and pays for a provider call each
-      // time. Raised in review, against the previous fix for this same guard.
-      //
-      // A name the store cannot hold means the provider's answer cannot be
-      // trusted, which is what `unreadable` says. Blaming infrastructure for a
-      // content problem is the mistake story 1.5b made and 1.5c split the port's
-      // refusal in two to fix.
-      const everyVendorName = result.records
-        .map((record) => record.vendorName)
-        .filter((name): name is string => name !== null)
-
-      if (!everyVendorName.every(isStorableName)) return await settle('unreadable', 'unreadable')
-
-      // Only now, and for a different question: how many distinct names does
-      // this document put in front of a human?
-      const vendorNames = distinctVendorNames(result.records)
+      // The quarantine rule, shared with the upload-time path in `ingest.ts`.
+      // Extraction finishes in two places and the rule is about extraction
+      // finishing, so it lives in one module rather than two copies.
+      if (unstorableName(result.records)) return await settle('unreadable', 'unreadable')
 
       // Held *before* the records are stored, and the order is load-bearing.
       //
@@ -314,14 +227,7 @@ export async function extractDocument(
       // silent and permanent, and nobody finds out. The other way round leaves
       // the document `held`, so the next poll re-extracts, holds again -- a
       // no-op, the database enforces that -- and stores. It heals itself.
-      for (const name of vendorNames) {
-        const resolution = await deps.vendors.resolve(name)
-
-        // AD-8: unknown vendors reach a human and are never created here.
-        if (resolution.outcome === 'unresolved') {
-          await deps.quarantine.hold(documentId, name)
-        }
-      }
+      await holdUnknownVendors(documentId, result.records, deps)
 
       // The fence goes with the write. `replace` clears the claim in the same
       // transaction as the state change, which is why nothing releases it here:
