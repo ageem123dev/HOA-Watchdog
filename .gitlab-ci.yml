@@ -58,8 +58,36 @@ verify:
     # type-checks at all.
     - npm test -- core/security
   rules:
+    # Always on main: whatever is merged gets the full check, with no dependence
+    # on the path list below being complete.
+    - if: $CI_COMMIT_BRANCH == 'main'
+    # On a merge request, only when something executable changed. Six of the
+    # fourteen commits on story 1.6b's branch touched nothing but story
+    # documents and config, and each one still paid for a full job.
+    #
+    # Written as "run when code changes" rather than "skip when docs change",
+    # because GitLab's `changes` fires when *any* listed path is touched -- a
+    # skip-list would wrongly skip a commit that changed a document and a source
+    # file together.
+    #
+    # The risk this accepts: a new top-level directory absent from this list
+    # would skip CI on a branch. The `main` rule above is what stops that
+    # reaching production unchecked, and it is why that rule is first.
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-    - if: $CI_COMMIT_BRANCH
+      changes:
+        - app/**/*
+        - core/**/*
+        - adapters/**/*
+        - migrations/**/*
+        - scripts/**/*
+        - catalog/**/*
+        - tools/**/*
+        - agent/**/*
+        - "*.ts"
+        - "*.mjs"
+        - "*.json"
+        - "*.mts"
+        - .gitlab-ci.yml
 
 # The database and storage tests need live credentials, so they cannot run on a
 # fork or an untrusted pipeline. They are opt-in: define WATCHDOG_WRITER_DATABASE_URL
