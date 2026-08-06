@@ -10,6 +10,14 @@ export const SIGN_IN_ROUTE = '/sign-in'
 export const DEFAULT_SIGNED_IN_ROUTE = '/dashboard'
 
 /**
+ * Named here rather than written inline wherever it is linked, so the route and
+ * the allow-list below cannot drift apart in different files. It is deliberately
+ * *not* added to `PUBLIC_ROUTES`: the queue lists vendor names taken off the
+ * association's invoices.
+ */
+export const QUARANTINE_ROUTE = '/quarantine'
+
+/**
  * The complete set of routes reachable without a session. This is an allow-list,
  * and the decision below is deny-by-default: a route nobody thought about is
  * protected, not exposed. Adding to this list is how a surface becomes public —

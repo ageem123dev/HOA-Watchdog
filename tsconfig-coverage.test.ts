@@ -1,0 +1,95 @@
+/**
+ * Every source file the project writes is type-checked.
+ *
+ * `npm run build` is the only gate here that checks types — neither ESLint nor
+ * Vitest does — so a file outside `tsconfig.json`'s `include` is a file with no
+ * type checking at all, and nothing says so. Story 1.6c added the first `.tsx`
+ * under `core/` and `include` listed `core/**\/*.ts` only; `tsc --listFiles`
+ * confirmed the file was invisible to the compiler. Raised by review.
+ *
+ * Written as a general rule rather than an assertion about that one pattern,
+ * because the next directory to grow a `.tsx` would repeat it silently.
+ */
+
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+const REPO_ROOT = dirname(fileURLToPath(import.meta.url))
+
+/** `tsconfig.json` carries `//` comments, which `JSON.parse` will not take. */
+function tsconfig(): { include: string[]; exclude: string[] } {
+  const raw = readFileSync(join(REPO_ROOT, 'tsconfig.json'), 'utf8').replace(/\/\/[^\n]*/g, '')
+  const parsed = JSON.parse(raw) as { include?: string[]; exclude?: string[] }
+
+  return { include: parsed.include ?? [], exclude: parsed.exclude ?? [] }
+}
+
+/**
+ * A TypeScript include glob, as a regex. `**` crosses separators; `*` does not.
+ *
+ * Split on `**\/` rather than substituting a placeholder for it. The first
+ * version used a sentinel character, and the character that ended up in the file
+ * was a literal NUL -- which worked, because a NUL is as consistent a
+ * placeholder as anything else, and made git classify this file as **binary**.
+ * It could not be diffed, so no reviewer could read it. Raised by Argus, which
+ * spotted the binary classification and guessed UTF-16; the cause was two NULs.
+ */
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern
+    .split('**/')
+    .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
+    .join('(?:.*/)?')
+
+  return new RegExp(`^${escaped}$`)
+}
+
+const SOURCE_EXTENSIONS = ['.ts', '.tsx']
+
+function sourceFiles(directory: string, excluded: readonly string[], found: string[] = []) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name)
+    const rel = relative(REPO_ROOT, full).split(sep).join('/')
+
+    if (excluded.some((skip) => rel === skip || rel.startsWith(`${skip}/`))) continue
+    if (entry.name.startsWith('.') && entry.isDirectory()) continue
+
+    if (entry.isDirectory()) sourceFiles(full, excluded, found)
+    else if (SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) found.push(rel)
+  }
+
+  return found
+}
+
+describe('tsconfig include coverage', () => {
+  it('type-checks every TypeScript source file in the project', () => {
+    const { include, exclude } = tsconfig()
+    const patterns = include.map(globToRegExp)
+
+    const unchecked = sourceFiles(REPO_ROOT, [...exclude, 'node_modules', '.next']).filter(
+      (file) => !patterns.some((pattern) => pattern.test(file)),
+    )
+
+    expect(unchecked).toEqual([])
+  })
+
+  it('finds files to check, so an empty sweep cannot pass', () => {
+    // The assertion above is satisfied by a walk that returns nothing at all —
+    // the same vacuous shape the queue port test guards against.
+    const { exclude } = tsconfig()
+
+    expect(sourceFiles(REPO_ROOT, [...exclude, 'node_modules', '.next']).length).toBeGreaterThan(20)
+  })
+
+  it('matches globs the way TypeScript does', () => {
+    // The control for the instrument. `**/` crosses directories and `*` does not,
+    // and a converter that got either wrong would make the sweep above agree with
+    // anything.
+    expect(globToRegExp('core/**/*.ts').test('core/design/tokens.ts')).toBe(true)
+    expect(globToRegExp('core/**/*.ts').test('core/tokens.ts')).toBe(true)
+    expect(globToRegExp('core/**/*.ts').test('core/design/tokens.tsx')).toBe(false)
+    expect(globToRegExp('*.ts').test('vitest.config.ts')).toBe(true)
+    expect(globToRegExp('*.ts').test('core/tokens.ts')).toBe(false)
+  })
+})

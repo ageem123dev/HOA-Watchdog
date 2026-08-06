@@ -38,3 +38,25 @@ export function readWriterDatabaseUrl(
 
   return url
 }
+
+/**
+ * The SELECT-only role's URL, read on the same terms as the writer's above.
+ *
+ * A second variable rather than a second use of the first: AD-4 puts the read
+ * path on a role that cannot write, and a connection string is the only place
+ * that distinction is actually made. Sharing the writer's URL would leave the
+ * grant in migration 010 true and unexercised.
+ */
+export const READER_DATABASE_URL_VAR = 'WATCHDOG_READER_DATABASE_URL'
+
+export function readReaderDatabaseUrl(
+  env: Readonly<Record<string, string | undefined>> = {
+    [READER_DATABASE_URL_VAR]: process.env.WATCHDOG_READER_DATABASE_URL,
+  },
+): string {
+  const url = env[READER_DATABASE_URL_VAR]?.trim()
+
+  if (!url) throw new MissingAuthConfigError([READER_DATABASE_URL_VAR])
+
+  return url
+}

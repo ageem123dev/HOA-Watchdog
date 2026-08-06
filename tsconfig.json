@@ -36,6 +36,7 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "core/**/*.ts",
+    "core/**/*.tsx",
     "adapters/**/*.ts",
     "migrations/**/*.ts",
     "scripts/**/*.ts",
