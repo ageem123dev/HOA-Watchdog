@@ -69,6 +69,22 @@ describe('POST /api/documents/[id]/extract', () => {
       expect(extractDocument).not.toHaveBeenCalled()
     })
 
+    it('hands extraction the vendor directory and the quarantine', async () => {
+      // The regression test for the failure that broke this branch's pipeline.
+      // The route gained two collaborators; nothing here asserted they arrived,
+      // and the suite that would have caught the missing mocks failed to load
+      // instead -- which reads as passing tests unless you check Test Files.
+      // Raised in review.
+      signedIn()
+
+      await call()
+
+      const [, dependencies] = extractDocument.mock.calls[0] as [string, Record<string, unknown>]
+
+      expect(dependencies).toHaveProperty('vendors')
+      expect(dependencies).toHaveProperty('quarantine')
+    })
+
     it.each([
       ['no user', {}],
       ['no id', { user: {} }],

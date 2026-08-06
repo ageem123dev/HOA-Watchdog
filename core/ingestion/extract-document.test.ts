@@ -934,6 +934,10 @@ describe('vendors nobody recognises wait for a human (story 1.6b)', () => {
       })
 
       expect(await extractDocument(DOCUMENT_ID, f)).toMatchObject({ outcome: 'unreadable' })
+      // Resolution too, not only the outcome: an implementation that resolved
+      // the first name before noticing the second still returns `unreadable`
+      // and would pass without this. Raised in review.
+      expect(f.resolved).toEqual([])
       expect(f.replaced).toEqual([])
       expect(f.quarantined).toEqual([])
     })
