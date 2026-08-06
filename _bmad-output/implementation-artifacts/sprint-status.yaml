@@ -64,7 +64,7 @@ development_status:
   # Epic story 1.6 is delivered as four stories; see epics.md for the AC mapping.
   # Order matters: 1.6d resolves from the queue 1.6c builds.
   1-6a-recognise-known-vendors: done
-  1-6b-hold-unknown-vendors-for-a-human: backlog
+  1-6b-hold-unknown-vendors-for-a-human: ready-for-dev
   1-6c-see-what-is-waiting: backlog
   1-6d-resolve-a-held-document: backlog
   epic-1-retrospective: optional
