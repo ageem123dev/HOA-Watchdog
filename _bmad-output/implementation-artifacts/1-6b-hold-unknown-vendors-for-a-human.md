@@ -1,5 +1,6 @@
 ---
 baseline_commit: b57140974ae3b83cac7cb39080362947acca3a55
+merge_request: 16
 ---
 
 # Story 1.6b: Hold unknown vendors for a human
@@ -388,6 +389,31 @@ files in the repo already use `__dirname` — two of them predating this story �
 The finding was reasoned from `package.json` without running anything, and changing working code to
 satisfy it would have introduced the defect it imagined.
 
+
+### Review Findings
+
+**Whole-story adversarial review (Argus, `b571409..HEAD`, 13/13 files, confidence 0.95).** One
+finding, **not reproduced**, and the verification is worth recording because the reasoning was sound.
+
+**R1 (medium, not reproduced) — `isStorable` guards only NUL.** The finding held that a vendor name
+over 200 characters, or one that is whitespace-only, would reach `hold`, violate
+`quarantine_item_name_length` with 23514, be caught by the generic handler and be misreported as a
+transient outage.
+
+The chain is right; the premise is not. `checkText` in `core/extraction/validate.ts` returns a
+**trimmed** string of 1 to 200 characters or `null`, and the extractor port's contract is that records
+are validated — "validation is all-or-nothing across the set". So neither shape can reach this code
+from a conforming extractor, and `core/extraction/validate.test.ts:135,141` already pins both bounds
+(accepts at the maximum, refuses one past it).
+
+NUL is the one case validation does **not** catch, which is exactly why the guard is narrow rather
+than general. Widening it to re-check length would add a branch no test can force, against the Prime
+Directive, and a test written to force it would have to construct a record the port says cannot exist.
+
+**The assumption is now named rather than implicit:** this code trusts the extractor port's validation
+contract for length and blankness, and guards only what that contract does not cover. A future adapter
+that returns unvalidated records breaks that, and the existing tests on `validate` are what would keep
+it honest.
 
 ### Completion Notes List
 
