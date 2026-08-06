@@ -59,7 +59,10 @@ async function seedDocument(filename: string): Promise<string> {
     [randomBytes(32).toString('hex'), `${RUN_PREFIX}/${randomBytes(6).toString('hex')}`, filename, memberId],
   )
 
-  return rows[0].id
+  const id = rows[0]?.id
+  if (id === undefined) throw new Error('seeding a document returned no id')
+
+  return id
 }
 
 async function hold(documentId: string, extractedName: string): Promise<void> {
@@ -84,7 +87,9 @@ describeWithDatabase('reading the quarantine queue', () => {
        returning id`,
       [`${RUN_PREFIX}@example.com`],
     )
-    memberId = rows[0].id
+    const id = rows[0]?.id
+    if (id === undefined) throw new Error('seeding a board member returned no id')
+    memberId = id
   })
 
   beforeEach(() => {
@@ -121,9 +126,10 @@ describeWithDatabase('reading the quarantine queue', () => {
     const documentId = await seedDocument(scoped('shape.pdf'))
     await hold(documentId, scoped('Shape Check'))
 
-    const [item] = ours(await createQuarantineQueue().held())
+    const [held] = ours(await createQuarantineQueue().held())
 
-    expect(Object.keys(item).sort()).toEqual(['documentId', 'extractedName', 'filename'])
+    expect(held).toBeDefined()
+    expect(Object.keys(held ?? {}).sort()).toEqual(['documentId', 'extractedName', 'filename'])
   })
 
   it('returns both names when one document holds two', async () => {
@@ -168,7 +174,15 @@ describeWithDatabase('reading the quarantine queue', () => {
     await writer.query(
       `insert into quarantine_item (id, document_id, extracted_name)
        values ($1, $4, $5), ($2, $4, $6), ($3, $4, $7)`,
-      [...ids, documentId, scoped('inserted first'), scoped('inserted second'), scoped('inserted third')],
+      [
+        ids[0],
+        ids[1],
+        ids[2],
+        documentId,
+        scoped('inserted first'),
+        scoped('inserted second'),
+        scoped('inserted third'),
+      ],
     )
 
     const items = ours(await createQuarantineQueue().held()).map((i) => i.extractedName)

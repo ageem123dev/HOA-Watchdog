@@ -50,14 +50,14 @@ export function stripComments(source: string): string {
 
 /** Lines of the form `name(` — a method declaration in an interface body. */
 function declaredMethods(source: string): string[] {
-  return [...stripComments(source).matchAll(/^\s*([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1])
+  return [...stripComments(source).matchAll(/^\s*([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1] ?? '')
 }
 
 /** Lines of the form `readonly name:` or `name?:` — a property declaration. */
 function declaredFields(source: string): { name: string; optional: boolean }[] {
   return [
     ...stripComments(source).matchAll(/^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)(\??):/gm),
-  ].map((m) => ({ name: m[1], optional: m[2] === '?' }))
+  ].map((m) => ({ name: m[1] ?? '', optional: m[2] === '?' }))
 }
 
 /**

@@ -9,7 +9,7 @@
  * reviewable.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   MissingAuthConfigError,
@@ -59,13 +59,18 @@ describe('reading the reader database URL', () => {
   it('reads nothing at module scope', async () => {
     // The defect `env.ts` exists to prevent: a module-scope read makes `next
     // build` require real credentials, so the build gate can only be run by
-    // someone with a populated environment. Importing with the variable unset
-    // must be uneventful.
+    // someone with a populated environment.
+    //
+    // Asserted by re-importing with the variable deleted. The first attempt used
+    // a cache-busting query string on the specifier, which TypeScript correctly
+    // rejected as a module that does not exist — `vi.resetModules()` is the
+    // supported way to force a fresh evaluation.
     const previous = process.env.WATCHDOG_READER_DATABASE_URL
     delete process.env.WATCHDOG_READER_DATABASE_URL
+    vi.resetModules()
 
     try {
-      await expect(import('./env?module-scope-check')).resolves.toBeDefined()
+      await expect(import('./env')).resolves.toBeDefined()
     } finally {
       if (previous !== undefined) process.env.WATCHDOG_READER_DATABASE_URL = previous
     }

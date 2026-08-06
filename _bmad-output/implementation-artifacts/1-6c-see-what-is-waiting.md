@@ -106,12 +106,12 @@ database happens to return
   - [x] No `@vitejs/plugin-react` — `tsconfig.json` sets `"jsx": "react-jsx"`, so esbuild transforms
         JSX already. Verify rather than assume: a trivial rendering test must fail for the right
         reason before Task 5 starts.
-- [ ] **Task 5 — The surface** (AC1, AC2, AC3, AC4)
-  - [ ] `app/quarantine/page.tsx`, server component, with the sign-in redirect both siblings carry.
-  - [ ] The list, and the empty state as its own rendered branch — not a ternary returning `null`.
-  - [ ] Rendering tests: a held item shows its name and its document; two names on one document both
+- [x] **Task 5 — The surface** (AC1, AC2, AC3, AC4)
+  - [x] `app/quarantine/page.tsx`, server component, with the sign-in redirect both siblings carry.
+  - [x] The list, and the empty state as its own rendered branch — not a ternary returning `null`.
+  - [x] Rendering tests: a held item shows its name and its document; two names on one document both
         appear; the empty state renders its sentence.
-  - [ ] **Tokens only.** `core/design/no-raw-values.test.ts` scans every `.ts`/`.tsx`/`.css` under
+  - [x] **Tokens only.** `core/design/no-raw-values.test.ts` scans every `.ts`/`.tsx`/`.css` under
         `app/` and fails on a raw hex colour or font-family. Use the custom properties the sibling
         pages use.
 - [ ] **Task 6 — Reaching it** (AC4)
@@ -357,6 +357,44 @@ the order, one of the two would have to move.
 **Cross-check:** the count on the view is verified against the input length independently of the
 items array, so a view that dropped an item while reporting the old count cannot pass.
 
+## Task 5 - the surface
+
+Split deliberately into a presentational component and a page. The page is a server component that
+reaches the database; the component takes a `QueueView` and renders it. Rendering tests target the
+component, because a test that had to stand up Postgres to assert a sentence would be neither
+Repeatable nor fast, and the seam is the design fix the test-design reference asks for rather than a
+concession to testing.
+
+### Behaviour F - `<QueueList view={...} />` (AC1, AC2, AC3, AC5)
+
+1. **Correct-run signal:** each held item's extracted name and its document's filename appear in the
+   output; an empty view renders the sentence instead; no control is rendered in either case.
+2. **How to test it:** `@testing-library/react` in jsdom, per Task 4.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| F1 | The empty state renders `null`, so an empty queue is a blank page and AC2 is unmet while the component "works" | GUARD |
+| F2 | Only the name is shown, or only the filename - AC1 requires the pairing, and a name with no document is not answerable | GUARD |
+| F3 | Two names on one document render one row, or render the filename once and orphan the second name (AC5) | GUARD |
+| F4 | A button or form appears - resolving is 1.6d's, and a control that does nothing is worse than none | GUARD - assert there is no `button`, no `form`, and no `link` in the list |
+| F5 | A name containing markup is interpreted rather than shown. React escapes by default, so this is a test that the default was not defeated with `dangerouslySetInnerHTML` | GUARD |
+| F6 | The name is rendered through a case or whitespace transform, so what is shown is not what the document said (AC1) | GUARD - a name with doubled internal spacing and mixed case, asserted exactly |
+
+### Behaviour G - `/quarantine` page (AC4)
+
+1. **Correct-run signal:** an unauthenticated request redirects to the sign-in route before any read
+   of the queue happens.
+2. **How to test it:** `auth` and the adapter are both module imports, so `vi.mock` supplies them.
+   The assertion that matters is ordering - redirect *before* the adapter is touched.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| G1 | The page reads the queue and then redirects, so an unauthenticated request still causes a database read of held vendor names | GUARD - assert the adapter was never called |
+| G2 | `session.user` is absent rather than the session being null, and the check only tests the session | GUARD - both shapes, as `app/upload/page.tsx` distinguishes them |
+| G3 | The route is added to `PUBLIC_ROUTES`, or the allow-list stops being an allow-list | GUARD - asserted against `core/auth/route-policy.ts` directly |
+
 ### Debug Log References
 
 **Task 2 red.** Both suites first failed on a missing module, which is not a valid red. A naive stub
@@ -392,6 +430,48 @@ Restored, re-ran, green.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 5.** The surface is split: `QueueList` takes a view and returns markup, the page reaches the
+database. That seam is what lets a treasurer's actual view be asserted without standing up Postgres.
+
+Guarded: the empty state as a rendered branch (F1), name *and* filename together (F2), two names on
+one document as two rows (F3), no control of any kind (F4), markup in a name shown as text rather
+than interpreted (F5), and the name rendered exactly as stored (F6 — with an identity normalizer,
+because Testing Library collapses whitespace by default and would have passed against a component
+that rewrote the record). The guard runs before the read (G1), both empty-session shapes redirect
+(G2), and the route is absent from the allow-list (G3).
+
+**Three things the tests caught that the code did not.**
+
+*Renders were accumulating.* Without `globals: true`, Testing Library never registers its automatic
+cleanup, so every render stayed in `document.body` and the next test queried both — two items
+produced four matching elements. Explicit `afterEach(cleanup)` in both component suites; turning
+globals on for the whole suite would be a large lever for one file's hygiene.
+
+*`--color-rule` is measured by nothing.* `core/design/text-pairings.test.ts` failed because the row
+divider referenced a token declared in no pairing. Switched to `rule-strong`, which is already
+declared for boundaries on the page ground, rather than adding a design-system entry in passing
+inside a story about a queue.
+
+*Seven type errors `npm run build` does not see.* `tsc --noEmit` went from the pre-existing 8 to 15;
+all seven were mine, in test files the build does not check — indexed access under
+`noUncheckedIndexedAccess`, and a cache-busting query string on an import specifier that is not a
+real module. All fixed; back to 8. This is the strongest argument yet for the recorded `tsc --noEmit`
+gate follow-up: lint and build both passed while seven real unsoundnesses sat in the diff.
+
+**Review findings, verified before acting — both not reproduced.**
+
+*`React.CSSProperties` used without importing React.* Three pre-existing app files use the identical
+pattern with no React import; `eslint app/quarantine` is clean and `tsc` reports nothing about the
+namespace. Next's generated types supply it globally. Argus attributed its own failed lint run to
+this, which was the wrong cause.
+
+*React key collision on `documentId:extractedName`.* The unique index is on
+`(document_id, normalised_name)`, and identical strings normalise identically — so a second row with
+the same name for the same document cannot exist. Not fixed, because there is nothing to fix; the
+reason is now written where the key is built, since it is not visible from the component. Adding the
+array index would have traded an impossible warning for reconciliation that breaks on reorder.
+
 
 **Task 4.** `jsdom@29` and `@testing-library/react@16` added; `include` widened to
 `**/*.test.{ts,tsx}`; `environment: 'node'` left as the default with per-file opt-in. No
@@ -485,6 +565,10 @@ Adversarial review (Argus, `gemini-3.1-pro-high`): no findings, confidence 1.0.
 - `core/design/rendering-harness.test.tsx` (new)
 - `tsconfig.json` (modified — `core/**/*.tsx`)
 - `tsconfig-coverage.test.ts` (new)
+- `app/quarantine/page.tsx` (new)
+- `app/quarantine/page.test.tsx` (new)
+- `app/quarantine/queue-list.tsx` (new)
+- `app/quarantine/queue-list.test.tsx` (new)
 
 
 ### Change Log

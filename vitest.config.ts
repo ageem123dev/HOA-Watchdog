@@ -1,6 +1,16 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  // `@/` is how everything under `app/` imports, and tsconfig maps it. Vitest
+  // did not, which failed quietly in a specific way: a *type* import through the
+  // alias is erased before runtime, so the one existing app test resolved fine
+  // and the alias looked configured. The first value import through it — a
+  // component test — could not load the file at all.
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },
+  },
   test: {
     environment: 'node',
     // `.tsx` as well as `.ts`. Story 1.6c added the first component tests, and

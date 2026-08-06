@@ -84,6 +84,6 @@ describe('the quarantine queue view', () => {
     // it; that is the whole contract.
     const odd = '  Ünïcode  &  <Ampersands>  '
 
-    expect(toQueueView([item({ extractedName: odd })]).items[0].extractedName).toBe(odd)
+    expect(toQueueView([item({ extractedName: odd })]).items[0]?.extractedName).toBe(odd)
   })
 })
