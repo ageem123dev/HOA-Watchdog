@@ -68,6 +68,19 @@ Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode
 
 Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`) and `git push -u origin story/{story_key}`.
 
+### 4b — First CodeRabbit review, in the IDE, before the MR exists
+
+The first review finds the most, and every round moved off the MR is a pipeline not billed. Story 1.6b took 8 rounds and ~11 pushes.
+
+1. Ask the user to run **CodeRabbit → Start Review** in VS Code against base `main`. It is started by hand; ask once and STOP until findings arrive.
+2. `coderabbit.agentType` = **"Claude Code Extension"** delivers findings to this session via **Fix with AI**. That handoff is the signal a review ran — no detection needed.
+3. Otherwise read `%APPDATA%\Code\User\globalStorage\coderabbit.coderabbit-vscode\<hash>.json`, keyed `${repoRoot}-${branch}-REVIEWS`. **Confirm a review exists for this branch before concluding anything is clean** — 8c's precondition applies here identically.
+4. Fix test-first, run the review gate on the fix diff (8e), commit, repeat until the IDE review is clean.
+
+IDE reviews are their own rate pool — **1/hr on the OSS plan**, so a multi-round story waits hours. Under `/loop` that is the cadence; do not spin.
+
+Unverified until the first run: whether the extension reads repo `.coderabbit.yaml` (so whether `path_filters` and `path_instructions` apply here).
+
 ### 5 — Merge request to main
 
 1. Existing? `glab api "projects/{enc}/merge_requests?source_branch={branch}&state=opened&target_branch=main"`. Filter on the target: an open MR from this branch to anything else must **stop the run** — it gets no CodeRabbit review (see 3), and opening a second MR from the same source is worse. Report it and let the user close or retarget it.
