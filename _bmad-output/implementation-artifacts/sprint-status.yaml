@@ -66,7 +66,7 @@ development_status:
   1-6a-recognise-known-vendors: done
   1-6b-hold-unknown-vendors-for-a-human: done
   1-6c-see-what-is-waiting: done
-  1-6d-resolve-a-held-document: backlog
+  1-6d-resolve-a-held-document: in-progress
   epic-1-retrospective: optional
 
   epic-2: backlog
