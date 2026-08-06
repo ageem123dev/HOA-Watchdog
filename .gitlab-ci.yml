@@ -56,7 +56,18 @@ verify:
     # not in the lockfile — now reaches `main`. `npm ci` plus `npm run build`
     # still catch most of that shape, and `build` remains the only gate that
     # type-checks at all.
-    - npm test -- core/security
+    # The full suite on main, the security guard on a merge request.
+    #
+    # Removing `npm test` outright left no merge gate at all: a local run is not
+    # a gate, because nothing stops a branch merging without one. Raised in
+    # review, and correctly. But paying for ~1,100 tests on every commit of a
+    # fourteen-commit branch is what ran the credits down.
+    #
+    # main is merged rarely, so the full suite there costs little and restores
+    # the property that matters: nothing reaches main without the whole suite
+    # having passed on a clean checkout. A merge request still runs
+    # core/security, which carries the NFR-2 assertion AD-2 requires of CI.
+    - if [ "$CI_COMMIT_BRANCH" = "main" ]; then npm test; else npm test -- core/security; fi
   rules:
     # Always on main: whatever is merged gets the full check, with no dependence
     # on the path list below being complete.
