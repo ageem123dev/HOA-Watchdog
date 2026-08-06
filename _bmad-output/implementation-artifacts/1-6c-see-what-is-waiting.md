@@ -1,5 +1,6 @@
 ---
 baseline_commit: ec12892a00da336c04c83f77163151bf65bc726b
+merge_request: 19
 ---
 
 # Story 1.6c: See what is waiting
@@ -428,6 +429,30 @@ Restored, re-ran, green.
 
 
 ### Review Findings
+
+**Merge-request round 1** on `290cbb8` — **1 actionable comment**, against story 1.6b's eight rounds.
+Pipeline green.
+
+*The port test used deny-lists, which fail open.* `archive()` was on no list of mutators, and
+`storage_key` is not the string `storagekey`, so both would have passed. Replaced with allow-lists —
+`declaredMethods` must equal exactly `['held']`, `declaredFields` exactly the three names — which
+rejects everything unlisted by construction. The same argument that removed the CI path filter.
+
+*Fixing it broke two other things, both caught by the gate on the fix diff.*
+
+The rewrite **deleted the comment-stripping control** and nothing complained, because a deleted test
+makes a suite greener. That is the lost-cover case the review gate's test-value pass exists to catch,
+and it caught it.
+
+Then the restored control turned out to be **vacuous, as the original had been**. It used single-line
+comments, and both regexes anchor at `^\s*` followed by an identifier — so a line beginning `//`
+never matches whether it is stripped or not. Disabling `stripComments` entirely left the test green.
+Rewritten around a *block* comment whose inner lines do begin with identifiers; disabling stripping
+now fails with `expected [ 'archive', 'held' ] to deeply equal [ 'held' ]`.
+
+Three layers of the same defect in one file: a deny-list that failed open, a control that was
+deleted, and a control that never tested anything. Only the first was found by review.
+
 
 **IDE round 1** on `cc0b553` — 24 comments, 20 of them LGTM. Four findings, **one on this story**.
 

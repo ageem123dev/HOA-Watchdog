@@ -12,9 +12,14 @@
  * Reading source text is a blunt instrument and it has misfired here before: a
  * migration test in story 1.6a matched the migration's own comment rather than
  * its SQL, and passed for a reason that had nothing to do with the schema.
- * Comments are stripped first, and `strips a forbidden word from a comment but
- * keeps a real declaration` is the control that proves the stripping neither
- * under- nor over-reaches.
+ * Comments are stripped first, and `strips comments without eating declarations`
+ * is the control proving the stripping neither under- nor over-reaches.
+ *
+ * The assertions are **allow-lists**. A deny-list of forbidden names was tried
+ * first and review found it failed open in two ways: `archive()` is on nobody's
+ * list of mutators, and `storage_key` is not the string `storagekey`. Naming
+ * what may exist rejects everything else by construction — the same argument
+ * that removed the CI path filter from `.gitlab-ci.yml`.
  */
 
 import { readFileSync } from 'node:fs'
@@ -44,27 +49,13 @@ function portSource(): string {
  * block comment would otherwise truncate the line and leave the block's closing
  * delimiter behind for the block pass to miss.
  */
-export function stripComments(source: string): string {
+function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 }
 
 /** Lines of the form `name(` — a method declaration in an interface body. */
 function declaredMethods(source: string): string[] {
   return [...stripComments(source).matchAll(/^\s*([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1] ?? '')
-}
-
-/**
- * Every name the port declares, however it declares it.
- *
- * Fields and methods together, because the two forbidden names are forbidden as
- * *data*, not as a syntax. `storageKey(): string` hands out a storage key just
- * as effectively as `readonly storageKey: string`, and checking only fields let
- * both pass. Raised in review.
- */
-function declaredNames(source: string): string[] {
-  return [...declaredFields(source).map((f) => f.name), ...declaredMethods(source)].map((name) =>
-    name.toLowerCase(),
-  )
 }
 
 /** Lines of the form `readonly name:` or `name?:` — a property declaration. */
@@ -74,83 +65,79 @@ function declaredFields(source: string): { name: string; optional: boolean }[] {
   ].map((m) => ({ name: m[1] ?? '', optional: m[2] === '?' }))
 }
 
-/**
- * Names that would mean this port can act on the queue rather than describe it.
- * `hold` is here too: writing belongs to `Quarantine`, and a second way in would
- * make two ports responsible for one invariant.
- */
-const MUTATOR_NAMES = [
-  'resolve',
-  'dismiss',
-  'clear',
-  'delete',
-  'remove',
-  'create',
-  'insert',
-  'update',
-  'write',
-  'hold',
-  'confirm',
-  'match',
-  'set',
-]
-
 describe('the quarantine queue port', () => {
   it('declares held', () => {
-    // First, and deliberately so: every other assertion below is satisfied by an
-    // empty file. This one is what stops "no mutators" being true because there
-    // is nothing there at all.
+    // First, and deliberately so: an empty file satisfies every other assertion
+    // here. This is what stops "declares exactly one method" being true because
+    // there is nothing there at all.
     expect(declaredMethods(portSource())).toContain('held')
   })
 
-  it('declares no method that could change what is waiting', () => {
-    // AC3's second clause. A treasurer's decision is story 1.6d's to record, and
-    // the way that survives is that this port cannot express it -- so a later
-    // caller cannot quietly reach for one.
-    const mutators = declaredMethods(portSource()).filter((name) =>
-      MUTATOR_NAMES.includes(name.toLowerCase()),
-    )
-
-    expect(mutators).toEqual([])
+  it('declares exactly one method, and it is held', () => {
+    // AC3's second clause. Confirming a vendor is story 1.6d's to record, and
+    // the way that survives contact with a codebase is that this port cannot
+    // express it — so a later caller cannot quietly reach for a method that was
+    // never declared.
+    expect(declaredMethods(portSource())).toEqual(['held'])
   })
 
-  it('strips a forbidden word from a comment but keeps a real declaration', () => {
-    // The control for the instrument itself. Without it, a stripper that deleted
-    // everything would make `declares no mutator` pass forever, and one that
-    // deleted nothing would fail this file's own prose.
-    const sample = ['// resolve() belongs to story 1.6d', '/* clear() does too */', '  held(): void']
+  it('declares exactly the three fields a treasurer needs', () => {
+    // Subsumes the two named checks it replaced. `normalisedName` is a
+    // comparison key of no use to a human (migration 010) and a storage key may
+    // not reach any caller (AD-10); neither can appear in a set asserted to be
+    // exactly these three, in any casing.
+    const fields = declaredFields(portSource())
+      .map((f) => f.name)
+      .sort()
 
-    const methods = declaredMethods(sample.join('\n'))
-
-    expect(methods).toEqual(['held'])
+    expect(fields).toEqual(['documentId', 'extractedName', 'filename'])
   })
 
-  it('does not hand out the normalised name', () => {
-    // Migration 010: the folded form is a comparison key and no use to a human.
-    // AC1 asks for the name as the document said it, and a type that offers both
-    // invites a surface to show the wrong one.
-    const names = declaredNames(portSource())
+  it('rejects the additions a deny-list let through', () => {
+    // The control for the allow-lists, using the two cases review named. Both
+    // passed against the deny-list version: `archive` was on no forbidden list,
+    // and `storage_key` did not equal `storagekey`.
+    const sneaky = [
+      'export interface HeldItem {',
+      '  readonly documentId: string',
+      '  readonly filename: string',
+      '  readonly extractedName: string',
+      '  readonly storage_key: string',
+      '}',
+      'export interface QuarantineQueue {',
+      '  held(): Promise<readonly HeldItem[]>',
+      '  archive(): Promise<void>',
+      '}',
+    ].join('\n')
 
-    expect(names).not.toContain('normalisedname')
-    expect(names).not.toContain('normalizedname')
+    expect(declaredMethods(sneaky)).not.toEqual(['held'])
+    expect(
+      declaredFields(sneaky)
+        .map((f) => f.name)
+        .sort(),
+    ).not.toEqual(['documentId', 'extractedName', 'filename'])
   })
 
-  it('does not hand out a storage key', () => {
-    // AD-10: no caller may receive a storage key. The adapter joins `document`
-    // for its filename and the key sits on the same row, one careless `select *`
-    // away.
-    const names = declaredNames(portSource())
+  it('strips comments without eating declarations', () => {
+    // The control for the instrument itself, and the second attempt at it. The
+    // first used single-line comments -- `// archive() belongs to 1.6d` -- which
+    // proved nothing: both regexes anchor at `^\s*` followed by an identifier,
+    // so a line beginning `//` never matches whether it is stripped or not. The
+    // test passed with stripping disabled entirely.
+    //
+    // A *block* comment is what exercises it, because its inner lines do begin
+    // with an identifier and would be picked up verbatim.
+    const sample = [
+      '/*',
+      '  archive(): Promise<void>',
+      '  readonly storage_key: string',
+      '*/',
+      '  held(): void',
+      '  readonly documentId: string',
+    ].join('\n')
 
-    expect(names).not.toContain('storagekey')
-  })
-
-  it('sees a forbidden name declared as a method, not only as a field', () => {
-    // The control for the fix above. Checking fields alone, both cases passed
-    // against a port that handed out a storage key through a method — a guard
-    // that proves nothing, which is the defect shape this project keeps meeting.
-    const leaky = ['export interface HeldItem {', '  storageKey(): string', '}']
-
-    expect(declaredNames(leaky.join('\n'))).toContain('storagekey')
+    expect(declaredMethods(sample)).toEqual(['held'])
+    expect(declaredFields(sample).map((f) => f.name)).toEqual(['documentId'])
   })
 
   it('declares no optional field', () => {
