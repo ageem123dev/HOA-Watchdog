@@ -5,7 +5,7 @@ import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
 import type { Quarantine } from '../ports/quarantine'
 import type { VendorDirectory } from '../ports/vendor-directory'
-import { holdUnknownVendors } from './hold-unknown-vendors'
+import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
@@ -164,6 +164,17 @@ async function ingestOne(
     // story 1.6's AC1 is about extraction completing, not about which parser
     // did it. Without this, uploading invoices as CSV was a way to put vendors
     // into the system with nobody asked about them. Raised in review.
+    // Reachable, contrary to my first reading of it. `acceptance.ts` scans only
+    // `bytes.subarray(0, 8192)` for a NUL, so one further into a large
+    // spreadsheet arrives here untouched -- and a decoded workbook cell can
+    // carry one with no NUL in the file bytes at all. Unguarded it reaches
+    // `resolve`, Postgres refuses the parameter, and the upload reports
+    // `figures-not-stored`: the treasurer is told their figures were not saved
+    // rather than that the document could not be read.
+    if (unstorableName(reading.records)) {
+      return { filename, outcome: 'unreadable', documentId: recorded.id }
+    }
+
     try {
       // Held before the records are stored, for the reason the deferred path
       // holds first: a hold that fails leaves nothing stored and the upload can
