@@ -6,6 +6,9 @@ import {
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { Extractor } from '../ports/extractor'
+import type { Quarantine } from '../ports/quarantine'
+import type { VendorDirectory } from '../ports/vendor-directory'
+import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -65,6 +68,10 @@ export interface ExtractDocumentDependencies {
   readonly store: DocumentStore
   readonly extractions: ExtractionRepository
   readonly extractor: Extractor
+  /** Asked whether a name is a vendor we already know. Never asked to create one. */
+  readonly vendors: VendorDirectory
+  /** Where a name nobody recognises goes to wait for a human (AD-8). */
+  readonly quarantine: Quarantine
   readonly onError?: (error: unknown, documentId: string) => void
 }
 
@@ -207,6 +214,20 @@ export async function extractDocument(
       // An empty collection is a content problem, not an infrastructure one.
       // `replace` refuses `[]`, and reaching it would report this as an outage.
       if (result.records.length === 0) return await settle('unreadable', 'unreadable')
+
+      // The quarantine rule, shared with the upload-time path in `ingest.ts`.
+      // Extraction finishes in two places and the rule is about extraction
+      // finishing, so it lives in one module rather than two copies.
+      if (unstorableName(result.records)) return await settle('unreadable', 'unreadable')
+
+      // Held *before* the records are stored, and the order is load-bearing.
+      //
+      // `replace` moves the document to `read`, which settles it: no later poll
+      // looks at it again. So records stored with the hold still missing is
+      // silent and permanent, and nobody finds out. The other way round leaves
+      // the document `held`, so the next poll re-extracts, holds again -- a
+      // no-op, the database enforces that -- and stores. It heals itself.
+      await holdUnknownVendors(documentId, result.records, deps)
 
       // The fence goes with the write. `replace` clears the claim in the same
       // transaction as the state change, which is why nothing releases it here:

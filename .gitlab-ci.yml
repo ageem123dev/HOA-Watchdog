@@ -8,6 +8,18 @@
 
 stages: [verify]
 
+# One pipeline per change, not two.
+#
+# Without this, a push to a branch with an open merge request creates a `push`
+# pipeline *and* a `merge_request_event` pipeline, both running the same jobs on
+# the same commit. Every commit on story 1.6b was billed twice for identical
+# work.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == 'main'
+    - when: never
+
 default:
   image: node:24
   # A lockfile-exact install, and the cache is keyed on it so a dependency change
@@ -24,16 +36,50 @@ verify:
   script:
     - npm run lint
     - npm run build
-    # The suite includes core/security/nfr2-guard.test.ts, which asserts that no
-    # banking, payment-processor, or external-accounting credential exists in
-    # this deploy unit's environment or tracked configuration. That assertion
-    # enforces NFR-2 by way of AD-2 ("the air-gap is an absence, not a
-    # permission"), which names a CI check as its mechanism. If it fails, remove
-    # the credential — removing the check is an architecture change, not a fix.
+    # The whole suite, on merge requests as well as main.
+    #
+    # Two earlier attempts at making this cheaper were both wrong. Removing
+    # `npm test` left no gate at all -- a local run is not a gate, because
+    # nothing stops a branch merging without one. Running the full suite only on
+    # `main` looked like a fix and was not: CI_COMMIT_BRANCH is unset in a
+    # merge-request pipeline, so the suite ran *after* GitLab updated main. That
+    # is post-merge detection wearing a gate's clothes.
+    #
+    # It turns out the suite was never the expensive part. Measured on story
+    # 1.6b's branch: ~46s of a job is npm ci and the image pull, 19s build, 10s
+    # lint, and the full suite about 25s more than the security subset. The
+    # money went on running *two* pipelines per commit and on running any
+    # pipeline at all for the six commits that touched only documents. Both are
+    # fixed above, and together they cut this branch from roughly 47 job-minutes
+    # to 13 -- with the whole suite still running before every merge.
+    #
+    # core/security within it carries the NFR-2 assertion that AD-2 requires of
+    # CI: no banking, payment-processor or external-accounting credential in this
+    # deploy unit. If it fails, remove the credential -- removing the check is an
+    # architecture change, not a fix.
     - npm test
+
   rules:
+    - if: $CI_COMMIT_BRANCH == 'main'
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-    - if: $CI_COMMIT_BRANCH
+
+# Path-based skipping was tried here and removed. The idea was to skip `verify`
+# for commits that change no code, and on story 1.6b's branch that was six of
+# fourteen commits -- about eight minutes of runner time.
+#
+# It leaked three times in three review rounds: first `.env*`, which the NFR-2
+# guard reads and which is exactly the change that must never skip; then
+# `.github/`, `.claude/` and `_bmad/`. GitLab's `changes` fires when *any* listed
+# path is touched, so it can only be written as an allow-list, and every gap in
+# an allow-list fails *open* and in silence. A skipped job looks the same as a
+# passing one on the merge request page.
+#
+# It is also worth much less than it was. Review rounds are now answered with a
+# single commit (`bmad-ship-story` Step 8e), so a commit that touches only
+# documents is rare -- most carry code and docs together and would run anyway.
+#
+# The saving that mattered is the `workflow` block above: one pipeline per
+# commit rather than two. That is half the bill, and it cannot fail open.
 
 # The database and storage tests need live credentials, so they cannot run on a
 # fork or an untrusted pipeline. They are opt-in: define WATCHDOG_WRITER_DATABASE_URL

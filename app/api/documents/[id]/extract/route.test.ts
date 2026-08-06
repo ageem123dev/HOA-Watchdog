@@ -28,6 +28,13 @@ vi.mock('@/adapters/db/document-repository-postgres', () => ({
 vi.mock('@/adapters/db/extraction-repository-postgres', () => ({
   createPostgresExtractionRepository: () => ({}),
 }))
+// Distinct sentinels rather than bare objects, so the assertion below can
+// say *which* collaborator arrived and not merely that something did.
+const QUARANTINE = { sentinel: 'quarantine' }
+const VENDORS = { sentinel: 'vendors' }
+
+vi.mock('@/adapters/db/quarantine-postgres', () => ({ createQuarantine: () => QUARANTINE }))
+vi.mock('@/adapters/db/vendor-directory-postgres', () => ({ createVendorDirectory: () => VENDORS }))
 vi.mock('@/adapters/extraction/extractor-gemini', () => ({ createGeminiExtractor: () => ({}) }))
 vi.mock('@/adapters/storage/document-store-s3', () => ({ createS3DocumentStore: () => ({}) }))
 
@@ -65,6 +72,25 @@ describe('POST /api/documents/[id]/extract', () => {
       await call()
 
       expect(extractDocument).not.toHaveBeenCalled()
+    })
+
+    it('hands extraction the vendor directory and the quarantine', async () => {
+      // The regression test for the failure that broke this branch's pipeline.
+      // The route gained two collaborators; nothing here asserted they arrived,
+      // and the suite that would have caught the missing mocks failed to load
+      // instead -- which reads as passing tests unless you check Test Files.
+      // Raised in review.
+      signedIn()
+
+      await call()
+
+      const [, dependencies] = extractDocument.mock.calls[0] as [string, Record<string, unknown>]
+
+      // The exact objects, not just the property names: `toHaveProperty`
+      // passes when the wrong collaborator is wired to the right key, which
+      // is the mistake worth catching. Raised in review.
+      expect(dependencies.vendors).toBe(VENDORS)
+      expect(dependencies.quarantine).toBe(QUARANTINE)
     })
 
     it.each([

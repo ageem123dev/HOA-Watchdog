@@ -124,7 +124,13 @@ Converged = pipeline green AND every finding **fixed** (push → new head → ba
 
 **8d. Triage.** Fix real correctness/security/accessibility issues. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
 
-**8e. Apply.** Fix test-first, re-run lint+build+test, then **run the review gate on the fix diff before pushing** — sensitivity check, **test-value pass**, and one `argus_review` scoped to what the fix touched (`_bmad/custom/review-gate.md`). Then commit and push (auto-triggers re-review; force with `@coderabbitai review`).
+**8e. Apply — one commit and one push per round.** Fix **every** finding in the round first, then **run the review gate on the whole round's diff before pushing** — sensitivity check, **test-value pass**, and one `argus_review` scoped to what the round touched (`_bmad/custom/review-gate.md`). Then **one** commit, **one** push.
+
+**A push does not reliably trigger a review, and batching does not change that.** CodeRabbit pauses automatic reviews after `auto_pause_after_reviewed_commits` (set to 25 here, default 5), and a paused branch stays paused until asked. So after every push: **confirm a review body exists for the current head**; if none arrives, post `@coderabbitai review` and wait for it. A pause is indistinguishable from a clean review from the outside — which is the false-clean 8c exists to refuse.
+
+**Not a commit per finding.** Story 1.6b answered 4 rounds with 12 commits, and each one cost a re-review, a pipeline and a place in CodeRabbit's `auto_pause_after_reviewed_commits` budget — it paused itself mid-story twice, which from outside is indistinguishable from a clean review. Batching also gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
+
+Keep the reasoning that would have gone in several messages — write it as sections of one commit body rather than losing it.
 
 The test-value pass matters most *here*, because a fix diff is where a test's premise expires. `python3 _bmad/scripts/tests_touched.py <range>` lists the cases the fix touched; for each, ask whether it is **vacuous** (break the code — does it fail?) and whether its premise is **expired** (does it assert something a later decision made wrong?). A mutation finds the first and is blind to the second: an expired test fails loudly when you break the code, so it looks healthy. Story 1.5d shipped two, each blocking the fix it should have driven. Then check what *lost* cover — re-specifying a test can strip the only assertion from a behaviour that is still correct, and the suite goes greener, so nothing complains.
 

@@ -3,6 +3,9 @@ import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
+import type { Quarantine } from '../ports/quarantine'
+import type { VendorDirectory } from '../ports/vendor-directory'
+import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
@@ -78,6 +81,17 @@ export interface IngestDependencies {
   /** Absent means spreadsheets are held unread rather than failing. */
   readonly workbooks?: WorkbookDecoder
   /**
+   * Asked whether a vendor name is one we already know.
+   *
+   * Optional so the many existing callers that predate story 1.6b keep working,
+   * but its absence is a real gap rather than a neutral default: without it a
+   * spreadsheet's unknown vendors are stored with nobody asked about them. The
+   * upload route supplies both.
+   */
+  readonly vendors?: VendorDirectory
+  /** Where a name nobody recognises waits for a human (AD-8). */
+  readonly quarantine?: Quarantine
+  /**
    * Where the real error goes. It is deliberately absent from the outcome — an
    * exception's text can name a path, a bucket, or a library — but discarding it
    * entirely would make a storage outage look like bad luck to whoever is on
@@ -145,7 +159,28 @@ async function ingestOne(
     // Caught separately from everything above, because by this point the upload
     // has already survived: reporting a storage-layer `failed` here would tell
     // the treasurer their file was not saved when it was.
+    // The same rule the deferred path applies, at the other place extraction
+    // finishes. A spreadsheet's vendors are as unknown as a scan's, and epic
+    // story 1.6's AC1 is about extraction completing, not about which parser
+    // did it. Without this, uploading invoices as CSV was a way to put vendors
+    // into the system with nobody asked about them. Raised in review.
+    // Reachable, contrary to my first reading of it. `acceptance.ts` scans only
+    // `bytes.subarray(0, 8192)` for a NUL, so one further into a large
+    // spreadsheet arrives here untouched -- and a decoded workbook cell can
+    // carry one with no NUL in the file bytes at all. Unguarded it reaches
+    // `resolve`, Postgres refuses the parameter, and the upload reports
+    // `figures-not-stored`: the treasurer is told their figures were not saved
+    // rather than that the document could not be read.
+    if (unstorableName(reading.records)) {
+      return { filename, outcome: 'unreadable', documentId: recorded.id }
+    }
+
     try {
+      // Held before the records are stored, for the reason the deferred path
+      // holds first: a hold that fails leaves nothing stored and the upload can
+      // be retried, where records stored without a hold is silent.
+      await holdUnknownVendors(recorded.id, reading.records, deps)
+
       await deps.extractions.replace(recorded.id, reading.records)
     } catch (error) {
       deps.onError?.(error, filename)
