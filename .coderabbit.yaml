@@ -18,12 +18,17 @@ reviews:
     # *before* any review has run, which is the false-clean the ship-story
     # convergence rule exists to refuse.
     #
-    # Raised rather than disabled, deliberately. Zero would remove the ceiling
+    # Raised rather than disabled, deliberately. Zero removes the ceiling
     # entirely, and a story that keeps finding defects in its own fixes should
-    # eventually stop and get a human rather than loop. 10 clears a normal
-    # story — 1.6b took 8 pushes, which is the worst so far — while still
-    # bounding a runaway.
-    auto_pause_after_reviewed_commits: 10
+    # eventually stop and involve a human rather than loop forever.
+    #
+    # 25 because this counts *commits*, not review rounds, and the two are not
+    # close. Story 1.6b reached 11 commits across 4 rounds — fix commits, a doc
+    # clarification, config, each drawing its own re-review. A ceiling of 10
+    # would already have tripped on a story that was converging normally, which
+    # is a false alarm rather than a safety net. 25 is roughly double the worst
+    # story so far, so it fires only on something genuinely stuck.
+    auto_pause_after_reviewed_commits: 25
     base_branches:
       - main
   path_instructions:
