@@ -4,7 +4,7 @@ baseline_commit: ec12892a00da336c04c83f77163151bf65bc726b
 
 # Story 1.6c: See what is waiting
 
-Status: ready-for-dev
+Status: review
 
 > **Third of four stories from epic story 1.6.**
 > **1.6a** built the mechanism: a `vendor` table, one normalisation rule, and a directory whose
@@ -114,12 +114,12 @@ database happens to return
   - [x] **Tokens only.** `core/design/no-raw-values.test.ts` scans every `.ts`/`.tsx`/`.css` under
         `app/` and fails on a raw hex colour or font-family. Use the custom properties the sibling
         pages use.
-- [ ] **Task 6 — Reaching it** (AC4)
-  - [ ] A link from the dashboard. EXPERIENCE.md says the queue is entered from the dashboard **when
+- [x] **Task 6 — Reaching it** (AC4)
+  - [x] A link from the dashboard. EXPERIENCE.md says the queue is entered from the dashboard **when
         non-empty**; decide and record whether the link hides when the queue is empty or always shows
         with a count. Recommendation: always show it. A link that disappears is a surface a treasurer
         cannot learn, and the empty state exists precisely to be readable.
-  - [ ] Confirm `/quarantine` is protected by `PUBLIC_ROUTES` being an allow-list — it should need no
+  - [x] Confirm `/quarantine` is protected by `PUBLIC_ROUTES` being an allow-list — it should need no
         entry anywhere. Assert that in a test rather than reasoning about it.
 
 ## Dev Notes
@@ -431,6 +431,29 @@ Restored, re-ran, green.
 
 ### Completion Notes List
 
+**Task 6.** The link is shown unconditionally. `EXPERIENCE.md` says the queue is entered from the
+dashboard "when non-empty", and the queue's own empty state is what makes the unconditional reading
+better: a link that appears only when something is behind it cannot be learned, and its absence is
+indistinguishable from having forgotten where the page was. The dashboard also has no other reason to
+query held vendor names, and adding one purely to decide whether to draw a link is a read nobody
+asked for.
+
+**A tautology in my own test, caught by running the sensitivity check properly.** The first attempt
+asserted `link.getAttribute('href')` equalled the imported `QUARANTINE_ROUTE` — the constant compared
+with itself. Renaming the route moved both sides together and the test kept passing. It now asserts
+the literal `'/quarantine'` and separately that the constant agrees with it; renaming the route now
+fails with `expected '/quarantine-x' to be '/quarantine'`. The first sensitivity run produced no
+output because the filter matched nothing, which is the only reason this was found — a check that
+silently runs nothing looks exactly like a check that passed.
+
+**Review findings.** `next/link` adopted: the lint claim did not reproduce (eslint is clean and the
+rule is not active), but this is the product's first internal link, so it sets the precedent, and an
+anchor discards the client router's state where `Link` navigates client-side. The redundant
+`.toBeDefined()` after a throwing `getByRole` was replaced with a count assertion — `toBeInTheDocument`
+was suggested but `@testing-library/jest-dom` is not installed, and adding a dependency to improve one
+assertion's phrasing is not worth it.
+
+
 **Task 5.** The surface is split: `QueueList` takes a view and returns markup, the page reaches the
 database. That seam is what lets a treasurer's actual view be asserted without standing up Postgres.
 
@@ -569,10 +592,18 @@ Adversarial review (Argus, `gemini-3.1-pro-high`): no findings, confidence 1.0.
 - `app/quarantine/page.test.tsx` (new)
 - `app/quarantine/queue-list.tsx` (new)
 - `app/quarantine/queue-list.test.tsx` (new)
+- `app/dashboard/page.tsx` (modified — link to the queue)
+- `app/dashboard/page.test.tsx` (new)
+- `core/auth/route-policy.ts` (modified — `QUARANTINE_ROUTE`)
 
 
 ### Change Log
 
+- 2026-08-06 — Implemented test-first across six tasks. 45 new tests: the port's negative shape, the
+  reader-backed adapter, the view model, the rendering harness, the surface, and the route in. Every
+  task's diff passed a sensitivity check and an Argus review. Four defects were found by the tests
+  and the gates rather than by review: accumulating renders, an unmeasured colour token, seven type
+  errors `npm run build` does not see, and a tautological assertion in my own test. Status -> review.
 - 2026-08-06 — Story created. Scope is the read-only quarantine queue: epic ACs 2 and 5. Two
   decisions recorded ahead of implementation — a separate read-only port, and reading through
   `watchdog_reader`. Status -> ready-for-dev.
