@@ -234,6 +234,14 @@ semantics — and the uniqueness rule depends on that guess, because "one open i
 name" is a different constraint from "one item ever". 1.6d decides, and can make the index partial
 then. Building it now would be a guard with no test behind it.
 
+**Which layer these assertions live at.** B1 and B2 below are stated against **direct inserts** in
+`migrations/quarantine-item.test.ts` — that is where a uuid comes back and where a second spelling
+raises 23505, because those are claims about the table. Through the port it looks different and
+deliberately so: `hold` returns `Promise<void>` and uses `on conflict do nothing`, so a duplicate
+**resolves quietly** and leaves one row. `adapters/db/quarantine-postgres.test.ts` asserts that
+version. Both are true; they are answers to different questions, and reading one set as the other
+would suggest the adapter throws on a duplicate when it must not.
+
 **B1 — an item is stored against a document.**
 *Correct if:* the insert returns a uuid and the row reads back with the name as extracted.
 
