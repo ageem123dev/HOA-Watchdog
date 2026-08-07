@@ -353,6 +353,47 @@ not a green run.
 
 ### Review Findings
 
+## CodeRabbit round 1 (IDE, 2026-08-07) — head `f82c2ad`, base `6f8e403`
+
+7 findings. `argus_ingest` ran before any fix (13 lessons written). Reconciliation: all 11 files in
+`main...HEAD` appear in `fileReviewMap`; 3 extra files — `.gitignore`, `.mcp.json` and
+`.claude/commands/argus-review.md` — are the extension picking up uncommitted work, which it does
+whatever the scope setting says.
+
+**Fixed (5).**
+
+| # | Finding | What was actually true |
+| --- | --- | --- |
+| 1 | `says why it cannot write` is non-sensitive | **Confirmed and deleted.** `/read/i` matches `readonly`, which every field of `UnitHolding` carries — so that half passed against a port stripped of every word of rationale. Checked against a bare port, not assumed. Not tightened: making it sensitive means matching a specific sentence, which is testing prose — the thing the migration tests strip comments to avoid. The exhaustive method list already protects the API, and it is a property of the code |
+| 2 | Pin `search_path` on the normalisation function | **Fixed.** The body calls `lower`, `regexp_replace`, `btrim` and `chr` unqualified, and it decides unit *identity* — it backs a stored generated column and the unique index on it. A shadowed `lower` would change which numbers are the same unit, and rows written before and after would disagree. Two assertions: the migration text, and `pg_proc.proconfig` on the live function |
+| 3 | The 750ms budget is the wrong direction for the beside-case | **Fixed, differently.** The finding is right that a timing budget can only produce false failures for the "does not block" assertion. Its proposed fix — drop the bound and await the insert — would leave a blocked case hanging until Vitest's timeout with two transactions still open, so `finally` would never roll them back and every later test would queue behind their locks. Raised to 5s instead: free when passing, still bounded when not |
+| 4 | Don't assert `covers_dates` for the empty range | **Confirmed, and stronger than reported.** Every empty daterange has a **null lower bound** — verified for `[d,d)`, `(d,d+1)` and the `empty` literal — so `lower(held_during) is not null` already rejects all of them. Dropping `not isempty(...)` from the live database changed no behaviour and left **all 351 tests passing**. The constraint was deleted, and two tests now stop it returning: one on the migration text, one asserting `pg_constraint` holds exactly one check constraint |
+| 5 | `executable` misses trailing and block comments | **Fixed once, shared.** Both files declared their own copy handling only leading `--`. Extracted to `migrations/executable-sql.ts`, now quote-aware: trailing comments, nested `/* */`, `--` inside a string literal, `$$` bodies kept whole. 8 tests of its own, including a positive control |
+
+**Out of scope (2)** — both on files this branch does not own:
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 6 | `.mcp.json` and `.claude/commands/argus-review.md` commit a machine-specific Argus path | Real, and already an open epic-1 action item ("portable Argus paths … must change together"). Both files are **uncommitted work on another branch**; fixing them here would drag them into this MR |
+| 7 | `argus-review.md` uses `git diff HEAD`, omitting untracked files | Real, same file, same branch. Recorded alongside the existing `$ARGUMENTS` shell-injection item for that file |
+
+**The lesson worth keeping from #4.** Task 2's mutation testing dropped both check constraints
+together and so never showed that either one mattered. A mutation that removes two things at once
+cannot tell you which of them is load-bearing. Re-run one at a time, the redundant constraint was
+invisible to all 351 tests.
+
+*Sensitivity checks on this round's fixes, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| `set search_path` removed | `pins the search_path on the normalisation function` **and** `carries the pinned search_path on the live function` |
+| `not isempty(...)` put back | `does not carry a redundant isempty check` **and** `carries the start-date check itself, by its definition` |
+| `lower(...) is not null` deleted | 4 tests — both behavioural cases, the migration-text assertion, and the definition cross-check |
+
+*Gates after the round:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**68 files / 1230 passed**, `npm run test:db` **19 files / 364 passed**.
+
+
 ### Completion Notes List
 
 **Task 1 — migration 011, the unit.** Done. `unit` holds the durable identity dues attach to;
@@ -546,6 +587,12 @@ the only observable is a live handle inside Node, and asserting it through
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — the shared-pool action item now names
   seven adapters and the HMR half of the same defect.
 
+**New (review round 1)**
+
+- `migrations/executable-sql.ts` — the shared, quote-aware comment stripper both migration test
+  files now use.
+- `migrations/executable-sql.test.ts` — 8 tests for it, including a positive control.
+
 **New (task 3)**
 
 - `core/ports/unit-directory.ts` — the read port: `heldBy(unitNumber, on)` and
@@ -560,6 +607,9 @@ the only observable is a live handle inside Node, and asserting it through
 
 ### Change Log
 
+- 2026-08-07 — CodeRabbit round 1 applied. Five fixes, two findings routed to existing action items.
+  A redundant check constraint deleted after review showed no test could detect its removal, and the
+  `search_path` on the normalisation function pinned.
 - 2026-08-07 — Task 4 complete (`bf5403d`). Two concurrent writers, with an assertion that they
   genuinely contended. All four tasks done; status -> review.
 - 2026-08-07 — Task 3 complete (`942d353`). The read port and its reader-connection adapter, plus a

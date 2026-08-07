@@ -69,15 +69,27 @@ create table unit_membership (
 
   created_at  timestamptz not null default now(),
 
-  -- `[d,d)` is an *empty* range, not a one-day one. Without this, a membership
-  -- can exist that covers no date, answers no query, and overlaps nothing --
-  -- so the constraint below would never notice it either.
-  constraint unit_membership_covers_dates check (not isempty(held_during)),
-
-  -- The half of the half-open rule that can actually fire. `lower_inc` is false
-  -- for an unbounded lower bound, which is the one malformed shape Postgres
-  -- will not canonicalise away: a membership that began at the beginning of
-  -- time. Every membership starts on a date somebody can name.
+  -- Every membership starts on a date somebody can name.
+  --
+  -- This rejects two malformed shapes, and it is the only check here because it
+  -- is the only one that can ever be the reason for a rejection:
+  --
+  --   * an unbounded lower bound -- a membership that began at the beginning of
+  --     time. The one shape Postgres will not canonicalise away.
+  --   * an *empty* range. `[d,d)` covers no date, answers no query, and overlaps
+  --     nothing, so the exclusion constraint below would not notice it either.
+  --
+  -- A second constraint, `not isempty(held_during)`, was written for that second
+  -- case and then deleted. Every empty daterange has a **null lower bound** --
+  -- verified for `[d,d)`, `(d,d+1)` and the `empty` literal -- so this check
+  -- already catches all of them. Dropping the `isempty` constraint from the live
+  -- database changed no behaviour and left all 351 tests passing: nothing could
+  -- make it the sole cause of a rejection, and nothing could detect its removal.
+  --
+  -- It was found by review, not by the mutation testing for this story, which
+  -- dropped both constraints together and so never told them apart. That is the
+  -- lesson worth keeping: a mutation that removes two things at once cannot show
+  -- that either one matters.
   constraint unit_membership_has_a_start check (lower(held_during) is not null),
 
   -- AC3, in one line, enforced by the database rather than by application code.

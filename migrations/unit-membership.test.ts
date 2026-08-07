@@ -17,6 +17,7 @@ import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { Client } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { executable } from './executable-sql'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
@@ -49,13 +50,6 @@ const INSUFFICIENT_PRIVILEGE = '42501'
 const RUN_PREFIX = `m${randomBytes(4).toString('hex')}`
 
 const MIGRATION = readFileSync(join(__dirname, '012_unit_membership.sql'), 'utf8')
-
-/** The statements only -- see the header. */
-const executable = (sql: string) =>
-  sql
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('--'))
-    .join('\n')
 
 describe('the migration says what it does', () => {
   it('creates both tables', () => {
@@ -103,14 +97,37 @@ describe('the migration says what it does', () => {
     )
   })
 
-  it('strips comments without eating statements', () => {
-    // The control for the instrument, as in unit.test.ts.
-    const sample = ['-- create table decoy (', 'create table unit_membership (', '  id uuid'].join(
-      '\n',
+  it('requires every membership to have a start date', () => {
+    // C5 and C6's guard, named. The database test below proves *a* check fired;
+    // this proves the migration still declares this one.
+    expect(executable(MIGRATION)).toMatch(
+      /check\s*\(\s*lower\s*\(\s*held_during\s*\)\s+is\s+not\s+null\s*\)/i,
     )
+  })
 
-    expect(executable(sample)).toMatch(/create\s+table\s+unit_membership\s*\(/i)
-    expect(executable(sample)).not.toMatch(/decoy/i)
+  it('does not carry a redundant isempty check', () => {
+    // Raised by review, and it turned out to be stronger than reported. Every
+    // empty daterange has a **null lower bound** -- verified for `[d,d)`,
+    // `(d,d+1)` and the `empty` literal -- so `lower(held_during) is not null`
+    // already rejects all of them. Dropping the `not isempty(...)` constraint
+    // from the live database changed no behaviour and left all 351 tests
+    // passing: nothing could make it the sole cause of a rejection, and nothing
+    // could detect its removal.
+    //
+    // Asserted so it cannot come back by reflex. The same reasoning already
+    // deleted the `lower_inc and not upper_inc` check from this migration.
+    expect(executable(MIGRATION)).not.toMatch(/isempty/i)
+  })
+
+  it('strips comments without eating this migration statements', () => {
+    // The control for the instrument, as applied to this file's migration.
+    // `executable-sql.test.ts` covers the stripper's own edge cases.
+    const stripped = executable(MIGRATION)
+
+    expect(stripped).toMatch(/create\s+table\s+unit_membership\s*\(/i)
+    expect(stripped).toMatch(/exclude\s+using\s+gist/i)
+    expect(stripped).toMatch(/grant\s+select/i)
+    expect(stripped.length).toBeLessThan(MIGRATION.length)
   })
 })
 
@@ -313,6 +330,12 @@ describeWithDatabase('who holds a unit, and when', () => {
 
     it('refuses a membership covering no dates', async () => {
       // C5. `[d,d)` is an empty range, not a one-day one -- verified.
+      //
+      // Caught by `unit_membership_has_a_start`, not by a separate isempty
+      // check: an empty daterange has a null lower bound, so the same constraint
+      // rejects both malformed shapes. The SQLSTATE is asserted rather than the
+      // constraint name for that reason -- and because Postgres does not promise
+      // which name it reports when more than one check fails.
       const { unitId, holderId } = await givenUnitAndHolder()
 
       await expect(heldFrom(unitId, holderId, '2024-01-01', '2024-01-01')).rejects.toMatchObject({
@@ -397,6 +420,25 @@ describeWithDatabase('who holds a unit, and when', () => {
       expect(rows.map((r) => r.def).join('\n')).toMatch(
         /exclude using gist \(unit_id with =, held_during with &&\)/i,
       )
+    })
+
+    it('carries the start-date check itself, by its definition', async () => {
+      // The other cross-check, and the one the review round added. The empty
+      // range and the unbounded lower bound both raise 23514, so a behavioural
+      // test cannot tell which constraint fired -- or notice a second, redundant
+      // one being removed. Matched on `pg_get_constraintdef`, not on the
+      // constraint's name, for the reason task 1 recorded.
+      const { rows } = await writer.query<{ def: string }>(
+        `select pg_get_constraintdef(oid) as def
+           from pg_constraint
+          where conrelid = 'unit_membership'::regclass and contype = 'c'`,
+      )
+      const definitions = rows.map((r) => r.def).join('\n')
+
+      expect(definitions).toMatch(/check \(\(?lower\(held_during\) IS NOT NULL\)?\)/i)
+      // And exactly one check constraint, so the redundant `isempty` one cannot
+      // return unnoticed.
+      expect(rows).toHaveLength(1)
     })
 
     it('still refuses an overlap inside a transaction, and a savepoint leaves it usable', async () => {
@@ -526,7 +568,20 @@ describeWithDatabase('who holds a unit, and when', () => {
           (error: { code?: string }) => error,
         )
 
-        expect(await stillPending(other, 750)).toBe(false)
+        // A generous budget, deliberately, and the asymmetry is the point.
+        // Raised by review: for the *blocked* assertion above, a longer budget
+        // makes the claim stronger; for this one it makes it less flaky, because
+        // an unblocked insert on a loaded machine can take longer than a tight
+        // budget allows. The two are not the same knob.
+        //
+        // The budgets differ in cost too. 750ms above is paid on every run,
+        // because the insert really is blocked for it. The five seconds here are
+        // free when the test passes — the insert resolves in milliseconds — and
+        // only spent when something is wrong. Dropping the bound entirely and
+        // awaiting the insert would leave a blocked case hanging until Vitest's
+        // timeout with the two transactions still open, so `finally` would never
+        // roll them back and every later test would queue behind their locks.
+        expect(await stillPending(other, 5_000)).toBe(false)
         expect(await other).toBe('inserted')
       } finally {
         await writer.query('rollback').catch(() => undefined)

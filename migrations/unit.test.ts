@@ -13,6 +13,7 @@ import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { Client } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { executable } from './executable-sql'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
@@ -48,18 +49,6 @@ const INSUFFICIENT_PRIVILEGE = '42501'
 const RUN_PREFIX = `u${randomBytes(4).toString('hex')}`
 
 const MIGRATION = readFileSync(join(__dirname, '011_unit.sql'), 'utf8')
-
-/**
- * The statements only.
- *
- * These migrations explain their own hazards in prose, so a check for a bad
- * shape matches the sentence warning against it unless comments come out first.
- */
-const executable = (sql: string) =>
-  sql
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('--'))
-    .join('\n')
 
 describe('the migration says what it does', () => {
   it('creates the unit table', () => {
@@ -106,14 +95,30 @@ describe('the migration says what it does', () => {
     )
   })
 
-  it('strips comments without eating statements', () => {
-    // The control for the instrument. Story 1.6c shipped two versions of this
-    // control that tested nothing, because the sample it used could not match
-    // either way.
-    const sample = ['-- create table decoy (', 'create table unit (', '  id uuid'].join('\n')
+  it('pins the search_path on the normalisation function', () => {
+    // Raised by review. The body calls `lower`, `regexp_replace`, `btrim` and
+    // `chr` unqualified, and this function decides unit *identity* -- it backs a
+    // stored generated column and the unique index built on it. A role able to
+    // put a schema earlier in the caller's search_path could shadow any of them,
+    // and rows written before and after would then disagree about which unit
+    // numbers are the same unit.
+    expect(executable(MIGRATION)).toMatch(/set\s+search_path\s*=\s*pg_catalog\s*,\s*pg_temp/i)
+  })
 
-    expect(executable(sample)).toMatch(/create\s+table\s+unit\s*\(/i)
-    expect(executable(sample)).not.toMatch(/decoy/i)
+  it('strips comments without eating this migration statements', () => {
+    // The control for the instrument, as applied to *this* file's migration.
+    // `executable-sql.test.ts` proves the stripper handles trailing comments,
+    // nested blocks and quoted literals; this proves it leaves migration 011's
+    // statements standing, which is what every assertion above rests on. Story
+    // 1.6c shipped two versions of this control that tested nothing, because the
+    // sample they used could not match either way.
+    const stripped = executable(MIGRATION)
+
+    expect(stripped).toMatch(/create\s+table\s+unit\s*\(/i)
+    expect(stripped).toMatch(/create\s+unique\s+index/i)
+    expect(stripped).toMatch(/grant\s+select/i)
+    // And it did remove something: the file opens with a comment block.
+    expect(stripped.length).toBeLessThan(MIGRATION.length)
   })
 })
 
@@ -222,6 +227,19 @@ describeWithDatabase('the unit table', () => {
     await expect(
       reader.query('insert into unit (unit_number) values ($1)', [numbered('9Z')]),
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
+  })
+
+  it('carries the pinned search_path on the live function', async () => {
+    // The cross-check for the migration-text assertion above. The text proves it
+    // was asked for; this proves the function in the database actually has it —
+    // the same pairing the queue adapter uses for its order clause, and the
+    // reason that pairing exists is that only one of the two caught a defect.
+    const { rows } = await writer.query<{ proconfig: string[] | null }>(
+      `select proconfig from pg_proc where proname = 'unit_normalised_number'`,
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.proconfig ?? []).toContain('search_path=pg_catalog, pg_temp')
   })
 
   it('carries the unique index the constraint depends on', async () => {

@@ -79,13 +79,17 @@ describe('the UnitDirectory port', () => {
     expect(declaredMethods('nothing here')).toEqual([])
   })
 
-  it('says why it cannot write', () => {
-    // The reason is the load-bearing part. A read-only port with no stated
-    // reason is one convenience away from growing a write method, which is how
-    // AD-8's single human decision point would quietly disappear.
-    expect(source).toMatch(/read/i)
-    expect(source).toMatch(/2\.4|write/i)
-  })
+  // There was a `says why it cannot write` test here, asserting the header
+  // contained `/read/i` and `/2\.4|write/i`. Review called it non-sensitive and
+  // it was: `/read/i` matches the word `readonly`, which every field of
+  // `UnitHolding` carries, so that half passed against a port stripped of every
+  // word of rationale — checked, not assumed. The other half only required the
+  // string `write` to appear anywhere.
+  //
+  // Deleted rather than tightened. Making it sensitive would mean matching a
+  // specific sentence, which is testing prose — the very thing the migration
+  // tests strip comments to avoid. The read-only API is already protected by the
+  // exhaustive method list above, which is a property of the code.
 
   it('carries dates as calendar dates, not instants', () => {
     // D2. `pg` turns a `date` into a JS `Date` at local midnight, so a

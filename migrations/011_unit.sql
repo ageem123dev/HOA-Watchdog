@@ -23,12 +23,25 @@
 -- because zero-padding is a real convention in some associations and deciding it
 -- means nothing is a data decision rather than a schema one. If a roll arrives
 -- padded, that belongs to whoever loads it.
+-- `search_path` pinned, which matters more here than in an ordinary function.
+--
+-- The body calls `lower`, `regexp_replace`, `btrim` and `chr` unqualified. A
+-- role able to create a schema earlier in the caller's `search_path` could
+-- shadow any of them, and this function decides *unit identity*: it backs a
+-- stored generated column and the unique index built on it. A shadowed `lower`
+-- would silently change which unit numbers are considered the same unit, and
+-- the rows already written would not agree with the rows written afterwards.
+-- Raised by review.
+--
+-- `pg_temp` last is deliberate: it is searched before anything else unless it is
+-- named explicitly, so leaving it out would not remove it from the path.
 create or replace function unit_normalised_number(raw text)
   returns text
   language sql
   immutable
   strict
   parallel safe
+  set search_path = pg_catalog, pg_temp
 as $$
   select lower(
            regexp_replace(
