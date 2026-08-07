@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: '2026-08-06'
+last_updated: '2026-08-07'
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -67,7 +67,7 @@ development_status:
   1-6b-hold-unknown-vendors-for-a-human: done
   1-6c-see-what-is-waiting: done
   1-6d-resolve-a-held-document: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   epic-2: backlog
   epic-2-retrospective: optional
@@ -77,3 +77,41 @@ development_status:
 
   epic-4: backlog
   epic-4-retrospective: optional
+
+action_items:
+  - epic: 1
+    action: "First Python story adds pytest to .gitlab-ci.yml in the same story"
+    owner: "Dev"
+    status: open
+  - epic: 1
+    action: "Fix $ARGUMENTS shell injection in .claude/commands/argus-review.md"
+    owner: "Matt"
+    status: open
+  - epic: 1
+    action: "Make .mcp.json and argus-review.md Argus paths portable (change together)"
+    owner: "Matt"
+    status: open
+  - epic: 1
+    action: "extraction.vendor_id, written from both the ingest and resolution paths in one change"
+    owner: "Dev"
+    status: deferred
+  - epic: 1
+    action: "Shared writer pool - six pools at max 5 against max_connections 100"
+    owner: "Dev"
+    status: open
+  - epic: 1
+    action: "Add .gitattributes and renormalise the repo-wide CRLF"
+    owner: "Dev"
+    status: open
+  - epic: 1
+    action: "Tests for readWriterDatabaseUrl and MissingAuthConfigError, which have none"
+    owner: "Dev"
+    status: open
+  - epic: 1
+    action: "Migration 006 padded-ends btrim bypass, which migration 009 fixed and 006 did not"
+    owner: "Dev"
+    status: open
+  - epic: 1
+    action: "DECIDED 2026-08-07: no tsc --noEmit CI gate; kept a local habit. Revisit if type errors reach main"
+    owner: "Matt"
+    status: decided

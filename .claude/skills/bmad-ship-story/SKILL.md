@@ -187,7 +187,7 @@ Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a
 
 ## Project facts
 
-- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema/adapter work, plus `pytest` once the Python service exists. **Neither ESLint nor Vitest type-checks** — `npm run build` is the only gate that does, and it has caught real errors twice that the other two passed.
+- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema/adapter work, plus `pytest` once the Python service exists. **Neither ESLint nor Vitest type-checks**, and `npm run build` does not check test files — so also run **`npx --no-install tsc --noEmit`** and compare against its baseline of 8 pre-existing errors. Epic 1's retro decided against making that a CI gate; it caught real errors in three consecutive stories that lint and build both passed, so running it by hand is not optional.
 - **Python is in scope** — `python3` is installed and the PRD puts a CrewAI service in the architecture.
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.
 - **CodeRabbit:** `.coderabbit.yaml`, `auto_review.base_branches: [main]`. Pro is free on public repos and the tier binds at MR-open time. Posts as a service account, findings in the review body, resolves threads itself when satisfied, hourly rate limits.
