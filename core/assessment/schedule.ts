@@ -21,7 +21,7 @@
  */
 
 import type { BillingCycle } from './billing-cycle'
-import { fromMinorUnits, toMinorUnits } from './minor-units'
+import { describeValue, fromMinorUnits, toMinorUnits } from './minor-units'
 
 export interface Instalment {
   /** `YYYY-MM-DD`, the first day of the period this instalment covers. */
@@ -56,7 +56,29 @@ export function deriveSchedule(terms: AssessmentTerms): readonly Instalment[] {
   const total = toMinorUnits(terms.annualAmount)
 
   if (total <= 0) {
-    throw new RangeError(`an assessment must be for a positive amount: ${terms.annualAmount}`)
+    throw new RangeError(
+      `an assessment must be for a positive amount: ${describeValue(terms.annualAmount)}`,
+    )
+  }
+
+  if (!Number.isSafeInteger(terms.assessmentYear)) {
+    // A fractional year yields '2024.5-01-01', which is not a date and sorts
+    // nowhere sensible. The database constrains the year to 1900-2200; that
+    // range is deliberately not restated here, because a second statement of a
+    // rule is only safe when something fails on disagreement (migration 007's
+    // note) and nothing here would.
+    throw new RangeError(`not a calendar year: ${describeValue(terms.assessmentYear)}`)
+  }
+
+  // `Object.hasOwn`, not a bare lookup. `DUE_MONTHS.constructor` is a function
+  // with a `length` of 1 and no `map`, and `DUE_MONTHS.__proto__` is an object
+  // with neither -- so an unvalidated key does not give `undefined`, it gives
+  // something that fails three lines later as "months.map is not a function",
+  // naming nothing useful. Story 1.6d shipped this exact defect, where
+  // `suggestions[key] ?? []` returned Object.prototype members for a vendor name
+  // that folded to `constructor`.
+  if (!Object.hasOwn(DUE_MONTHS, terms.billingCycle)) {
+    throw new TypeError(`not a billing cycle: ${describeValue(terms.billingCycle)}`)
   }
 
   const months = DUE_MONTHS[terms.billingCycle]
@@ -70,7 +92,9 @@ export function deriveSchedule(terms: AssessmentTerms): readonly Instalment[] {
   const base = (total - remainder) / count
 
   return months.map((month, index) => ({
-    dueOn: `${terms.assessmentYear}-${String(month).padStart(2, '0')}-01`,
+    // The year is padded too: '999-01-01' < '2024-01-01' is false, so a short
+    // year silently breaks the string ordering these dates exist to provide.
+    dueOn: `${String(terms.assessmentYear).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`,
     // The earliest `remainder` instalments carry one extra minor unit, which is
     // what makes the instalments sum to exactly the annual amount.
     amount: fromMinorUnits(base + (index < remainder ? 1 : 0)),

@@ -46,6 +46,9 @@ const ECHO_LIMIT = 40
 /**
  * A rejected value, rendered safely enough to put in an error message.
  *
+ * Exported because `schedule.ts` rejects values for its own reasons and needs the
+ * same three protections. One helper, so a fix reaches both.
+ *
  * Three separate hazards, all raised by review and all reproduced before this
  * was written:
  *
@@ -58,7 +61,7 @@ const ECHO_LIMIT = 40
  *   does `String(Object.create(null))` — so a naive message replaces the error
  *   the caller should see with one raised by the error path itself.
  */
-const echo = (value: unknown): string => {
+export const describeValue = (value: unknown): string => {
   try {
     const text = typeof value === 'symbol' ? value.toString() : String(value)
     return JSON.stringify(text.slice(0, ECHO_LIMIT))
@@ -69,7 +72,7 @@ const echo = (value: unknown): string => {
 
 export function toMinorUnits(amount: string): number {
   if (typeof amount !== 'string' || !AMOUNT.test(amount)) {
-    throw new TypeError(`not a decimal amount with at most ${SCALE} decimal places: ${echo(amount)}`)
+    throw new TypeError(`not a decimal amount with at most ${SCALE} decimal places: ${describeValue(amount)}`)
   }
 
   const negative = amount.startsWith('-')
@@ -92,7 +95,7 @@ export function fromMinorUnits(minorUnits: number): string {
     // exact integer representation. A fractional minor unit means someone
     // divided without deciding where the remainder goes, and formatting it
     // would bury that decision rather than surface it.
-    throw new RangeError(`not an exact count of minor units: ${echo(minorUnits)}`)
+    throw new RangeError(`not an exact count of minor units: ${describeValue(minorUnits)}`)
   }
 
   const negative = minorUnits < 0

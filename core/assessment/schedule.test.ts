@@ -146,6 +146,55 @@ describe('deriveSchedule', () => {
     expect(first).toEqual(second)
   })
 
+  it.each(['__proto__', 'constructor', 'toString', 'quarterly'])(
+    'refuses a billing cycle of %s rather than crashing on it',
+    (cycle) => {
+      // Story 1.6d shipped this exact defect: `suggestions[key] ?? []` returned
+      // `Object.prototype` members for a name that folded to `constructor`.
+      // Indexing a plain object with an unvalidated key is the same mistake —
+      // `DUE_MONTHS.constructor` is a function with a `length` of 1 and no
+      // `map`, so the failure arrives as "months.map is not a function" from
+      // three lines later, naming nothing useful. Verified before fixing.
+      // Asserted on the **message**, not just the type. The crash throws a
+      // `TypeError` of its own — "months.map is not a function" — so
+      // `toThrow(TypeError)` alone passes whether the cycle was validated or
+      // whether the function fell over three lines later. It did exactly that
+      // before this was tightened, which makes it the third time in two stories
+      // that a `toThrow(SomeType)` assertion could not tell the contract from
+      // the crash.
+      expect(() => deriveSchedule(anAssessment('1200.00', cycle as BillingCycle))).toThrow(
+        /not a billing cycle/,
+      )
+    },
+  )
+
+  it('zero-pads a year shorter than four digits', () => {
+    // `'999-01-01' < '2024-01-01'` is **false**, so an unpadded year breaks the
+    // string ordering that is the entire reason these dates are strings.
+    // Checked, not assumed.
+    expect(deriveSchedule(anAssessment('1200.00', 'annual', 999))[0]?.dueOn).toBe('0999-01-01')
+    expect('0999-01-01' < '2024-01-01').toBe(true)
+  })
+
+  it.each([2024.5, Number.NaN, Number.POSITIVE_INFINITY])('refuses a year of %s', (year) => {
+    // A fractional year produces '2024.5-01-01', which is not a date and sorts
+    // nowhere sensible. The database constrains the year to 1900-2200; that
+    // range is deliberately *not* restated here, because a second statement of a
+    // rule is only safe when something fails on disagreement — migration 007's
+    // lesson — and nothing would.
+    expect(() => deriveSchedule(anAssessment('1200.00', 'monthly', year))).toThrow(RangeError)
+  })
+
+  it('does not repeat a rejected amount raw in its error message', () => {
+    // Same hazard as `minor-units`, same shared helper. This project logs
+    // structured JSON, and story 2.4 feeds extracted amounts through here.
+    try {
+      deriveSchedule(anAssessment('-1.00\nlevel=info msg="all clear"', 'monthly'))
+    } catch (error) {
+      expect((error as Error).message).not.toContain('\n')
+    }
+  })
+
   it.each(['0.00', '-1.00'])('refuses an annual amount of %s', (amount) => {
     // A schedule for nothing owed is not a schedule. The database already
     // forbids these on `assessment.annual_amount`; this refuses to invent an
