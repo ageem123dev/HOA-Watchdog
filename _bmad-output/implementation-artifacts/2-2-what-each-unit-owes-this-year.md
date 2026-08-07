@@ -4,7 +4,7 @@ baseline_commit: b44495b4ece5c4ca06ad432d3afde96996d95dd1
 
 # Story 2.2: What each unit owes this year
 
-Status: ready-for-dev
+Status: review
 
 > **Second of four stories in epic 2, the dues ledger.** 2.1 built the unit and who holds it. This
 > story records what each unit owes for a year and on what cadence it is paid. 2.3 turns that into
@@ -109,14 +109,14 @@ not checked:
   - [x] `adapters/db/assessment-directory-postgres.ts` on the **reader** connection, following
         `unit-directory-postgres.ts`: lazy pool, named columns rather than `select *`, and a
         connection test asserting it never reaches for the writer URL.
-- [ ] **Task 4 — Prove the annual-amount property** (AC2, AC3)
-  - [ ] The assertion AC2 actually asks for: two units, **same annual amount, different cycles**, and
+- [x] **Task 4 — Prove the annual-amount property** (AC2, AC3)
+  - [x] The assertion AC2 actually asks for: two units, **same annual amount, different cycles**, and
         the stored amounts are equal. A test that merely reads one assessment back would pass against
         a schema that scaled the amount by the cycle.
-  - [ ] Prove the amount survives the round trip **exactly** — `1234.56` comes back as `'1234.56'`,
+  - [x] Prove the amount survives the round trip **exactly** — `1234.56` comes back as `'1234.56'`,
         not `1234.56` and not `'1234.5600'`. A float would fail this; so would a `number` at the
         boundary.
-  - [ ] Constrain every expected failure to its SQLSTATE. A bare `rejects.toThrow()` passes for a
+  - [x] Constrain every expected failure to its SQLSTATE. A bare `rejects.toThrow()` passes for a
         missing table, which MR !20 caught in this very shape.
 
 ## Dev Notes
@@ -241,6 +241,31 @@ alone passes against `numeric(20,4)`; a type check alone passes against a column
 
 ### Completion Notes List
 
+**Task 4 — prove the annual-amount property.** Done, and enlarged. All three written subtasks were
+already satisfied by tasks 1 and 3: the AC2 property is asserted both against the table and through
+the port, the exact round trip is asserted in both places, and every expected failure names its
+SQLSTATE. Ticking them and moving on would have been honest but thin.
+
+*The gap they left.* The entire money decision rests on one sentence, in migration 006 and in the
+architecture: **"a binary float cannot represent 0.10"**. No test used that value. Every amount in
+play — `1234.56`, `1200`, `3400.00` — either survives a JS-number round trip or fails only on its
+scale, so a coercion could have slipped through several of them.
+
+Added: `0.10` carried end to end through the port, **plus a control proving the value
+discriminates** — `String(Number('1234.56'))` is `'1234.56'` and survives, while
+`String(Number('0.10'))` is `'0.1'` and does not. The control asserts a fact about JavaScript rather
+than about this code, which is the point: it shows the chosen value can fail, instead of claiming so
+in a comment.
+
+*Sensitivity, and the check that mattered.* Making the adapter coerce through
+`String(Number(...))` fails **7** tests — and specifically `returns a value a binary float cannot
+represent, unchanged`, which is the one this task exists for. Verified by name rather than by
+counting failures, because the previous run truncated its output and a passing new test would have
+hidden inside a list of seven.
+
+*Gates on the final head:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**73 files / 1265 passed**, `npm run test:db` **22 files / 423 passed**.
+
 **Task 3 — the read port and its adapter.** Done. `AssessmentDirectory` answers one question and can
 express nothing else; `annualAmount` crosses as a decimal string and `billingCycle` as the shared
 union rather than `string`. The adapter reads on the reader connection, matches the unit through
@@ -359,7 +384,32 @@ is recorded as a repo-wide consistency item rather than fixed here.
 
 ### File List
 
+**New**
+
+- `migrations/013_assessment.sql` — the `assessment` table: annual amount, cycle, one row per unit
+  per year, and `grant select` to `watchdog_reader`.
+- `migrations/assessment.test.ts` — 7 migration-text tests and 23 database tests.
+- `core/assessment/billing-cycle.ts` — the frozen vocabulary and its union type.
+- `core/assessment/billing-cycle.test.ts` — 5 tests, including the both-directions agreement with
+  migration 013 and a type-level assertion against widening.
+- `core/ports/assessment-directory.ts` — the read port.
+- `core/ports/assessment-directory.test.ts` — 5 tests on the declaration shape.
+- `adapters/db/assessment-directory-postgres.ts` — the adapter, on the reader connection.
+- `adapters/db/assessment-directory-postgres.test.ts` — 12 database tests.
+- `adapters/db/assessment-directory-connection.test.ts` — 9 tests on the two things behaviour cannot
+  catch: which role it connects as, and what the query text asks for.
+
+**Modified**
+
+- `_bmad-output/planning-artifacts/architecture/.../ARCHITECTURE-SPINE.md` — the Money row amended.
+- `_bmad-output/planning-artifacts/epics.md` — story 2.2's third acceptance criterion amended.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — status, plus two new action items.
+
 ### Change Log
+
+- 2026-08-07 — All four tasks complete. Migration 013, the cycle vocabulary, the read port and its
+  reader adapter. Two guards that proved nothing were found by their own sensitivity checks and
+  fixed before the tasks were ticked. Status -> review.
 
 - 2026-08-07 — Story created. The money-representation conflict between `ARCHITECTURE-SPINE.md` and
   epic 1's shipped code was surfaced and resolved by Matt before implementation rather than

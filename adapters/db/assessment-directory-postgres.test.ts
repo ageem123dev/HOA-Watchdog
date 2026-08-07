@@ -173,6 +173,31 @@ describeWithDatabase('the assessment directory', () => {
     expect((await directory.forUnitAndYear(annual, 2024))?.billingCycle).toBe('annual')
   })
 
+  it('returns a value a binary float cannot represent, unchanged', async () => {
+    // The whole money decision rests on one sentence in migration 006 and in the
+    // architecture: "a binary float cannot represent 0.10". This is that value,
+    // carried end to end -- stored as numeric(14,2), read by `pg`, and handed
+    // across the port.
+    //
+    // It is chosen because it *discriminates*. The control below shows why: many
+    // plausible amounts survive a round trip through a JS number and would leave
+    // a coercion here undetected. This one does not.
+    const number = await givenAnAssessment('0A', 2024, '0.10', 'annual')
+
+    const owed = await createAssessmentDirectory().forUnitAndYear(number, 2024)
+
+    expect(owed?.annualAmount).toBe('0.10')
+  })
+
+  it('uses a value that a number round trip would visibly damage', async () => {
+    // The control for the assertion above, and the reason it is not decoration.
+    // A test asserting `1234.56` would pass against an adapter that coerced to a
+    // number, because that value happens to survive; `0.10` does not, and this
+    // proves the difference rather than asserting it in a comment.
+    expect(String(Number('1234.56'))).toBe('1234.56')
+    expect(String(Number('0.10'))).not.toBe('0.10')
+  })
+
   it('reports the same annual amount for two units on different cycles', async () => {
     // AC2, through the port rather than against the table. This is the assertion
     // that forbids the adapter dividing the annual figure by the cycle on the
