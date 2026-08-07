@@ -13,7 +13,8 @@
  * that fetches and then redirects still put the query on the wire.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest' 
 
 import { PUBLIC_ROUTES, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 
@@ -35,6 +36,8 @@ vi.mock('next/navigation', () => ({ redirect: (path: string) => redirect(path) }
 beforeEach(() => {
   vi.clearAllMocks()
 })
+
+afterEach(cleanup)
 
 afterEach(() => {
   vi.resetModules()
@@ -86,5 +89,42 @@ describe('the quarantine page', () => {
     // that matters is that nobody adds one later.
     expect(PUBLIC_ROUTES).not.toContain('/quarantine')
     expect(PUBLIC_ROUTES).toEqual([SIGN_IN_ROUTE])
+  })
+})
+
+describe('what the page says after a resolution', () => {
+  it('reports an outcome carried back by the action', async () => {
+    auth.mockResolvedValue({ user: { email: 'treasurer@example.com' } })
+    const { default: QuarantinePage } = await import('./page')
+
+    render(await QuarantinePage({ searchParams: Promise.resolve({ resolved: 'already-resolved' }) }))
+
+    expect(screen.getByRole('status').textContent).toMatch(/already answered/i)
+  })
+
+  it('says nothing when no outcome was carried back', async () => {
+    auth.mockResolvedValue({ user: { email: 'treasurer@example.com' } })
+    const { default: QuarantinePage } = await import('./page')
+
+    render(await QuarantinePage({}))
+
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('says nothing for a value somebody typed into the URL', async () => {
+    // The parameter is attacker-controllable. Rendering it back would put
+    // arbitrary text on the page above the association's records.
+    auth.mockResolvedValue({ user: { email: 'treasurer@example.com' } })
+    const { default: QuarantinePage } = await import('./page')
+
+    const { container } = render(
+      await QuarantinePage({ searchParams: Promise.resolve({ resolved: 'anything at all' }) }),
+    )
+
+    expect(screen.queryByRole('status')).toBeNull()
+    // And absent from the page entirely, not merely from the status region. The
+    // first version passed against a regression that rendered the value
+    // somewhere else. Raised in review.
+    expect(container.textContent).not.toContain('anything at all')
   })
 })

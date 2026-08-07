@@ -1,6 +1,22 @@
 import type { QueueView } from '@/core/quarantine/queue-view'
 
 /**
+ * A server action, as the page hands it in.
+ *
+ * Taken as a prop rather than imported. Importing the actions here dragged
+ * `next-auth` into every rendering test through `'use server'`, and the suite
+ * simply failed to load the file — the test saying, plainly, that a
+ * presentational component had started reaching for the server.
+ *
+ * Returns `void`, which is what React's `formAction` accepts. The actions
+ * themselves return an outcome and are tested on it; the page wraps them, and
+ * what a treasurer sees of `already-resolved` today is the row disappearing
+ * rather than a sentence. Reporting it in words needs `useActionState` in a
+ * client component, as `app/upload/upload-form.tsx` does — recorded, not done.
+ */
+type ResolveAction = (formData: FormData) => void | Promise<void>
+
+/**
  * The queue, rendered.
  *
  * Presentational and separate from the page on purpose. The page is a server
@@ -8,11 +24,24 @@ import type { QueueView } from '@/core/quarantine/queue-view'
  * what a treasurer actually sees can be asserted without standing up Postgres.
  * The seam is the design, not a concession to testing.
  *
- * There is nothing to click. Confirming a vendor is story 1.6d's, and a control
- * that looks actionable before it works is worse than no control -- it invites
- * someone to believe they have answered a question that is still open.
+ * Story 1.6d gave it controls. Each row offers confirm-as-new, and one button
+ * per candidate the similarity ranking turned up.
+ *
+ * Nothing is preselected and there is no free-text field: a treasurer chooses an
+ * identity or creates one, and never types a vendor. A preselected candidate is
+ * automatic near-matching with one extra click, which is the failure the whole
+ * of epic story 1.6 exists to prevent -- `suggest`'s own header says a caller
+ * treating the first entry as an answer has reintroduced it.
  */
-export function QueueList({ view }: { view: QueueView }) {
+export function QueueList({
+  view,
+  confirmAction,
+  matchAction,
+}: {
+  view: QueueView
+  confirmAction: ResolveAction
+  matchAction: ResolveAction
+}) {
   if (view.isEmpty) {
     // A rendered branch, not an absence. Returning null gives a blank page,
     // which satisfies "no rows" and tells a treasurer nothing -- and AC2 asks
@@ -47,6 +76,34 @@ export function QueueList({ view }: { view: QueueView }) {
           */}
           <span style={styles.name}>{held.extractedName}</span>
           <span style={styles.document}>{held.filename}</span>
+
+          {/*
+            One form per row. Both actions read the same two hidden fields, and
+            the vendor id is what tells them apart -- `matchToExistingVendor`
+            refuses a submission without one rather than guessing which candidate
+            was meant.
+          */}
+          <form style={styles.controls}>
+            <input type="hidden" name="documentId" value={held.documentId} readOnly />
+            <input type="hidden" name="extractedName" value={held.extractedName} readOnly />
+
+            <button type="submit" formAction={confirmAction} style={styles.control}>
+              Confirm as a new vendor
+            </button>
+
+            {view.suggestionsFor(held.extractedName).map((candidate) => (
+              <button
+                key={candidate.id}
+                type="submit"
+                name="vendorId"
+                value={candidate.id}
+                formAction={matchAction}
+                style={styles.control}
+              >
+                This is {candidate.displayName}
+              </button>
+            ))}
+          </form>
         </li>
       ))}
     </ul>
@@ -76,6 +133,24 @@ const styles = {
     borderBottom: 'var(--component-rule-hairline) solid var(--color-rule-strong)',
   },
   name: { fontFamily: 'var(--type-serif)', fontSize: 'var(--type-scale-title)' },
+  controls: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 'var(--space-row)',
+    marginTop: 'var(--space-base)',
+  },
+  // Records an action rather than urging one -- never a filled button, matching
+  // the sign-out control on the dashboard.
+  control: {
+    font: 'inherit',
+    color: 'var(--color-ink)',
+    background: 'transparent',
+    border: 'var(--component-rule-hairline) solid var(--color-rule-strong)',
+    borderRadius: 'var(--radius-none)',
+    padding: 'var(--space-row)',
+    minHeight: '44px',
+    cursor: 'pointer',
+  },
   document: {
     fontSize: 'var(--type-scale-label)',
     letterSpacing: 'var(--type-tracking-label)',

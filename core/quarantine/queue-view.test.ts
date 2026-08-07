@@ -87,3 +87,98 @@ describe('the quarantine queue view', () => {
     expect(toQueueView([item({ extractedName: odd })]).items[0]?.extractedName).toBe(odd)
   })
 })
+
+describe('the view carrying suggestions', () => {
+  const candidate = (id: string, displayName: string, score: number) => ({
+    id,
+    displayName,
+    score,
+  })
+
+  it('offers a row the candidates found for its name', () => {
+    const view = toQueueView([item({ extractedName: 'Acme Plumbing' })], {
+      'acme plumbing': [candidate('v1', 'Acme Plumbing Co', 0.9)],
+    })
+
+    expect(view.suggestionsFor('Acme Plumbing').map((c) => c.id)).toEqual(['v1'])
+  })
+
+  it('finds them for a different spelling of the same name', () => {
+    // F1. The lookup and the key must fold the same way, or a row whose
+    // spelling differs from the key silently offers nothing — which looks
+    // exactly like a name with no similar vendors.
+    const view = toQueueView([item({ extractedName: 'ACME   plumbing  ' })], {
+      'acme plumbing': [candidate('v1', 'Acme Plumbing Co', 0.9)],
+    })
+
+    expect(view.suggestionsFor('ACME   plumbing  ').map((c) => c.id)).toEqual(['v1'])
+  })
+
+  it('keeps the ranking it was given', () => {
+    // F2. `suggest()` orders by similarity. Re-sorting here would replace a
+    // measured ranking with an alphabetical one that looks just as deliberate.
+    const view = toQueueView([item({ extractedName: 'Acme' })], {
+      acme: [candidate('v1', 'Zulu Services', 0.8), candidate('v2', 'Alpha Supply', 0.4)],
+    })
+
+    expect(view.suggestionsFor('Acme').map((c) => c.displayName)).toEqual([
+      'Zulu Services',
+      'Alpha Supply',
+    ])
+  })
+
+  it('offers none for a name nothing matched', () => {
+    const view = toQueueView([item({ extractedName: 'Nobody' })], {})
+
+    expect(view.suggestionsFor('Nobody')).toEqual([])
+  })
+
+  it('offers none when no suggestions were supplied at all', () => {
+    // F3. The argument is optional so story 1.6c's callers and its assertions on
+    // `items` keep working untouched — that shape is still correct and this
+    // story has no business editing it.
+    const view = toQueueView([item({ extractedName: 'Nobody' })])
+
+    expect(view.suggestionsFor('Nobody')).toEqual([])
+  })
+
+  it('marks nothing as chosen', () => {
+    // F4 and AC4. There is no selection on the view at all, so there is nothing
+    // for a surface to preselect — `suggest`'s own header warns that a caller
+    // treating the first entry as an answer has reintroduced automatic
+    // near-matching.
+    const view = toQueueView([item({ extractedName: 'Acme' })], {
+      acme: [candidate('v1', 'Acme Co', 0.9)],
+    })
+
+    expect(Object.keys(view.suggestionsFor('Acme')[0] ?? {}).sort()).toEqual([
+      'displayName',
+      'id',
+      'score',
+    ])
+  })
+})
+
+describe('a held name that collides with Object.prototype', () => {
+  it('offers none for a name that folds to a prototype member', () => {
+    // Raised in review. `suggestions['constructor']` on a plain object returns
+    // the Object constructor, not undefined, so `?? []` never fires and the
+    // caller gets a function where it expects an array.
+    //
+    // "No vendor is called that" is the reasoning this project has been wrong
+    // about twice, and AD-8 is explicit that an extracted value is untrusted
+    // data. The name arrives from a document.
+    const view = toQueueView([item({ extractedName: 'constructor' })], {})
+
+    expect(view.suggestionsFor('constructor')).toEqual([])
+  })
+
+  it('offers none for every prototype member, not just constructor', () => {
+    // One case would be fixed by special-casing that one string.
+    const view = toQueueView([], {})
+
+    for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(view.suggestionsFor(name)).toEqual([])
+    }
+  })
+})
