@@ -168,6 +168,19 @@ tokens and core components (UX-DR1–5, 9), upload states (UX-DR12), quarantine 
 **Standalone:** yes. Even alone, a board has a document store that reads invoices and statements
 reliably and refuses to guess. Enables Epics 2 and 3; requires neither.
 
+### Epic 5: The dues ledger — who owes what, and who paid *(built next)*
+
+Units, who held them and when, what each owed for the year, and what actually arrived. No
+detection and no questions answered — this is the data FR-7 triangulates and the data the
+catalog needs before `dues_status` can mean anything. Added 2026-08-07 after Epic 1's
+retrospective established that `UNIT`, `ASSESSMENT` and `PAYMENT` are named in the ERD and
+exist nowhere.
+
+**FRs covered:** none directly.
+**Also carries:** AD-1 (uploads only), AD-13 (re-upload replaces), AD-4 (writer-only).
+
+**Standalone:** yes. A treasurer can see the roll the system holds and what it believes was paid.
+
 ### Epic 2: The Oracle — ask a question, get an answer you can prove
 
 A board member can ask about dues, payments, and vendors and get an answer with the records it
@@ -210,6 +223,41 @@ with a stopped-watching alert, and the scope-disclosure redraft.
 **Standalone:** yes, given Epic 1. Requires neither Epic 2 nor Epic 3.
 
 ---
+
+### Domain detail: how dues actually work (recorded 2026-08-07)
+
+Stated by the project lead during Epic 2 planning. It is not in the PRD, the architecture, or the
+UX, and the ERD's `UNIT ||--o{ ASSESSMENT : owes` does not imply it. Recorded here because FR-7 is
+unbuildable without it and it would be expensive to recover.
+
+- **Dues are owed per member**, against their unit.
+- **The billing cycle is per member, not per association** — monthly, six-monthly, or annual.
+- **The amount differs per member**, driven by factors such as unit size or unit value.
+
+**Why this matters to FR-7.** "Deposits compared against the expected assessment roll to identify
+missed or partial payments" is only computable if both the expected amount *and* the cycle are
+per-unit. A monthly payer and an annual payer look identical under a single global period for eleven
+months of the year, and a naive comparison would report the annual payer delinquent every month
+until their payment lands.
+
+**Amount and cycle are different things.** The amount is set **annually, per unit**. The *cycle* on
+which that annual amount is paid varies by member — monthly, six-monthly, or annual. A monthly payer
+and an annual payer owe the same figure for the year and settle it on different cadences.
+
+**Dues attach to the unit, not the member.** They are assigned by unit number. A member is tied to a
+unit and **that member can change mid-year**, which makes membership a time-bounded relationship
+rather than a column on the unit. It also means a missed payment must be attributed to whoever held
+the unit *in that period*, not to whoever holds it now — attributing an arrears flag to the wrong
+person is the kind of error a fiduciary tool cannot make.
+
+**Two flags, not one.** FR-7's "missed or partial" resolves to: **paid late**, and **paid the wrong
+amount**. They are distinct findings with distinct evidence.
+
+**Consequence for the entity model.** `UNIT` is the durable entity and carries the unit number.
+Membership is a dated relationship between a unit and a person. `ASSESSMENT` carries the annual
+amount for a unit and year, plus the payment cycle. `PAYMENT` records what actually arrived, from an
+uploaded deposit document. None of `UNIT`, `ASSESSMENT` or `PAYMENT` exists in the schema as of the
+end of Epic 1, though all three are named in the ERD.
 
 ### Recorded assumptions (approved 2026-07-30 without amendment)
 
@@ -424,3 +472,181 @@ threshold is a recorded, tunable decision in 1.6a, not a constant buried in a qu
 **Ordering note.** 1.6c is viewable before 1.6d exists: a queue you can read but not act on is a
 smaller, honestly shippable step. 1.6d must not ship before 1.6c, since resolving from a queue
 requires the queue.
+
+---
+
+## Epic 5: The dues ledger — who owes what, and who paid
+
+*Added 2026-08-07 and **sequenced next, immediately after Epic 1**, ahead of Epics 2, 3 and 4.*
+
+*On the number.* This document already states that numbering reflects document order rather than
+build order, and this epic leans on that. It is 5 rather than 1.5 for a mechanical reason: story
+keys are matched as `number-number-name`, so `1-5-1-units...` both fails to parse and collides with
+Epic 1's existing `1-5-read-a-document-into-structured-records`. Renumbering Epics 2, 3 and 4 was the
+alternative, and their numbers are referenced throughout the FR mapping and the architecture.
+
+The association's assessment roll and its deposits become typed records: units, who held them and
+when, what each owed for the year, and what actually arrived. No detection, no questions answered —
+this epic exists so that Epic 3's FR-7 has something to triangulate and Epic 2's catalog has
+something to ask about beyond vendors.
+
+**Why it is its own epic.** Epic 1 delivered `DOCUMENT`, `EXTRACTION`, `VENDOR` and
+`QUARANTINE_ITEM`. The ERD also names `UNIT`, `ASSESSMENT` and `PAYMENT`, and none exist. FR-7
+consumes all three. Folding them into Epic 2 would have the Oracle epic spend its first three
+stories on data modelling before answering anything; folding them into Epic 3 would have the
+detection epic build its own inputs. Neither is honest about what the work is.
+
+**FRs covered:** none directly — it is the data FR-7 reasons over.
+**Also carries:** AD-1 (the roll and the deposits arrive by upload, like everything else), AD-13
+(re-uploading a roll replaces its rows rather than appending), AD-4 (writer-only, as with all
+ingestion).
+
+**Standalone:** yes. A treasurer can see the roll the system holds and what it believes was paid,
+which is useful before anything flags anything.
+
+### Story 5.1: Units and who holds them
+
+As a treasurer,
+I want the association's units recorded, with who held each one and when,
+So that a payment or an arrears finding can be attributed to the right person even after a unit
+changes hands.
+
+**Acceptance Criteria:**
+
+**Given** the association's units
+**When** they are recorded
+**Then** each is identified by its unit number, which is the durable identity dues attach to
+
+**Given** a unit that changes hands mid-year
+**When** the new member is recorded
+**Then** the previous membership is closed with an end date rather than overwritten
+**And** the unit's history states who held it for any date in the past
+
+**Given** a query about who held a unit on a given date
+**When** it is answered
+**Then** exactly one membership is returned, or none — overlapping memberships for one unit are
+rejected by the database, not by application code
+
+### Story 5.2: What each unit owes this year
+
+As a treasurer,
+I want each unit's annual dues and its payment cycle recorded,
+So that "paid the proper amount, on time" is a question with a defined answer.
+
+**Acceptance Criteria:**
+
+**Given** an assessment for a unit and a year
+**When** it is recorded
+**Then** it carries one annual amount and that unit's cycle — monthly, six-monthly, or annual
+
+**Given** two units on different cycles with the same annual amount
+**When** their assessments are compared
+**Then** they owe the same total for the year and differ only in when it falls due
+
+**Given** an assessment amount
+**When** it is stored
+**Then** it is held in integer minor units, never a float — the money convention the architecture
+fixes for the whole system
+
+### Story 5.3: What is due, and by when
+
+As a treasurer,
+I want the annual amount turned into the instalments it is actually paid in,
+So that lateness and shortfall are measurable rather than matters of opinion.
+
+**Acceptance Criteria:**
+
+**Given** an annual amount and a cycle
+**When** the schedule is derived
+**Then** the instalments sum to exactly the annual amount, with any remainder placed
+deterministically rather than lost to rounding
+
+**Given** a monthly cycle and an annual cycle for the same amount
+**When** each is evaluated part-way through the year
+**Then** the monthly unit is expected to have paid a proportion and the annual unit is not yet
+expected to have paid anything, and neither is delinquent for that reason alone
+
+**Given** the derivation
+**When** it runs
+**Then** it is a pure function over the assessment, with no I/O and no clock of its own — the
+evaluation date is a parameter
+
+### Story 5.4: Deposits become payments
+
+As a treasurer,
+I want uploaded deposit records stored as payments against units,
+So that what arrived can be compared with what was owed.
+
+**Acceptance Criteria:**
+
+**Given** an uploaded deposit document
+**When** its records are extracted
+**Then** each payment is stored against a unit, with its date and amount
+
+**Given** a payment whose unit cannot be identified
+**When** it is processed
+**Then** it is held for a human in the same manner as an unrecognised vendor, and no unit is invented
+**And** nothing is attributed to a unit on a guess
+
+**Given** the same deposit document uploaded twice
+**When** it is processed the second time
+**Then** its payments replace rather than duplicate, as AD-13 requires of every derived row
+
+**Ordering note.** 5.1 precedes everything: an assessment without a unit and a payment without a
+unit are both meaningless. 5.3 depends only on 5.2 and is pure logic, so it can be built and
+tested before any deposit exists. 5.4 is last because it is the only story that needs a document.
+
+---
+
+## Epic 2: The Oracle — ask a question, get an answer you can prove
+
+A board member asks about the association's records and gets an answer with the rows it came from
+already on screen, and the board can later see who asked what and when.
+
+**FRs covered:** FR-4, FR-5
+**Also carries:** AD-5, AD-6, AD-14 (the query catalog and its immutability), AD-15 and AD-3 (two
+runtimes, one wire contract, and the agent holding no data credential), AD-7/NFR-3 (the pre-render
+numeric validator), AD-11/NFR-4 (model capability binding), AD-12/NFR-5 (provenance logging),
+UX-DR6, 7, 11, 16, 17, 18.
+
+**Standalone:** yes, given Epics 1 and 5.
+
+**Two constraints fix the story order, both from the architecture:**
+
+- **AD-12**: *"A query path that can execute without writing this record is a defect."* Provenance
+  cannot be a later story. It lands with the first execution path or it becomes a retrofit that logs
+  only some paths.
+- **AD-7**: every numeric token in a rendered answer must match a value in that turn's tool result.
+  The validator must exist **before** the first answer is rendered, or the first surface story ships
+  precisely the failure the product exists to prevent.
+
+**Deployment note (decided 2026-08-07).** The Railway private network AD-15 assumes does not exist
+yet. Stories 2.2 and 2.3 build against localhost with the service-token check enforced in code; the
+private-network binding is a deployment task, and AD-15's network half stays untested until then.
+That is a known gap, recorded rather than glossed.
+
+### Story spine
+
+| # | Story | Carries | Proves on its own |
+| --- | --- | --- | --- |
+| 2.1 | The catalog, executed and logged | AD-5, AD-6, AD-14, AD-12 | A named entry with typed parameters runs, and cannot run without writing provenance |
+| 2.2 | Tool endpoints as the only way in | AD-15, AD-3 | The endpoints are the sole data path and reject an unauthenticated caller |
+| 2.3 | The Python service exists | AD-3, **pytest in CI** | A second runtime holding only the model key, obtaining facts by calling Node |
+| 2.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
+| 2.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
+| 2.6 | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
+| 2.7 | When it cannot answer | UX-DR17, 18 | No-catalog-match and service-unavailable as distinct, honest states |
+| 2.8 | The access log | NFR-5, UX-DR16 | Who asked what, when — the provenance record given a reader |
+
+**Why eight and not four.** Epic 1's evidence. Story 1.5 was split into four mid-flight and 1.6 into
+four before implementation; the pre-split epic went materially better. Story 1.5d at 27 files drew
+five review rounds, while the four 1.6 stories averaged closer to one.
+
+**Critical path item.** Story 2.3 introduces Python and **must add `pytest` to `.gitlab-ci.yml` in
+the same story**. A gate that runs only locally is not a gate, and Epic 1 has the worked example of
+what happens otherwise.
+
+**First catalog entry.** Not `dues_status` before Epic 5 exists — that needs its tables. The
+architecture uses `dues_status@2` as a *naming* example for versioning, not as a statement that the
+data exists. With Epic 5 built, `dues_status` becomes the natural first entry and exercises AD-6's
+derived-values rule.
