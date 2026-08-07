@@ -40,9 +40,36 @@ const AMOUNT = /^-?\d+(\.\d{1,2})?$/
 
 const SCALE = 2
 
+/** How much of a rejected value an error message may repeat. */
+const ECHO_LIMIT = 40
+
+/**
+ * A rejected value, rendered safely enough to put in an error message.
+ *
+ * Three separate hazards, all raised by review and all reproduced before this
+ * was written:
+ *
+ * - **Newlines.** This project logs structured JSON, so a raw newline in a
+ *   message is a forged log line. `JSON.stringify` escapes it. Story 2.4 feeds
+ *   amounts read off uploaded documents through here, which makes the input
+ *   untrusted in the strict sense rather than the theoretical one.
+ * - **Length.** An unbounded echo turns one bad field into a megabyte log line.
+ * - **Values that cannot be stringified at all.** `${aSymbol}` throws, and so
+ *   does `String(Object.create(null))` — so a naive message replaces the error
+ *   the caller should see with one raised by the error path itself.
+ */
+const echo = (value: unknown): string => {
+  try {
+    const text = typeof value === 'symbol' ? value.toString() : String(value)
+    return JSON.stringify(text.slice(0, ECHO_LIMIT))
+  } catch {
+    return `[unprintable ${typeof value}]`
+  }
+}
+
 export function toMinorUnits(amount: string): number {
   if (typeof amount !== 'string' || !AMOUNT.test(amount)) {
-    throw new TypeError(`not a decimal amount with at most ${SCALE} decimal places: ${String(amount)}`)
+    throw new TypeError(`not a decimal amount with at most ${SCALE} decimal places: ${echo(amount)}`)
   }
 
   const negative = amount.startsWith('-')
@@ -65,7 +92,7 @@ export function fromMinorUnits(minorUnits: number): string {
     // exact integer representation. A fractional minor unit means someone
     // divided without deciding where the remainder goes, and formatting it
     // would bury that decision rather than surface it.
-    throw new RangeError(`not an exact count of minor units: ${minorUnits}`)
+    throw new RangeError(`not an exact count of minor units: ${echo(minorUnits)}`)
   }
 
   const negative = minorUnits < 0

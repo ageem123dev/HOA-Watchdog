@@ -89,6 +89,49 @@ describe('toMinorUnits', () => {
     expect(() => toMinorUnits(null as unknown as string)).toThrow(TypeError)
     expect(() => toMinorUnits(12.34 as unknown as string)).toThrow(TypeError)
   })
+
+  it('does not carry a newline from the rejected input into the message', () => {
+    // Story 2.4 feeds *extracted* amounts through here — read off an uploaded
+    // document, so untrusted in the strict sense. This project logs structured
+    // JSON, and a raw newline in a message is a forged log line. Raised by
+    // review and verified: the first version reproduced the input verbatim.
+    const forged = '1.00\nlevel=info msg="payment cleared"'
+
+    expect(() => toMinorUnits(forged)).toThrow(TypeError)
+
+    try {
+      toMinorUnits(forged)
+    } catch (error) {
+      expect((error as Error).message).not.toContain('\n')
+      // And the input is still identifiable, which is the whole reason to
+      // include it at all.
+      expect((error as Error).message).toContain('1.00')
+    }
+  })
+
+  it('bounds how much of the rejected input it repeats', () => {
+    // An unbounded echo turns one bad field into a megabyte log line.
+    const huge = '9'.repeat(10_000)
+
+    try {
+      toMinorUnits(`${huge}.999`)
+    } catch (error) {
+      expect((error as Error).message.length).toBeLessThan(200)
+    }
+  })
+
+  it('still reports a TypeError for a value that cannot be stringified', () => {
+    // `String(Object.create(null))` throws, so describing the input naively
+    // replaces the intended error with a confusing one from inside the error
+    // path itself.
+    // Asserted on the *message*, not just the type. `String()` throws a
+    // `TypeError` of its own, so `toThrow(TypeError)` alone passes whether the
+    // error came from this function's contract or from its error path falling
+    // over — which is what it did before the fix, silently.
+    for (const hostile of [Object.create(null), Symbol('nope')]) {
+      expect(() => toMinorUnits(hostile as string)).toThrow(/not a decimal amount/)
+    }
+  })
 })
 
 describe('fromMinorUnits', () => {
@@ -115,6 +158,15 @@ describe('fromMinorUnits', () => {
     // A fractional minor unit is a bug upstream — someone divided without
     // deciding where the remainder goes — and formatting it would hide that.
     expect(() => fromMinorUnits(minorUnits)).toThrow(RangeError)
+  })
+
+  it('reports a RangeError even for a value that cannot be interpolated', () => {
+    // `${aSymbol}` throws `TypeError: Cannot convert a Symbol value to a string`,
+    // so building the message naively replaces the intended RangeError with one
+    // raised by the error path. The caller then sees a failure that has nothing
+    // to do with what they did wrong. Raised by review and verified.
+    expect(() => fromMinorUnits(Symbol('nope') as unknown as number)).toThrow(RangeError)
+    expect(() => fromMinorUnits(Object.create(null) as number)).toThrow(RangeError)
   })
 })
 

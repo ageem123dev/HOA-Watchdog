@@ -81,16 +81,16 @@ over "first instalment absorbs it" so no single instalment carries a visibly odd
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Exact decimal arithmetic, without a float and without a dependency** (AC1)
-  - [ ] Parse a `numeric(14,2)` decimal string to an integer count of minor units **by string
+- [x] **Task 1 — Exact decimal arithmetic, without a float and without a dependency** (AC1)
+  - [x] Parse a `numeric(14,2)` decimal string to an integer count of minor units **by string
         manipulation**, never through `Number()` or `parseFloat`. `Number('1000.00') * 100` is
         `100000.00000000001`-class arithmetic waiting to happen and is the single most likely defect
         in this story.
-  - [ ] Format an integer count of minor units back to a decimal string with exactly two decimal
+  - [x] Format an integer count of minor units back to a decimal string with exactly two decimal
         places — `100000` → `'1000.00'`, and `4` → `'0.04'`, not `'0.4'` or `'.04'`.
-  - [ ] **Reverse-it:** parse then format returns the input for every amount tested, including ones
+  - [x] **Reverse-it:** parse then format returns the input for every amount tested, including ones
         with a trailing zero (`'1200.00'`), no fractional part, and the maximum the column admits.
-  - [ ] Reject an input that is not a well-formed two-decimal amount rather than coercing it. Say
+  - [x] Reject an input that is not a well-formed two-decimal amount rather than coercing it. Say
         which error and prove it — a silent `NaN` here becomes a wrong instalment downstream.
 - [ ] **Task 2 — The schedule** (AC1, AC3)
   - [ ] `core/assessment/schedule.ts` — a **pure function** over `{ annualAmount, billingCycle,
@@ -188,6 +188,48 @@ while fixing a previous one**. The ones whose shape applies here:
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 1 — exact decimal conversion.** Done. `core/assessment/minor-units.ts`, the only place the
+decimal-string and integer representations meet.
+
+*The defect it exists to prevent is one line:* `Math.trunc(Number('0.29') * 100)` is **28**. What
+makes it dangerous is that `'1000.00'` and `'1234.56'` both survive it, so it is correct in testing
+and wrong in a ledger. `'0.29'` is therefore the value the tests are built around, with a control
+asserting the float route really does break on it and really does not break on `'1000.00'` — a fact
+about JavaScript, stated so the chosen value is shown to be able to fail rather than claimed to be.
+
+Both directions work on digits: parsing concatenates rather than multiplies, formatting pads before
+slicing so `4` is `'0.04'`. The only arithmetic is one integer parse. No dependency added.
+
+*Review — three findings, all in the error path, all confirmed by reproducing them.* `argus_review`
+raised that both messages interpolated the rejected value raw:
+
+| Finding | Reproduced | Fixed by |
+| --- | --- | --- |
+| A newline in the input reaches the message, forging a log line in a project that logs JSON | yes — the message contained a raw `
+` | `JSON.stringify` escaping, in a shared `echo()` |
+| An unbounded echo repeats the whole input | yes — a 10,000-character input produced a 10,056-character message | truncation at 40 characters |
+| A `Symbol` makes `${…}` throw, masking the intended error | yes — `TypeError: Cannot convert a Symbol value to a string` instead of `RangeError` | explicit symbol handling plus a `try/catch` for null-prototype objects |
+
+These are not theoretical: **story 2.4 feeds amounts read off uploaded documents through this
+function**, which makes the input untrusted in the strict sense.
+
+*And a test that passed for the wrong reason, caught while fixing them.* `still reports a TypeError
+for a value that cannot be stringified` asserted only `toThrow(TypeError)` — and `String()` throws a
+`TypeError` of its own, so it passed whether the error came from the contract or from the error path
+falling over. It now asserts the message.
+
+*Sensitivity checks, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Parsing routed through a float | `converts an amount the float route gets wrong` and `round-trips 0.29 unchanged`, and nothing else |
+| Zero-padding dropped from the formatter | all four sub-unit cases and the `0.00` round trip |
+| `echo()` reverted to plain interpolation | all four error-path tests |
+| Only the `try/catch` inside `echo()` removed | the two unstringifiable-value tests — so the catch is falsifiable rather than decorative |
+
+*Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**74 files / 1320 passed**, `npm run test:db` **22 files / 423 passed**.
 
 ### File List
 
