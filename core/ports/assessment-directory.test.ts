@@ -62,7 +62,7 @@ const declaredMethods = (text: string): readonly string[] => {
   // member is a capability, and a surprise one should fail loudly here rather
   // than be silently excluded by the shape of the regex.
   return [
-    ...withoutComments.slice(open + 1, close).matchAll(/^\s*(?:readonly\s+)?(\w+)\s*[:(]/gm),
+    ...withoutComments.slice(open + 1, close).matchAll(/^\s*(?:readonly\s+)?(\w+)\s*[:(<]/gm),
   ].map((m) => m[1]!)
 }
 
@@ -104,6 +104,22 @@ describe('the AssessmentDirectory port', () => {
       'export interface AssessmentDirectory {',
       '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
       '  readonly record: (unitNumber: string) => Promise<void>',
+      '}',
+    ].join('\n')
+
+    expect([...declaredMethods(sample)].sort()).toEqual(['forUnitAndYear', 'record'])
+  })
+
+  it('sees a capability declared with generic type parameters', () => {
+    // The third way to write one, and the third round of this same hole. After
+    // the property form was fixed, review pointed out that `record<T>(…)` still
+    // slipped through, because the name is followed by `<` rather than `:` or
+    // `(`. Same consequence: a write capability the read-only assertion cannot
+    // see. Fixed by one character in the character class, with this to prove it.
+    const sample = [
+      'export interface AssessmentDirectory {',
+      '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
+      '  record<T>(payload: T): Promise<void>',
       '}',
     ].join('\n')
 
