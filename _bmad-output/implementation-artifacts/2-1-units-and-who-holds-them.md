@@ -394,6 +394,45 @@ invisible to all 351 tests.
 **68 files / 1230 passed**, `npm run test:db` **19 files / 364 passed**.
 
 
+## Argus round 2 (the review-gate pass on round 1's own diff)
+
+Three **low** findings, all latent holes in the two parsers round 1 introduced — two of them in the
+file created to close exactly this class of hole. All three verified against the code: true, and
+none reachable by anything in the repo today. Fixed, on the same argument that justified writing the
+shared stripper at all: the hole is worth closing while no assertion depends on it.
+
+| Finding | Fix |
+| --- | --- |
+| The stripper mishandles double-quoted identifiers | `"…"` handled like `'…'`; a `--` inside a quoted identifier is part of the name |
+| The stripper ends an `E'…'` escape string early at `'` | Escape strings handled separately, with a beside-case proving a backslash in a *plain* literal is still ordinary text |
+| `declaredMethods` brace matching is not string-aware | String and template literals skipped before counting |
+
+**And the sensitivity check caught my own fix being untestable.** The first version of
+`counts braces outside string literals only` used `'{'` and `'}'` on separate methods — and they
+*balanced*, so a naive counter still reached the real closing brace at the right depth. The test
+passed with the string-awareness removed. Rewritten around a single unmatched `'}'`, it now fails
+with `['closing']` instead of `['closing', 'second']`. Two guards that proved nothing in this story
+were found this way; this is the third.
+
+## Two pre-existing tests that my new test file pushed over their timeout
+
+Adding `migrations/executable-sql.test.ts` put one more file into Vitest's parallel pool, and two
+scrypt tests from epic 1 began timing out at Vitest's 5s default — **reproducibly in the full run,
+never in isolation**. Confirmed as `Error: Test timed out in 5000ms`, not an assertion failure.
+
+Both were given a 30s bound. This is the one place in this story where a test I do not own was
+edited, so the reasoning is recorded rather than assumed:
+
+- `spends comparable effort on an unknown address as on a wrong password` asserts a **ratio** between
+  two code paths, so it is indifferent to how slow the machine is. Verified rather than argued:
+  with the 30s bound in place, removing the dummy verification from the absent-user path still fails
+  it — `0.03ms` against `22.96ms`.
+- `is usable in practice — a real hash and verify completes` asserts two boolean results. Its bound
+  was raised and **not** its scrypt parameters; lowering those is the single change that would make
+  it stop meaning anything, since "usable at the real parameters" is the whole claim.
+
+Three consecutive full unit runs afterwards: **68 files, 1234 passed**, no flake.
+
 ### Completion Notes List
 
 **Task 1 — migration 011, the unit.** Done. `unit` holds the durable identity dues attach to;

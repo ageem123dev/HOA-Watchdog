@@ -41,8 +41,24 @@ const declaredMethods = (sql: string): readonly string[] => {
   let depth = 0
   let close = -1
   for (let i = open; i < withoutComments.length; i += 1) {
-    if (withoutComments[i] === '{') depth += 1
-    else if (withoutComments[i] === '}') {
+    const ch = withoutComments[i]
+
+    // Skip over string and template literals before counting braces. A string
+    // literal type — `sep: '{' | '}'` — would otherwise desync the depth counter
+    // and truncate the body, which would make the exhaustive method list below
+    // silently shorter than the interface really is. Raised by review; nothing
+    // in this port triggers it today.
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i += 1
+      while (i < withoutComments.length && withoutComments[i] !== ch) {
+        if (withoutComments[i] === '\\') i += 1
+        i += 1
+      }
+      continue
+    }
+
+    if (ch === '{') depth += 1
+    else if (ch === '}') {
       depth -= 1
       if (depth === 0) {
         close = i
@@ -77,6 +93,28 @@ describe('the UnitDirectory port', () => {
 
     expect([...declaredMethods(sample)].sort()).toEqual(['first', 'second'])
     expect(declaredMethods('nothing here')).toEqual([])
+  })
+
+  it('counts braces outside string literals only', () => {
+    // A string literal type carrying a brace would otherwise desync the depth
+    // counter, close the body early, and make the exhaustive list above
+    // silently shorter than the interface really is — a guard weakened by a
+    // change nobody would connect to it.
+    //
+    // The literal is a lone closing brace on purpose. The first version of this
+    // test used `'{'` and `'}'` on separate methods, and they *balanced*: a
+    // naive counter reached the real closing brace at the right depth anyway,
+    // so the test passed with the string-awareness removed. Caught by the
+    // sensitivity check on this very fix. One unmatched brace is what actually
+    // separates the two implementations.
+    const sample = [
+      'export interface UnitDirectory {',
+      "  closing(sep: '}'): Promise<void>",
+      '  second(): Promise<void>',
+      '}',
+    ].join('\n')
+
+    expect([...declaredMethods(sample)].sort()).toEqual(['closing', 'second'])
   })
 
   // There was a `says why it cannot write` test here, asserting the header

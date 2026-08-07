@@ -55,6 +55,34 @@ describe('the executable part of a migration', () => {
     expect(executable(sql)).toContain('select 1;')
   })
 
+  it('keeps a double dash that is inside a quoted identifier', () => {
+    // A `--` inside `"…"` is part of the identifier, not a comment. Treating it
+    // as one would delete the rest of the statement.
+    const sql = 'create index "unit--key" on unit (id);\nselect 1;'
+
+    expect(executable(sql)).toContain('"unit--key"')
+    expect(executable(sql)).toContain('select 1;')
+  })
+
+  it('does not end an escape string early at a backslash-escaped quote', () => {
+    // `E'…'` treats a backslash as an escape; a plain literal does not, because
+    // standard_conforming_strings is on. Ending the string at the `\\'` would
+    // leave `-- not a comment` being scanned as SQL, and the `select` after it
+    // would vanish.
+    const sql = "select E'a\\'b -- not a comment';\nselect 2;"
+
+    expect(executable(sql)).toContain('select 2;')
+    expect(executable(sql)).toContain('-- not a comment')
+  })
+
+  it('still treats a backslash in a plain literal as ordinary text', () => {
+    // The beside-case: the escape handling must not leak into normal literals,
+    // where a backslash means nothing special.
+    const sql = "select 'a\\';\nselect 3;"
+
+    expect(executable(sql)).toContain('select 3;')
+  })
+
   it('keeps a dollar-quoted function body whole', () => {
     // Migration 011's normalisation lives in one of these, and it is precisely
     // what the tests need to look at.

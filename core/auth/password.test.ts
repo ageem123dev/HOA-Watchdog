@@ -228,5 +228,15 @@ describe('production parameters', () => {
 
     await expect(verifyPassword('a realistic passphrase', stored)).resolves.toBe(true)
     await expect(verifyPassword('not it', stored)).resolves.toBe(false)
-  })
+    // Three real scrypt operations at DEFAULT_SCRYPT_PARAMETERS, which are
+    // deliberately expensive — that is the property this test exists to check.
+    // Vitest's 5s default was enough while the suite was smaller; story 2.1
+    // added a test file and the extra parallel load pushed this over it,
+    // intermittently in the full run and never on its own.
+    //
+    // The bound is raised, not the parameters. Lowering the cost is the one
+    // change that would make this test stop meaning anything, since "usable in
+    // practice at the real parameters" is the whole claim. Both assertions above
+    // are unaffected by how long it takes.
+  }, 30_000)
 })

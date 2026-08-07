@@ -64,11 +64,24 @@ export const executable = (sql: string): string => {
       continue
     }
 
-    if (sql[i] === "'") {
-      out += "'"
-      i += 1
+    // `E'…'` is an escape string constant, where a backslash escapes the next
+    // character. In a plain `'…'` a backslash is literal, because
+    // `standard_conforming_strings` is on. Handling them the same way would end
+    // an escape string one character early at `\'` and leave the rest of it
+    // being scanned as SQL — where a `--` in the text would then eat a real
+    // statement. Nothing here uses `E'…'` today; migration 009 records why it is
+    // avoided in stored expressions. Raised by review as a latent trap, which is
+    // the same reason this whole helper exists.
+    const escapeString = /^[Ee]'/.test(sql.slice(i, i + 2))
+    if (escapeString) {
+      out += sql.slice(i, i + 2)
+      i += 2
       while (i < sql.length) {
-        // '' is an escaped quote inside a literal, not the end of one.
+        if (sql[i] === '\\') {
+          out += sql.slice(i, i + 2)
+          i += 2
+          continue
+        }
         if (sql[i] === "'" && sql[i + 1] === "'") {
           out += "''"
           i += 2
@@ -76,6 +89,30 @@ export const executable = (sql: string): string => {
         }
         out += sql[i]
         const closing = sql[i] === "'"
+        i += 1
+        if (closing) break
+      }
+      continue
+    }
+
+    // Single-quoted literals and double-quoted identifiers behave the same way
+    // for this purpose: the delimiter doubled is an escaped delimiter, not the
+    // end. A `--` inside a quoted identifier is part of the name.
+    if (sql[i] === "'" || sql[i] === '"') {
+      // Narrowed to a literal rather than read back out of the string:
+      // `sql[i]` is `string | undefined` under `noUncheckedIndexedAccess`, and a
+      // non-null assertion here would be a claim rather than a fact.
+      const quote = sql[i] === "'" ? "'" : '"'
+      out += quote
+      i += 1
+      while (i < sql.length) {
+        if (sql[i] === quote && sql[i + 1] === quote) {
+          out += quote + quote
+          i += 2
+          continue
+        }
+        out += sql[i]
+        const closing = sql[i] === quote
         i += 1
         if (closing) break
       }
