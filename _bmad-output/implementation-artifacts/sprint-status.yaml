@@ -69,7 +69,7 @@ development_status:
   1-6d-resolve-a-held-document: done
   epic-1-retrospective: done
   epic-2: in-progress
-  2-1-units-and-who-holds-them: ready-for-dev
+  2-1-units-and-who-holds-them: review
   2-2-what-each-unit-owes-this-year: backlog
   2-3-what-is-due-and-by-when: backlog
   2-4-deposits-become-payments: backlog
@@ -110,7 +110,7 @@ action_items:
     owner: "Dev"
     status: deferred
   - epic: 1
-    action: "Shared writer pool - six pools at max 5 against max_connections 100"
+    action: "Shared connection pool - seven module-scoped pools at max 5 against max_connections 100. Story 2.1 added the seventh (unit-directory) and a review raised the second half of the same defect: a module-scoped pool is orphaned on every Next.js HMR reload in dev, so connections leak until the limit is hit. Both halves want one change across all seven adapters, not one file at a time."
     owner: "Dev"
     status: open
   - epic: 1

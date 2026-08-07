@@ -4,7 +4,7 @@ baseline_commit: 2cb23009af497cabf09f772d8a4f7db3794264ec
 
 # Story 2.1: Units and who holds them
 
-Status: ready-for-dev
+Status: review
 
 > **First of four stories in epic 2, the dues ledger.**
 > Nothing in the schema knows what a unit is. This story adds that, plus who held it and when —
@@ -73,25 +73,25 @@ rejected by the database, not by application code
   - [x] The constraint: `exclude using gist (unit_id with =, held_during with &&)`. Verified working —
         an overlapping insert raises **`23P01`**, and adjacent half-open ranges are accepted.
   - [x] `grant select on` both tables to `watchdog_reader`.
-- [ ] **Task 3 — The port and its read** (AC2, AC3)
-  - [ ] `core/ports/unit-directory.ts` — a read port. Two questions this story can answer: who held a
+- [x] **Task 3 — The port and its read** (AC2, AC3)
+  - [x] `core/ports/unit-directory.ts` — a read port. Two questions this story can answer: who held a
         unit on a date, and the full history for a unit.
-  - [ ] **Read-only, like 1.6c's queue port.** Recording units and memberships is data entry, and no
+  - [x] **Read-only, like 1.6c's queue port.** Recording units and memberships is data entry, and no
         story before 2.4 needs to write them from the application; a write port with no caller is a
         capability waiting to be misused. Say so in the header, as `quarantine-queue.ts` does.
-  - [ ] `adapters/db/unit-directory-postgres.ts` on the **reader** connection — this only reads, and
+  - [x] `adapters/db/unit-directory-postgres.ts` on the **reader** connection — this only reads, and
         1.6c established the pattern with `readReaderDatabaseUrl()`.
-- [ ] **Task 4 — Prove the constraint from the outside** (AC3)
-  - [ ] Database tests that insert a real overlap and assert `23P01`, and that adjacent ranges are
+- [x] **Task 4 — Prove the constraint from the outside** (AC3)
+  - [x] Database tests that insert a real overlap and assert `23P01`, and that adjacent ranges are
         accepted. Constrain the error — a bare `rejects.toThrow()` passes for any rejection, which
         MR !20 caught in this very shape.
-  - [ ] **Use savepoints for expected failures.** A rejected statement aborts the transaction, so a
+  - [x] **Use savepoints for expected failures.** A rejected statement aborts the transaction, so a
         query issued afterwards fails with `25P02` — "current transaction is aborted" — and the test
         then reports the wrong cause. Verified while writing this story: `savepoint` +
         `rollback to savepoint` leaves the transaction usable.
-  - [ ] Point-in-time reads return exactly one row inside a membership and zero outside it. Assert
+  - [x] Point-in-time reads return exactly one row inside a membership and zero outside it. Assert
         both; the second is what stops a query that always matches.
-  - [ ] Per-test scoping in `beforeEach`, not per file. `quarantine-queue-postgres.test.ts` scoped
+  - [x] Per-test scoping in `beforeEach`, not per file. `quarantine-queue-postgres.test.ts` scoped
         per run first and its tests stopped being independent.
 
 ## Dev Notes
@@ -284,6 +284,56 @@ found two guards that matched an index's *name* rather than its column, so the s
 match the constraint's **definition**, not the string `held_during` appearing somewhere in it.
 
 
+## Task 3 - the port and its read
+
+Two behaviours: the port's shape, and the adapter that answers it. The port is **read-only**, for
+the reason `core/ports/quarantine-queue.ts` gives about itself -- a capability with no caller is a
+capability waiting to be misused, and nothing before story 2.4 writes units or memberships from the
+application.
+
+### Behaviour D - the `UnitDirectory` port (AC2, AC3)
+
+1. **Correct-run signal:** a caller can ask who held a unit on a date, and for a unit's whole
+   history, and can express nothing else.
+2. **How to test it:** the port is types plus prose, so it is tested the way 1.6c tested its own --
+   by asserting on the declaration's text, with a control proving the instrument works.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| D1 | The port declares a write -- record a unit, close a membership -- with no caller, so a capability nobody needs exists to be reached for | GUARD - read-only, with the reason in the header. Asserted against the declared method names, not against the string `insert` appearing somewhere |
+| D2 | Dates cross the boundary as `Date`, so a membership beginning 2024-07-01 reads back as 2024-06-30 for anyone west of UTC. `pg` converts `date` to a JS `Date` at local midnight by default | GUARD - the SQL returns text and the port's type is a `YYYY-MM-DD` string. A calendar date is not an instant |
+| D3 | "Still holds it" is expressed as a far-future date rather than an absence | GUARD - `heldUntil: string \| null`, null meaning still held, matching the unbounded upper bound the schema uses |
+
+### Behaviour E - the Postgres adapter (AC2, AC3)
+
+1. **Correct-run signal:** against the real database, the right holder comes back for a date, and
+   the whole history comes back in order.
+2. **How to test it:** database tests for the answers, plus the two things no behavioural test can
+   catch -- which role it connects as, and what the query text asks for. `quarantine-queue-connection.test.ts`
+   established both.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| E1 | A unit number typed in another spelling finds nothing, so `4b ` off a roll silently has no holder | GUARD - match on `normalised_number` through `unit_normalised_number($1)`, the function migration 011 defines |
+| E2 | The query returns the *previous* holder on the day of sale, so 1 July has two answers or the wrong one | GUARD - `held_during @> $2::date`, with boundary tests on 30 June, 1 July and 2 July |
+| E3 | An open-ended membership stops answering for dates far in the future | GUARD - a query years out returns the current holder |
+| E4 | A date before any membership, or a unit with no memberships, throws instead of answering "nobody" | GUARD - `null` and `[]` respectively |
+| E5 | The history comes back in whatever order the plan produced, so two renders disagree | GUARD - `order by lower(held_during)`, asserted both behaviourally and in the query text. The queue adapter's own tiebreak note applies: a behavioural test alone caught a missing order in only two runs of three |
+| E6 | The adapter builds its pool from the **writer** URL, which satisfies every behavioural test here because `watchdog_writer` can do everything `watchdog_reader` can -- and leaves migration 012's grants unexercised | GUARD - the connection test, mocking `../auth/env` rather than reaching into the adapter |
+| E7 | `select *` carries `normalised_number` out to callers, a comparison key no human has a use for | GUARD - source assertion, as the queue adapter has |
+| E8 | The pool is built at module load, so `next build` fails on a machine with no database | GUARD - lazy `getPool()`, the shape `../auth/env.ts` records the reason for |
+| E9 | The unit number is interpolated into the SQL | GUARD - parameterised, asserted in the query text |
+| E10 | Two memberships come back for one date | OUT-OF-SCOPE here - made impossible by the exclusion constraint, which `migrations/unit-membership.test.ts` proves fires. A defensive `throw` for it could not be triggered from a test without dropping the constraint, and a guard that cannot be made to fire is the shape this project keeps deleting. The adapter states the dependency instead |
+| E11 | "This unit does not exist" and "nobody held it then" are the same answer (`null`) | OUT-OF-SCOPE - recorded. Nothing in this epic distinguishes them, and an error contract no caller consumes is scope invented here. It belongs with whichever surface first lets a treasurer type a unit number |
+
+**Cross-check (required):** the boundary answer is verified two independent ways -- `holderOn` on
+30 June, 1 July and 2 July, and `historyFor` returning both memberships with the day of sale as one
+membership's end and the other's start. A single-date probe would pass against an adapter that
+returned the first row it found.
+
+
 ### Debug Log References
 
 **Baseline, and an anomaly worth recording.** The first `npm test` of this session reported
@@ -390,6 +440,90 @@ referential check would scan. The migration names the two triggers for adding it
 *Gates on `c245450`:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
 **64 files / 1205 passed**, `npm run test:db` **325 passed**.
 
+**Task 3 — the read port and its adapter.** Done. `UnitDirectory` answers the two questions this
+story exists for and can express nothing else; the write side is absent on purpose, and the header
+says why. Dates cross the boundary as `YYYY-MM-DD` strings because `pg` builds a JS `Date` at *local*
+midnight for a Postgres `date`, which moves a 1 July membership to 30 June for anyone west of UTC.
+
+*Two findings worth keeping.*
+
+**An ordering test that was right by luck.** Deleting the `order by` from `historyFor` left
+`returns every tenure, earliest first` **green** — the planner happened to return insertion order —
+and failed only the query-text assertion. This is the same thing `quarantine-queue-connection.test.ts`
+recorded about its own tiebreak, reproduced independently: a behavioural ordering test is a detector
+that is usually right. Both tests stay.
+
+**A test narrowed rather than weakened.** `interpolates nothing into its SQL` first forbade `${`
+anywhere, and the shared `TENURE_COLUMNS` constant tripped it. Relaxing it to "not the unit number"
+would have been a test bent to fit the code. It now permits exactly one interpolation *by name*, and
+a second test proves that name resolves to a literal containing no interpolation of its own. The
+constant is shared deliberately — spelling the columns out twice would let the two queries drift,
+and the `to_char` assertion matches the whole file, so it would stay green with only one casting.
+
+*Sensitivity checks run, each restored:*
+
+| Mutation | Test that failed |
+| --- | --- |
+| Raw `unit_number` instead of the normalised column | `finds the unit however the number was typed` + the query-text assertion |
+| `@>` reassembled as `lower(...) <= d and (upper(...) is null or upper(...) >= d)` | `names the incoming holder on the day of the sale itself` — the reassembly reads as equivalent and hands 1 July to **both** tenures |
+| `to_char` dropped from the upper bound | both tests that read `heldUntil` |
+| Pool built from the writer URL | both connection tests |
+| `order by` deleted | the query-text test **only** — see above |
+
+*Review.* One `argus_review` returned three findings, all verified against the real files:
+
+- **high — module-scoped pool leaks on Next.js HMR.** True, and true of **all seven** db adapters,
+  not this one. Fixing it in one file would leave it inconsistent with six siblings and would not
+  address the leak. Folded into the existing epic-1 action item, which this story updated: it now
+  names seven pools and both halves of the defect.
+- **medium — the test never closes the adapter pool, so Vitest will hang.** The stated consequence
+  does not occur: the db suite completes in 31s with no teardown stall, and
+  `quarantine-queue-postgres.test.ts` — the other reader adapter — has the identical shape. Skipped,
+  with the measurement rather than an opinion.
+- **low — the mutable `scope` reassigned in `beforeEach` breaks under concurrent execution.** Vitest
+  runs a file's tests sequentially unless `.concurrent` is used, which nothing here does, and three
+  sibling files use the same pattern. Skipped.
+
+*Gates on `942d353`:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**67 files / 1220 passed**, `npm run test:db` **18 files / 349 passed**.
+
+**Task 4 — prove the constraint from the outside.** Done, and enlarged. Its two written subtasks —
+insert a real overlap and assert `23P01`, and use savepoints for expected failures — were already
+satisfied by task 2's tests. Ticking them and moving on would have been honest but thin, because
+AC3's claim is narrower than "an overlap is rejected": it is that the overlap is rejected **by the
+database, not by application code**, and a single-connection test cannot tell those apart. An
+application-level "check then insert" passes every other test in the file — two writers each read an
+empty table, each find no overlap, and each insert.
+
+So the task added two concurrent writers on separate connections, both inside open transactions:
+overlapping ranges on **one** unit must block the second writer while the first is uncommitted and
+then fail with `23P01`; overlapping ranges on **two** units must not block at all.
+
+*The blocking assertion is the evidence, not decoration.* A concurrency test that only observes "one
+of them failed" passes against a database that serialised the inserts completely and against one
+that never overlapped them — which is how story 1.5d shipped a `Promise.all` concurrency test that
+passed against a deliberately racy implementation. `stillPending` asserts the contended insert has
+not settled after 750ms with the rival transaction still open.
+
+*Sensitivity checks run, each restored:*
+
+| Mutation | Test that failed |
+| --- | --- |
+| Exclusion dropped entirely | `makes the second of two concurrent overlapping writers wait, then refuses it` |
+| Exclusion unscoped to `held_during` alone | **both** concurrency tests, the beside-case included — it starts blocking across units |
+
+The second is what stops the first test being satisfied by a constraint that serialises every
+membership in the association.
+
+*Review.* One `argus_review` returned one **low** finding: the `setTimeout` in `stillPending` is not
+cleared when the promise settles first, leaving a 750ms handle alive after the assertion is made.
+Verified — true, and it fires on the beside-case every run. Fixed. No regression test accompanies it:
+the only observable is a live handle inside Node, and asserting it through
+`process._getActiveHandles()` would test the runtime rather than this file.
+
+*Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**67 files / 1220 passed**, `npm run test:db` **18 files / 351 passed**.
+
 ### File List
 
 **New**
@@ -409,9 +543,27 @@ referential check would scan. The migration names the two triggers for adding it
 
 - `migrations/unit.test.ts` — cleanup scoped to a per-file `RUN_PREFIX`; it was deleting
   `unit-membership.test.ts`'s rows mid-run.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — the shared-pool action item now names
+  seven adapters and the HMR half of the same defect.
+
+**New (task 3)**
+
+- `core/ports/unit-directory.ts` — the read port: `heldBy(unitNumber, on)` and
+  `historyFor(unitNumber)`, with `UnitHolding` carrying calendar-date strings.
+- `core/ports/unit-directory.test.ts` — 4 tests on the declaration's shape, including a control for
+  the brace-matching helper that reads the interface body.
+- `adapters/db/unit-directory-postgres.ts` — the adapter, on the reader connection.
+- `adapters/db/unit-directory-postgres.test.ts` — 13 database tests, built around the day a unit
+  changes hands.
+- `adapters/db/unit-directory-connection.test.ts` — 11 tests on the two things behaviour cannot
+  catch: which role it connects as, and what the query text asks for.
 
 ### Change Log
 
+- 2026-08-07 — Task 4 complete (`bf5403d`). Two concurrent writers, with an assertion that they
+  genuinely contended. All four tasks done; status -> review.
+- 2026-08-07 — Task 3 complete (`942d353`). The read port and its reader-connection adapter, plus a
+  sensitivity check showing the behavioural ordering test was passing by luck.
 - 2026-08-07 — Task 2 complete (`c245450`). Migration 012, its 26 tests, and a fix to a defect this
   task exposed: two db test files were deleting each other's rows under Vitest's parallelism. A
   half-open `check` was deleted before it shipped because probing showed it could never fire.

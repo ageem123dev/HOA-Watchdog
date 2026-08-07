@@ -442,14 +442,28 @@ describeWithDatabase('who holds a unit, and when', () => {
      */
     const stillPending = async (promise: Promise<unknown>, ms: number) => {
       const marker = Symbol('pending')
-      const raced = await Promise.race([
-        promise.then(
-          () => 'resolved',
-          () => 'rejected',
-        ),
-        new Promise((resolve) => setTimeout(() => resolve(marker), ms)),
-      ])
-      return raced === marker
+      // The timer is cleared on the way out. `Promise.race` settles as soon as
+      // either side does, but it does not cancel the loser -- so the beside-case
+      // below, where the insert returns in milliseconds, would otherwise leave a
+      // 750ms handle alive after the assertion has already been made. Raised by
+      // review; no regression test accompanies it because the only observable is
+      // a live handle inside Node, and reaching for `process._getActiveHandles()`
+      // to assert it would test the runtime rather than this file.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const raced = await Promise.race([
+          promise.then(
+            () => 'resolved',
+            () => 'rejected',
+          ),
+          new Promise((resolve) => {
+            timer = setTimeout(() => resolve(marker), ms)
+          }),
+        ])
+        return raced === marker
+      } finally {
+        clearTimeout(timer)
+      }
     }
 
     it('makes the second of two concurrent overlapping writers wait, then refuses it', async () => {
