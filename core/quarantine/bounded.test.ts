@@ -85,3 +85,25 @@ describe('when one item fails', () => {
     ).rejects.toThrow('failure 1')
   })
 })
+
+describe('an unusable limit', () => {
+  it('refuses zero rather than returning an unprocessed array', async () => {
+    // `Math.min(0, n)` creates no workers, so `Promise.all([])` resolves at once
+    // and the caller receives a sparse array of `undefined` as though the work
+    // had succeeded. Raised in review.
+    // A rejection rather than a synchronous throw: the function is async, so its
+    // throw is delivered that way whatever the caller expects.
+    await expect(mapWithLimit([1, 2], 0, async (n) => n)).rejects.toThrow(RangeError)
+  })
+
+  it('refuses a negative limit', async () => {
+    await expect(mapWithLimit([1, 2], -1, async (n) => n)).rejects.toThrow(RangeError)
+  })
+
+  it('refuses a fractional limit rather than coercing it', async () => {
+    // 2.5 workers is not a thing anybody meant.
+    await expect(mapWithLimit([1, 2], 2.5, async (n) => n)).rejects.toThrow(
+      /positive integer, received 2.5/,
+    )
+  })
+})

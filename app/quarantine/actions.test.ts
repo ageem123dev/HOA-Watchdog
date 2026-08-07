@@ -34,7 +34,13 @@ vi.mock('@/adapters/auth/auth', () => ({ auth: () => auth() }))
 vi.mock('@/adapters/db/vendor-resolution-postgres', () => ({
   createVendorResolution: () => ({ confirmAsNew, matchToExisting }),
 }))
-vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
+// Hoisted so a test can reach it. Created inside the factory, no test could —
+// and removing the `revalidatePath` call from the action left every test here
+// passing while a resolved row kept rendering from a cached page. Raised in
+// review.
+const revalidatePath = vi.fn()
+
+vi.mock('next/cache', () => ({ revalidatePath: (path: string) => revalidatePath(path) }))
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => {
     // The real `redirect` throws to unwind the render, and nothing after it
@@ -244,5 +250,34 @@ describe('when the adapter throws', () => {
     await expect(confirmHeld(form({ documentId: 'doc-1', extractedName: 'Acme' }))).rejects.toThrow(
       'NEXT_REDIRECT:/quarantine?resolved=created',
     )
+  })
+})
+
+describe('keeping the queue fresh', () => {
+  it('revalidates the queue route after a resolution', async () => {
+    // Without this the row a treasurer just answered keeps rendering from cache,
+    // and the page contradicts the database.
+    auth.mockResolvedValue(SIGNED_IN)
+    const { confirmHeld } = await actions()
+
+    await expect(confirmHeld(form({ documentId: 'doc-1', extractedName: 'Acme' }))).rejects.toThrow(
+      'NEXT_REDIRECT',
+    )
+
+    expect(revalidatePath).toHaveBeenCalledWith('/quarantine')
+  })
+
+  it('revalidates even when the port failed', async () => {
+    // A refusal still changes nothing, but the page may be stale for other
+    // reasons and the treasurer is about to be sent back to it.
+    auth.mockResolvedValue(SIGNED_IN)
+    confirmAsNew.mockRejectedValueOnce(new Error('pool exhausted'))
+    const { confirmHeld } = await actions()
+
+    await expect(confirmHeld(form({ documentId: 'doc-1', extractedName: 'Acme' }))).rejects.toThrow(
+      'NEXT_REDIRECT',
+    )
+
+    expect(revalidatePath).toHaveBeenCalledWith('/quarantine')
   })
 })

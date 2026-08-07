@@ -55,6 +55,7 @@ function getPool(): Pool {
  */
 async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect()
+  let released = false
 
   try {
     // Stated, not inherited. `default_transaction_isolation` is server
@@ -68,14 +69,24 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promi
     await client.query('commit')
     return result
   } catch (error) {
+    let rollbackFailed = false
+
     await client.query('rollback').catch(() => {
       // The rollback itself can fail when the connection is already gone. The
-      // original error is the one worth reporting; Postgres discards the
-      // transaction when the connection drops regardless.
+      // original error is still the one worth reporting.
+      rollbackFailed = true
     })
+
+    // Released with a truthy argument so `pg` destroys the client rather than
+    // returning it to the pool: a connection whose rollback failed may still be
+    // inside a transaction, and the next borrower would inherit it. Raised in
+    // review.
+    client.release(rollbackFailed ? (error instanceof Error ? error : new Error('rollback failed')) : undefined)
+    released = true
+
     throw error
   } finally {
-    client.release()
+    if (!released) client.release()
   }
 }
 

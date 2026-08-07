@@ -1,5 +1,6 @@
 ---
 baseline_commit: 4be6c9d6c5740605a6a0168e98a40f187632675a
+merge_request: 20
 ---
 
 # Story 1.6d: Resolve a held document
@@ -409,6 +410,36 @@ one story 1.6b's guard was rebuilt around.
 
 
 ### Review Findings
+
+**Merge-request round 1** on `f41cea9` — **7 findings, all on this story, all fixed.** Pipeline green.
+
+Three were the same defect this project keeps meeting, in three new places. A `rejects.toThrow()`
+with no argument passed for *any* rejection — a missing function, a wrong column, a dead connection —
+while the two state assertions beside it still held, because nothing was written in those cases
+either; it is now constrained to the length violation it was built around. A `revalidatePath` mock
+created inside the factory was reachable by no test, so deleting the call from the action left every
+test passing while a resolved row kept rendering from cache. And a concurrency `limit` of zero made
+`Math.min` create no workers, so `Promise.all([])` resolved at once and returned a sparse array of
+`undefined` as though the work had succeeded.
+
+Two more were narrower but real: the database suite gated on `WATCHDOG_READER_DATABASE_URL`, which it
+never uses, so an environment with only the writer skipped the whole file while the run reported
+success; and the XSS test asserted only that no `role="status"` existed, passing against a regression
+that rendered the value elsewhere. It now asserts the text is absent from the page entirely.
+
+The remaining two: a client whose `rollback` failed is now released with an error so `pg` destroys it
+rather than returning a possibly-in-transaction connection to the pool, and the swallowed adapter
+error is logged before `refused` is reported — a deleted vendor, an exhausted pool and a statement
+timeout otherwise reach the treasurer as one sentence with no trace of which happened.
+
+**One finding from the fix-diff gate did not reproduce, and the fix was reverted.** Argus reported
+that workers failing after the first would produce unhandled rejections. `Promise.all` attaches a
+handler to every promise it is given, so a later rejection is handled — merely not reported — and the
+sensitivity check confirmed it: removing the guard changed nothing, because the test written for it
+could not fail. Both the guard and its test were removed. A guard no test can force is the thing this
+workflow's Prime Directive forbids, and keeping it because a reviewer suggested it would have been
+the same mistake with better manners.
+
 
 **IDE round 1** on `06e51c0` — 17 comments, **8 on this story**. Six fixed, one skipped, three belong
 to another branch.

@@ -117,8 +117,14 @@ describe('what the page says after a resolution', () => {
     auth.mockResolvedValue({ user: { email: 'treasurer@example.com' } })
     const { default: QuarantinePage } = await import('./page')
 
-    render(await QuarantinePage({ searchParams: Promise.resolve({ resolved: 'anything at all' }) }))
+    const { container } = render(
+      await QuarantinePage({ searchParams: Promise.resolve({ resolved: 'anything at all' }) }),
+    )
 
     expect(screen.queryByRole('status')).toBeNull()
+    // And absent from the page entirely, not merely from the status region. The
+    // first version passed against a regression that rendered the value
+    // somewhere else. Raised in review.
+    expect(container.textContent).not.toContain('anything at all')
   })
 })

@@ -16,6 +16,15 @@ export async function mapWithLimit<T, R>(
   limit: number,
   work: (item: T) => Promise<R>,
 ): Promise<R[]> {
+  // Before anything else, and thrown rather than clamped. A limit of zero makes
+  // `Math.min` create no workers, `Promise.all([])` resolves immediately, and
+  // the caller receives a sparse array of `undefined` as though the work had
+  // succeeded — the queue would render every row with no candidates and nothing
+  // would say why. Raised in review.
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new RangeError(`concurrency limit must be a positive integer, received ${limit}`)
+  }
+
   const results = new Array<R>(items.length)
   let next = 0
   // Set by whichever worker fails first. Without it the others keep taking work

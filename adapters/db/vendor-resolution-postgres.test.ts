@@ -17,16 +17,19 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { createVendorResolution } from './vendor-resolution-postgres'
 
+// The writer only. This adapter connects through `readWriterDatabaseUrl()` and
+// this file opens one writer client; requiring the reader too meant an
+// environment with just the writer skipped the whole suite while the run still
+// reported success. Raised in review — a suite that silently does not run is
+// indistinguishable from one that passed.
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
-const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
-const configured = Boolean(writerUrl && readerUrl)
+const configured = Boolean(writerUrl)
 
 const describeWithDatabase = configured ? describe : describe.skip
 
 if (!configured) {
   console.warn(
-    '\n  vendor-resolution adapter tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL and ' +
-      'WATCHDOG_READER_DATABASE_URL must both be set.\n',
+    '\n  vendor-resolution adapter tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL must be set.\n',
   )
 }
 
@@ -210,9 +213,15 @@ describeWithDatabase('resolving a held document', () => {
       const held = scoped('Acme')
       await hold(documentId, held)
 
+      // Constrained to the length violation. A bare `rejects.toThrow()` passes
+      // for any rejection at all — a missing `vendor_normalised_name`, a wrong
+      // column, a dead connection — and the two state assertions below still
+      // hold, because nothing was written in any of those cases either. The test
+      // would report success while proving nothing about the constraint it was
+      // built around. Raised in review; it is this project's signature defect.
       await expect(
         createVendorResolution().confirmAsNew(documentId, `${held}${' '.repeat(300)}`),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/vendor_display_name_length/)
 
       expect(await holdsFor(documentId)).toBe(1)
       expect(await vendorCount()).toBe(0)
@@ -250,7 +259,7 @@ describeWithDatabase('resolving a held document', () => {
           name,
           '018f3a2b-0000-7000-8000-0000000000ff',
         ),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/no vendor with id/)
 
       expect(await holdsFor(documentId)).toBe(1)
     })

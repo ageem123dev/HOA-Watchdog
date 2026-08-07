@@ -97,7 +97,12 @@ async function resolveAndReport(run: () => Promise<ResolveResult>): Promise<neve
 
   try {
     result = await run()
-  } catch {
+  } catch (error) {
+    // Logged before it is discarded. A deleted vendor, an exhausted pool, a
+    // statement timeout and a broken migration all reach the treasurer as the
+    // same sentence, and this is the only write path in the flow — so it is the
+    // one that most needs a trace of which actually happened. Raised in review.
+    console.error('quarantine resolution failed', error)
     result = { outcome: 'refused' }
   }
 
