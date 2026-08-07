@@ -86,6 +86,10 @@ development_status:
 
 action_items:
   - epic: 1
+    action: "Restore CI after the heavy development cycle. Config is at 621d4cc:.gitlab-ci.yml; prefer a self-managed runner, which consumes no GitLab compute minutes. See AD-2 amendment"
+    owner: "Matt"
+    status: open
+  - epic: 1
     action: "DECIDED 2026-08-07: CI removed entirely (GitLab per-minute billing). AD-2's CI assertion withdrawn; local gate is the only gate. Restore nfr2-guard first if budget returns"
     owner: "Matt"
     status: decided

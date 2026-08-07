@@ -64,6 +64,36 @@ Layer → namespace mapping:
   rather than an erosion. If CI budget becomes available, the single cheapest thing to restore is
   this check alone.
 
+  **Restoring it.** The intent is to bring CI back after the heavy development cycle, so the path is
+  written down rather than left to archaeology.
+
+  The last good config is 96 lines and lives at **`621d4cc:.gitlab-ci.yml`** — recover it verbatim
+  with `git show 621d4cc:.gitlab-ci.yml > .gitlab-ci.yml`. It already carries the three fixes that
+  cost the most to learn: one pipeline per commit rather than two, the full suite on merge requests
+  as well as `main`, and no path-based skipping. Do not re-derive it.
+
+  Reverse alongside it: this amendment, the two Consistency Convention rows above, and the ten places
+  in `bmad-ship-story` that stopped expecting a pipeline (Step 7 in particular, which became
+  "verify the head, locally").
+
+  **Consider a cheaper shape than the one withdrawn.** The pipeline was removed because GitLab.com
+  bills per minute on *shared* runners. Three options change that arithmetic, in rough order of how
+  much they give back per unit of effort:
+
+  1. **A self-managed runner.** Compute minutes apply only to GitLab-hosted runners. A runner
+     registered on any machine you already own consumes none, which restores the full pipeline at
+     zero marginal cost. This is the option that makes the cost question go away rather than
+     rebalancing it.
+  2. **`main` only.** Drop merge-request pipelines and verify after merge. Cheap, and honest about
+     what it is: post-merge detection, not a gate — the mistake this project already made once and
+     reverted, so it should be chosen deliberately if at all.
+  3. **Manual pipelines.** A configured pipeline that runs only when somebody triggers it. Costs
+     nothing until used and is useful before a release, but a gate nobody is obliged to run is the
+     same category of thing as the local gate that replaced it.
+
+  Option 1 is the only one that restores the property that was actually lost: a check that runs
+  whether or not anyone remembers.
+
 ### AD-3 — The LLM-adjacent runtime holds no data credentials
 
 - **Binds:** NFR-1, NFR-2, FR-4, the agent service
