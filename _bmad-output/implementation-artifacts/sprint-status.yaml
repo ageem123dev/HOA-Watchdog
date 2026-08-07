@@ -1,5 +1,5 @@
 # generated: 2026-07-30
-# last_updated: 2026-08-05
+# last_updated: "2026-08-07"
 # project: HOA-Treasurer-Assistant
 # project_key: NOKEY
 # tracking_system: file-system
@@ -70,7 +70,7 @@ development_status:
   epic-1-retrospective: done
   epic-2: in-progress
   2-1-units-and-who-holds-them: done
-  2-2-what-each-unit-owes-this-year: backlog
+  2-2-what-each-unit-owes-this-year: ready-for-dev
   2-3-what-is-due-and-by-when: backlog
   2-4-deposits-become-payments: backlog
   epic-2-retrospective: optional

@@ -545,8 +545,16 @@ So that "paid the proper amount, on time" is a question with a defined answer.
 
 **Given** an assessment amount
 **When** it is stored
-**Then** it is held in integer minor units, never a float — the money convention the architecture
-fixes for the whole system
+**Then** it is held as an exact decimal — `numeric(p,s)` in the database and a decimal string across
+every boundary — never a float and never a JS `number`
+
+> **Amended 2026-08-07.** This criterion previously said "integer minor units, never a float — the
+> money convention the architecture fixes for the whole system". The architecture did say that, and
+> epic 1 shipped the opposite: `extraction.total_amount` is `numeric(14,2)` and
+> `core/extraction/record.ts` crosses the boundary as a decimal string, pinned by a migration-text
+> test. Story 2.4 compares an extracted payment against a stored assessment, so two representations
+> would put a rounding conversion inside the comparison that produces arrears findings. Matt chose
+> the shipped convention; ARCHITECTURE-SPINE's Money row was amended to match.
 
 ### Story 2.3: What is due, and by when
 

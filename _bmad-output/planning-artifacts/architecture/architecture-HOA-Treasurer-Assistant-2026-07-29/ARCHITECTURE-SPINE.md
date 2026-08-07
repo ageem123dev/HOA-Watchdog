@@ -200,7 +200,7 @@ graph LR
 | Concern | Convention |
 | --- | --- |
 | Naming | Catalog entries are `verb_noun` (`dues_status`, `vendor_trailing_avg`) and versioned (`dues_status@2`); DB tables snake_case plural; TS types PascalCase. |
-| Money | Integer minor units (cents) end to end. Never a float, never a JS `number` for a balance. Formatting happens only at render. |
+| Money | **Amended 2026-08-07.** Exact decimal end to end: `numeric(p,s)` in Postgres, a **decimal string** across every boundary. Never a float, never a JS `number` for an amount. Formatting happens only at render. *This row previously said "integer minor units (cents) end to end", and epic 1 shipped the other way: `extraction.total_amount` is `numeric(14,2)` and `core/extraction/record.ts` documents `totalAmount` as a decimal string, with a migration-text test pinning `numeric(p,s)`. Story 2.2 had to choose, because story 2.4 compares an extracted payment against a stored assessment and two representations would put a rounding conversion inside the comparison that produces arrears findings. The shipped convention won; the words were wrong, not the code.* |
 | Dates | ISO-8601 date (`2026-07-29`) for accounting periods; UTC `timestamptz` for events. Assessment periods are dates, not timestamps. |
 | Ids | Database rows use uuid v7. Catalog entries use stable string ids. Vendors are referenced by id, never by extracted name. |
 | Errors | One envelope `{code, message, detail?}`. Extraction failures use the FR-1 user-facing copy verbatim. Never surface a raw provider error to a board member. |
