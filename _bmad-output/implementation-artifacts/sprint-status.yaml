@@ -86,7 +86,11 @@ development_status:
 
 action_items:
   - epic: 1
-    action: "First Python story adds pytest to .gitlab-ci.yml in the same story"
+    action: "DECIDED 2026-08-07: CI removed entirely (GitLab per-minute billing). AD-2's CI assertion withdrawn; local gate is the only gate. Restore nfr2-guard first if budget returns"
+    owner: "Matt"
+    status: decided
+  - epic: 1
+    action: "First Python story adds pytest to the local gate (package.json script + the Tested= line) in the same story - there is no CI as of 2026-08-07"
     owner: "Dev"
     status: open
   - epic: 1

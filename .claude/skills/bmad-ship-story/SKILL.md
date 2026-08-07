@@ -12,16 +12,16 @@ Resumable: every run detects state from `sprint-status.yaml`, git and the MR, th
 ## Conventions
 
 - `implementation_artifacts` = `_bmad-output/implementation-artifacts`; `sprint_status` = that + `/sprint-status.yaml`; `story_file` = that + `/{story_key}.md`.
-- **GitLab only.** `glab` for all remote ops; MRs not PRs; `.gitlab-ci.yml` is the pipeline (`.github/workflows/ci.yml` is vestigial and does not run).
+- **GitLab only.** `glab` for all remote ops; MRs not PRs. **There is no CI** — the pipeline was removed on 2026-08-07 because GitLab bills per minute (see AD-2's amendment). `.github/workflows/ci.yml` is vestigial and does not run either.
 - Project path `ageem123/hoa-treasurer-assistant`, encoded `ageem123%2Fhoa-treasurer-assistant` for `glab api`.
-- Never guess CI/MR state — query it.
+- Never guess MR state — query it.
 
 ## Hard rules
 
 - **Never merge, never push to `main`.** Terminal state is ready-to-merge.
 - **Never commit secrets.** `.env*.local` stay gitignored; never `git add -f`.
-- **Never weaken, skip, or delete a test** to get a green suite, pipeline, or review. Fix the code or STOP with the conflict stated.
-- **Never mark a story `done` on unverified work** — all tasks checked, lint+build+test clean, pipeline green on the final head, no open actionable feedback.
+- **Never weaken, skip, or delete a test** to get a green suite or a clean review. Fix the code or STOP with the conflict stated. **This matters more now than it did**: with no CI, the local gate is the only thing between a broken suite and `main`.
+- **Never mark a story `done` on unverified work** — all tasks checked, lint+build+test clean **on the final head**, no open actionable feedback. Nothing enforces this externally, so re-run the gates after the close-out commit rather than trusting the run from before it.
 - Only edit the story file in: Status, Tasks checkboxes, Dev Agent Record (Debug Log / Test Design / Completion Notes), **Review Findings**, File List, Change Log, and frontmatter `baseline_commit` + `merge_request`.
 - Quote real output. If a step fails, surface it and stop.
 
@@ -61,7 +61,7 @@ Status `backlog` or no story file → invoke **`bmad-create-story`**. Otherwise 
 Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode analysis → red → green → harden; fills the Dev Agent Record; sets status `review`). Already `review`/`done` → skip.
 
 - **Harness (its Step 2):** if none exists for the story's language, approve the conventional one rather than stalling — **Vitest** (TS), **pytest** (Python). STOP only for a heavyweight runtime change the story doesn't cover.
-- **A story adding a gate must add it to `.gitlab-ci.yml`.** A gate that runs only locally is not a gate.
+- **A story adding a gate must add it to the local gate** — a `package.json` script *and* the "Tested =" line under *Project facts*, so the next run inherits it. There is no CI to add it to. A gate nobody knows to run is not a gate.
 - Pass `story_path` explicitly so its discovery menu never fires under `/loop`.
 - Run `python3 _bmad/scripts/resolve_customization.py` as its Steps 1 and 11 instruct; hand-merge TOML only if it errors.
 - **A HALT is a real halt** — ambiguous AC, untestable design, test/code conflict. Surface and STOP.
@@ -70,7 +70,7 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 ### 4b — First CodeRabbit review, in the IDE, before the MR exists
 
-The first review finds the most, and every round moved off the MR is a pipeline not billed. Story 1.6b took 8 rounds and ~11 pushes.
+The first review finds the most. Story 1.6b took 8 rounds and ~11 pushes; moving the first round here took 1.6c and 1.6d to one each.
 
 **One base for the whole step: local `main`, fast-forwarded at item 2.** The extension bases on it and cannot be told otherwise, so Argus and the diff checks use it too; mixing in `origin/main` means Argus and CodeRabbit score different diffs the moment anyone merges upstream mid-round.
 
@@ -113,11 +113,13 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 
 **Look hardest at guards that prove nothing** — a check that passes whether or not the thing it guards against is present. Ten found on this project: a bare `rejects.toThrow()` that also passes when the table is absent; a loop over an empty list; a `Promise.all` "concurrency" test that passed against a deliberately racy implementation; a `requestTimeout` that only logged a warning. Tool: the `bmad-dev-tdd` Step 9 sensitivity check — break the covered code, confirm the test fails, restore.
 
-### 7 — Pipeline on the MR head
+### 7 — Verify the head, locally
 
-`glab api "projects/{enc}/merge_requests/{iid}"` → `head_pipeline.status`, confirming `sha` matches your head; jobs via `.../pipelines/{id}/jobs`. On failure read the log, fix, push, return here. Three failures on one cause → STOP.
+**There is no pipeline.** It was removed on 2026-08-07 — GitLab bills per minute on this account and the budget is not there. Do not wait for one, do not report its status, and do not treat its absence as a failure.
 
-`verify:database` runs only when `WATCHDOG_WRITER_DATABASE_URL` and `WATCHDOG_READER_DATABASE_URL` are set as protected masked CI variables; otherwise the DB tests skip in CI — say so rather than implying coverage.
+What replaced it is the gate you already ran before pushing: `npm run lint`, `npm run build`, `npm test`, plus `npm run test:db` for schema or adapter work and `npx --no-install tsc --noEmit` against its baseline. **Re-run them on the exact head the MR points at**, because that is now the only evidence that head is green, and there is no second opinion.
+
+Say so honestly when reporting: "gates green locally on `<sha>`" is true; "pipeline green" is not, and there is nothing to link to.
 
 ### 8 — CodeRabbit loop (the `/loop` tick)
 
@@ -144,7 +146,7 @@ A note is a review only if it carries a `Commits` / `Files selected for processi
 
 **8c. Convergence.** Precondition: a service-account review matching the current head, in any of 8b's four shapes. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
 
-Converged = pipeline green AND every finding **fixed** (push → new head → back to 8a), **skipped** with a reason on its thread, or **resolved by CodeRabbit**. Anything else is pending — including a review still missing after the wait.
+Converged = the local gates green on the current head AND every finding **fixed** (push → new head → back to 8a), **skipped** with a reason on its thread, or **resolved by CodeRabbit**. Anything else is pending — including a review still missing after the wait.
 
 **8d. Triage.** Fix real correctness/security/accessibility issues. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
 
@@ -152,7 +154,7 @@ Converged = pipeline green AND every finding **fixed** (push → new head → ba
 
 **A push does not reliably trigger a review, and batching does not change that.** CodeRabbit pauses automatic reviews after `auto_pause_after_reviewed_commits` (set to 25 here, default 5), and a paused branch stays paused until asked. So after every push: **confirm a review body exists for the current head**; if none arrives, post `@coderabbitai review` and wait for it. A pause is indistinguishable from a clean review from the outside — which is the false-clean 8c exists to refuse.
 
-**Not a commit per finding.** Story 1.6b answered 4 rounds with 12 commits, and each one cost a re-review, a pipeline and a place in CodeRabbit's `auto_pause_after_reviewed_commits` budget — it paused itself mid-story twice, which from outside is indistinguishable from a clean review. Batching also gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
+**Not a commit per finding.** Story 1.6b answered 4 rounds with 12 commits, and each one cost a re-review and a place in CodeRabbit's `auto_pause_after_reviewed_commits` budget — it paused itself mid-story twice, which from outside is indistinguishable from a clean review. Batching also gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
 
 Keep the reasoning that would have gone in several messages — write it as sections of one commit body rather than losing it.
 
@@ -167,10 +169,10 @@ The test-value pass matters most *here*, because a fix diff is where a test's pr
 ### 9 — Ready-to-merge (terminal)
 
 1. **Docs first.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`. If this is the epic's last not-`done` story also set `epic-{N} = done` in the same commit; otherwise set it `in-progress` if unset. Commit and push.
-2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence. Re-run Step 7, then Step 8 **including 8a's wait** — a docs-only push triggers a re-review like any other.
+2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence. Re-run the gates, then Step 8 **including 8a's wait** — a docs-only push triggers a re-review like any other. With no pipeline, the re-run is the *whole* of the evidence, not a confirmation of it.
 3. **If that re-verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
 4. **Confirm the MR is still open at your head**, as in 8a, before reporting.
-5. Report MR URL, review outcome, pipeline status on the **final** head, and **"Ready to merge — leaving the merge to you."**
+5. Report MR URL, review outcome, and the **local gate results on the final head** — naming them as local, since no pipeline corroborates them. Then **"Ready to merge — leaving the merge to you."**
 6. STOP.
 
 **`done` means ready-to-merge, not merged** — it is written on an unmerged branch. Nothing downstream may treat it as proof of a merge.
@@ -183,11 +185,12 @@ If the user wants to keep building without merging, branch off the previous *sto
 
 `/loop ship story {id}`. Early ticks run 1–7 once; later ticks sit in Step 8; the loop ends at Step 9.
 
-Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a fix push, ~2400s after a rate limit. Bounded `until` loops are for pipelines, which finish in a minute or two; a foreground `sleep` is blocked. Standalone: run 0–7, STOP at 8a, say when the review is due.
+Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a fix push, ~2400s after a rate limit. A foreground `sleep` is blocked. Standalone: run 0–7, STOP at 8a, say when the review is due.
 
 ## Project facts
 
-- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema/adapter work, plus `pytest` once the Python service exists. **Neither ESLint nor Vitest type-checks**, and `npm run build` does not check test files — so also run **`npx --no-install tsc --noEmit`** and compare against its baseline of 8 pre-existing errors. Epic 1's retro decided against making that a CI gate; it caught real errors in three consecutive stories that lint and build both passed, so running it by hand is not optional.
+- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema/adapter work, plus `pytest` once the Python service exists. **Neither ESLint nor Vitest type-checks**, and `npm run build` does not check test files — so also run **`npx --no-install tsc --noEmit`** and compare against its baseline of 8 pre-existing errors. It caught real errors in three consecutive stories that lint and build both passed.
+- **This list is the only gate there is.** With CI removed there is no second chance and no external record: an unrun check is simply an unmade claim. `npm run test:db` in particular now runs *nowhere* unless someone runs it, which makes AD-4's SELECT-only proof and AD-13's idempotency constraints locally-verified only.
 - **Python is in scope** — `python3` is installed and the PRD puts a CrewAI service in the architecture.
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.
 - **CodeRabbit:** `.coderabbit.yaml`, `auto_review.base_branches: [main]`. Pro is free on public repos and the tier binds at MR-open time. Posts as a service account, findings in the review body, resolves threads itself when satisfied, hourly rate limits.

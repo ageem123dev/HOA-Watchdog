@@ -642,9 +642,12 @@ That is a known gap, recorded rather than glossed.
 four before implementation; the pre-split epic went materially better. Story 1.5d at 27 files drew
 five review rounds, while the four 1.6 stories averaged closer to one.
 
-**Critical path item.** Story 3.3 introduces Python and **must add `pytest` to `.gitlab-ci.yml` in
-the same story**. A gate that runs only locally is not a gate, and Epic 1 has the worked example of
-what happens otherwise.
+**Critical path item, revised 2026-08-07.** Story 3.3 introduces Python and **must add `pytest` to
+the local gate in the same story** — a `package.json` script *and* the "Tested =" line in
+`bmad-ship-story`'s Project facts, so the next run inherits it. The original wording said
+`.gitlab-ci.yml`; there is no CI any more (see AD-2's amendment), so a second language arrives with
+no automated check of any kind behind it. That makes the local gate list the only place it can be
+registered, and makes forgetting it the most likely way Epic 3 ships untested Python.
 
 **First catalog entry.** Not `dues_status` before Epic 2 exists — that needs its tables. The
 architecture uses `dues_status@2` as a *naming* example for versioning, not as a statement that the

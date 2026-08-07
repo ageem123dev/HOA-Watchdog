@@ -47,6 +47,23 @@ Layer → namespace mapping:
 - **Prevents:** A future story "just adding" a write integration, or an operator widening a scope, without an explicit architecture change. Equally: a builder reading "air-gap" as "the system performs no writes" and architecting around a constraint that does not exist.
 - **Rule:** No credential granting write access to any *external* financial rail — bank, payment processor, QuickBooks, AppFolio — may exist in any environment, secret store, or CI configuration of any deploy unit. There is no rail to write to; introducing one is an architecture change requiring a new AD, not a configuration change. **The system does own and write its own store** — uploaded documents, extracted records, alerts, and the provenance log — and must, to function. The air-gap constrains outbound writes to third-party systems of record, nothing else. Internal write capability is partitioned by AD-4, not withheld.
 
+- **Amended 2026-08-07 — the CI assertion is withdrawn.** The rule above is unchanged: no external
+  financial-rail credential may exist in any environment or deploy unit. What changed is its
+  *enforcement*. GitLab CI on this account bills per minute against a budget the project will not
+  fund, so the pipeline was removed entirely rather than reduced. `core/security/nfr2-guard.test.ts`
+  still runs, in the local gate before every push, and is still the assertion — but it is now
+  asserted by convention plus habit rather than by something that runs whether anyone remembers or
+  not.
+
+  **State the weakening plainly rather than let it read as equivalent.** A local run is not a gate: a
+  branch can be merged with the check never having run, and nothing in the system would say so. The
+  same now applies to AD-4's SELECT-only proof and AD-9's extraction probe, which were opt-in CI jobs
+  gated on protected credentials and now run only where someone runs them.
+
+  This is a cost decision taken knowingly, recorded here so that a later reader finds a decision
+  rather than an erosion. If CI budget becomes available, the single cheapest thing to restore is
+  this check alone.
+
 ### AD-3 — The LLM-adjacent runtime holds no data credentials
 
 - **Binds:** NFR-1, NFR-2, FR-4, the agent service
@@ -159,8 +176,8 @@ graph LR
 | Errors | One envelope `{code, message, detail?}`. Extraction failures use the FR-1 user-facing copy verbatim. Never surface a raw provider error to a board member. |
 | Tool contracts | Every agent-facing tool declares `strict: true` and `additionalProperties: false`. A tool without both is not registered. |
 | Logging | Structured JSON. Query provenance (AD-12) is a separate append-only table, not application logs. Never log extracted field values at info level. |
-| Config | Secrets by environment variable only, never committed. The *absence* of write credentials (AD-2) is asserted by a CI check, not left to convention. |
-| Tests | Vitest for the Node/Next side, pytest for the Python service (3.13). Both run in CI. Test-first per `bmad-dev-tdd`. |
+| Config | Secrets by environment variable only, never committed. The *absence* of write credentials (AD-2) is asserted by `core/security/nfr2-guard.test.ts`, which runs in the local gate before every push. **It is no longer a CI check** — see AD-2's amendment of 2026-08-07. |
+| Tests | Vitest for the Node/Next side, pytest for the Python service (3.13). **Neither runs in CI** — there is no CI; see AD-2's amendment of 2026-08-07. Both run in the local gate before every push. Test-first per `bmad-dev-tdd`. |
 
 ## Stack
 
