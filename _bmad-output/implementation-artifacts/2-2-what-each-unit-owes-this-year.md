@@ -200,6 +200,41 @@ not checked:
 
 ### Test Design
 
+## Task 1 - migration 013, the assessment
+
+One behaviour: the `assessment` table exists with the right shape, the right vocabulary and the
+right grants. Two instruments, as epic 1 settled — database tests that violate each constraint and
+assert the SQLSTATE, and a migration-text test using the **shared** `executable()` stripper.
+
+### Behaviour A - the `assessment` table (AC1, AC3)
+
+1. **Correct-run signal:** an assessment inserts for a unit and a year with an annual amount and a
+   cycle, and reads back with the amount **byte-identical** as a decimal string.
+2. **How to test it:** against the real database, scoped per test with a per-file `RUN_PREFIX`,
+   asserting SQLSTATEs rather than that something threw.
+3. **Failure modes:**
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| A1 | The amount is stored as a float, so `1234.56` comes back `1234.5599999999999` and every comparison against a payment is wrong by a fraction that compounds | GUARD - `numeric(14,2)`, matching `extraction.total_amount`. Proved by a round-trip asserting the exact **string**, not a numeric closeness |
+| A2 | The column holds the **instalment** rather than the annual figure - `$500` for a monthly payer instead of `$6000` - so two units owing the same for the year look different, and 2.3 multiplies an already-divided number | GUARD, but by **contract not constraint**, and worth saying plainly: no check constraint can tell 500 from 6000. What guards it is the column name, the migration comment, and AC2's test that two units with the same annual figure and different cycles store equal amounts |
+| A3 | Two assessments for one unit in one year, so "what does 4B owe for 2024" has two answers and neither looks wrong | GUARD - unique on `(unit_id, assessment_year)`, `23505` |
+| A4 | An assessment for a unit that does not exist | GUARD - foreign key, `23503` |
+| A5 | A cycle outside the vocabulary - `quarterly`, `Monthly`, `''` - so a row exists that nothing downstream can interpret and 2.3 cannot schedule | GUARD - `check (billing_cycle in (...))`, `23514`. Case matters: `Monthly` must fail, because the application constant is lower-case |
+| A6 | A zero or negative annual amount. A unit owing nothing is an **absent** assessment, not a zero one; a negative annual due is not a thing | GUARD - `check (annual_amount > 0)`, `23514`. Boundaries: `0`, `-0.01`, and `0.01` which must be accepted |
+| A7 | An absurd year - `0`, `20024`, negative - from a typo or a pasted cell, becoming a row nobody can find | GUARD - a range check, `23514` |
+| A8 | An amount beyond `numeric(14,2)` capacity | GUARD - Postgres raises `22003` numeric field overflow. Boundary: the largest representable value must be **accepted** |
+| A9 | More decimal places than the scale - `1234.567` | **PROPAGATE, documented.** Postgres does not reject it: `numeric(14,2)` **rounds** to `1234.57`. This is inherent to the type and `extraction.total_amount` behaves identically. Tested and recorded rather than guarded, because a caller must know the rounding happens and which way it goes |
+| A10 | `watchdog_reader` cannot read the table, so epic 3 cannot answer a dues question; or **can write** it, letting the query path invent an assessment | GUARD - explicit `grant select`, and assert no write privilege (`42501`) |
+| A11 | The migration-text test matches the migration's own prose rather than its SQL | GUARD - the **shared** `executable()` from `migrations/executable-sql.ts`, plus a positive control that this migration's statements survive stripping |
+
+**Cross-check (required):** the money representation is verified two independent ways — once by the
+round trip returning the exact decimal string, and once by reading the column type out of
+`information_schema.columns` and asserting `numeric` with precision 14 and scale 2. A round trip
+alone passes against `numeric(20,4)`; a type check alone passes against a column nothing writes to.
+
+**Reverse-it:** insert then read is the inverse pair, and it is the assertion A1 turns on.
+
 ### Debug Log References
 
 ### Review Findings
