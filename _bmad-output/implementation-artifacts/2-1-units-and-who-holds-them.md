@@ -5,7 +5,7 @@ merge_request: 21
 
 # Story 2.1: Units and who holds them
 
-Status: review
+Status: done
 
 > **First of four stories in epic 2, the dues ledger.**
 > Nothing in the schema knows what a unit is. This story adds that, plus who held it and when —
@@ -712,6 +712,12 @@ the only observable is a live handle inside Node, and asserting it through
   catch: which role it connects as, and what the query text asks for.
 
 ### Change Log
+
+- 2026-08-07 — **Merged.** MR !21 into `main` as `c2c1fd0`, carrying `b35e73f`. A final CodeRabbit
+  round raised further comments on `migrations/executable-sql.ts`; Matt judged them minor and
+  trivial test-side points and merged without them. Recorded rather than silently dropped: they are
+  on the MR thread if they ever matter, and the helper now carries a written scope saying it is not
+  a general SQL parser. Status -> done.
 
 - 2026-08-07 — CodeRabbit round 1 applied. Five fixes, two findings routed to existing action items.
   A redundant check constraint deleted after review showed no test could detect its removal, and the
