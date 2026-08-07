@@ -134,7 +134,17 @@ describe('authenticate', () => {
     const unknownElapsed = performance.now() - startUnknown
 
     expect(unknownElapsed).toBeGreaterThan(knownElapsed / 10)
-  })
+    // Three real scrypt operations at DEFAULT_SCRYPT_PARAMETERS, which are
+    // expensive on purpose. Vitest's 5s default was enough while the suite was
+    // smaller; story 2.1 added a test file and the extra parallel load pushed
+    // this past it — reproducibly in the full run, never on its own.
+    //
+    // Raising the bound does not weaken what this asserts. The assertion is a
+    // *ratio* between the two paths, so it is unaffected by how slow the machine
+    // is; the timeout only decides whether the test gets to finish. Verified by
+    // removing the dummy verification from the absent-user path with this
+    // timeout in place: the test still fails.
+  }, 30_000)
 
   it('re-hashes a password stored under weaker parameters', async () => {
     const user = await member({ passwordHash: await hashPassword('correct-passphrase', FAST) })
