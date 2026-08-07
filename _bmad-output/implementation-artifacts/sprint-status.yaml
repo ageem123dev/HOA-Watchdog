@@ -117,6 +117,14 @@ action_items:
     action: "The TypeScript comment stripper in the two *-connection.test.ts files strips // with a naive regex that is not quote-aware, so a // inside a string literal (a URL) would delete the rest of the line before the source assertions run. Latent: neither adapter contains one today. Raised by Argus on story 2.1; migrations/executable-sql.ts is the quote-aware equivalent for SQL if this ever needs writing."
     owner: "Dev"
     status: open
+  - epic: 2
+    action: "core/ports/unit-directory.test.ts declaredMethods matches only method-shorthand syntax (/^\s*(\w+)\s*\(/gm), so a write capability declared as a function-typed property (readonly record: (x) => Promise<void>) is invisible and the exhaustive read-only assertion still passes. Same hole was found and fixed in assessment-directory.test.ts on story 2.2; the fix is /^\s*(?:readonly\s+)?(\w+)\s*[:(]/gm."
+    owner: "Dev"
+    status: open
+  - epic: 2
+    action: "All six migrations/*.test.ts use __dirname while package.json is type: module; they rely on Vitest polyfilling it. The ports and adapters family uses import.meta.url. Pick one across the repo rather than per-file."
+    owner: "Dev"
+    status: open
   - epic: 1
     action: "Add .gitattributes and renormalise the repo-wide CRLF"
     owner: "Dev"

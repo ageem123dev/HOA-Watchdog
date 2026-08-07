@@ -100,13 +100,13 @@ not checked:
   - [x] The test must fail if either side gains, loses, or renames a value — check **both
         directions**, not just that every constant appears in the SQL. A one-way check passes when
         the migration has an extra value the application has never heard of.
-- [ ] **Task 3 — The port and its read** (AC1, AC2)
-  - [ ] `core/ports/assessment-directory.ts` — a **read** port, for the reason
+- [x] **Task 3 — The port and its read** (AC1, AC2)
+  - [x] `core/ports/assessment-directory.ts` — a **read** port, for the reason
         `core/ports/unit-directory.ts` and `quarantine-queue.ts` both give: recording assessments is
         data entry and no story before 2.4 does it from the application. Say so in the header.
-  - [ ] `annualAmount` crosses as a **decimal string**, exactly as `ExtractionRecord.totalAmount`
+  - [x] `annualAmount` crosses as a **decimal string**, exactly as `ExtractionRecord.totalAmount`
         does. Never a `number`.
-  - [ ] `adapters/db/assessment-directory-postgres.ts` on the **reader** connection, following
+  - [x] `adapters/db/assessment-directory-postgres.ts` on the **reader** connection, following
         `unit-directory-postgres.ts`: lazy pool, named columns rather than `select *`, and a
         connection test asserting it never reaches for the writer URL.
 - [ ] **Task 4 — Prove the annual-amount property** (AC2, AC3)
@@ -240,6 +240,47 @@ alone passes against `numeric(20,4)`; a type check alone passes against a column
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 3 — the read port and its adapter.** Done. `AssessmentDirectory` answers one question and can
+express nothing else; `annualAmount` crosses as a decimal string and `billingCycle` as the shared
+union rather than `string`. The adapter reads on the reader connection, matches the unit through
+`unit_normalised_number()`, and does not cast the amount on the way out.
+
+*Sensitivity checks, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Pool built from the writer URL | both connection tests |
+| Raw `unit_number` instead of the normalised column | the query-text assertion and `finds the unit however the number was typed` |
+| Year filter dropped | 5, including the query-text assertion |
+| `annual_amount::float8` on the way out | **6**, including the source guard and every exact-decimal assertion |
+
+The last one is the money decision, and the mutation most likely to be made by someone tidying up.
+
+*Review — and a fifth guard that proved nothing, again mine.* One `argus_review` returned three
+findings:
+
+- **low, confirmed and fixed — the one that mattered.** `declaredMethods` matched only method
+  shorthand. TypeScript lets the same capability be written as a function-typed property
+  (`readonly record: (x) => Promise<void>`), and in that form a **write method would have been
+  invisible** to the exhaustive read-only assertion, which would have gone on reporting a read-only
+  port. Verified against a planted declaration before fixing, and the new control fails against the
+  old regex.
+- **medium, skipped.** Method shorthand is bivariant and disables strict function-type checking.
+  True, and true of **every** port in this repo — `UnitDirectory`, `QuarantineQueue` and the rest all
+  use it. Changing one splits the convention; recorded rather than done here.
+- **low, skipped.** The pool `error` listener swallows idle-client errors. It exists to stop Node
+  treating them as unhandled and killing the process, and it is identical in
+  `unit-directory-postgres.ts` and `quarantine-queue-postgres.ts`. Same argument.
+
+*Sibling defect found, recorded rather than fixed (Step 8 question 4).*
+`core/ports/unit-directory.test.ts` — story 2.1, already merged — has the **identical blind spot**:
+its `declaredMethods` cannot see a function-typed property, so its read-only assertion would pass
+with a write capability declared that way. Logged as an epic-2 action item carrying the exact
+one-line fix.
+
+*Gates on `50cdd1a`:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**73 files / 1265 passed**, `npm run test:db` **22 files / 421 passed**.
 
 **Task 2 — the cycle vocabulary, stated once.** Done. `BILLING_CYCLES` and migration 013's
 `assessment_cycle_known` name the same three values, and a test reads the migration to prove it.

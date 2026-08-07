@@ -53,7 +53,17 @@ const declaredMethods = (text: string): readonly string[] => {
   }
   if (close === -1) return []
 
-  return [...withoutComments.slice(open + 1, close).matchAll(/^\s*(\w+)\s*\(/gm)].map((m) => m[1]!)
+  // Both declaration forms. `record(x): Promise<void>` and
+  // `readonly record: (x) => Promise<void>` are the same capability, and matching
+  // only the first would let a write method be added in the second form without
+  // the exhaustive list below noticing.
+  //
+  // A data property would be reported too. That is deliberate: on a port, any
+  // member is a capability, and a surprise one should fail loudly here rather
+  // than be silently excluded by the shape of the regex.
+  return [
+    ...withoutComments.slice(open + 1, close).matchAll(/^\s*(?:readonly\s+)?(\w+)\s*[:(]/gm),
+  ].map((m) => m[1]!)
 }
 
 describe('the AssessmentDirectory port', () => {
@@ -76,6 +86,28 @@ describe('the AssessmentDirectory port', () => {
 
     expect([...declaredMethods(sample)].sort()).toEqual(['closing', 'second'])
     expect(declaredMethods('nothing here')).toEqual([])
+  })
+
+  it('sees a capability declared as a function-typed property, not only as a method', () => {
+    // The hole this helper had, and the reason it matters more than style.
+    // TypeScript lets the same capability be written two ways:
+    //
+    //   record(unitNumber: string): Promise<void>            // method shorthand
+    //   readonly record: (unitNumber: string) => Promise<void>  // property
+    //
+    // The first version of the regex matched only the first form. A write method
+    // added in the second form would have been **invisible** to the exhaustive
+    // list above, which would have gone on reporting a read-only port — the
+    // guard passing whether or not the thing it guards against was present.
+    // Raised by review; verified against a planted declaration before fixing.
+    const sample = [
+      'export interface AssessmentDirectory {',
+      '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
+      '  readonly record: (unitNumber: string) => Promise<void>',
+      '}',
+    ].join('\n')
+
+    expect([...declaredMethods(sample)].sort()).toEqual(['forUnitAndYear', 'record'])
   })
 
   it('carries the amount as a decimal string, never a number', () => {
