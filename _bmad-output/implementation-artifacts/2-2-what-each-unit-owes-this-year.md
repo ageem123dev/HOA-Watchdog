@@ -70,34 +70,34 @@ not checked:
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Migration 013: the assessment** (AC1, AC3)
-  - [ ] `migrations/013_assessment.sql`. One row per unit per year: `unit_id` referencing `unit(id)`,
+- [x] **Task 1 — Migration 013: the assessment** (AC1, AC3)
+  - [x] `migrations/013_assessment.sql`. One row per unit per year: `unit_id` referencing `unit(id)`,
         `assessment_year`, `annual_amount`, `billing_cycle`.
-  - [ ] **`annual_amount numeric(14,2)`**, matching `extraction.total_amount` exactly — same
+  - [x] **`annual_amount numeric(14,2)`**, matching `extraction.total_amount` exactly — same
         precision and scale, for the reason recorded above. A check constraint that the amount is
         **positive**: a unit that owes nothing is an absent assessment, not a zero one, and a
         negative annual due is not a thing.
-  - [ ] **Store the ANNUAL amount, never the instalment.** The tempting error is to record
+  - [x] **Store the ANNUAL amount, never the instalment.** The tempting error is to record
         `$500/month` for a monthly payer. AC2 exists to forbid it: two units with the same annual
         figure owe the same total whatever their cycle, so the amount column must not be scaled by
         the cycle. Say so in the migration.
-  - [ ] **`billing_cycle text` + `check (billing_cycle in ('monthly', 'six_monthly', 'annual'))`** —
+  - [x] **`billing_cycle text` + `check (billing_cycle in ('monthly', 'six_monthly', 'annual'))`** —
         a closed vocabulary the database enforces, in the style of `document_extraction_state`. Not a
         Postgres `enum`: nothing here uses one, and adding a value to an enum is a migration where a
         check constraint is a one-line change.
-  - [ ] **Unique on `(unit_id, assessment_year)`.** Two assessments for one unit in one year is two
+  - [x] **Unique on `(unit_id, assessment_year)`.** Two assessments for one unit in one year is two
         answers to "what does 4B owe for 2024", and neither would look wrong.
-  - [ ] `assessment_year integer` with a sanity range check. A pasted cell or a typo'd `20024` should
+  - [x] `assessment_year integer` with a sanity range check. A pasted cell or a typo'd `20024` should
         fail here rather than become a row nobody can find.
-  - [ ] `grant select on assessment to watchdog_reader` — explicit per table, as migration 003
+  - [x] `grant select on assessment to watchdog_reader` — explicit per table, as migration 003
         requires. **SELECT only**, per AD-4.
-  - [ ] Migration-text test using the shared `executable()` from `migrations/executable-sql.ts`
+  - [x] Migration-text test using the shared `executable()` from `migrations/executable-sql.ts`
         (story 2.1 built it; do **not** write a fourth local copy).
-- [ ] **Task 2 — The cycle vocabulary, stated once** (AC1)
-  - [ ] A TypeScript constant for the three cycles, and a test that **reads migration 013 and proves
+- [x] **Task 2 — The cycle vocabulary, stated once** (AC1)
+  - [x] A TypeScript constant for the three cycles, and a test that **reads migration 013 and proves
         the two agree**. This is migration 007's established pattern and its comment says why: "a
         second statement of a shape is only safe when something fails on disagreement."
-  - [ ] The test must fail if either side gains, loses, or renames a value — check **both
+  - [x] The test must fail if either side gains, loses, or renames a value — check **both
         directions**, not just that every constant appears in the SQL. A one-way check passes when
         the migration has an extra value the application has never heard of.
 - [ ] **Task 3 — The port and its read** (AC1, AC2)
@@ -240,6 +240,81 @@ alone passes against `numeric(20,4)`; a type check alone passes against a column
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 2 — the cycle vocabulary, stated once.** Done. `BILLING_CYCLES` and migration 013's
+`assessment_cycle_known` name the same three values, and a test reads the migration to prove it.
+Structured after `core/extraction/record.test.ts` rather than inventing a second shape — including
+its empty-list guard, which exists because a comparison of nothing to nothing shipped twice in 1.4.
+
+*Set equality, so it fails both ways.* Mutated in three directions, each restored:
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Migration gains `quarterly` | the agreement test **and** the vacuity control |
+| Constant gains `quarterly` | the agreement test and the anchor test |
+| Constraint renamed so the parser matches nothing | the vacuity control — the case that would otherwise compare two empty arrays and report green |
+
+The migration is read with `readFileSync` at runtime rather than imported, so nothing under `core/`
+gains an outward import; `core/ports/boundary.test.ts` enforces that and `record.test.ts` set the
+precedent.
+
+*Review — and a fourth guard that proved nothing, in the same shape as story 2.1's five.* One
+`argus_review` returned three findings:
+
+- **medium, confirmed and fixed.** `const cycle: BillingCycle = 'six_monthly'` was commented as
+  preventing the type widening to `string`. It does not — an assignment only proves assignability,
+  and it compiles just as happily when the type *is* `string`. **The comment asserted a property the
+  code did not check.** Replaced with `const notWidened: string extends BillingCycle ? never : true`,
+  and verified: widening the type takes `tsc --noEmit` from the baseline 8 to 9, with
+  `Type 'true' is not assignable to type 'never'`.
+- **low, fixed.** The migration parser hard-coded lower-case `check`/`in`. The constraint name is
+  what anchors the match, so the `i` flag costs nothing and stops a future `CHECK (… IN (…))` from
+  making the parser silently match nothing.
+- **medium, skipped.** `clause![1]!` double non-null assertions. Copied verbatim from
+  `record.test.ts`, and runtime-safe: the `expect(clause).not.toBeNull()` above throws first, so the
+  assertion is never evaluated against null. Diverging here would split an idiom this file
+  deliberately reuses.
+
+*Gates on `b19490d`:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**70 files / 1251 passed**, `npm run test:db` **20 files / 402 passed**.
+
+**Task 1 — migration 013, the assessment.** Done. `annual_amount numeric(14,2)` matching
+`extraction.total_amount`, the cycle as a check-constraint vocabulary, and one row per unit per year.
+
+*The guard that is a contract, not a constraint.* `annual_amount` is the annual figure and never the
+instalment, and **no check constraint can tell 500 from 6000**. What guards it is the column name,
+the migration comment and AC2's test. Said plainly in the migration rather than left implicit,
+because if the amount were ever stored already divided, story 2.3 would divide it again and every
+expected instalment would be wrong by a factor of twelve.
+
+*A behaviour propagated rather than guarded.* `numeric(14,2)` **rounds** an amount carrying more
+decimals than the scale — `1234.567` stores as `1234.57` — it does not reject it. Inherent to the
+type, and `extraction.total_amount` behaves identically. Pinned by a test so a caller relying on it,
+or surprised by it, finds the answer there rather than in production.
+
+*Sensitivity checks, one change each, every one restored by dropping the table and re-running the
+migration so the schema comes from the file:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| `annual_amount` as `double precision` | **8** — the `information_schema` type cross-check, the migration-text assertion, and every money assertion |
+| Unique on `unit_id` alone | `accepts the same unit in a different year` |
+| Unique on `assessment_year` alone | the same-year-different-unit case, and 5 others |
+| Positive-amount check dropped | the zero and the negative case |
+| Cycle vocabulary dropped | the migration-text assertion and all three rejection cases |
+
+Mutated **one at a time**, which is 2.1's lesson: a mutation removing two things at once cannot show
+that either one matters, and that is how 2.1 shipped a check constraint nothing could detect the
+removal of.
+
+*Review.* One `argus_review` on the task diff returned one **low** finding: `__dirname` is not native
+to ESM and this package is `"type": "module"`. Verified — true, and true of **all six**
+`migrations/*.test.ts` files, which rely on Vitest's polyfill; the ports and adapters family uses
+`import.meta.url` instead. Changing one of six would split the convention inside `migrations/`, so it
+is recorded as a repo-wide consistency item rather than fixed here.
+
+*Gates on `83ac8c3`:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**69 files / 1246 passed**, `npm run test:db` **402 passed**.
 
 ### File List
 

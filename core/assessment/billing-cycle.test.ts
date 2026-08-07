@@ -25,7 +25,14 @@ const migration = (): string =>
 
 /** Quoted values inside a named `check (... in (...))` clause. */
 function declaredList(constraint: string): string[] {
-  const clause = new RegExp(`${constraint} check \\(\\s*[a-z_]+ in \\(([^)]*)\\)`).exec(migration())
+  // Case-insensitive: every migration here is written in lower-case SQL, but the
+  // keywords are not the thing being asserted, and a future `CHECK (… IN (…))`
+  // would make this parser silently match nothing — which the vacuity control
+  // below would then catch as a failure whose cause looks like drift. Raised by
+  // review. The constraint name is what anchors the match, not the keywords.
+  const clause = new RegExp(`${constraint} check \\(\\s*[a-z_]+ in \\(([^)]*)\\)`, 'i').exec(
+    migration(),
+  )
 
   expect(clause, `migration 013 no longer declares ${constraint}`).not.toBeNull()
 
@@ -71,12 +78,22 @@ describe('the billing cycle vocabulary', () => {
       expect([...BILLING_CYCLES].sort()).toEqual(['annual', 'monthly', 'six_monthly'])
     })
 
-    it('types a cycle as one of its members', () => {
-      // A compile-time assertion, executed so it is not merely decorative: if
-      // BillingCycle widened to `string`, this file would still compile and the
-      // vocabulary would stop constraining anything.
+    it('types a cycle as a union of its members, not as string', () => {
+      // The first version of this assigned a literal to a `BillingCycle`
+      // variable and claimed that stopped the type widening. It does not: an
+      // assignment only proves assignability, and `const c: string = 'x'`
+      // compiles just as happily. The comment asserted a property the code did
+      // not check — the shape this project keeps finding. Raised by review.
+      //
+      // `string extends BillingCycle` is true only when the type is already as
+      // wide as `string`, in which case the annotation resolves to `never` and
+      // this line stops compiling. Verified by widening it: `tsc --noEmit` goes
+      // from the baseline 8 errors to 9.
+      const notWidened: string extends BillingCycle ? never : true = true
+
       const cycle: BillingCycle = 'six_monthly'
 
+      expect(notWidened).toBe(true)
       expect(BILLING_CYCLES).toContain(cycle)
     })
   })
