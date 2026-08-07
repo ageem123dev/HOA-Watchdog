@@ -91,6 +91,19 @@ create table unit_membership (
     exclude using gist (unit_id with =, held_during with &&)
 );
 
+-- `holder_id` is deliberately not indexed. Raised by review and skipped rather
+-- than overlooked.
+--
+-- `unit_id` is already covered: the exclusion constraint builds a gist index on
+-- `(unit_id, held_during)`, which is what both of story 2.1's questions filter
+-- by -- who held a unit on a date, and the history of a unit. Nothing in this
+-- epic queries by holder, and no story before 2.4 writes these tables from the
+-- application, so there is no `delete from unit_holder` path whose referential
+-- check would scan. An index no query uses is schema nobody tested.
+--
+-- Add it when either arrives: a query answering "which units does this person
+-- hold", or a delete path for `unit_holder`.
+
 -- Migration 003 revoked the reader's blanket select, so read access is an
 -- explicit decision per table. SELECT only -- AD-4 keeps the LLM-driven query
 -- path unable to invent a holder or a membership, and a membership that exists
