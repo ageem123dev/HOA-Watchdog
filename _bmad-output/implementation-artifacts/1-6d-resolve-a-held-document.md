@@ -5,7 +5,7 @@ merge_request: 20
 
 # Story 1.6d: Resolve a held document
 
-Status: review
+Status: done
 
 > **Last of four stories from epic story 1.6.**
 > **1.6a** built the matching rule, **1.6b** held unresolved vendors, **1.6c** made the queue
@@ -411,6 +411,12 @@ one story 1.6b's guard was rebuilt around.
 
 ### Review Findings
 
+**Converged after one merge-request round.** CodeRabbit resolved all seven threads itself; pipeline
+green on `a558949`. As on story 1.6c the clean line arrived inside the summary comment rather than a
+standalone review note, so convergence was taken from the thread resolutions — an unambiguous
+service-account statement about the current head — rather than from the summary.
+
+
 **Merge-request round 1** on `f41cea9` — **7 findings, all on this story, all fixed.** Pipeline green.
 
 Three were the same defect this project keeps meeting, in three new places. A `rejects.toThrow()`
@@ -579,6 +585,11 @@ Adversarial review (Argus) clean on both task diffs.
 
 ### Change Log
 
+- 2026-08-06 — One IDE round (8 findings) and one merge-request round (7 findings), all fixed or
+  answered. Three of the merge-request findings were the same defect in new places: a bare
+  `rejects.toThrow()`, a mock no test could reach, and a concurrency limit of zero returning a sparse
+  array as success. One finding from the fix-diff gate did not reproduce and its fix was reverted,
+  because the test written for it could not fail. Status -> done. Closes epic story 1.6.
 - 2026-08-06 — Story created. Scope is epic AC3: confirm as new, or match to existing, atomically.
   Three decisions recorded ahead of implementation — a separate write port, no `extraction.vendor_id`
   while the ingest path still discards the resolved id, and no migration because migration 002's
