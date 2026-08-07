@@ -395,6 +395,36 @@ invisible to all 351 tests.
 **68 files / 1230 passed**, `npm run test:db` **19 files / 364 passed**.
 
 
+
+## CodeRabbit round 2 (MR !21, 2026-08-07) — head `ff65c97`
+
+4 actionable findings. Three fixed, one skipped with the reason on its thread.
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 1 | The `catch` in `source()` turns a missing file into `''` | **Fixed.** A path that stopped resolving made every assertion fail with "expected `''` to match /select/i", naming the wrong cause. Nothing could make the catch fire in a test, so it was an unproven guard. Removed; `readFileSync` now throws `ENOENT` with the path |
+| 2 | Close the adapter pool in `afterAll` | **Skipped**, second time. The stated consequence does not occur — the db suite completes with no teardown stall — and `quarantine-queue-postgres.test.ts` has the identical shape, which CodeRabbit itself notes. Adding a close helper to one of seven adapters would leave it inconsistent and would not address the pool problem, which is an open epic-1 action item covering all seven |
+| 3 | `still treats a backslash in a plain literal as ordinary text` passes either way | **Confirmed and fixed — the fourth guard in this story that proved nothing, and it was written *in the round that fixed the third*.** The escape branch copies every character it scans, so `select 3;` appeared in the output under either behaviour. A `--` comment after the literal makes the difference observable: closed literal → real comment, stripped; open literal → swallowed as text, survives |
+| 4 | `E'` needs a word boundary before it | **Fixed.** `/^[Ee]'/` matches the `e'` at the end of `else'b'`, ordinary SQL. Scanned as an escape string, a backslash consumes the closing quote and the scanner runs past the literal's end |
+
+*Sensitivity checks, each restored:*
+
+| Mutation | Test that failed |
+| --- | --- |
+| Word boundary removed | `does not read the e at the end of a keyword as an escape-string prefix` |
+| All literals scanned as escape strings | **both** literal tests, including the beside-case that previously could not fail |
+| Unicode boundary reverted to ASCII `\w` | `treats a non-ASCII identifier as a word too` |
+
+*Argus on the same round* raised three more. One (`\w` is ASCII-only, so `añe'b'` misparses) was
+fixed with a test. One was `.mcp.json`'s hardcoded path — the user's uncommitted file, already an
+open action item. The third — the naive `//` stripper in the two `*-connection.test.ts` files, which
+is the same class of trap this round fixed for SQL — is **latent**: neither adapter contains a `//`
+inside a string literal, checked. Recorded as an epic-2 action item rather than answered with a
+second parser.
+
+*Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**68 files / 1236 passed**, `npm run test:db` **19 files / 369 passed**.
+
 ## Argus round 2 (the review-gate pass on round 1's own diff)
 
 Three **low** findings, all latent holes in the two parsers round 1 introduced — two of them in the

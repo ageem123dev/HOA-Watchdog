@@ -113,6 +113,10 @@ action_items:
     action: "Shared connection pool - seven module-scoped pools at max 5 against max_connections 100. Story 2.1 added the seventh (unit-directory) and a review raised the second half of the same defect: a module-scoped pool is orphaned on every Next.js HMR reload in dev, so connections leak until the limit is hit. Both halves want one change across all seven adapters, not one file at a time."
     owner: "Dev"
     status: open
+  - epic: 2
+    action: "The TypeScript comment stripper in the two *-connection.test.ts files strips // with a naive regex that is not quote-aware, so a // inside a string literal (a URL) would delete the rest of the line before the source assertions run. Latent: neither adapter contains one today. Raised by Argus on story 2.1; migrations/executable-sql.ts is the quote-aware equivalent for SQL if this ever needs writing."
+    owner: "Dev"
+    status: open
   - epic: 1
     action: "Add .gitattributes and renormalise the repo-wide CRLF"
     owner: "Dev"

@@ -72,7 +72,18 @@ export const executable = (sql: string): string => {
     // statement. Nothing here uses `E'…'` today; migration 009 records why it is
     // avoided in stored expressions. Raised by review as a latent trap, which is
     // the same reason this whole helper exists.
-    const escapeString = /^[Ee]'/.test(sql.slice(i, i + 2))
+    // The word boundary matters: `/^[Ee]'/` alone matches the `e'` at the end of
+    // `else'b'`, which is ordinary SQL — a keyword followed by a literal. Scanned
+    // as an escape string, a backslash inside would consume the closing quote and
+    // the scanner would run past the literal's real end, reading the rest of the
+    // statement as string content. Raised by review; no migration here triggers
+    // it, and this helper is shared by every migration test.
+    // `\w` is ASCII-only, and Postgres identifiers are not: `añe'b'` would put a
+    // non-ASCII letter before the `e` and the boundary test would wrongly say
+    // "not part of a word". Unicode property escapes instead.
+    const previous = i > 0 ? sql[i - 1] : ''
+    const escapeString =
+      /^[Ee]'/.test(sql.slice(i, i + 2)) && !/[\p{L}\p{N}_$]/u.test(previous ?? '')
     if (escapeString) {
       out += sql.slice(i, i + 2)
       i += 2

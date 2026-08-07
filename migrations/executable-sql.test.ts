@@ -77,10 +77,44 @@ describe('the executable part of a migration', () => {
 
   it('still treats a backslash in a plain literal as ordinary text', () => {
     // The beside-case: the escape handling must not leak into normal literals,
-    // where a backslash means nothing special.
-    const sql = "select 'a\\';\nselect 3;"
+    // where a backslash means nothing special because standard_conforming_strings
+    // is on.
+    //
+    // The `--` after the literal is what makes this assertion mean anything. The
+    // first version asserted only that `select 3;` survived — and the escape
+    // branch copies every character it scans, so `select 3;` appeared in the
+    // output under *either* behaviour and the test could not fail. Raised by
+    // review; the fourth guard in this story that proved nothing.
+    //
+    // With the literal closing at the quote, what follows is a real comment and
+    // is stripped. If the backslash had escaped that quote, the literal would
+    // still be open and would swallow the comment as text, so it would survive.
+    const sql = "select 'a\\'; -- swallowed only if the backslash escaped the quote\nselect 3;"
 
     expect(executable(sql)).toContain('select 3;')
+    expect(executable(sql)).not.toMatch(/swallowed/i)
+  })
+
+  it('does not read the e at the end of a keyword as an escape-string prefix', () => {
+    // `else'b'` is a keyword followed by a literal, and valid SQL. Treated as an
+    // escape string, the backslash consumes the closing quote, the scanner runs
+    // past the literal's real end, and everything after it — including a real
+    // comment — is read as string content and survives.
+    const sql = "select case when x then 'a' else'b\\' end; -- a real comment\nselect 4;"
+
+    expect(executable(sql)).toContain('select 4;')
+    expect(executable(sql)).not.toMatch(/a real comment/i)
+  })
+
+  it('treats a non-ASCII identifier as a word too', () => {
+    // Beside the keyword case: Postgres identifiers may contain non-ASCII
+    // letters, and `\w` does not match them — so an identifier ending `ñe`
+    // followed by a literal would still be read as an escape string. Raised by
+    // Argus after the keyword fix landed.
+    const sql = "select añe'b\\' end; -- a real comment\nselect 5;"
+
+    expect(executable(sql)).toContain('select 5;')
+    expect(executable(sql)).not.toMatch(/a real comment/i)
   })
 
   it('keeps a dollar-quoted function body whole', () => {

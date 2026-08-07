@@ -91,13 +91,15 @@ describe('the unit directory connection', () => {
 describe('the queries state their own terms', () => {
   const source = () => {
     const path = join(dirname(fileURLToPath(import.meta.url)), 'unit-directory-postgres.ts')
-    try {
-      return readFileSync(path, 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/[^\n]*/g, '')
-    } catch {
-      return ''
-    }
+    // No `catch` returning ''. The queue adapter's version has one, and it turns
+    // a path that stops resolving into an empty string — every assertion below
+    // then fails with "expected '' to match /select/i", which names the wrong
+    // cause. Letting `readFileSync` throw names the real one, with the path in
+    // the message. Raised by review, and correctly: nothing could make that catch
+    // fire in a test, so it was an unproven guard.
+    return readFileSync(path, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
   }
 
   const flat = () => source().replace(/\s+/g, ' ')
