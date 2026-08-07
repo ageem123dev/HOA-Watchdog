@@ -31,6 +31,22 @@ const CHECK_VIOLATION = '23514'
 const UNIQUE_VIOLATION = '23505'
 const INSUFFICIENT_PRIVILEGE = '42501'
 
+/**
+ * Every unit this file creates carries this prefix, and its cleanup deletes only
+ * rows carrying it.
+ *
+ * Vitest runs test files in parallel. The first version of this file cleaned up
+ * with `unit_number like '%-%'`, which matches any unit number containing a
+ * dash -- including the ones `unit-membership.test.ts` was using at that moment.
+ * The two files deleted each other's rows mid-run, and the symptom was a count
+ * assertion failing in whichever file lost the race, intermittently, in a suite
+ * that is the only gate this project has. Proved directly rather than inferred:
+ * inserting `deadbeef-4B` and running the old cleanup statement removed it.
+ *
+ * The convention is `quarantine-item.test.ts`'s, which had it right first.
+ */
+const RUN_PREFIX = `u${randomBytes(4).toString('hex')}`
+
 const MIGRATION = readFileSync(join(__dirname, '011_unit.sql'), 'utf8')
 
 /**
@@ -106,7 +122,7 @@ describeWithDatabase('the unit table', () => {
   let reader: Client
   let scope = ''
 
-  const numbered = (suffix: string) => `${scope}-${suffix}`
+  const numbered = (suffix: string) => `${RUN_PREFIX}-${scope}-${suffix}`
 
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
@@ -122,7 +138,7 @@ describeWithDatabase('the unit table', () => {
   })
 
   afterAll(async () => {
-    await writer.query("delete from unit where unit_number like '%-%'")
+    await writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}-%`])
     await writer.end()
     await reader.end()
   })
@@ -160,7 +176,7 @@ describeWithDatabase('the unit table', () => {
 
     const { rows } = await writer.query<{ n: string }>(
       'select count(*)::text n from unit where unit_number like $1',
-      [`${scope}-%`],
+      [`${RUN_PREFIX}-${scope}-%`],
     )
     expect(rows[0]?.n).toBe('2')
   })
