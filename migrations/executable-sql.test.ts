@@ -117,6 +117,42 @@ describe('the executable part of a migration', () => {
     expect(executable(sql)).not.toMatch(/a real comment/i)
   })
 
+  it('treats an astral identifier character as a word too', () => {
+    // Beside the non-ASCII case, and a step further: `𐐀` is a surrogate *pair* in
+    // JavaScript, so reading the preceding code unit yields a lone low surrogate
+    // — which matches no Unicode letter property, though the character it came
+    // from does. The boundary check would then read `e'` as an escape string.
+    const sql = "select \u{10400}e'b\\' end; -- a real comment\nselect 6;"
+
+    expect(executable(sql)).toContain('select 6;')
+    expect(executable(sql)).not.toMatch(/a real comment/i)
+  })
+
+  it('does not mistake a letter before a lone low surrogate for that character', () => {
+    // Cannot arrive from a file — Node turns invalid UTF-8 into U+FFFD — but a
+    // caller can hand one in.
+    //
+    // The **letter** before the lone surrogate is what makes this falsifiable.
+    // Slicing two units blindly returns `a` + the surrogate, and the unanchored
+    // property test then matches the `a` — so the scanner concludes `e'` is part
+    // of a word and reads a plain literal, closing it at the escaped quote and
+    // stripping the comment. Correctly, the preceding character is the lone
+    // surrogate, which is no letter, so `e'` is an escape string, the backslash
+    // keeps the literal open, and the comment is swallowed as text.
+    //
+    // The first version of this test put a *space* there, and passed either way.
+    const sql = "select a\udc00e'b\\' -- swallowed, because the literal is still open\nselect 7;"
+
+    expect(executable(sql)).toMatch(/swallowed/i)
+  })
+
+  it('keeps a tagged dollar-quoted body whole, including a non-ASCII tag', () => {
+    // A dollar tag is an identifier, and Postgres identifiers are not ASCII-only.
+    const sql = ['create function f() returns text language sql as $café$', '  select 1 -- kept', '$café$;'].join('\n')
+
+    expect(executable(sql)).toContain('select 1 -- kept')
+  })
+
   it('keeps a dollar-quoted function body whole', () => {
     // Migration 011's normalisation lives in one of these, and it is precisely
     // what the tests need to look at.

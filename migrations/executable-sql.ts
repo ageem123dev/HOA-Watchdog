@@ -27,7 +27,46 @@
  *
  * Newlines inside stripped blocks are preserved, so anything reading the result
  * line by line still sees the original line structure.
+ *
+ * **Scope, stated so it stops expanding.** The input is the `.sql` files in this
+ * directory, read with `readFileSync(…, 'utf8')`. That bounds what can arrive:
+ * Node replaces invalid UTF-8 with U+FFFD, so no lone surrogate reaches it from
+ * a file, and nothing here uses `E'…'`, a tagged dollar quote, or a non-ASCII
+ * identifier. Four review rounds hardened the scanner against all of those
+ * anyway — they are cheap and the helper is shared — but this is not a general
+ * SQL parser and should not grow into one. Anything beyond "strip the comments
+ * from the migrations in this repo" wants a real parser, not another branch.
  */
+/**
+ * The complete code point immediately before `at`, or `''` at the start.
+ *
+ * `sql[at - 1]` is a UTF-16 *code unit*, so for an astral character it returns
+ * half a surrogate pair — and a lone surrogate matches no Unicode letter
+ * property, which is the opposite of the truth about the character it came from.
+ */
+const precedingCodePoint = (sql: string, at: number): string => {
+  if (at <= 0) return ''
+
+  const unit = sql.charCodeAt(at - 1)
+  const isLowSurrogate = unit >= 0xdc00 && unit <= 0xdfff
+  // Paired with a real high surrogate, not merely preceded by something. A lone
+  // low surrogate cannot arrive from `readFileSync(…, 'utf8')` — Node replaces
+  // invalid sequences with U+FFFD — but a caller can hand one in, and slicing two
+  // units blindly would return a letter *plus* the surrogate, so the caller's
+  // property test would answer about the wrong character.
+  //
+  // Review also proposed anchoring the caller's regex (`/^…$/u`) as a second
+  // guard against a two-character return. Both were tried; the anchor makes this
+  // check unobservable, since a two-character string matches neither form, and
+  // then neither guard can be made to fail on its own. Kept the one a test can
+  // falsify — the same reasoning that deleted `not isempty(held_during)` from
+  // migration 012.
+  const pairedWithHigh =
+    isLowSurrogate && at >= 2 && sql.charCodeAt(at - 2) >= 0xd800 && sql.charCodeAt(at - 2) <= 0xdbff
+
+  return pairedWithHigh ? sql.slice(at - 2, at) : (sql[at - 1] ?? '')
+}
+
 export const executable = (sql: string): string => {
   let out = ''
   let i = 0
@@ -81,9 +120,14 @@ export const executable = (sql: string): string => {
     // `\w` is ASCII-only, and Postgres identifiers are not: `añe'b'` would put a
     // non-ASCII letter before the `e` and the boundary test would wrongly say
     // "not part of a word". Unicode property escapes instead.
-    const previous = i > 0 ? sql[i - 1] : ''
+    //
+    // And the preceding *code point*, not the preceding code unit. An astral
+    // character like `𐐀` is a surrogate pair in JavaScript, so `sql[i - 1]` is a
+    // lone low surrogate — which `\p{L}` does not match even though the whole
+    // character does. Both halves of this boundary check were found by review;
+    // the second only after the first was fixed.
     const escapeString =
-      /^[Ee]'/.test(sql.slice(i, i + 2)) && !/[\p{L}\p{N}_$]/u.test(previous ?? '')
+      /^[Ee]'/.test(sql.slice(i, i + 2)) && !/[\p{L}\p{N}_$]/u.test(precedingCodePoint(sql, i))
     if (escapeString) {
       out += sql.slice(i, i + 2)
       i += 2
@@ -130,8 +174,10 @@ export const executable = (sql: string): string => {
       continue
     }
 
-    // A dollar-quoted body: `$$`, or a tagged `$tag$`. Kept verbatim.
-    const dollar = /^\$([A-Za-z_]\w*)?\$/.exec(sql.slice(i))
+    // A dollar-quoted body: `$$`, or a tagged `$tag$`. Kept verbatim. The tag is
+    // an identifier, and Postgres identifiers are not ASCII-only — the same
+    // oversight the boundary check above had.
+    const dollar = /^\$([\p{L}_][\p{L}\p{N}_]*)?\$/u.exec(sql.slice(i))
     if (dollar) {
       const tag = dollar[0]
       const end = sql.indexOf(tag, i + tag.length)

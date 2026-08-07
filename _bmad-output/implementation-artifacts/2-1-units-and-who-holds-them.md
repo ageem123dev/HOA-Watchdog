@@ -425,6 +425,42 @@ second parser.
 *Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
 **68 files / 1236 passed**, `npm run test:db` **19 files / 369 passed**.
 
+
+## CodeRabbit round 3 (MR !21) and the Argus pass on it — head `1f06236`
+
+One CodeRabbit finding and three from Argus, all on the same 20-line scanner. Fixed, and then the
+scanner was given a written scope so this stops recurring.
+
+| Finding | Disposition |
+| --- | --- |
+| `sql[i - 1]` is a code *unit*, so an astral character like `𐐀` yields a lone low surrogate, which matches no letter property | **Fixed.** Verified empirically first: the lone surrogate fails `\p{L}`, the whole code point passes. `precedingCodePoint()` now returns the complete character |
+| `precedingCodePoint` assumed any low surrogate is preceded by a high one | **Fixed.** It now checks the pairing, so malformed input cannot make it return a letter *plus* a surrogate |
+| The dollar-tag regex was ASCII-only | **Fixed.** `$café$` is a legal Postgres tag; the regex uses Unicode property escapes now |
+| Anchor the caller regex as a second guard against a multi-character return | **Rejected, after trying it.** The anchor makes the surrogate-pairing check *unobservable* — a two-character string matches neither the anchored nor the unanchored form — so with both in place neither could be made to fail. Kept the one a test can falsify, which is the same reasoning that deleted `not isempty(held_during)` from migration 012 |
+
+**And a fifth guard that proved nothing, caught by its own sensitivity check.** The first version of
+`does not mistake a letter before a lone low surrogate for that character` put a *space* before the
+surrogate, and passed with the fix reverted. A **letter** is what makes it falsifiable: slicing two
+units blindly returns `a` + surrogate, the property test then matches the `a`, and the scanner reads
+a plain literal instead of an escape string.
+
+*Sensitivity checks, each restored:*
+
+| Mutation | Test that failed |
+| --- | --- |
+| Preceding code *unit* instead of code point | `treats an astral identifier character as a word too` |
+| High-surrogate pairing check removed | `does not mistake a letter before a lone low surrogate for that character` |
+| Dollar tag reverted to ASCII-only | `keeps a tagged dollar-quoted body whole, including a non-ASCII tag` |
+
+**Scope, now written into the file.** None of these are reachable from the real input — checked, not
+assumed: no migration uses `E'…'`, a tagged dollar quote, or a non-ASCII identifier, and Node's UTF-8
+decoder replaces invalid bytes with U+FFFD so no lone surrogate can arrive from a file. The fixes
+are one line each and the helper is shared, so they were worth taking; but the header now says
+plainly that this is not a general SQL parser and should not grow into one.
+
+*Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**68 files / 1239 passed**, `npm run test:db` **19 files / 372 passed**.
+
 ## Argus round 2 (the review-gate pass on round 1's own diff)
 
 Three **low** findings, all latent holes in the two parsers round 1 introduced — two of them in the
