@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 
 import { BILLING_CYCLES, type BillingCycle } from './billing-cycle'
 import { fromMinorUnits, toMinorUnits } from './minor-units'
-import { deriveSchedule } from './schedule'
+import { deriveSchedule, expectedBy } from './schedule'
 
 const anAssessment = (annualAmount: string, billingCycle: BillingCycle, assessmentYear = 2024) => ({
   annualAmount,
@@ -36,6 +36,8 @@ const AMOUNTS = [
   '83.33',
   '1234.56',
   '7.77',
+  // Twelve instalments of exactly 0.29 — see the float note in `expectedBy`.
+  '3.48',
 ]
 
 describe('deriveSchedule', () => {
@@ -238,4 +240,117 @@ describe('the module reads no clock', () => {
       expect(source()).not.toContain(forbidden)
     },
   )
+})
+
+describe('expectedBy', () => {
+  const monthly = deriveSchedule(anAssessment('1200.00', 'monthly'))
+
+  it('expects nothing before the first instalment falls due', () => {
+    expect(expectedBy(monthly, '2023-12-31')).toBe('0.00')
+  })
+
+  it('expects an instalment on the very day it falls due', () => {
+    // Due in advance: the instalment for January is owed *on* 1 January, not
+    // after it. This is the boundary the whole due-date decision turns on.
+    expect(expectedBy(monthly, '2024-01-01')).toBe('100.00')
+  })
+
+  it('still expects only that instalment the day after', () => {
+    expect(expectedBy(monthly, '2024-01-02')).toBe('100.00')
+  })
+
+  it('expects the next instalment once its own day arrives', () => {
+    expect(expectedBy(monthly, '2024-02-01')).toBe('200.00')
+  })
+
+  it('expects the whole amount once the last instalment is due', () => {
+    expect(expectedBy(monthly, '2024-12-01')).toBe('1200.00')
+  })
+
+  it('expects the whole amount for any date after the year', () => {
+    // Epic 4 evaluates historical years, so a date years later must not wrap,
+    // saturate or under-count.
+    expect(expectedBy(monthly, '2031-06-15')).toBe('1200.00')
+  })
+
+  it('expects nothing from an empty schedule', () => {
+    expect(expectedBy([], '2024-06-01')).toBe('0.00')
+  })
+
+  it('sums an uneven schedule exactly', () => {
+    // The remainder instalments are 83.34 and the rest 83.33; five of them is
+    // 83.34 * 4 + 83.33 = 416.69.
+    const uneven = deriveSchedule(anAssessment('1000.00', 'monthly'))
+
+    expect(expectedBy(uneven, '2024-05-01')).toBe('416.69')
+    expect(expectedBy(uneven, '2024-12-01')).toBe('1000.00')
+  })
+
+  it('sums instalments a float would get wrong', () => {
+    // This case exists because the one above does NOT discriminate. Summing via
+    // `Number(amount) * 100` was mutated in and every test still passed:
+    // `Number('83.34') * 100` is exactly 8334, and so are the other amounts in
+    // play. The comment there had claimed "a float sum drifts here", which was
+    // simply untrue — a test whose comment asserted a property the values could
+    // not exercise.
+    //
+    // 3.48 over twelve months is twelve instalments of exactly 0.29, and
+    // `Number('0.29') * 100` is 28.999999999999996. Five of them sum to
+    // 144.99999999999997 rather than 145, which is not an exact count of minor
+    // units and cannot be formatted. Verified before this test was written.
+    const schedule = deriveSchedule(anAssessment('3.48', 'monthly'))
+
+    expect(schedule[0]?.amount).toBe('0.29')
+    expect(expectedBy(schedule, '2024-05-01')).toBe('1.45')
+    expect(expectedBy(schedule, '2024-12-01')).toBe('3.48')
+  })
+
+  it.each(['', '2024-6-01', '01/06/2024', '2024-06-01T00:00:00Z', 'yesterday'])(
+    'refuses an evaluation date of %s',
+    (on) => {
+      // The comparison is a string comparison, which is only a date comparison
+      // while the format holds. '2024-6-01' sorts after '2024-12-01'.
+      expect(() => expectedBy(monthly, on)).toThrow(/not a calendar date/)
+    },
+  )
+
+  it('compares dates as strings, never through a Date', () => {
+    // A `Date` is an instant at local midnight, so parsing these would shift the
+    // day for anyone west of UTC and change which instalments count. Story 2.1
+    // recorded the same hazard for membership dates.
+    const source = readFileSync(join(process.cwd(), 'core', 'assessment', 'schedule.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+
+    expect(source).not.toContain('new Date(')
+    expect(source).not.toContain('Date.parse')
+  })
+})
+
+describe('AC2 - a cycle changes when money is owed, never how much', () => {
+  it('expects different amounts to date, from schedules that sum the same', () => {
+    // Both halves, because either alone is satisfied by a wrong implementation.
+    // "Same annual total" alone passes against a function that expects the full
+    // amount immediately for every cycle. "Different to date" alone passes
+    // against one that scales the annual figure by the cycle.
+    const monthly = deriveSchedule(anAssessment('1200.00', 'monthly'))
+    const annual = deriveSchedule(anAssessment('1200.00', 'annual'))
+    const on = '2024-07-01'
+
+    expect(expectedBy(monthly, on)).toBe('700.00')
+    expect(expectedBy(annual, on)).toBe('1200.00')
+
+    expect(expectedBy(monthly, '2024-12-31')).toBe(expectedBy(annual, '2024-12-31'))
+    expect(expectedBy(monthly, '2024-12-31')).toBe('1200.00')
+  })
+
+  it('holds for every cycle at the end of the year', () => {
+    // The general form: whatever the cycle, the year's total is the annual
+    // amount. A cycle that scaled the figure would fail here for at least one.
+    for (const cycle of BILLING_CYCLES) {
+      const schedule = deriveSchedule(anAssessment('1000.00', cycle))
+
+      expect(expectedBy(schedule, '2024-12-31')).toBe('1000.00')
+    }
+  })
 })

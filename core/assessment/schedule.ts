@@ -100,3 +100,41 @@ export function deriveSchedule(terms: AssessmentTerms): readonly Instalment[] {
     amount: fromMinorUnits(base + (index < remainder ? 1 : 0)),
   }))
 }
+
+/**
+ * `YYYY-MM-DD`. Shape only, deliberately.
+ *
+ * This does not check that the date exists — `2024-13-01` passes. Validating a
+ * real calendar date belongs where dates enter the system, not here, and the
+ * shape is what this function actually depends on: string comparison is date
+ * comparison only while every date has the same width. `2024-6-01` sorts *after*
+ * `2024-12-01`, which would quietly change which instalments count.
+ */
+const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * What a unit is expected to have paid by a given date.
+ *
+ * The sum of every instalment already due — **including one falling due on the
+ * date itself**, because dues are collected in advance. A unit owes January's
+ * instalment on 1 January, not on 2 January.
+ *
+ * The date is a parameter and the comparison is a string comparison. Parsing
+ * either side into a `Date` would make it an instant at local midnight and shift
+ * the day for anyone west of UTC, changing which instalments count. Story 2.1
+ * recorded the same hazard for membership dates.
+ */
+export function expectedBy(schedule: readonly Instalment[], on: string): string {
+  if (typeof on !== 'string' || !CALENDAR_DATE.test(on)) {
+    throw new RangeError(`not a calendar date: ${describeValue(on)}`)
+  }
+
+  // Summed in minor units, then formatted once. Adding decimal strings as
+  // numbers would drift, and the drift would be invisible until an arrears
+  // finding was a cent out.
+  const total = schedule
+    .filter((instalment) => instalment.dueOn <= on)
+    .reduce((sum, instalment) => sum + toMinorUnits(instalment.amount), 0)
+
+  return fromMinorUnits(total)
+}

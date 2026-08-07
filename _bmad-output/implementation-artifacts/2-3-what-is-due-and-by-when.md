@@ -4,7 +4,7 @@ baseline_commit: 42b368f5409334dc06e41ddcfd2df36720af05b1
 
 # Story 2.3: What is due, and by when
 
-Status: in-progress
+Status: review
 
 > **Third of four stories in epic 2, the dues ledger.** 2.1 built the unit and who held it, 2.2 what
 > it owes for a year. This turns that annual figure into the instalments it is actually paid in. 2.4
@@ -92,33 +92,33 @@ over "first instalment absorbs it" so no single instalment carries a visibly odd
         with a trailing zero (`'1200.00'`), no fractional part, and the maximum the column admits.
   - [x] Reject an input that is not a well-formed two-decimal amount rather than coercing it. Say
         which error and prove it — a silent `NaN` here becomes a wrong instalment downstream.
-- [ ] **Task 2 — The schedule** (AC1, AC3)
-  - [ ] `core/assessment/schedule.ts` — a **pure function** over `{ annualAmount, billingCycle,
+- [x] **Task 2 — The schedule** (AC1, AC3)
+  - [x] `core/assessment/schedule.ts` — a **pure function** over `{ annualAmount, billingCycle,
         assessmentYear }`. No I/O, no imports outside `core/`, and **no clock**: it must not call
         `new Date()`, `Date.now()` or read any ambient time.
-  - [ ] Instalment counts: monthly 12, six_monthly 2, annual 1. Due dates are the first of the
+  - [x] Instalment counts: monthly 12, six_monthly 2, annual 1. Due dates are the first of the
         period — monthly `YYYY-01-01` … `YYYY-12-01`, six-monthly `YYYY-01-01` and `YYYY-07-01`,
         annual `YYYY-01-01`.
-  - [ ] Dates are `YYYY-MM-DD` **strings**, matching `UnitHolding.heldFrom` from story 2.1 and for
+  - [x] Dates are `YYYY-MM-DD` **strings**, matching `UnitHolding.heldFrom` from story 2.1 and for
         the same reason: a JS `Date` is an instant at local midnight and shifts the day west of UTC.
-  - [ ] **The sum property is the assertion this task exists for.** Assert it across many amounts and
+  - [x] **The sum property is the assertion this task exists for.** Assert it across many amounts and
         all three cycles, not one worked example — a single case can pass against an implementation
         that drops the remainder.
-  - [ ] The switch over the cycle must be **exhaustive at compile time**. A fourth cycle added to
+  - [x] The switch over the cycle must be **exhaustive at compile time**. A fourth cycle added to
         `BILLING_CYCLES` should fail the type check here, not fall through to a default.
-- [ ] **Task 3 — What is expected by a given date** (AC2, AC3)
-  - [ ] A second pure function: given a schedule and an evaluation date, the total expected to have
+- [x] **Task 3 — What is expected by a given date** (AC2, AC3)
+  - [x] A second pure function: given a schedule and an evaluation date, the total expected to have
         been paid by then — the sum of instalments whose due date is on or before it.
-  - [ ] **The evaluation date is a parameter.** Assert it, and assert the module reads no clock.
-  - [ ] Boundaries: the day before the first due date (nothing expected), **exactly on** a due date
+  - [x] **The evaluation date is a parameter.** Assert it, and assert the module reads no clock.
+  - [x] Boundaries: the day before the first due date (nothing expected), **exactly on** a due date
         (that instalment *is* expected — due in advance), the day after, the last due date, and a
         date after the year ends (the whole annual amount).
-  - [ ] A date before the assessment year and one after it, since epic 4 will evaluate historical
+  - [x] A date before the assessment year and one after it, since epic 4 will evaluate historical
         years.
-- [ ] **Task 4 — AC2, as the property it actually is** (AC2)
-  - [ ] Two cycles, one annual amount, evaluated on the same date: each expects exactly the
+- [x] **Task 4 — AC2, as the property it actually is** (AC2)
+  - [x] Two cycles, one annual amount, evaluated on the same date: each expects exactly the
         instalments already due, and both schedules sum to the same annual total.
-  - [ ] Assert **both halves**. "Same total for the year" alone passes against a function that
+  - [x] Assert **both halves**. "Same total for the year" alone passes against a function that
         expects the full amount immediately for every cycle; "different expected-to-date" alone
         passes against one that scales the annual figure by the cycle.
 
@@ -189,6 +189,94 @@ while fixing a previous one**. The ones whose shape applies here:
 
 ### Completion Notes List
 
+**Tasks 3 and 4 — what is expected by a date, and AC2 as a property.** Done.
+
+`expectedBy(schedule, on)` sums every instalment already due, **including one falling due on the
+date itself**, because dues are collected in advance. That boundary is the whole due-date decision,
+and the sensitivity check confirms it: making the comparison exclusive fails five tests.
+
+The comparison is a string comparison. Parsing either side into a `Date` would make it an instant at
+local midnight and shift the day west of UTC — story 2.1 recorded the same hazard for membership
+dates — so the module is asserted against `new Date(` and `Date.parse` as well as the clock calls.
+
+AC2 is asserted as **both halves**, because either alone passes a wrong implementation: "same annual
+total" alone is satisfied by a function expecting the full amount immediately for every cycle, and
+"different to date" alone by one that scales the annual figure by the cycle.
+
+**The eighth guard that proved nothing, and this one was a comment of mine.**
+`sums an uneven schedule exactly` carried the note "a float sum drifts here and a naive one is off by
+a cent". It does not. Mutating the sum to `Number(amount) * 100` left **every test passing** —
+`Number('83.34') * 100` is exactly 8334, and so is every other amount that schedule produces. The
+comment asserted a property the chosen values could not exercise.
+
+The value that does discriminate is `0.29`, and a total of `3.48` over twelve months is twelve
+instalments of exactly that. `Number('0.29') * 100` is 28.999999999999996, so five of them sum to
+144.99999999999997 — not an exact count of minor units, and unformattable. Verified before the test
+was written; the float mutation now fails precisely that test, and `3.48` was added to the
+sum-property table too.
+
+*Sensitivity checks, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Due-date comparison made exclusive | 5, including the on-the-day boundary and AC2 |
+| Sum routed through floats | `sums instalments a float would get wrong` — and **nothing at all** before that test existed |
+| Evaluation-date validation removed | all five malformed-date cases |
+
+*One thing caught by the gate rather than by a test:* lint went from 1 warning to 2 — an unused
+binding I had left in the test file. Removed, restoring the baseline. Worth recording because a
+warning count that drifts upward one at a time is how a baseline stops meaning anything.
+
+*Gates:* lint 0 errors and **1 warning** (pre-existing, in `tsconfig-coverage.test.ts`),
+`tsc --noEmit` **8** (= baseline), build clean, `npm test` **75 files / 1389 passed**,
+`npm run test:db` **22 files / 423 passed**.
+
+**Task 2 — the schedule.** Done. `deriveSchedule` is pure: no I/O, no imports outside `core/`, and
+the module is asserted against `new Date(`, `Date.now(`, `performance.now(` and `process.hrtime`,
+because a behavioural test cannot catch a clock read that happens to agree with the expected answer.
+
+*The sum property is asserted across eight amounts × three cycles, not demonstrated once* — and the
+sensitivity check shows why that matters: removing the remainder distribution fails only the amounts
+that **do not** divide evenly. Every `1200.00` case still passes. A test suite built from round
+numbers would have shipped the bug.
+
+Moving the remainder to the *last* instalments instead fails exactly two tests and leaves the sum
+property green — correctly, since both placements are exact and only the recorded decision
+distinguishes them.
+
+The cycle table is `Record<BillingCycle, readonly number[]>` rather than a switch, so the instalment
+count is the list length and the two cannot disagree. Exhaustive at compile time, **verified**:
+adding a fourth cycle takes `tsc --noEmit` from 8 to 9, pointing at `schedule.ts` and naming the
+missing key.
+
+*Review — four findings, three fixed, one not reproducible:*
+
+| Finding | Disposition |
+| --- | --- |
+| `DUE_MONTHS[cycle]` with an unvalidated key | **Fixed.** This is story 1.6d's defect exactly. Probed: `DUE_MONTHS.constructor` is a function with `length` 1 and no `map`, `.__proto__` an object with neither, `.toString` a function with `length` 0 — none is `undefined`, so the failure surfaces three lines later as "months.map is not a function" |
+| The year is not zero-padded | **Fixed.** `'999-01-01' < '2024-01-01'` is **false**, checked — a short year silently breaks the string ordering these dates exist to provide. A non-integer year is refused outright |
+| The error message repeats the raw amount | **Fixed**, through the `describeValue` helper task 1 grew, now exported so one fix reaches both |
+| `total <= 0` lets `NaN` through | **Not reproducible.** `toMinorUnits` validates with a regex and `Number.isSafeInteger`, so it cannot return `NaN`. Reported as checked rather than fixed |
+
+*And a third assertion in two stories that could not tell a contract from a crash.* The cycle tests
+first asserted `toThrow(TypeError)` — and the crash throws a `TypeError` of its own, so they passed
+**before the guard existed**. They now assert the message. The same shape appeared in task 1, where
+`String()` throws a `TypeError`, and in story 2.2.
+
+*Sensitivity checks, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Remainder not distributed | the placement test and every **unevenly divisible** sum case |
+| Remainder moved to the last instalments | placement and the fencepost case only; the sum property stayed green |
+| A fourth cycle added to `BILLING_CYCLES` | `tsc` 8 → 9, at `schedule.ts` |
+| `Object.hasOwn` guard removed | all four hostile-cycle cases |
+| Year padding removed | the short-year case |
+| Year integer guard removed | all three non-integer cases |
+
+*Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**75 files / 1369 passed**.
+
 **Task 1 — exact decimal conversion.** Done. `core/assessment/minor-units.ts`, the only place the
 decimal-string and integer representations meet.
 
@@ -234,6 +322,8 @@ falling over. It now asserts the message.
 ### File List
 
 ### Change Log
+
+- 2026-08-07 — All four tasks complete. Status -> review.
 
 - 2026-08-07 — Story created. Two domain decisions were settled before implementation rather than
   during it: instalments fall due at the start of the period (dues in advance), which required
