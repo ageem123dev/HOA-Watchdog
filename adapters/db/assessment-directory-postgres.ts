@@ -55,10 +55,14 @@ export function createAssessmentDirectory(): AssessmentDirectory {
       // `unit_normalised_number($1)` and not the raw column, so `4b ` off a roll
       // finds `4B`. Migration 011 defines the folding and pins its `search_path`.
       //
-      // At most one row: migration 013's `assessment_one_per_unit_year` makes a
-      // second row for the pair unrepresentable, and `migrations/assessment.test.ts`
-      // proves it fires. No defensive length check is written for a case nothing
-      // could produce without dropping that constraint.
+      // At most one row, and both halves of the join guarantee it: migration
+      // 011's unique index `unit_normalised_number_key` on `unit
+      // (normalised_number)` makes the join match at most one unit, and
+      // migration 013's `assessment_one_per_unit_year` makes a second row for
+      // that unit and year unrepresentable. `migrations/unit.test.ts` and
+      // `migrations/assessment.test.ts` each prove their half fires. No
+      // defensive length check is written for a case nothing could produce
+      // without dropping one of them.
       const { rows } = await getPool().query<UnitAssessment>(
         `select unit.unit_number             as "unitNumber",
                 assessment.assessment_year   as "assessmentYear",

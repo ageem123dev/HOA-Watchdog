@@ -79,22 +79,39 @@ describe('the assessment directory connection', () => {
 })
 
 describe('the query states its own terms', () => {
-  const source = () => {
-    const path = join(dirname(fileURLToPath(import.meta.url)), 'assessment-directory-postgres.ts')
+  const adapterPath = join(dirname(fileURLToPath(import.meta.url)), 'assessment-directory-postgres.ts')
+
+  /** The adapter's source with its comments removed. */
+  const source = () =>
     // No `catch` returning '' — see the note in `unit-directory-connection.test.ts`.
-    return readFileSync(path, 'utf8')
+    readFileSync(adapterPath, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/[^\n]*/g, '')
-  }
 
   const flat = () => source().replace(/\s+/g, ' ')
 
-  it('reads a source file that still has its statements', () => {
-    // The control. Every assertion below is on stripped source, and a stripper
-    // that ate the file — or a path that stopped resolving — would make all of
-    // them pass by matching nothing.
+  /**
+   * A phrase that appears only inside the adapter's docblock, on a single line.
+   *
+   * Single-line matters: the docblock wraps, so a sentence spanning two lines is
+   * broken by a newline and a ` * ` and would never match — the first attempt at
+   * this fix picked one and failed for that reason rather than for a real one.
+   */
+  const COMMENT_ONLY_PHRASE = /only real where a connection string makes it real/
+
+  it('actually removes the comments, and leaves the statements standing', () => {
+    // The control, and the first version of it proved nothing. It asserted the
+    // absence of "Which role the assessment directory connects as" — the opening
+    // line of *this* file's docblock, which never appears in the adapter at all.
+    // The assertion held with both `.replace` calls deleted. Raised by review;
+    // the same shape was copied here from `unit-directory-connection.test.ts`,
+    // which still has it.
+    //
+    // Now it names a phrase that is genuinely present before stripping and must
+    // be gone after, so deleting the stripping fails this test.
+    expect(readFileSync(adapterPath, 'utf8')).toMatch(COMMENT_ONLY_PHRASE)
+    expect(source()).not.toMatch(COMMENT_ONLY_PHRASE)
     expect(flat()).toMatch(/select/i)
-    expect(flat()).not.toMatch(/Which role the assessment directory connects as/)
   })
 
   it('matches the unit on its normalised number', () => {

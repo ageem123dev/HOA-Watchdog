@@ -53,17 +53,36 @@ const declaredMethods = (text: string): readonly string[] => {
   }
   if (close === -1) return []
 
-  // Both declaration forms. `record(x): Promise<void>` and
-  // `readonly record: (x) => Promise<void>` are the same capability, and matching
-  // only the first would let a write method be added in the second form without
-  // the exhaustive list below noticing.
+  // Every member form TypeScript offers, because each one this missed was a way
+  // to add a capability the exhaustive list below would report as absent. Four
+  // rounds of review found four of them:
   //
-  // A data property would be reported too. That is deliberate: on a port, any
-  // member is a capability, and a surprise one should fail loudly here rather
-  // than be silently excluded by the shape of the regex.
-  return [
-    ...withoutComments.slice(open + 1, close).matchAll(/^\s*(?:readonly\s+)?(\w+)\s*[:(<]/gm),
-  ].map((m) => m[1]!)
+  //   record(x): Promise<void>                  named method
+  //   readonly record: (x) => Promise<void>     named property
+  //   record<T>(x: T): Promise<void>            generic method
+  //   (x: string): Promise<void>                call signature      -- unnamed
+  //   [key: string]: unknown                    index signature     -- unnamed
+  //
+  // The last two have no name at all, so they are reported under a placeholder
+  // rather than skipped. A port that gained either would fail the assertion
+  // below loudly, which is the whole point — the previous comment claimed "any
+  // member is a capability" while the regex quietly required a name.
+  //
+  // A data property is reported too, deliberately: on a port every member is a
+  // capability, and a surprise one should fail here rather than be excluded by
+  // the shape of a regex.
+  const body = withoutComments.slice(open + 1, close)
+
+  return body
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      if (line.startsWith('(')) return '<call signature>'
+      if (line.startsWith('[')) return '<index signature>'
+      return /^(?:readonly\s+)?(\w+)\s*[:(<]/.exec(line)?.[1]
+    })
+    .filter((name): name is string => name !== undefined)
 }
 
 describe('the AssessmentDirectory port', () => {
@@ -124,6 +143,24 @@ describe('the AssessmentDirectory port', () => {
     ].join('\n')
 
     expect([...declaredMethods(sample)].sort()).toEqual(['forUnitAndYear', 'record'])
+  })
+
+  it.each([
+    ['a call signature', '  (unitNumber: string): Promise<void>', '<call signature>'],
+    ['an index signature', '  [key: string]: unknown', '<index signature>'],
+  ])('sees %s, which has no name to match on', (_label, member, expected) => {
+    // The two forms with no identifier at all. A regex requiring `\w+` reports
+    // them as absent, so a port gaining either would still assert as read-only —
+    // and the helper's own comment claimed it reported "any member". Raised by
+    // review, and the fourth round on this same guard.
+    const sample = [
+      'export interface AssessmentDirectory {',
+      '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
+      member,
+      '}',
+    ].join('\n')
+
+    expect([...declaredMethods(sample)].sort()).toEqual([expected, 'forUnitAndYear'].sort())
   })
 
   it('carries the amount as a decimal string, never a number', () => {

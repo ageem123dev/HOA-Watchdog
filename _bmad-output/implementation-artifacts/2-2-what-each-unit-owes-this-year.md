@@ -239,6 +239,48 @@ alone passes against `numeric(20,4)`; a type check alone passes against a column
 
 ### Review Findings
 
+## CodeRabbit round 1 (IDE, 2026-08-07) - head `7a88c5c`, base `b44495b`
+
+10 findings, 7 in scope. All 13 branch files appeared in `fileReviewMap`; the other 3 are the
+extension picking up uncommitted work, as it always does.
+
+**A process failure first, because it cost the round its scoring.** `argus_ingest` skipped this
+review - *"no Argus run recorded for 7a88c5c"*. Argus had run on `main...HEAD` at `ebd6a77`; a fix
+commit then became the new head and the review was requested against it without re-running Argus.
+Step 4b says to review the **fix commit** for exactly this reason. Recovered by running
+`argus_review` on `7a88c5c` and re-ingesting: agreed 2, missed 2, recall 0.5.
+
+**Fixed (4).**
+
+| # | Finding | What was true |
+| --- | --- | --- |
+| 1 | *major* - the comment-stripping control passes whether or not stripping works | **Confirmed.** It asserted the absence of "Which role the assessment directory connects as" - the opening line of the *test* file own docblock, which never appears in the adapter. The assertion held with both `.replace` calls deleted. Now it names a phrase present in the adapter before stripping and absent after, and deleting the stripping fails it. **This shape was copied from `unit-directory-connection.test.ts`, which still has it** |
+| 7 | *trivial* - `accepts %s` reads back the amount, not the cycle | **Confirmed.** The amount was the same constant for all three cases, so an implementation that mapped or defaulted `billing_cycle` would have passed all three. Now reads back the cycle |
+| 5 | *trivial* - call and index signatures still escape the read-only guard | **Confirmed**, and the helper comment claimed it reported "any member" while the regex required a name. Both are now reported under a placeholder, with a planted-declaration test each |
+| 3 | *trivial* - name the unit uniqueness guarantee | Fair. The comment named migration 013 constraint but not migration 011 unique index, the other half of why the join returns at most one row |
+
+**Skipped (3), each with the reason.**
+
+| # | Finding | Why not |
+| --- | --- | --- |
+| 2 | Close the shared pool in `afterAll` | Third time raised across 2.1 and 2.2. The stated consequence does not occur, and the shape is identical in all eight adapters. One open action item covers them together |
+| 4 | Run `tsc --noEmit` as a blocking CI step | **There is no CI** - removed 2026-08-07. The substance is already the practice: `tsc --noEmit` is in the local gate precisely because `npm run build` does not type-check test files |
+| 6 | *major* - `__dirname` fails during module loading under ESM | The stated consequence is **false here**: the tests pass, because Vitest polyfills it. Checked rather than assumed. The real point is true of all six `migrations/*.test.ts` and is already an open action item |
+
+**The count that matters.** Findings 1 and 7 bring this story to **seven** guards that passed whether
+or not the thing they guarded against was present, across 2.1 and 2.2. Four of the seven were
+written *while fixing a previous one*, and finding 1 was inherited by copying a sibling file.
+
+*Sensitivity checks on this round, each restored:*
+
+| Mutation | Test that failed |
+| --- | --- |
+| Both `.replace` stripping lines deleted | `actually removes the comments, and leaves the statements standing`, plus the two source guards that depend on stripping |
+| Regex reverted to require a name | both unnamed-member cases |
+
+*Gates:* lint 0 errors, `tsc --noEmit` **8** (= baseline), build clean, `npm test`
+**73 files / 1268 passed**, `npm run test:db` **22 files / 423 passed**.
+
 ### Completion Notes List
 
 **Task 4 — prove the annual-amount property.** Done, and enlarged. All three written subtasks were

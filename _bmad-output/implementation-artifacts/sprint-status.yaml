@@ -125,6 +125,10 @@ action_items:
     action: "All six migrations/*.test.ts use __dirname while package.json is type: module; they rely on Vitest polyfilling it. The ports and adapters family uses import.meta.url. Pick one across the repo rather than per-file."
     owner: "Dev"
     status: open
+  - epic: 2
+    action: "adapters/db/unit-directory-connection.test.ts has a comment-stripping control that proves nothing: it asserts the absence of the opening line of its OWN docblock, a phrase that never appears in the adapter it reads, so it holds with the stripping deleted. Found on story 2.2 where the same shape had been copied. Fix: assert a single-line phrase present in the adapter before stripping and absent after."
+    owner: "Dev"
+    status: open
   - epic: 1
     action: "Add .gitattributes and renormalise the repo-wide CRLF"
     owner: "Dev"

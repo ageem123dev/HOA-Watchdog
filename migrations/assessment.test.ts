@@ -249,12 +249,21 @@ describeWithDatabase('what a unit owes for a year', () => {
   })
 
   describe('the cycle', () => {
-    it.each(['monthly', 'six_monthly', 'annual'])('accepts %s', async (cycle) => {
+    it.each(['monthly', 'six_monthly', 'annual'])('accepts %s and stores it', async (cycle) => {
+      // Reads back the *cycle*, which is the value under test. The first version
+      // asserted the amount — the same constant for all three cases — so an
+      // implementation that mapped or defaulted `billing_cycle` on the way in
+      // would have passed all three: the insert would not throw and the amount
+      // would still match. Raised by review.
       const unitId = await givenAUnit()
 
       await assess(unitId, 2024, '1200.00', cycle)
 
-      expect(await amountFor(unitId, 2024)).toBe('1200.00')
+      const { rows } = await writer.query<{ billing_cycle: string }>(
+        'select billing_cycle from assessment where unit_id = $1 and assessment_year = $2',
+        [unitId, 2024],
+      )
+      expect(rows[0]?.billing_cycle).toBe(cycle)
     })
 
     it('refuses a cycle outside the vocabulary', async () => {
