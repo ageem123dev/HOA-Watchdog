@@ -190,7 +190,7 @@ exclusive by design. The consequence is real and is stated rather than discovere
 cannot be revoked server-side before it expires.** Disabling a departed director stops them signing
 in again but does not immediately kill a session they already hold. `maxAge` is set to 8 hours to
 bound that window. Genuine revocation would mean moving to an email magic-link provider, which needs
-a mail sender this project does not build until Epic 3 — so it is a deliberate pilot-scope
+a mail sender this project does not build until Epic 4 — so it is a deliberate pilot-scope
 acceptance, revisited when `adapters/mail` exists.
 
 **Auth.js v5 is pinned at a beta.** `5.0.0-beta.32`; the stable line is v4, which predates the App

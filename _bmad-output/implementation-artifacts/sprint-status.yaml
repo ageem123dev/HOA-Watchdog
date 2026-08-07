@@ -68,14 +68,11 @@ development_status:
   1-6c-see-what-is-waiting: done
   1-6d-resolve-a-held-document: done
   epic-1-retrospective: done
-  epic-5: backlog
-  5-1-units-and-who-holds-them: backlog
-  5-2-what-each-unit-owes-this-year: backlog
-  5-3-what-is-due-and-by-when: backlog
-  5-4-deposits-become-payments: backlog
-  epic-5-retrospective: optional
-
   epic-2: backlog
+  2-1-units-and-who-holds-them: backlog
+  2-2-what-each-unit-owes-this-year: backlog
+  2-3-what-is-due-and-by-when: backlog
+  2-4-deposits-become-payments: backlog
   epic-2-retrospective: optional
 
   epic-3: backlog
@@ -83,6 +80,9 @@ development_status:
 
   epic-4: backlog
   epic-4-retrospective: optional
+
+  epic-5: backlog
+  epic-5-retrospective: optional
 
 action_items:
   - epic: 1

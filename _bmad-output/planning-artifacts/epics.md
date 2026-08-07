@@ -140,15 +140,15 @@ UX-DR24: Enforced anti-patterns — no confidence scores shown to board members,
 FR-1: Epic 1 — Upload of PDF/image/CSV/Excel with rejection and unreadable states
 FR-2: Epic 1 — Isolated extraction; raw bytes and raw text never reach the reasoning context
 FR-3: Epic 1 — Schema conformance enforced at the extractor API; invalid output halts
-FR-4: Epic 2 — Intent routing to the parameterized query catalog; model never computes
-FR-5: Epic 2 — Answer, always-visible evidence table, expandable query
-FR-6: Epic 3 — Duplicate and billing-spike detection against vendor history
-FR-7: Epic 3 — Dues triangulation of deposits against the assessment roll
-FR-8: Epic 3 — Dashboard findings widget and structured email alerts
+FR-4: Epic 3 — Intent routing to the parameterized query catalog; model never computes
+FR-5: Epic 3 — Answer, always-visible evidence table, expandable query
+FR-6: Epic 4 — Duplicate and billing-spike detection against vendor history
+FR-7: Epic 4 — Dues triangulation of deposits against the assessment roll
+FR-8: Epic 4 — Dashboard findings widget and structured email alerts
 
 Non-FR requirements are carried as follows: NFR-1, NFR-1a, NFR-2 in Epic 1 (they constrain how
-data enters and who holds credentials); NFR-3, NFR-4, NFR-5 in Epic 2 (they constrain how answers
-are produced and recorded); CS-1 … CS-9 in Epic 4.
+data enters and who holds credentials); NFR-3, NFR-4, NFR-5 in Epic 3 (they constrain how answers
+are produced and recorded); CS-1 … CS-9 in Epic 5.
 
 ## Epic List
 
@@ -166,9 +166,9 @@ data credentials (NFR-1a), content-hash idempotency (AD-13), quarantine queue (A
 tokens and core components (UX-DR1–5, 9), upload states (UX-DR12), quarantine surface (UX-DR15).
 
 **Standalone:** yes. Even alone, a board has a document store that reads invoices and statements
-reliably and refuses to guess. Enables Epics 2 and 3; requires neither.
+reliably and refuses to guess. Enables Epics 3 and 4; requires neither.
 
-### Epic 5: The dues ledger — who owes what, and who paid *(built next)*
+### Epic 2: The dues ledger — who owes what, and who paid
 
 Units, who held them and when, what each owed for the year, and what actually arrived. No
 detection and no questions answered — this is the data FR-7 triangulates and the data the
@@ -181,7 +181,7 @@ exist nowhere.
 
 **Standalone:** yes. A treasurer can see the roll the system holds and what it believes was paid.
 
-### Epic 2: The Oracle — ask a question, get an answer you can prove
+### Epic 3: The Oracle — ask a question, get an answer you can prove
 
 A board member can ask about dues, payments, and vendors and get an answer with the records it
 came from already on screen — and the board can later see who asked what and when. This is where
@@ -194,9 +194,9 @@ capability binding (NFR-4), provenance logging and the access-log surface (NFR-5
 persistent ask field (UX-DR7), evidence table and query disclosure (UX-DR6, 11), the
 no-catalog-match and service-unavailable states (UX-DR17, 18).
 
-**Standalone:** yes, given Epic 1's data. Does not require Epic 3.
+**Standalone:** yes, given Epic 1's data. Does not require Epic 4.
 
-### Epic 3: The Watchdog — be told before you pay
+### Epic 4: The Watchdog — be told before you pay
 
 The system flags probable duplicates, unusual vendor billing, and missed dues without being
 asked, and every finding lands in a permanent register the board can hand to an auditor. This is
@@ -209,9 +209,9 @@ reviewed register with search and board-packet export (UX-DR14, 8), print treatm
 structured email alerting.
 
 **Standalone:** yes, given Epic 1's data — **provided** detection and alert copy are deterministic
-rather than model-generated (see Open Question below). Does not require Epic 2.
+rather than model-generated (see Open Question below). Does not require Epic 3.
 
-### Epic 4: Connected document sources — later
+### Epic 5: Connected document sources — later
 
 Documents arrive from the association's existing Dropbox or Google Drive without a treasurer
 uploading them by hand. Sequenced after the core pilot; direct upload remains and is not replaced.
@@ -220,13 +220,13 @@ uploading them by hand. Sequenced after the core pilot; direct upload remains an
 **Also carries:** CS-1 … CS-9, including the AD-1 amendment as a prerequisite, connection health
 with a stopped-watching alert, and the scope-disclosure redraft.
 
-**Standalone:** yes, given Epic 1. Requires neither Epic 2 nor Epic 3.
+**Standalone:** yes, given Epic 1. Requires neither Epic 3 nor Epic 4.
 
 ---
 
 ### Domain detail: how dues actually work (recorded 2026-08-07)
 
-Stated by the project lead during Epic 2 planning. It is not in the PRD, the architecture, or the
+Stated by the project lead during Epic 3 planning. It is not in the PRD, the architecture, or the
 UX, and the ERD's `UNIT ||--o{ ASSESSMENT : owes` does not imply it. Recorded here because FR-7 is
 unbuildable without it and it would be expensive to recover.
 
@@ -264,14 +264,14 @@ end of Epic 1, though all three are named in the ERD.
 These were surfaced at approval and accepted as stated. They are recorded rather than buried
 because either could change the epic ordering if revisited:
 
-1. **Epic 3 detection and alert copy are deterministic** — SQL identifies the finding, templated
+1. **Epic 4 detection and alert copy are deterministic** — SQL identifies the finding, templated
    prose describes it. No reasoning model is involved in FR-6, FR-7, or FR-8. This is what makes
-   Epic 3 independent of Epic 2. If model-written alert prose is wanted in the pilot, Epic 3 gains
-   a hard dependency on Epic 2 and the two stop being swappable.
-2. **Epics 2 and 3 are interchangeable in sequence.** Numbering reflects document order, not a
-   required build order. Epic 3 completes UJ-1 (Sarah, the duplicate invoice) and delivers the
-   product's headline promise; Epic 2 completes UJ-2 (David, the meeting).
-3. **NFR-1a moved from Epic 1 to Epic 2** during story breakdown. The Python agent service does
+   Epic 4 independent of Epic 3. If model-written alert prose is wanted in the pilot, Epic 4 gains
+   a hard dependency on Epic 3 and the two stop being swappable.
+2. **Epics 3 and 4 are interchangeable in sequence.** Numbering reflects document order, not a
+   required build order. Epic 4 completes UJ-1 (Sarah, the duplicate invoice) and delivers the
+   product's headline promise; Epic 3 completes UJ-2 (David, the meeting).
+3. **NFR-1a moved from Epic 1 to Epic 3** during story breakdown. The Python agent service does
    not exist until the Oracle needs it, and the principle is to create things only when a story
    requires them. The constraint is unchanged; only its location moved.
 
@@ -475,25 +475,25 @@ requires the queue.
 
 ---
 
-## Epic 5: The dues ledger — who owes what, and who paid
+## Epic 2: The dues ledger — who owes what, and who paid
 
 *Added 2026-08-07 and **sequenced next, immediately after Epic 1**, ahead of Epics 2, 3 and 4.*
 
-*On the number.* This document already states that numbering reflects document order rather than
-build order, and this epic leans on that. It is 5 rather than 1.5 for a mechanical reason: story
-keys are matched as `number-number-name`, so `1-5-1-units...` both fails to parse and collides with
-Epic 1's existing `1-5-read-a-document-into-structured-records`. Renumbering Epics 2, 3 and 4 was the
-alternative, and their numbers are referenced throughout the FR mapping and the architecture.
+*On the number.* Renumbered 2026-08-07 from an earlier draft that placed this epic at 5 to avoid
+disturbing the others. Nothing had been built against the Oracle's number, so taking 2 and shifting
+the Oracle, the Watchdog and Connected sources to 3, 4 and 5 is cleaner than a number that reads out
+of order. Completed story files still say "Epic 2" where they mean the Oracle; they are dated records
+and were accurate when written.
 
 The association's assessment roll and its deposits become typed records: units, who held them and
 when, what each owed for the year, and what actually arrived. No detection, no questions answered —
-this epic exists so that Epic 3's FR-7 has something to triangulate and Epic 2's catalog has
+this epic exists so that Epic 4's FR-7 has something to triangulate and Epic 3's catalog has
 something to ask about beyond vendors.
 
 **Why it is its own epic.** Epic 1 delivered `DOCUMENT`, `EXTRACTION`, `VENDOR` and
 `QUARANTINE_ITEM`. The ERD also names `UNIT`, `ASSESSMENT` and `PAYMENT`, and none exist. FR-7
-consumes all three. Folding them into Epic 2 would have the Oracle epic spend its first three
-stories on data modelling before answering anything; folding them into Epic 3 would have the
+consumes all three. Folding them into Epic 3 would have the Oracle epic spend its first three
+stories on data modelling before answering anything; folding them into Epic 4 would have the
 detection epic build its own inputs. Neither is honest about what the work is.
 
 **FRs covered:** none directly — it is the data FR-7 reasons over.
@@ -504,7 +504,7 @@ ingestion).
 **Standalone:** yes. A treasurer can see the roll the system holds and what it believes was paid,
 which is useful before anything flags anything.
 
-### Story 5.1: Units and who holds them
+### Story 2.1: Units and who holds them
 
 As a treasurer,
 I want the association's units recorded, with who held each one and when,
@@ -527,7 +527,7 @@ changes hands.
 **Then** exactly one membership is returned, or none — overlapping memberships for one unit are
 rejected by the database, not by application code
 
-### Story 5.2: What each unit owes this year
+### Story 2.2: What each unit owes this year
 
 As a treasurer,
 I want each unit's annual dues and its payment cycle recorded,
@@ -548,7 +548,7 @@ So that "paid the proper amount, on time" is a question with a defined answer.
 **Then** it is held in integer minor units, never a float — the money convention the architecture
 fixes for the whole system
 
-### Story 5.3: What is due, and by when
+### Story 2.3: What is due, and by when
 
 As a treasurer,
 I want the annual amount turned into the instalments it is actually paid in,
@@ -571,7 +571,7 @@ expected to have paid anything, and neither is delinquent for that reason alone
 **Then** it is a pure function over the assessment, with no I/O and no clock of its own — the
 evaluation date is a parameter
 
-### Story 5.4: Deposits become payments
+### Story 2.4: Deposits become payments
 
 As a treasurer,
 I want uploaded deposit records stored as payments against units,
@@ -592,13 +592,13 @@ So that what arrived can be compared with what was owed.
 **When** it is processed the second time
 **Then** its payments replace rather than duplicate, as AD-13 requires of every derived row
 
-**Ordering note.** 5.1 precedes everything: an assessment without a unit and a payment without a
-unit are both meaningless. 5.3 depends only on 5.2 and is pure logic, so it can be built and
-tested before any deposit exists. 5.4 is last because it is the only story that needs a document.
+**Ordering note.** 2.1 precedes everything: an assessment without a unit and a payment without a
+unit are both meaningless. 2.3 depends only on 2.2 and is pure logic, so it can be built and
+tested before any deposit exists. 2.4 is last because it is the only story that needs a document.
 
 ---
 
-## Epic 2: The Oracle — ask a question, get an answer you can prove
+## Epic 3: The Oracle — ask a question, get an answer you can prove
 
 A board member asks about the association's records and gets an answer with the rows it came from
 already on screen, and the board can later see who asked what and when.
@@ -609,7 +609,7 @@ runtimes, one wire contract, and the agent holding no data credential), AD-7/NFR
 numeric validator), AD-11/NFR-4 (model capability binding), AD-12/NFR-5 (provenance logging),
 UX-DR6, 7, 11, 16, 17, 18.
 
-**Standalone:** yes, given Epics 1 and 5.
+**Standalone:** yes, given Epics 1 and 2.
 
 **Two constraints fix the story order, both from the architecture:**
 
@@ -621,7 +621,7 @@ UX-DR6, 7, 11, 16, 17, 18.
   precisely the failure the product exists to prevent.
 
 **Deployment note (decided 2026-08-07).** The Railway private network AD-15 assumes does not exist
-yet. Stories 2.2 and 2.3 build against localhost with the service-token check enforced in code; the
+yet. Stories 3.2 and 3.3 build against localhost with the service-token check enforced in code; the
 private-network binding is a deployment task, and AD-15's network half stays untested until then.
 That is a known gap, recorded rather than glossed.
 
@@ -629,24 +629,24 @@ That is a known gap, recorded rather than glossed.
 
 | # | Story | Carries | Proves on its own |
 | --- | --- | --- | --- |
-| 2.1 | The catalog, executed and logged | AD-5, AD-6, AD-14, AD-12 | A named entry with typed parameters runs, and cannot run without writing provenance |
-| 2.2 | Tool endpoints as the only way in | AD-15, AD-3 | The endpoints are the sole data path and reject an unauthenticated caller |
-| 2.3 | The Python service exists | AD-3, **pytest in CI** | A second runtime holding only the model key, obtaining facts by calling Node |
-| 2.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
-| 2.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
-| 2.6 | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
-| 2.7 | When it cannot answer | UX-DR17, 18 | No-catalog-match and service-unavailable as distinct, honest states |
-| 2.8 | The access log | NFR-5, UX-DR16 | Who asked what, when — the provenance record given a reader |
+| 3.1 | The catalog, executed and logged | AD-5, AD-6, AD-14, AD-12 | A named entry with typed parameters runs, and cannot run without writing provenance |
+| 3.2 | Tool endpoints as the only way in | AD-15, AD-3 | The endpoints are the sole data path and reject an unauthenticated caller |
+| 3.3 | The Python service exists | AD-3, **pytest in CI** | A second runtime holding only the model key, obtaining facts by calling Node |
+| 3.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
+| 3.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
+| 3.6 | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
+| 3.7 | When it cannot answer | UX-DR17, 18 | No-catalog-match and service-unavailable as distinct, honest states |
+| 3.8 | The access log | NFR-5, UX-DR16 | Who asked what, when — the provenance record given a reader |
 
 **Why eight and not four.** Epic 1's evidence. Story 1.5 was split into four mid-flight and 1.6 into
 four before implementation; the pre-split epic went materially better. Story 1.5d at 27 files drew
 five review rounds, while the four 1.6 stories averaged closer to one.
 
-**Critical path item.** Story 2.3 introduces Python and **must add `pytest` to `.gitlab-ci.yml` in
+**Critical path item.** Story 3.3 introduces Python and **must add `pytest` to `.gitlab-ci.yml` in
 the same story**. A gate that runs only locally is not a gate, and Epic 1 has the worked example of
 what happens otherwise.
 
-**First catalog entry.** Not `dues_status` before Epic 5 exists — that needs its tables. The
+**First catalog entry.** Not `dues_status` before Epic 2 exists — that needs its tables. The
 architecture uses `dues_status@2` as a *naming* example for versioning, not as a statement that the
-data exists. With Epic 5 built, `dues_status` becomes the natural first entry and exercises AD-6's
+data exists. With Epic 2 built, `dues_status` becomes the natural first entry and exercises AD-6's
 derived-values rule.
