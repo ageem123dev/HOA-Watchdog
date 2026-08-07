@@ -116,6 +116,7 @@ describe('the migration says what it does', () => {
 
 describeWithDatabase('who holds a unit, and when', () => {
   let writer: Client
+  let rival: Client
   let reader: Client
   let scope = ''
 
@@ -134,16 +135,30 @@ describeWithDatabase('who holds a unit, and when', () => {
     return { unitId: unit.rows[0]!.id, holderId: holder.rows[0]!.id }
   }
 
-  const heldFrom = (unitId: string, holderId: string, from: string | null, to: string | null) =>
-    writer.query(
+  const heldFromOn = (
+    client: Client,
+    unitId: string,
+    holderId: string,
+    from: string | null,
+    to: string | null,
+  ) =>
+    client.query(
       'insert into unit_membership (unit_id, holder_id, held_during) values ($1, $2, daterange($3::date, $4::date))',
       [unitId, holderId, from, to],
     )
 
+  const heldFrom = (unitId: string, holderId: string, from: string | null, to: string | null) =>
+    heldFromOn(writer, unitId, holderId, from, to)
+
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
+    // A second connection, for the concurrency tests at the end of this file.
+    // Two statements on one client are serialised by the client itself, so a
+    // single connection cannot demonstrate anything about two writers at once.
+    rival = new Client({ connectionString: writerUrl })
     reader = new Client({ connectionString: readerUrl })
     await writer.connect()
+    await rival.connect()
     await reader.connect()
   })
 
@@ -162,6 +177,7 @@ describeWithDatabase('who holds a unit, and when', () => {
     await writer.query('delete from unit_holder where full_name like $1', [`${RUN_PREFIX}-%`])
     await writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}-%`])
     await writer.end()
+    await rival.end()
     await reader.end()
   })
 
@@ -408,6 +424,99 @@ describeWithDatabase('who holds a unit, and when', () => {
         expect(rows[0]?.n).toBe('1')
       } finally {
         await writer.query('rollback')
+      }
+    })
+  })
+
+  describe('two writers at once', () => {
+    /**
+     * Whether a promise is still pending after `ms`.
+     *
+     * This is the evidence, not decoration. A concurrency test that merely
+     * observes "one of them failed" would pass against a database that
+     * serialised the two inserts completely, and against one that never
+     * overlapped them at all -- which is how story 1.5d shipped a `Promise.all`
+     * concurrency test that passed against a deliberately racy implementation.
+     * Asserting the second insert is *blocked while the first is uncommitted*
+     * is what distinguishes a real lock from a lucky ordering.
+     */
+    const stillPending = async (promise: Promise<unknown>, ms: number) => {
+      const marker = Symbol('pending')
+      const raced = await Promise.race([
+        promise.then(
+          () => 'resolved',
+          () => 'rejected',
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(marker), ms)),
+      ])
+      return raced === marker
+    }
+
+    it('makes the second of two concurrent overlapping writers wait, then refuses it', async () => {
+      // AC3's real claim: rejected *by the database*, not by application code.
+      // An application-level "check then insert" passes every other test in this
+      // file and fails exactly here -- both writers would read an empty table,
+      // both would find no overlap, and both would insert.
+      const { unitId, holderId } = await givenUnitAndHolder()
+
+      await writer.query('begin')
+      await rival.query('begin')
+      try {
+        await heldFrom(unitId, holderId, '2024-01-01', '2024-07-01')
+
+        // Issued while the first is still uncommitted. The gist index the
+        // exclusion constraint builds is what makes this block rather than
+        // succeed.
+        const contended = heldFromOn(rival, unitId, holderId, '2024-06-01', '2024-12-01').then(
+          () => 'inserted' as const,
+          (error: { code?: string }) => error,
+        )
+
+        expect(await stillPending(contended, 750)).toBe(true)
+
+        await writer.query('commit')
+
+        expect(await contended).toMatchObject({ code: EXCLUSION_VIOLATION })
+      } finally {
+        await writer.query('rollback').catch(() => undefined)
+        await rival.query('rollback').catch(() => undefined)
+      }
+    })
+
+    it('lets two concurrent writers on different units through without waiting', async () => {
+      // The beside-case, and the one that stops the test above from being
+      // satisfied by a constraint that serialises every membership in the
+      // association. If the exclusion were not scoped by `unit_id`, this insert
+      // would block on the other unit's uncommitted row exactly as the one above
+      // does -- so `stillPending` must come back false here for the same reason
+      // it must come back true there.
+      const first = await givenUnitAndHolder()
+      const second = await writer.query<{ id: string }>(
+        'insert into unit (unit_number) values ($1) returning id',
+        [named('5B')],
+      )
+
+      await writer.query('begin')
+      await rival.query('begin')
+      try {
+        await heldFrom(first.unitId, first.holderId, '2024-01-01', '2024-12-01')
+
+        const other = heldFromOn(
+          rival,
+          second.rows[0]!.id,
+          first.holderId,
+          '2024-01-01',
+          '2024-12-01',
+        ).then(
+          () => 'inserted' as const,
+          (error: { code?: string }) => error,
+        )
+
+        expect(await stillPending(other, 750)).toBe(false)
+        expect(await other).toBe('inserted')
+      } finally {
+        await writer.query('rollback').catch(() => undefined)
+        await rival.query('rollback').catch(() => undefined)
       }
     })
   })
