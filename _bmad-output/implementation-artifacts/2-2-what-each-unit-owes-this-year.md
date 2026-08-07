@@ -5,7 +5,7 @@ merge_request: 24
 
 # Story 2.2: What each unit owes this year
 
-Status: review
+Status: done
 
 > **Second of four stories in epic 2, the dues ledger.** 2.1 built the unit and who holds it. This
 > story records what each unit owes for a year and on what cadence it is paid. 2.3 turns that into
@@ -240,6 +240,15 @@ alone passes against `numeric(20,4)`; a type check alone passes against a column
 
 ### Review Findings
 
+## CodeRabbit round 2 (MR !24, 2026-08-07) - head `68aeff2`
+
+**No actionable comments were generated.** The service-account note names the range
+`b44495b..68aeff2` explicitly, so it is a review of this head rather than an earlier one - which is
+the check 8c exists for, because "no findings" and "no review yet" look identical from outside.
+
+The four fixes from the IDE round and the exhaustive-member rewrite that followed it were all in
+this diff, and none drew a further finding.
+
 ## CodeRabbit round 1 (IDE, 2026-08-07) - head `7a88c5c`, base `b44495b`
 
 10 findings, 7 in scope. All 13 branch files appeared in `fileReviewMap`; the other 3 are the
@@ -449,6 +458,8 @@ is recorded as a repo-wide consistency item rather than fixed here.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — status, plus two new action items.
 
 ### Change Log
+
+- 2026-08-07 - Ready to merge. MR !24 reviewed clean on `68aeff2`. Status -> done.
 
 - 2026-08-07 — All four tasks complete. Migration 013, the cycle vocabulary, the read port and its
   reader adapter. Two guards that proved nothing were found by their own sensitivity checks and
