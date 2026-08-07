@@ -1,5 +1,6 @@
 ---
 baseline_commit: 2cb23009af497cabf09f772d8a4f7db3794264ec
+merge_request: 21
 ---
 
 # Story 2.1: Units and who holds them
