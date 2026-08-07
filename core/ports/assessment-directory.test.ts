@@ -20,7 +20,7 @@ const source = readFileSync(
   'utf8',
 )
 
-const declaredMethods = (text: string): readonly string[] => {
+const declaredMembers = (text: string): readonly string[] => {
   const withoutComments = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   const start = withoutComments.indexOf('interface AssessmentDirectory')
   if (start === -1) return []
@@ -53,106 +53,52 @@ const declaredMethods = (text: string): readonly string[] => {
   }
   if (close === -1) return []
 
-  // Every member form TypeScript offers, because each one this missed was a way
-  // to add a capability the exhaustive list below would report as absent. Four
-  // rounds of review found four of them:
+  // Returns the member *lines*, not parsed names.
   //
-  //   record(x): Promise<void>                  named method
-  //   readonly record: (x) => Promise<void>     named property
-  //   record<T>(x: T): Promise<void>            generic method
-  //   (x: string): Promise<void>                call signature      -- unnamed
-  //   [key: string]: unknown                    index signature     -- unnamed
+  // Five rounds of review found five member forms an earlier, name-matching
+  // version silently dropped — a named property, a generic method, a call
+  // signature, an index signature, and finally optional (`record?()`) and quoted
+  // (`"write"()`) members. Each one was a way to add a write capability that the
+  // exhaustive assertion below would report as absent, which is the same defect
+  // wearing a new syntax each time.
   //
-  // The last two have no name at all, so they are reported under a placeholder
-  // rather than skipped. A port that gained either would fail the assertion
-  // below loudly, which is the whole point — the previous comment claimed "any
-  // member is a capability" while the regex quietly required a name.
+  // So this stops recognising syntax. Every non-empty line inside the interface
+  // is a member line, whatever it looks like. There is no form left for a sixth
+  // round to find, because nothing is being matched — a member either changes
+  // this list or it does not exist.
   //
-  // A data property is reported too, deliberately: on a port every member is a
-  // capability, and a surprise one should fail here rather than be excluded by
-  // the shape of a regex.
-  const body = withoutComments.slice(open + 1, close)
-
-  return body
+  // The trade is that harmless reformatting also fails the assertion. On a port
+  // that is the right trade: it should not change quietly.
+  return withoutComments
+    .slice(open + 1, close)
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => line.trim().replace(/\s+/g, ' '))
     .filter((line) => line.length > 0)
-    .map((line) => {
-      if (line.startsWith('(')) return '<call signature>'
-      if (line.startsWith('[')) return '<index signature>'
-      return /^(?:readonly\s+)?(\w+)\s*[:(<]/.exec(line)?.[1]
-    })
-    .filter((name): name is string => name !== undefined)
 }
 
 describe('the AssessmentDirectory port', () => {
-  it('declares exactly the one question this story answers', () => {
-    // Listed exhaustively rather than checked for presence: `toContain` would
-    // pass for a port that also declared `record` or `replace`.
-    expect([...declaredMethods(source)].sort()).toEqual(['forUnitAndYear'])
-  })
-
-  it('reads the interface body rather than stopping at the first brace', () => {
-    // The control for the helper, with an unmatched brace in a string literal
-    // type — the case that made story 2.1's first version of this test pass with
-    // the string-awareness removed.
-    const sample = [
-      'export interface AssessmentDirectory {',
-      "  closing(sep: '}'): Promise<void>",
-      '  second(): Promise<void>',
-      '}',
-    ].join('\n')
-
-    expect([...declaredMethods(sample)].sort()).toEqual(['closing', 'second'])
-    expect(declaredMethods('nothing here')).toEqual([])
-  })
-
-  it('sees a capability declared as a function-typed property, not only as a method', () => {
-    // The hole this helper had, and the reason it matters more than style.
-    // TypeScript lets the same capability be written two ways:
-    //
-    //   record(unitNumber: string): Promise<void>            // method shorthand
-    //   readonly record: (unitNumber: string) => Promise<void>  // property
-    //
-    // The first version of the regex matched only the first form. A write method
-    // added in the second form would have been **invisible** to the exhaustive
-    // list above, which would have gone on reporting a read-only port — the
-    // guard passing whether or not the thing it guards against was present.
-    // Raised by review; verified against a planted declaration before fixing.
-    const sample = [
-      'export interface AssessmentDirectory {',
-      '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
-      '  readonly record: (unitNumber: string) => Promise<void>',
-      '}',
-    ].join('\n')
-
-    expect([...declaredMethods(sample)].sort()).toEqual(['forUnitAndYear', 'record'])
-  })
-
-  it('sees a capability declared with generic type parameters', () => {
-    // The third way to write one, and the third round of this same hole. After
-    // the property form was fixed, review pointed out that `record<T>(…)` still
-    // slipped through, because the name is followed by `<` rather than `:` or
-    // `(`. Same consequence: a write capability the read-only assertion cannot
-    // see. Fixed by one character in the character class, with this to prove it.
-    const sample = [
-      'export interface AssessmentDirectory {',
-      '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
-      '  record<T>(payload: T): Promise<void>',
-      '}',
-    ].join('\n')
-
-    expect([...declaredMethods(sample)].sort()).toEqual(['forUnitAndYear', 'record'])
+  it('declares exactly the one member this story needs', () => {
+    // The whole body, not a parsed list of names. Anything added — in any
+    // syntax at all — changes this and fails.
+    expect(declaredMembers(source)).toEqual([
+      'forUnitAndYear(unitNumber: string, year: number): Promise<UnitAssessment | null>',
+    ])
   })
 
   it.each([
-    ['a call signature', '  (unitNumber: string): Promise<void>', '<call signature>'],
-    ['an index signature', '  [key: string]: unknown', '<index signature>'],
-  ])('sees %s, which has no name to match on', (_label, member, expected) => {
-    // The two forms with no identifier at all. A regex requiring `\w+` reports
-    // them as absent, so a port gaining either would still assert as read-only —
-    // and the helper's own comment claimed it reported "any member". Raised by
-    // review, and the fourth round on this same guard.
+    ['a named method', '  record(unitNumber: string): Promise<void>'],
+    ['a function-typed property', '  readonly record: (unitNumber: string) => Promise<void>'],
+    ['a generic method', '  record<T>(payload: T): Promise<void>'],
+    ['a call signature', '  (unitNumber: string): Promise<void>'],
+    ['an index signature', '  [key: string]: unknown'],
+    ['an optional method', '  record?(unitNumber: string): Promise<void>'],
+    ['a quoted member name', '  "record"(unitNumber: string): Promise<void>'],
+  ])('sees a write capability declared as %s', (_label, member) => {
+    // Five rounds of review found five of these forms escaping a name-matching
+    // helper, each one a way to add a write method that the assertion above
+    // would report as absent. They are listed here so the list itself is the
+    // record of what was missed — and they all pass now for the same reason:
+    // nothing is matched, so nothing can be missed.
     const sample = [
       'export interface AssessmentDirectory {',
       '  forUnitAndYear(unitNumber: string, year: number): Promise<void>',
@@ -160,7 +106,23 @@ describe('the AssessmentDirectory port', () => {
       '}',
     ].join('\n')
 
-    expect([...declaredMethods(sample)].sort()).toEqual([expected, 'forUnitAndYear'].sort())
+    expect(declaredMembers(sample)).toHaveLength(2)
+    expect(declaredMembers(sample)[1]).toBe(member.trim())
+  })
+
+  it('reads the interface body rather than stopping at the first brace', () => {
+    // The control for the brace matcher, with an unmatched brace inside a
+    // string literal type — the case that made story 2.1's version of this pass
+    // with the string-awareness removed.
+    const sample = [
+      'export interface AssessmentDirectory {',
+      "  closing(sep: '}'): Promise<void>",
+      '  second(): Promise<void>',
+      '}',
+    ].join('\n')
+
+    expect(declaredMembers(sample)).toHaveLength(2)
+    expect(declaredMembers('nothing here')).toEqual([])
   })
 
   it('carries the amount as a decimal string, never a number', () => {
