@@ -5,7 +5,7 @@ merge_request: 26
 
 # Story 2.4: Deposits become payments
 
-Status: review
+Status: done
 
 > **Last of four stories in epic 2, the dues ledger.** 2.1 built the unit and who held it, 2.2 what it
 > owes for a year, 2.3 the instalments that fall due. This records what actually arrived — the other
@@ -357,6 +357,7 @@ with no generated normalisation — and verified: attaching
 
 - 2026-08-08 — All five tasks complete. Status -> review.
 - 2026-08-08 — MR round 3: a regression test for the rollback-failure release, which until now was an unproven guard. Three mutations confirm it discriminates.
+- 2026-08-08 — MR !26 reviewed clean on `e97f4f0`. Status -> done.
 
 - 2026-08-07 — Story created. Two gaps in epic 1 were found before writing it: an extracted record has
   no unit field, and there is no `deposit` document kind. Matt chose a new `unit_reference` column on
