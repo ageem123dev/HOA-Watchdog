@@ -157,7 +157,11 @@ export function validate(candidate: unknown): Validation {
   // pays a vendor; a statement names nobody. Accepting one on another kind would
   // store a reference that no code path ever resolves, and it would read as a
   // successful extraction. Raised by review.
-  if (unitReference !== null && documentKind !== 'deposit') {
+  // Only for a *known* non-deposit kind. When the kind is missing or unknown
+  // that is already reported, and adding a second problem here would blame the
+  // reference for a fault it did not cause -- the caller would be told to fix
+  // two things when there is one. Raised by review.
+  if (unitReference !== null && isDocumentKind(documentKind) && documentKind !== 'deposit') {
     problems.push({ field: 'unitReference', reason: 'unknown-value' })
   }
 

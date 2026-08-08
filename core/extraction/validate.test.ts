@@ -277,3 +277,25 @@ describe('a unit reference belongs to a deposit', () => {
     expect(validate({ ...base, documentKind: 'invoice', vendorName: 'Acme' }).ok).toBe(true)
   })
 })
+
+describe('an unknown kind is reported once, not twice', () => {
+  it('blames the kind, not the reference', () => {
+    // The reference did not cause this fault. Reporting both would tell the
+    // caller to fix two things when there is one, and the second is a
+    // consequence of the first.
+    const result = validate({
+      documentKind: 'receipt',
+      vendorName: null,
+      documentNumber: null,
+      issuedOn: null,
+      totalAmount: '120.00',
+      unitReference: '4B',
+      currency: 'USD',
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.problems).toEqual([{ field: 'documentKind', reason: 'unknown-value' }])
+    }
+  })
+})
