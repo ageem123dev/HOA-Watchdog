@@ -50,6 +50,7 @@ interface ExtractionRow {
   document_number: string | null
   issued_on_text: string | null
   total_amount: string | null
+  unit_reference: string | null
   currency: string
 }
 
@@ -111,8 +112,8 @@ export function createPostgresExtractionRepository(
           await client.query(
             `insert into extraction
                (document_id, document_kind, vendor_name, document_number,
-                issued_on, total_amount, currency)
-             values ($1, $2, $3, $4, $5, $6, $7)`,
+                issued_on, total_amount, unit_reference, currency)
+             values ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [
               documentId,
               record.documentKind,
@@ -120,6 +121,7 @@ export function createPostgresExtractionRepository(
               record.documentNumber,
               record.issuedOn,
               record.totalAmount,
+              record.unitReference,
               record.currency,
             ],
           )
@@ -164,7 +166,7 @@ export function createPostgresExtractionRepository(
       const { rows } = await pool().query<ExtractionRow>(
         `select document_kind, vendor_name, document_number,
                 to_char(issued_on, 'YYYY-MM-DD') as issued_on_text,
-                total_amount, currency
+                total_amount, unit_reference, currency
            from extraction
           where document_id = $1
           order by extracted_at, id`,
@@ -177,6 +179,7 @@ export function createPostgresExtractionRepository(
         documentNumber: row.document_number,
         issuedOn: row.issued_on_text,
         totalAmount: row.total_amount,
+        unitReference: row.unit_reference,
         currency: row.currency as ExtractionRecord['currency'],
       }))
     },

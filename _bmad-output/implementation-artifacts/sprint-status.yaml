@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: '2026-08-07'
+last_updated: '2026-08-08'
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -128,6 +128,10 @@ action_items:
     status: open
   - epic: 2
     action: "adapters/db/unit-directory-connection.test.ts has a comment-stripping control that proves nothing: it asserts the absence of the opening line of its OWN docblock, a phrase that never appears in the adapter it reads, so it holds with the stripping deleted. Found on story 2.2 where the same shape had been copied. Fix: assert a single-line phrase present in the adapter before stripping and absent after."
+    owner: "Dev"
+    status: open
+  - epic: 2
+    action: "Both replace() paths insert one row per record in a for-of loop, holding a SELECT FOR UPDATE lock across hundreds of roundtrips for a CSV bank feed. Applies to adapters/db/extraction-repository-postgres.ts (epic 1) and adapters/db/payment-repository-postgres.ts (story 2.4) equally. Raised twice by Argus. Fix both together with UNNEST or a multi-row INSERT rather than diverging one from the other."
     owner: "Dev"
     status: open
   - epic: 1

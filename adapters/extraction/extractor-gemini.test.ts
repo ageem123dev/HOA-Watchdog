@@ -47,6 +47,7 @@ const RECORD: ExtractionRecord = {
   documentNumber: 'INV-4021',
   issuedOn: '2026-06-01',
   totalAmount: '1450.00',
+unitReference: null,
   currency: 'USD',
 }
 
