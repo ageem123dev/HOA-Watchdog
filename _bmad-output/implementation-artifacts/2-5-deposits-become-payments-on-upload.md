@@ -5,7 +5,7 @@ merge_request: 29
 
 # Story 2.5: A deposit becomes payments when it is uploaded
 
-Status: review
+Status: done
 
 > **Added 2026-08-08, after story 2.4.** 2.4 built the ledger — the `payment` and `held_payment`
 > tables, the resolve-or-hold decision, and the repository that replaces both on re-ingest. It did
@@ -531,6 +531,8 @@ three remain reads, which is what stops a deposit inventing a unit.
 ### Change Log
 
 - 2026-08-08 — All four tasks complete. Status -> review.
+- 2026-08-08 — MR !29 reviewed clean on `1e58d54` after two rounds. Status -> done. Epic 2 stays
+  `in-progress`: story 2.6 closes it.
 - 2026-08-08 — Story created, after story 2.4 was found to have built the payment ledger without
   connecting it to upload. Verified by search that nothing calls `createPaymentRepository`,
   `resolveLine` or `createHeldPaymentQueue` outside their own tests. Status -> ready-for-dev.
