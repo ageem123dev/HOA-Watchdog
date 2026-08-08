@@ -116,13 +116,13 @@ of keeping unit identity and vendor identity separate, and 2.1 already paid it o
         legitimately carry two unresolved lines for the same unknown reference on different dates.
         Say so, and prove it with a test that inserts both.
   - [x] `grant select` to `watchdog_reader`. No write grant — AD-4.
-- [ ] **Task 4 — Resolving a line to a unit, or holding it** (AC1, AC2)
-  - [ ] A **pure** function in `core/` deciding, for one extracted deposit line, whether it resolves:
+- [x] **Task 4 — Resolving a line to a unit, or holding it** (AC1, AC2)
+  - [x] A **pure** function in `core/` deciding, for one extracted deposit line, whether it resolves:
         it takes the line and a lookup result, never a database. No I/O, testable without one.
-  - [ ] **Nothing is attributed on a guess.** Matching is exact on `unit_normalised_number`, the same
+  - [x] **Nothing is attributed on a guess.** Matching is exact on `unit_normalised_number`, the same
         folding migration 011 defines. No fuzzy matching, no nearest-match, no "one candidate so it
         must be it". If the fold does not match exactly, it is held.
-  - [ ] A line missing a unit reference, an amount, or a date is held rather than dropped — a payment
+  - [x] A line missing a unit reference, an amount, or a date is held rather than dropped — a payment
         the system silently forgot is worse than one waiting for a human.
 - [ ] **Task 5 — Writing them, and replacing them on re-ingest** (AC1, AC3)
   - [ ] One transaction per document: delete this document's payments **and** its held payments, then
@@ -201,9 +201,56 @@ what makes that a comparison rather than a conversion.
 
 ### Debug Log References
 
+**The under-collection anomaly recurred, and this time it was caught.**
+
+Task 4's gate run reported **`68 passed | 11 skipped (76)`, 1410 tests** and exited **green**. Three
+consecutive runs immediately afterwards, on an unchanged tree, reported **`(79)`, 1432 tests** — and
+a JSON-reporter run confirmed **79 files collected, 0 missing** against the 78 tracked on disk plus
+the new one.
+
+So three files and twenty-two tests silently did not run, and the summary still said green.
+
+This is the **second** occurrence. Story 2.1 recorded the first: `49 passed | 9 skipped (58)`, 1167
+tests, where the true figure was `(62)` and 1192. Two epics apart, same shape, still unreproduced on
+demand.
+
+**Practical consequence, restated because it has now paid off twice:** read the *file count*, not
+only pass/fail. It is what caught this. With no CI, a green run that executed three fewer files is
+indistinguishable from a green run — except by the number.
+
+The figures quoted for tasks 1-3 were taken from runs whose counts were consistent with the files
+present at the time, so they stand.
+
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 4 — resolving a line, or holding it.** Done. A pure function; the directory lookup is a
+parameter, so it is testable without a database and cannot consult one by accident.
+
+*The decision is deliberately dull, and the tests exist to keep it that way.* Every helpful-looking
+variant is a way of attributing money to the wrong person: nearest match, prefix match, "only one
+candidate so it must be that one", folding a leading zero. Each has its own test asserting the line
+is **held** instead.
+
+*Story 1.6d's defect, guarded against explicitly.* A directory implemented as a plain object answers
+`constructor` with a function and `__proto__` with an object, and `?? null` catches neither — which
+is exactly what `suggestions[key] ?? []` did in 1.6d. The guard is `typeof unitId !== 'string'`, and
+replacing it with a truthiness check fails both cases.
+
+*And an inert case in my own parameterised test, caught by the sensitivity check.* The list was
+`['__proto__', 'constructor', 'toString']`, and the mutation failed only **two** of the three.
+`toString` folds to `tostring`, which is not a prototype key, so that case resolved to null through
+the ordinary path and could not fail whatever the code did. Removed, with the reason recorded — the
+two that remain survive folding precisely because they are already lower-case.
+
+*Sensitivity, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Truthiness instead of `typeof` | both prototype-key cases |
+| Leading zeroes folded | `holds a reference differing only by a leading zero` |
+| Blank-reference early return dropped | both missing-reference cases **and** `never consults the directory` |
 
 **Task 3 — migration 016, what could not be attributed.** Done. `held_payment` folds its reference
 with **`unit_normalised_number()`**, the function migration 011 defines for unit identity.
