@@ -37,6 +37,7 @@ describe('readTable', () => {
         documentNumber: null,
         issuedOn: '2026-06-01',
         totalAmount: '1450.00',
+        unitReference: null,
         currency: 'USD',
       })
     })

@@ -1,6 +1,7 @@
 import {
   AMOUNT_PATTERN,
   DOCUMENT_NUMBER_MAX_LENGTH,
+  UNIT_REFERENCE_MAX_LENGTH,
   type ExtractionRecord,
   VENDOR_NAME_MAX_LENGTH,
   isDocumentKind,
@@ -145,6 +146,24 @@ export function validate(candidate: unknown): Validation {
     DOCUMENT_NUMBER_MAX_LENGTH,
     problems,
   )
+  const unitReference = checkText(
+    source.unitReference,
+    'unitReference',
+    UNIT_REFERENCE_MAX_LENGTH,
+    problems,
+  )
+
+  // A unit reference belongs to a deposit line and to nothing else. An invoice
+  // pays a vendor; a statement names nobody. Accepting one on another kind would
+  // store a reference that no code path ever resolves, and it would read as a
+  // successful extraction. Raised by review.
+  // Only for a *known* non-deposit kind. When the kind is missing or unknown
+  // that is already reported, and adding a second problem here would blame the
+  // reference for a fault it did not cause -- the caller would be told to fix
+  // two things when there is one. Raised by review.
+  if (unitReference !== null && isDocumentKind(documentKind) && documentKind !== 'deposit') {
+    problems.push({ field: 'unitReference', reason: 'unknown-value' })
+  }
 
   let issuedOn: string | null = null
   const rawDate = source.issuedOn
@@ -190,6 +209,7 @@ export function validate(candidate: unknown): Validation {
       documentNumber,
       issuedOn,
       totalAmount,
+      unitReference,
       currency: currency as ExtractionRecord['currency'],
     },
   }
