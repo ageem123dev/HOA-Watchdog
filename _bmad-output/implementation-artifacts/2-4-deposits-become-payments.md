@@ -108,14 +108,14 @@ of keeping unit identity and vendor identity separate, and 2.1 already paid it o
   - [x] `on delete cascade` from `document`, matching `extraction`: a payment without its document is
         debris that still satisfies a foreign key.
   - [x] `grant select on payment to watchdog_reader` — SELECT only, per AD-4.
-- [ ] **Task 3 — Migration 016: what could not be attributed** (AC2)
-  - [ ] `held_payment`: `document_id` (cascade), `unit_reference text not null`,
+- [x] **Task 3 — Migration 016: what could not be attributed** (AC2)
+  - [x] `held_payment`: `document_id` (cascade), `unit_reference text not null`,
         `normalised_reference` generated from **`unit_normalised_number(unit_reference)`**, `paid_on`,
         `amount`, `created_at`.
-  - [ ] Deliberately **not** unique on `(document_id, normalised_reference)`: one deposit document can
+  - [x] Deliberately **not** unique on `(document_id, normalised_reference)`: one deposit document can
         legitimately carry two unresolved lines for the same unknown reference on different dates.
         Say so, and prove it with a test that inserts both.
-  - [ ] `grant select` to `watchdog_reader`. No write grant — AD-4.
+  - [x] `grant select` to `watchdog_reader`. No write grant — AD-4.
 - [ ] **Task 4 — Resolving a line to a unit, or holding it** (AC1, AC2)
   - [ ] A **pure** function in `core/` deciding, for one extracted deposit line, whether it resolves:
         it takes the line and a lookup result, never a database. No I/O, testable without one.
@@ -204,6 +204,27 @@ what makes that a comparison rather than a conversion.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 3 — migration 016, what could not be attributed.** Done. `held_payment` folds its reference
+with **`unit_normalised_number()`**, the function migration 011 defines for unit identity.
+
+*The separation is cross-checked two independent ways:* the migration text asserts what the
+generated column **calls**, and a database test reads the column's actual expression out of
+`pg_attrdef`. A migration saying the right thing and a column doing it are different facts, and only
+the second survives someone editing the schema by hand.
+
+*Deliberately not unique on `(document_id, normalised_reference)`.* One deposit can carry two
+unresolved lines for the same unknown reference on different dates — a unit paying twice under a
+reference nobody recognises yet. A unique constraint would reject the second line and **the money it
+represents would vanish from the ledger with nobody told**. Holding a duplicate question is
+recoverable; dropping a payment is not. Proved by inserting both.
+
+*Sensitivity, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| Reference folded by `vendor_normalised_name` | the migration-text assertion **and** the `pg_attrdef` cross-check |
+| A unique index on `(document_id, normalised_reference)` | the text assertion and both behavioural cases, including the two-lines-one-reference one |
 
 **Task 2 — migration 015, the payment.** Done. `numeric(14,2)`, cascading from the document and not
 from the unit, positive amounts only.
