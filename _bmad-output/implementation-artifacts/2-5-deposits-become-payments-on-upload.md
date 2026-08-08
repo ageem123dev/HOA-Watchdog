@@ -75,13 +75,13 @@ real ingestion path rather than through a repository called directly
   - [x] **Resolve in one query for the whole document, not one per line.** A CSV bank feed is
         hundreds of lines; a lookup per line is hundreds of roundtrips inside the ingest transaction.
         Fetch the references the document mentions and build the map once.
-- [ ] **Task 2 — The extractor emits a unit reference for deposit lines** (AC1)
-  - [ ] Teach the extraction path to populate `unitReference`. `validate.ts` already accepts it and
+- [x] **Task 2 — The extractor emits a unit reference for deposit lines** (AC1)
+  - [x] Teach the extraction path to populate `unitReference`. `validate.ts` already accepts it and
         already refuses it on any kind but `deposit`, so the contract exists — only the producer is
         missing.
-  - [ ] Both producers, or say which and why: the Gemini extractor and the tabular reader. A CSV bank
+  - [x] Both producers, or say which and why: the Gemini extractor and the tabular reader. A CSV bank
         feed goes through the second, and that is the shape the pilot actually ingests.
-  - [ ] A deposit fixture end to end: bytes in, records out, with the reference populated.
+  - [x] A deposit fixture end to end: bytes in, records out, with the reference populated.
 - [ ] **Task 3 — Ingestion writes payments** (AC1, AC3, AC4)
   - [ ] Thread a `PaymentRepository` into `extract-document.ts` as a dependency, beside `quarantine`.
         It is the same shape as the vendor hold, which is the precedent to follow rather than invent
@@ -205,9 +205,58 @@ re-keying is a fold-and-check rather than a fold-and-assign.
 
 ### Debug Log References
 
+**One flaky run, not reproduced, recorded rather than buried.** During Task 2's gate the first
+`npm test` reported 2 *files* failing (1477/1888); the next twelve runs were identical at 1479/1888.
+The failing run was the first after `cp` restored two source files from the mutation harness, and the
+two files that failed were the extractor pair — both of which `readFileSync` the module they test. A
+stale transform cache disagreeing with freshly-read source produces exactly that shape. Consistent
+with the evidence and with an artifact of the harness rather than of the committed code, but not
+proven, so it is written down here rather than called fixed.
+
+
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 2 — the producers.** Done, both of them.
+
+*A new `unit` column, not a second meaning for `reference`.* `reference` already lands in
+`documentNumber` as the transaction reference, and a deposit line commonly carries both. A column
+whose meaning depends on a sibling cell is a rule nobody can read off the header row.
+
+*Read only when the row is a deposit.* `validate` refuses `unitReference` on every other kind, and
+one invalid row fails the whole document here — so reading the column unconditionally would turn a
+stray `unit` column on an invoice export into a refusal of the entire upload. Ignored rather than
+refused: a unit means nothing on an invoice.
+
+*The provider schema needed the field at all.* Structured output answers the schema it is given, so
+`unitReference` absent from it was `unitReference` null on every document a provider ever read —
+which is why story 2.4's field was dead in practice even though the record and the validator both
+carried it. Bounded by `UNIT_REFERENCE_MAX_LENGTH` rather than a hand-written `64`, nullable, and
+deliberately not `required`.
+
+*A second exhaustive guard fired*, as Task 1's did: `permits null on exactly the fields the table
+allows null (B7)`. Widened deliberately — migration 014 declares `unit_reference text` without
+`not null`, so the field belongs on that list.
+
+*Sensitivity check — six mutations, each verified to have actually applied:*
+
+| Mutation | Result |
+| --- | --- |
+| read the unit column for every kind | 1 of 9 failed |
+| never read the unit column | 3 of 9 failed |
+| read `reference` as the unit instead | 3 of 9 failed |
+| drop `nullable` from the provider schema | 2 of 86 failed |
+| drop the provider's value before validation | 1 of 86 failed |
+| stop normalising the `unit` header | 5 of 9 failed |
+
+**The `nullable` mutation is the one worth keeping.** Its first attempt reported *zero* failures — and
+that was a multi-line replacement against a CRLF file, so it never applied at all. A mutation that
+silently no-ops is indistinguishable from a test that fails to catch it, and reads as the more
+reassuring of the two. Every mutation in this story now prints its substitution count.
+
+*A stub with no assertion was written and deleted.* It reached the file during an edit and would have
+counted toward the suite's total while proving nothing.
 
 **Task 1 — the lookup.** Done. `unitIdsFor(references)` on `UnitDirectory`, one `unnest` query per
 document, keyed by the caller's own string.
@@ -262,6 +311,11 @@ three remain reads, which is what stops a deposit inventing a unit.
 - `adapters/db/unit-directory-postgres.ts` — modified, Task 1.
 - `adapters/db/unit-directory-references.test.ts` — added, Task 1.
 - `adapters/db/unit-directory-reference-queries.test.ts` — added, Task 1.
+- `core/extraction/tabular.ts` — modified, Task 2.
+- `core/extraction/tabular-deposit.test.ts` — added, Task 2.
+- `adapters/extraction/extractor-gemini.ts` — modified, Task 2.
+- `adapters/extraction/extractor-gemini.test.ts` — modified, Task 2.
+- `adapters/extraction/extractor-gemini-unit.test.ts` — added, Task 2.
 
 ### Change Log
 

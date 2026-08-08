@@ -3,6 +3,7 @@ import {
   DOCUMENT_KINDS,
   DOCUMENT_NUMBER_MAX_LENGTH,
   SUPPORTED_CURRENCIES,
+  UNIT_REFERENCE_MAX_LENGTH,
   VENDOR_NAME_MAX_LENGTH,
 } from '../../core/extraction/record'
 import type { ExtractionRecord } from '../../core/extraction/record'
@@ -101,6 +102,21 @@ function responseSchema(): Record<string, unknown> {
               nullable: true,
             },
             currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES] },
+            // The unit a deposit line pays for, and null on everything else.
+            //
+            // Absent from the schema means absent from the answer: structured
+            // output returns the schema it was given, not the one the record
+            // type wishes it had. Story 2.4 added this field to the record and
+            // the validator without adding it here, so it was null on every
+            // document a provider ever read.
+            //
+            // Not in `required` — most documents name no unit, and `validate`
+            // refuses a reference on any kind but `deposit`.
+            unitReference: {
+              type: 'string',
+              maxLength: UNIT_REFERENCE_MAX_LENGTH,
+              nullable: true,
+            },
           },
           // Exactly the two columns migration 006 declares `not null`.
           required: ['documentKind', 'currency'],

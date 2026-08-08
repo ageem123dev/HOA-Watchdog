@@ -18,8 +18,16 @@ import { validate } from './validate'
 /** Matched case-insensitively after trimming; neither carries information. */
 export const REQUIRED_HEADERS = ['date', 'description', 'amount'] as const
 
-/** Present or absent; a file without them is still within contract. */
-export const OPTIONAL_HEADERS = ['reference', 'type'] as const
+/**
+ * Present or absent; a file without them is still within contract.
+ *
+ * `unit` is its own column and deliberately not a second meaning for
+ * `reference`. `reference` is the transaction reference and lands in
+ * `documentNumber`; a deposit line commonly carries both, and a column whose
+ * meaning depends on the value of a sibling cell is a rule nobody can read off
+ * the header row.
+ */
+export const OPTIONAL_HEADERS = ['reference', 'type', 'unit'] as const
 
 /** A tabular upload with no `type` column is a bank statement, which is what the pilot ingests. */
 const DEFAULT_DOCUMENT_KIND = 'statement'
@@ -114,13 +122,25 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
   const problems: TableProblem[] = []
 
   dataRows.forEach((row, index) => {
+    const documentKind = optional(row, 'type') ?? DEFAULT_DOCUMENT_KIND
+
     const candidate = {
-      documentKind: optional(row, 'type') ?? DEFAULT_DOCUMENT_KIND,
+      documentKind,
       vendorName: required(row, 'description'),
       documentNumber: optional(row, 'reference'),
       issuedOn: required(row, 'date'),
       totalAmount: required(row, 'amount'),
       currency: 'USD',
+
+      // Read only for a deposit, because `validate` refuses `unitReference` on
+      // every other kind — and one invalid row fails the whole document here.
+      // Reading it unconditionally would turn a stray `unit` column on an
+      // invoice export into a refusal of the entire upload.
+      //
+      // Ignored rather than refused, which is the choice worth naming: a unit
+      // means nothing on an invoice, and turning a column nobody asked about
+      // into a rejection helps no treasurer.
+      unitReference: documentKind === 'deposit' ? optional(row, 'unit') : null,
     }
 
     const validation = validate(candidate)
