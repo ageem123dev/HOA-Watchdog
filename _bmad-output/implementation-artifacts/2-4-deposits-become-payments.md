@@ -97,17 +97,17 @@ of keeping unit identity and vendor identity separate, and 2.1 already paid it o
         two-part shape migration 009 arrived at (`char_length(x) <= n` **and**
         `char_length(btrim(x, …)) >= 1` when present).
   - [x] Migration-text test using the shared `executable()` from `migrations/executable-sql.ts`.
-- [ ] **Task 2 — Migration 015: the payment** (AC1, AC3)
-  - [ ] `payment`: `unit_id` referencing `unit(id)`, `document_id` referencing `document(id)` **on
+- [x] **Task 2 — Migration 015: the payment** (AC1, AC3)
+  - [x] `payment`: `unit_id` referencing `unit(id)`, `document_id` referencing `document(id)` **on
         delete cascade**, `paid_on date`, `amount numeric(14,2)`.
-  - [ ] `numeric(14,2)`, matching `extraction.total_amount` and `assessment.annual_amount` exactly.
+  - [x] `numeric(14,2)`, matching `extraction.total_amount` and `assessment.annual_amount` exactly.
         This is the column epic 4 compares against an assessment, and the whole money decision of
         story 2.2 exists so that comparison needs no conversion.
-  - [ ] A positive-amount check. A deposit of zero is not a payment; a negative one is a reversal and
+  - [x] A positive-amount check. A deposit of zero is not a payment; a negative one is a reversal and
         is **out of scope** — record that rather than allowing it silently.
-  - [ ] `on delete cascade` from `document`, matching `extraction`: a payment without its document is
+  - [x] `on delete cascade` from `document`, matching `extraction`: a payment without its document is
         debris that still satisfies a foreign key.
-  - [ ] `grant select on payment to watchdog_reader` — SELECT only, per AD-4.
+  - [x] `grant select on payment to watchdog_reader` — SELECT only, per AD-4.
 - [ ] **Task 3 — Migration 016: what could not be attributed** (AC2)
   - [ ] `held_payment`: `document_id` (cascade), `unit_reference text not null`,
         `normalised_reference` generated from **`unit_normalised_number(unit_reference)`**, `paid_on`,
@@ -204,6 +204,26 @@ what makes that a comparison rather than a conversion.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 2 — migration 015, the payment.** Done. `numeric(14,2)`, cascading from the document and not
+from the unit, positive amounts only.
+
+*The assertion that protects epic 4* is not the round trip — it is the one comparing
+`payment.amount` and `assessment.annual_amount` in `information_schema` **against each other**.
+Changing one and not the other fails there, rather than in an arrears finding a year later.
+
+*Two decisions recorded rather than left implicit:* the cascade is from the **document** and
+deliberately not from the unit — deleting a unit must not silently erase what it paid — and a
+negative amount is refused because **reversals are out of scope**, needing a decision about whether
+they offset a payment or stand alone.
+
+*Sensitivity, each restored by dropping the table and re-running the migration:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| `amount` at `numeric(20,4)` | 6, including the cross-check **and** the parity test against `assessment.annual_amount` |
+| Positive-amount check dropped | the zero and the negative case |
+| Document cascade removed | the migration-text assertion and `goes when its document goes` |
 
 **Task 1 — migration 014, the deposit kind and the unit reference.** Done.
 
