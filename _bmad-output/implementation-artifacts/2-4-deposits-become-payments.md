@@ -1,5 +1,6 @@
 ---
 baseline_commit: e09cd82f4d6b1f3e34a343c9195acce43a5c878f
+merge_request: 26
 ---
 
 # Story 2.4: Deposits become payments
