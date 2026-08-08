@@ -359,14 +359,30 @@ describeWithDatabase('the payment repository', () => {
       { kind: 'attributed', unitId, paidOn: '2026-03-01', amount: '250.00' },
     ]
 
+    // The fresher run's reading, written first. Raised on the merge request:
+    // without it this test asserted zero rows on a document that never had any,
+    // so "refused before deleting" and "deleted, then refused" were
+    // indistinguishable -- and zero was true before the call was even made.
+    //
+    // What matters is not that nothing was written but that **the previous
+    // reading survived**, which is the whole point of the fence.
+    await writer.query(
+      `insert into payment (unit_id, document_id, paid_on, amount)
+       values ($1, $2, '2026-02-01'::date, '99.00')`,
+      [unitId, documentId],
+    )
+
     // A token that is not the one on the row: a runner whose claim lapsed.
     await expect(
       repository.replace(documentId, lines, { token: '00000000-0000-4000-8000-00000000dead' }),
     ).rejects.toBeInstanceOf(StaleExtractionClaimError)
 
-    // And nothing written -- the refusal happens before the deletes.
-    const { rows } = await writer.query('select 1 from payment where document_id = $1', [documentId])
-    expect(rows).toHaveLength(0)
+    const { rows } = await writer.query<{ amount: string }>(
+      'select amount::text from payment where document_id = $1',
+      [documentId],
+    )
+    // The earlier reading, untouched -- not the 250.00 the stale run carried.
+    expect(rows.map((row) => row.amount)).toEqual(['99.00'])
   })
 
   it('replaces when the claim it was given is the one on the document', async () => {

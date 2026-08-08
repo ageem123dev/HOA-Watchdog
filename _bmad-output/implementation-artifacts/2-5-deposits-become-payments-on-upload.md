@@ -217,6 +217,29 @@ proven, so it is written down here rather than called fixed.
 
 ### Review Findings
 
+**MR round 2 — 1 actionable, aimed at round 1's own test, and half right.**
+
+**[minor] The stale-claim test asserted zero rows on a document that never had any.** Correct, and a
+good catch: `expect(rows).toHaveLength(0)` was true *before the call was made*, so it could not
+distinguish a refusal from a deletion. Taken — the test now seeds a payment from the fresher run and
+asserts **it survives**, which is the property the fence exists to protect rather than a proxy for it.
+
+**Its stated rationale does not hold, and that is worth recording.** The finding says the old
+assertion "also passes if the implementation deletes rows before it detects the stale claim". Tested:
+moving the fence check to after both deletes leaves all 536 green, and **no test can catch it** —
+the throw rolls the transaction back, so the deletes are undone and the two orderings are observably
+identical. The mutation that does matter is removing the fence entirely, and the improved test fails
+on it.
+
+| Mutation | Result |
+| --- | --- |
+| no fence at all (the original defect) | 1 of 536 failed |
+| check the fence after the deletes | 536 passed — unobservable by construction |
+
+Fix-diff rounds are where this project has historically found the most defects, and this round is a
+mild version of the pattern: round 1's fix carried a test whose assertion was weaker than it looked.
+
+
 **MR round 1 — 1 actionable, and it was a real defect this story introduced.**
 
 **[major] The payment write was not fenced by the extraction claim.** Confirmed against the code, and
