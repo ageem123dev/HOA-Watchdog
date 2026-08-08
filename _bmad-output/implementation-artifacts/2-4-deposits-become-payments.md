@@ -85,18 +85,18 @@ of keeping unit identity and vendor identity separate, and 2.1 already paid it o
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Migration 014: a deposit is a kind of document, and a line can name a unit** (AC1)
-  - [ ] Add `deposit` to the `extraction_kind_known` check constraint **and** to `DOCUMENT_KINDS` in
+- [x] **Task 1 — Migration 014: a deposit is a kind of document, and a line can name a unit** (AC1)
+  - [x] Add `deposit` to the `extraction_kind_known` check constraint **and** to `DOCUMENT_KINDS` in
         `core/extraction/record.ts`. `core/extraction/record.test.ts` already reads migration 006 and
         compares the lists both ways — it will fail until both sides agree, which is the point.
-  - [ ] **The parity test reads migration 006.** Adding the value in 014 means the parser must find
+  - [x] **The parity test reads migration 006.** Adding the value in 014 means the parser must find
         the constraint's *current* definition, not 006's text. Decide and record how: either read
         `pg_constraint` (the live truth) or have 014 restate the whole constraint. A test that keeps
         reading 006 after 014 changes the constraint is a test that has stopped watching anything.
-  - [ ] `alter table extraction add column unit_reference text`, nullable, with a length check in the
+  - [x] `alter table extraction add column unit_reference text`, nullable, with a length check in the
         two-part shape migration 009 arrived at (`char_length(x) <= n` **and**
         `char_length(btrim(x, …)) >= 1` when present).
-  - [ ] Migration-text test using the shared `executable()` from `migrations/executable-sql.ts`.
+  - [x] Migration-text test using the shared `executable()` from `migrations/executable-sql.ts`.
 - [ ] **Task 2 — Migration 015: the payment** (AC1, AC3)
   - [ ] `payment`: `unit_id` referencing `unit(id)`, `document_id` referencing `document(id)` **on
         delete cascade**, `paid_on date`, `amount numeric(14,2)`.
@@ -204,6 +204,31 @@ what makes that a comparison rather than a conversion.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 1 — migration 014, the deposit kind and the unit reference.** Done.
+
+*The trap the story predicted, demonstrated rather than assumed.* A check constraint cannot be
+extended in place, so 014 drops and recreates `extraction_kind_known` — and from that point
+**migration 006 no longer states the vocabulary the database admits**.
+`core/extraction/record.test.ts` read 006 to learn it. The sequence was left in the commit history on
+purpose: adding `deposit` to the constant failed the parity test, adding it to 014 *still* failed it,
+and only pointing the parser at every migration — taking the **last** definition, which is what the
+database does — made it pass. Reverting the parser fails both the parity test and its new control.
+
+*And the eleventh guard of this kind in the epic, which is the one worth reading.* The test
+`never routes the unit reference through the vendor normaliser` forbade the string
+`vendor_normalised_name` anywhere in the executable SQL. It failed immediately — because the
+`comment on` literal at the foot of the migration **explains** the separation and names the function
+to do it, and `executable()` correctly preserves string literals. A deny-list catching a mention
+rather than a dependency.
+
+Story 2.1 shipped that exact mistake and recorded it. **This test's own comment cited that record,
+and it was written as a deny-list anyway.** Narrowed to what the column *is* — a plain `text` column
+with no generated normalisation — and verified: attaching
+`generated always as (vendor_normalised_name(unit_reference))` now fails it.
+
+*Gates:* lint 0 errors and 1 pre-existing warning, `tsc --noEmit` **8** (= baseline), build clean,
+`npm test` **76 files / 1398 passed**, `npm run test:db` **23 files / 437 passed**.
 
 ### File List
 

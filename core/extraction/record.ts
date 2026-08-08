@@ -16,6 +16,9 @@ export const DOCUMENT_KINDS = Object.freeze([
   'invoice',
   'statement',
   'assessment_roll',
+  // A bank deposit or a batch of receipts. Story 2.4: one such document carries
+  // many payments, each naming the unit it settles.
+  'deposit',
   'other',
 ] as const)
 

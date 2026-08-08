@@ -7,7 +7,7 @@
  * after the document's bytes are already in object storage — would sail through.
  */
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -23,14 +23,46 @@ import {
   isSupportedCurrency,
 } from './record'
 
-const migration = (): string =>
-  readFileSync(join(process.cwd(), 'migrations', '006_extraction.sql'), 'utf8')
+/**
+ * Every migration, in order, concatenated.
+ *
+ * This read migration 006 alone until story 2.4, which added `deposit` to the
+ * document-kind vocabulary. A check constraint cannot be extended in place — it
+ * is dropped and recreated — so from migration 014 onwards **006 no longer
+ * states the current vocabulary**. A parser still reading it compares the
+ * application's list against a stale one and fails for a reason that has nothing
+ * to do with the disagreement it exists to catch.
+ *
+ * Reading every migration and taking the **last** definition is what the
+ * database itself does: the newest statement wins. The three-digit zero-padded
+ * filenames sort correctly, so ordinary lexicographic order is migration order.
+ */
+const migrations = (): string =>
+  readdirSync(join(process.cwd(), 'migrations'))
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .map((name) => readFileSync(join(process.cwd(), 'migrations', name), 'utf8'))
+    .join('\n')
+
+/** The final match, since a later migration may redefine an earlier constraint. */
+function lastMatch(pattern: string, text: string): RegExpExecArray | null {
+  const scanner = new RegExp(pattern, 'g')
+  let found: RegExpExecArray | null = null
+  let current: RegExpExecArray | null = scanner.exec(text)
+
+  while (current !== null) {
+    found = current
+    current = scanner.exec(text)
+  }
+
+  return found
+}
 
 /** Quoted values inside a named `check (... in (...))` clause. */
 function declaredList(constraint: string): string[] {
-  const clause = new RegExp(`${constraint} check \\(\\s*[a-z_]+ in \\(([^)]*)\\)`).exec(migration())
+  const clause = lastMatch(`${constraint} check \\(\\s*[a-z_]+ in \\(([^)]*)\\)`, migrations())
 
-  expect(clause, `migration 006 no longer declares ${constraint}`).not.toBeNull()
+  expect(clause, `no migration declares ${constraint}`).not.toBeNull()
 
   const values = Array.from(clause![1]!.matchAll(/'([^']+)'/g), (m) => m[1]).filter(
     (v): v is string => v !== undefined,
@@ -46,7 +78,7 @@ function declaredList(constraint: string): string[] {
 function declaredLength(constraint: string): { min: number; max: number } {
   const clause = new RegExp(
     `${constraint} check \\(\\s*[a-z_]+ is null\\s+or char_length\\(btrim\\([a-z_]+[^)]*\\)\\) between (\\d+) and (\\d+)`,
-  ).exec(migration())
+  ).exec(migrations())
 
   expect(clause, `migration 006 no longer declares ${constraint}`).not.toBeNull()
 
@@ -54,7 +86,7 @@ function declaredLength(constraint: string): { min: number; max: number } {
 }
 
 describe('the extracted record vocabulary', () => {
-  describe('agreement with migration 006', () => {
+  describe('agreement with the migrations', () => {
     it('publishes exactly the document kinds the database admits', () => {
       expect([...DOCUMENT_KINDS].sort()).toEqual(declaredList('extraction_kind_known').sort())
     })
@@ -80,21 +112,36 @@ describe('the extracted record vocabulary', () => {
     })
 
     it('matches the numeric precision and scale of the amount column', () => {
-      const declared = /total_amount\s+numeric\((\d+),(\d+)\)/.exec(migration())
+      const declared = /total_amount\s+numeric\((\d+),(\d+)\)/.exec(migrations())
 
       expect(declared, 'migration 006 no longer declares total_amount as numeric(p,s)').not.toBeNull()
       expect(AMOUNT_PRECISION).toBe(Number(declared![1]))
       expect(AMOUNT_SCALE).toBe(Number(declared![2]))
     })
 
-    it('reads a migration that actually contains the constraints', () => {
-      // The guard on every parity test above. If the file moved or was emptied,
-      // each regex would match nothing and the failures would point at the
-      // constants rather than at the missing source.
-      const sql = migration()
+    it('reads migrations that actually contain the constraints', () => {
+      // The guard on every parity test above. If the directory moved or was
+      // emptied, each regex would match nothing and the failures would point at
+      // the constants rather than at the missing source.
+      const sql = migrations()
 
       expect(sql.length).toBeGreaterThan(500)
       expect(sql).toContain('create table extraction')
+    })
+
+    it('reads past the migration that first declared a constraint', () => {
+      // The control for the change story 2.4 made here. A check constraint
+      // cannot be extended in place, so migration 014 dropped and recreated
+      // `extraction_kind_known` — and from that point migration 006 states a
+      // vocabulary the database no longer has.
+      //
+      // This asserts the parser sees the *later* definition, by naming a value
+      // only 014 declares. Reading 006 alone passes every other test in this
+      // block and fails only this one.
+      expect(declaredList('extraction_kind_known')).toContain('deposit')
+      expect(
+        readFileSync(join(process.cwd(), 'migrations', '006_extraction.sql'), 'utf8'),
+      ).not.toContain('deposit')
     })
   })
 
