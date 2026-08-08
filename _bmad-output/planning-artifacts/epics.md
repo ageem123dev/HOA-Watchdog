@@ -569,10 +569,22 @@ So that lateness and shortfall are measurable rather than matters of opinion.
 **Then** the instalments sum to exactly the annual amount, with any remainder placed
 deterministically rather than lost to rounding
 
-**Given** a monthly cycle and an annual cycle for the same amount
+**Given** a monthly cycle and an annual cycle for the same annual amount
 **When** each is evaluated part-way through the year
-**Then** the monthly unit is expected to have paid a proportion and the annual unit is not yet
-expected to have paid anything, and neither is delinquent for that reason alone
+**Then** each is expected to have paid exactly the instalments that have already fallen due, and the
+two schedules still sum to the same annual total — the cycle changes *when* money is owed, never
+*how much* is owed for the year
+
+> **Amended 2026-08-07.** This criterion previously read: "the monthly unit is expected to have paid
+> a proportion and the annual unit is not yet expected to have paid anything, and neither is
+> delinquent for that reason alone". That only holds if instalments fall due at the **end** of the
+> period they cover. Matt chose the real-world convention — dues are collected **in advance**, each
+> instalment due on the first day of its period — so an annual payer is expected to have paid in full
+> from 1 January, and the old wording would have made the schedule contradict the schedule.
+>
+> The surviving point is the one that mattered: a difference in cycle must never by itself produce an
+> arrears finding. Under start-of-period that is expressed as "exactly the instalments already due",
+> which is true for every cycle.
 
 **Given** the derivation
 **When** it runs
