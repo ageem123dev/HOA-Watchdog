@@ -240,3 +240,40 @@ describe('validate', () => {
     })
   })
 })
+
+describe('a unit reference belongs to a deposit', () => {
+  const base = {
+    vendorName: null,
+    documentNumber: null,
+    issuedOn: null,
+    totalAmount: '120.00',
+    currency: 'USD',
+  }
+
+  it('accepts one on a deposit', () => {
+    const result = validate({ ...base, documentKind: 'deposit', unitReference: '4B' })
+
+    expect(result.ok).toBe(true)
+  })
+
+  it.each(['invoice', 'statement', 'assessment_roll', 'other'])(
+    'refuses one on %s',
+    (documentKind) => {
+      // An invoice pays a vendor and a statement names nobody. Accepting a
+      // reference on those would store something no code path resolves, and it
+      // would read as a successful extraction.
+      const result = validate({ ...base, documentKind, unitReference: '4B' })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.problems).toContainEqual({ field: 'unitReference', reason: 'unknown-value' })
+      }
+    },
+  )
+
+  it('still accepts those kinds without a reference', () => {
+    // Beside the cases above: a rule that rejected every non-deposit record
+    // would satisfy them and break ingestion entirely.
+    expect(validate({ ...base, documentKind: 'invoice', vendorName: 'Acme' }).ok).toBe(true)
+  })
+})

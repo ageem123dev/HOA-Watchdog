@@ -117,7 +117,12 @@ export function resolveLine(
   // inherited members — a function and an object — and neither is null. Story
   // 1.6d shipped exactly that: `suggestions[key] ?? []` returned
   // Object.prototype members for a vendor name that folded to `constructor`.
-  if (typeof unitId !== 'string' || unitId.length === 0) return held('unknown-unit')
+  // `typeof` only. An earlier version also refused an empty string, and nothing
+  // could make that branch fire: a directory returning '' for a known reference
+  // is not a case any caller produces, and no test could force it without
+  // inventing one. A guard nothing can reach is a guard this project deletes --
+  // raised by review, and the twelfth of its kind this epic.
+  if (typeof unitId !== 'string') return held('unknown-unit')
 
   return { kind: 'attributed', unitId, paidOn: line.paidOn, amount: line.amount }
 }

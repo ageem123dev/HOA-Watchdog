@@ -345,6 +345,20 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
   })
 
+  it('accepts the reason migration 018 added', async () => {
+    // The parity test reads migration 018's *text*, so it would pass while the
+    // database still refused the value -- the constraint could have failed to
+    // apply and nothing would have noticed. Raised by review.
+    const documentId = await doc()
+
+    await expect(
+      writer.query(
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
+         values ($1, '9Z', '2024-03-01'::date, null, 'unsupported-amount')`,
+        [documentId],
+      ),
+    ).resolves.toBeDefined()
+  })
   it('refuses a hold reason outside the vocabulary', async () => {
     const documentId = await doc()
 

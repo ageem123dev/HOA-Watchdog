@@ -153,6 +153,14 @@ export function validate(candidate: unknown): Validation {
     problems,
   )
 
+  // A unit reference belongs to a deposit line and to nothing else. An invoice
+  // pays a vendor; a statement names nobody. Accepting one on another kind would
+  // store a reference that no code path ever resolves, and it would read as a
+  // successful extraction. Raised by review.
+  if (unitReference !== null && documentKind !== 'deposit') {
+    problems.push({ field: 'unitReference', reason: 'unknown-value' })
+  }
+
   let issuedOn: string | null = null
   const rawDate = source.issuedOn
   if (rawDate !== null && rawDate !== undefined) {

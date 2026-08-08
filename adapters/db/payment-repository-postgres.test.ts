@@ -148,6 +148,23 @@ describeWithDatabase('the payment repository', () => {
     expect(rows[0]?.amount).toBe('345.67')
   })
 
+  it('stores the date an attributed payment was made', async () => {
+    // Every attributed assertion checked the amount; none checked the date. A
+    // repository writing today's date, or the wrong column, would have passed
+    // all of them. Raised by review.
+    const documentId = await newDocument()
+    const unitId = await newUnit()
+
+    await createPaymentRepository({ pool }).replace(documentId, [
+      attributed(unitId, '120.00', '2024-07-19'),
+    ])
+
+    const { rows } = await writer.query<{ paid_on: string }>(
+      `select to_char(paid_on, 'YYYY-MM-DD') as paid_on from payment where document_id = $1`,
+      [documentId],
+    )
+    expect(rows[0]?.paid_on).toBe('2024-07-19')
+  })
   it('clears held payments too when the second reading resolves them', async () => {
     // The half-replacement this signature exists to prevent. A treasurer names
     // the unit, the document is re-read, and the line is now attributed — if the

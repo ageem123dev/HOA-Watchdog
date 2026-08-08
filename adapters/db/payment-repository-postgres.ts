@@ -62,6 +62,7 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
       }
 
       const client: PoolClient = await pool().connect()
+      let released = false
 
       try {
         await client.query('begin')
@@ -119,10 +120,20 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
         // The alternative is a document holding nothing at all, which is worse
         // than a stale reading: a treasurer can see that last month's figures
         // are old, and cannot see figures that are absent.
-        await client.query('rollback').catch(() => undefined)
+        // If the rollback itself fails the connection is still inside a
+        // transaction, and releasing it returns a poisoned client to the pool for
+        // the next caller to inherit. Destroyed instead. Raised by review.
+        let rollbackFailed = false
+        try {
+          await client.query('rollback')
+        } catch {
+          rollbackFailed = true
+        }
+        client.release(rollbackFailed)
+        released = true
         throw error
       } finally {
-        client.release()
+        if (!released) client.release()
       }
     },
   }
