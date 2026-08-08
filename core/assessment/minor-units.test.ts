@@ -113,6 +113,11 @@ describe('toMinorUnits', () => {
     // An unbounded echo turns one bad field into a megabyte log line.
     const huge = '9'.repeat(10_000)
 
+    // Asserted before the try, so a widened AMOUNT regex cannot make this pass
+    // with zero assertions. Raised by review: a bare try/catch whose only
+    // expectations live in the catch is a test that succeeds by not running.
+    expect(() => toMinorUnits(`${huge}.999`)).toThrow(TypeError)
+
     try {
       toMinorUnits(`${huge}.999`)
     } catch (error) {

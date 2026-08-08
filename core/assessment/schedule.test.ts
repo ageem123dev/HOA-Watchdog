@@ -187,13 +187,30 @@ describe('deriveSchedule', () => {
     expect(() => deriveSchedule(anAssessment('1200.00', 'monthly', year))).toThrow(RangeError)
   })
 
-  it('does not repeat a rejected amount raw in its error message', () => {
-    // Same hazard as `minor-units`, same shared helper. This project logs
-    // structured JSON, and story 2.4 feeds extracted amounts through here.
+  it('does not repeat a rejected billing cycle raw in its error message', () => {
+    // Two things were wrong with the first version, both raised by review and
+    // both verified before changing anything.
+    //
+    // It asserted only inside a `catch`, so if the throw ever stopped happening
+    // the block would not run and the test would pass with zero assertions.
+    //
+    // And it aimed at an unreachable path. It passed an amount carrying a
+    // newline — but `AMOUNT` rejects that, so `toMinorUnits` threw first and the
+    // `describeValue` call in *this* module was never reached. A well-formed
+    // amount cannot contain a newline, so that path cannot be exercised at all.
+    //
+    // The cycle is the input that actually arrives unvalidated, which makes it
+    // the one worth sanitising. This project logs structured JSON, and a raw
+    // newline in a message is a forged log line.
+    const forged = 'monthly\nlevel=info msg=\"all clear\"'
+
+    expect(() => deriveSchedule(anAssessment('1200.00', forged as BillingCycle))).toThrow(TypeError)
+
     try {
-      deriveSchedule(anAssessment('-1.00\nlevel=info msg="all clear"', 'monthly'))
+      deriveSchedule(anAssessment('1200.00', forged as BillingCycle))
     } catch (error) {
       expect((error as Error).message).not.toContain('\n')
+      expect((error as Error).message).toContain('monthly')
     }
   })
 
@@ -231,7 +248,7 @@ describe('the module reads no clock', () => {
     expect(source()).toMatch(/export function deriveSchedule/)
   })
 
-  it.each(['new Date(', 'Date.now(', 'performance.now(', 'process.hrtime'])(
+  it.each(['new Date(', 'Date.parse', 'Date.now(', 'performance.now(', 'process.hrtime'])(
     'does not call %s',
     (forbidden) => {
       // AC3 says the evaluation date is a parameter. A behavioural test cannot
@@ -314,17 +331,6 @@ describe('expectedBy', () => {
     },
   )
 
-  it('compares dates as strings, never through a Date', () => {
-    // A `Date` is an instant at local midnight, so parsing these would shift the
-    // day for anyone west of UTC and change which instalments count. Story 2.1
-    // recorded the same hazard for membership dates.
-    const source = readFileSync(join(process.cwd(), 'core', 'assessment', 'schedule.ts'), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '')
-
-    expect(source).not.toContain('new Date(')
-    expect(source).not.toContain('Date.parse')
-  })
 })
 
 describe('AC2 - a cycle changes when money is owed, never how much', () => {
