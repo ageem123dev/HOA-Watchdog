@@ -17,6 +17,8 @@
  * database and cannot consult one by accident.
  */
 
+import { toMinorUnits } from '../assessment/minor-units'
+
 /** One line read off a deposit document, before anything has been decided. */
 export interface DepositLine {
   readonly unitReference: string
@@ -54,6 +56,7 @@ export const HOLD_REASONS = Object.freeze([
   'missing-reference',
   'missing-amount',
   'missing-date',
+  'unsupported-amount',
 ] as const)
 
 export type HoldReason = (typeof HOLD_REASONS)[number]
@@ -93,6 +96,19 @@ export function resolveLine(
   if (folded.length === 0) return held('missing-reference')
   if (line.amount.length === 0) return held('missing-amount')
   if (line.paidOn.length === 0) return held('missing-date')
+
+  // Held, not attributed. `payment.amount` refuses zero and negatives because a
+  // reversal is out of scope -- but a check constraint refuses them by aborting
+  // the transaction, which loses every payment in the document and leaves it
+  // retried forever. A line the system cannot use has to become a question, not
+  // an exception. Same shape as the defect migration 017 fixed.
+  let minorUnits: number
+  try {
+    minorUnits = toMinorUnits(line.amount)
+  } catch {
+    return held('unsupported-amount')
+  }
+  if (minorUnits <= 0) return held('unsupported-amount')
 
   const unitId = lookup(folded)
 

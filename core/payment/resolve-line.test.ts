@@ -103,6 +103,29 @@ describe('resolveLine', () => {
     expect(resolved).toMatchObject({ kind: 'held', reason })
   })
 
+  it.each([
+    ['a negative amount, which extraction produces for a credit', '-50.00'],
+    ['zero', '0.00'],
+    ['an amount that is not a decimal at all', '1,000.00'],
+  ])('holds a line with %s rather than letting the database refuse it', (_label, amount) => {
+    // `payment.amount > 0` refuses these -- but a check constraint refuses them
+    // by aborting the transaction, which loses every payment in the document and
+    // leaves it retried forever by the generic handler. A line the system cannot
+    // use has to become a question, not an exception.
+    //
+    // Raised by review, and it is the same shape as migration 017's defect: the
+    // schema was made to reject something the pipeline could still produce.
+    const resolved = resolveLine(line({ amount }), knowing({ '4b': 'unit-1' }))
+
+    expect(resolved).toMatchObject({ kind: 'held', reason: 'unsupported-amount' })
+  })
+
+  it('still attributes an ordinary positive amount', () => {
+    // Beside the cases above: a guard that held everything would satisfy them.
+    expect(resolveLine(line({ amount: '0.01' }), knowing({ '4b': 'unit-1' }))).toMatchObject({
+      kind: 'attributed',
+    })
+  })
   it('never consults the directory for a line it cannot fold', () => {
     // A blank reference folds to nothing, and asking the directory about nothing
     // invites a lookup that returns the wrong thing for an empty key.
@@ -179,7 +202,7 @@ describe('the module reads nothing ambient', () => {
 describe('the hold reason vocabulary', () => {
   const migration = (): string =>
     readFileSync(
-      join(process.cwd(), 'migrations', '017_held_payment_incomplete_lines.sql'),
+      join(process.cwd(), 'migrations', '018_hold_unsupported_amounts.sql'),
       'utf8',
     )
 
@@ -191,12 +214,12 @@ describe('the hold reason vocabulary', () => {
     // `core/extraction/record.test.ts` make the same comparison the same way.
     const clause = /held_payment_reason_known check \(\s*[a-z_]+ in \(([^)]*)\)/.exec(migration())
 
-    expect(clause, 'migration 017 no longer declares held_payment_reason_known').not.toBeNull()
+    expect(clause, 'migration 018 no longer declares held_payment_reason_known').not.toBeNull()
 
     const declared = Array.from(clause![1]!.matchAll(/'([^']+)'/g), (m) => m[1]!).sort()
 
     // Without this the comparison can pass by comparing nothing to nothing.
-    expect(declared.length).toBe(4)
+    expect(declared.length).toBe(5)
     expect([...HOLD_REASONS].sort()).toEqual(declared)
   })
 
@@ -213,6 +236,7 @@ describe('the hold reason vocabulary', () => {
         resolveLine(line({ unitReference: '' }), () => null),
         resolveLine(line({ amount: '' }), () => null),
         resolveLine(line({ paidOn: '' }), () => null),
+        resolveLine(line({ amount: '-1.00' }), () => null),
       ]
         .filter((r): r is Extract<typeof r, { kind: 'held' }> => r.kind === 'held')
         .map((r) => r.reason),
