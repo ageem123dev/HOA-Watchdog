@@ -4,7 +4,7 @@ baseline_commit: cffb9e5
 
 # Story 2.5: A deposit becomes payments when it is uploaded
 
-Status: ready-for-dev
+Status: review
 
 > **Added 2026-08-08, after story 2.4.** 2.4 built the ledger — the `payment` and `held_payment`
 > tables, the resolve-or-hold decision, and the repository that replaces both on re-ingest. It did
@@ -94,13 +94,13 @@ real ingestion path rather than through a repository called directly
         `extraction-repository-postgres.ts` records the same hazard for its own state write.
   - [x] **An entirely-held deposit is a success, not a failure.** Every line unresolved is an ordinary
         outcome, and the document's extraction state must reflect that it was read.
-- [ ] **Task 4 — Prove the path, not the parts** (AC1, AC4)
-  - [ ] One test that starts at an uploaded deposit and ends with rows in `payment` and
+- [x] **Task 4 — Prove the path, not the parts** (AC1, AC4)
+  - [x] One test that starts at an uploaded deposit and ends with rows in `payment` and
         `held_payment`, going through the real ingestion entry point. This is the test whose absence
         let story 2.4 ship a complete set of green units and no working path.
-  - [ ] Re-ingest the same document through that same entry point and assert the counts do not double
+  - [x] Re-ingest the same document through that same entry point and assert the counts do not double
         — AD-13 proved where it actually has to hold, not at the repository.
-  - [ ] A deposit mixing resolvable and unresolvable lines, since that is the ordinary case and the
+  - [x] A deposit mixing resolvable and unresolvable lines, since that is the ordinary case and the
         one where a partial write would be least visible.
 
 ## Dev Notes
@@ -217,6 +217,32 @@ proven, so it is written down here rather than called fixed.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 4 — the path itself.** Done. `adapters/db/deposit-ingestion.test.ts` starts where a treasurer
+starts — bytes and a filename handed to `ingest`, the entry point the upload action calls — and ends
+by reading `payment` and `held_payment` directly. Everything between is production code; the only
+fake is the object store, because an S3 bucket is not what is under test.
+
+*Written against the CSV path deliberately.* `extract-document.ts` refuses a CSV outright with
+`no-provider-path`, so an end-to-end test written there would have proved nothing about the documents
+the pilot actually uploads — the same blind spot in a new place.
+
+*The mutation that matters:* deleting the `recordPayments` call from `ingest.ts` reproduces story
+2.4's exact state — every part correct, nothing connected — and fails **5 of these 7 tests**. Story
+2.4 shipped that state past Argus, one IDE round and two MR rounds, with a fully green suite. This is
+the check that was missing.
+
+| Mutation | Result |
+| --- | --- |
+| disconnect the ledger from the upload path (2.4's state) | **5 of 7 failed** |
+| record every kind, not only deposits (AC3) | 1 of 7 failed |
+| stop deleting on re-ingest (AD-13) | 1 here, plus 2 in the repository suite |
+| stop reading the `unit` column (task 2 undone) | 5 of 7 failed |
+
+*A type error the test suite could not have caught.* The store fake was written with `put(key, bytes)`
+against a port whose signature is `put(document)`. Vitest does not typecheck, so all seven tests
+passed while the fake did not implement the port — `tsc` moved 8 to 11 and named it. Fixed rather
+than cast away.
 
 **Task 3 — the wiring, in both paths.** Done, as one shared module rather than two copies.
 
@@ -369,9 +395,11 @@ three remain reads, which is what stops a deposit inventing a unit.
 - `core/payment/resolve-line.ts` — modified, Task 3 (`fold` exported).
 - `app/upload/actions.ts` — modified, Task 3.
 - `app/api/documents/[id]/extract/route.ts` — modified, Task 3.
+- `adapters/db/deposit-ingestion.test.ts` — added, Task 4.
 
 ### Change Log
 
+- 2026-08-08 — All four tasks complete. Status -> review.
 - 2026-08-08 — Story created, after story 2.4 was found to have built the payment ledger without
   connecting it to upload. Verified by search that nothing calls `createPaymentRepository`,
   `resolveLine` or `createHeldPaymentQueue` outside their own tests. Status -> ready-for-dev.
