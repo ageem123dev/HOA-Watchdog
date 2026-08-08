@@ -216,6 +216,46 @@ proven, so it is written down here rather than called fixed.
 
 ### Review Findings
 
+**Local round (Argus + CodeRabbit IDE, on `c487ebe`).** Argus: **zero findings** on the whole-story
+diff — recorded rather than celebrated, since Argus also passed story 2.4, the story that shipped a
+complete and unreachable ledger. When the defect is *absence*, a clean second opinion is weak
+evidence. `argus_ingest` scored it against the review: recall **0**, three misses written to memory.
+
+CodeRabbit: 4 actionable. Two in scope, both fixed; two on uncommitted files that belong to another
+branch.
+
+**[major] The provider path lost whole documents to a stray unit reference.** The response schema
+permits `unitReference` on every kind, `validate` refuses it on anything but a deposit, and this
+adapter turns *any* validation failure into `null` — which the caller reports as `unreadable`. So a
+provider hallucinating a unit on an invoice did not lose the field, it lost **the entire document**,
+and told the treasurer their scan was bad.
+
+The same shape as all three defects story 2.4 found: *the schema refusing something the pipeline can
+still produce*. Fixed by dropping the field on non-deposit kinds, which is what the tabular reader
+already did — the two producers now agree, where before the same document read two ways gave two
+answers.
+
+The fix is deliberately narrow: it clears one field on exactly the kinds that cannot carry it and
+leaves an unrecognised `documentKind` for `validate` to judge. A broader version would be this
+adapter quietly correcting an untrusted answer instead of finding out it was wrong. Mutation
+confirms the narrowness matters — nulling unconditionally fails 2 tests, because that "fix" would
+have silently undone the whole story.
+
+**[minor] The split test pinned the payment side and not the held side.** `toEqual` fixed the
+payments exactly, while the held side inspected only `[0]`, so extra held rows would have passed.
+Now counted. Proved by writing a duplicate held row: 3 tests fail.
+
+**Two findings triaged out, not fixed here.** The machine-specific Argus path in `.mcp.json`, and
+`git diff HEAD` omitting untracked files in `.claude/commands/argus-review.md`. Both are real, both
+are already open action items in `sprint-status.yaml`, and both live in files this branch does not
+touch — the IDE extension ignores `path_filters` and picks up uncommitted work whatever the scope
+says. Fixing them here would put unrelated changes in this MR.
+
+The untracked-files one deserves a note: it means **Argus has been reviewing without seeing new
+files**, which is a plausible contributor to the zero-findings result above and to story 2.4's ledger
+going unnoticed.
+
+
 ### Completion Notes List
 
 **Task 4 — the path itself.** Done. `adapters/db/deposit-ingestion.test.ts` starts where a treasurer

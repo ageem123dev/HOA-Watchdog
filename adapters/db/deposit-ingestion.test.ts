@@ -201,7 +201,12 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
     expect(await paymentsOf(documentId)).toEqual([
       { unit_id: knownId, amount: '250.00', paid_on: '2026-03-01' },
     ])
-    expect((await heldOf(documentId))[0]).toMatchObject({
+    // Both sides pinned by count, not just the payment side. Raised by review:
+    // inspecting only `[0]` lets a regression that writes extra held rows pass,
+    // and a duplicated hold is a treasurer asked the same question twice.
+    const held = await heldOf(documentId)
+    expect(held).toHaveLength(1)
+    expect(held[0]).toMatchObject({
       unit_reference: `${RUN_PREFIX}-${scope}-ghost`,
       amount: '175.00',
       hold_reason: 'unknown-unit',

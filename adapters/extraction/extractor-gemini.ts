@@ -127,6 +127,28 @@ function responseSchema(): Record<string, unknown> {
   }
 }
 
+/**
+ * The candidate with a unit reference removed unless it is a deposit.
+ *
+ * Deliberately narrow: it clears exactly one field on exactly the kinds that
+ * cannot carry it, and leaves everything else — including an unrecognised
+ * `documentKind` — for `validate` to judge. Anything broader would be this
+ * adapter quietly correcting the provider, and the point of validating an
+ * untrusted answer is to find out when it is wrong rather than to tidy it.
+ *
+ * `deposit` is compared against the record's own vocabulary rather than a
+ * literal, so adding a kind that carries a unit changes one list.
+ */
+function withoutStrayUnitReference(candidate: unknown): unknown {
+  if (typeof candidate !== 'object' || candidate === null) return candidate
+
+  const source = candidate as { documentKind?: unknown; unitReference?: unknown }
+  if (source.unitReference === undefined || source.unitReference === null) return candidate
+  if (source.documentKind === 'deposit') return candidate
+
+  return { ...source, unitReference: null }
+}
+
 export class MissingExtractionConfigError extends Error {
   override readonly name = 'MissingExtractionConfigError'
 
@@ -287,7 +309,16 @@ function validateAll(payload: unknown): readonly ExtractionRecord[] | null {
   const validated: ExtractionRecord[] = []
 
   for (const candidate of records) {
-    const result = validate(candidate)
+    // A unit means nothing on anything but a deposit, and `validate` refuses one
+    // there — so a provider that attaches `unitReference` to an invoice would
+    // fail validation, and this loop turns any failure into `null`, which the
+    // caller reports as `unreadable`. One hallucinated reference would lose the
+    // whole document and tell the treasurer their scan was bad.
+    //
+    // Dropped rather than refused, which is what the tabular reader already does
+    // with its `unit` column: the two producers have to agree, or the same
+    // document read two ways gives two answers. Raised by review.
+    const result = validate(withoutStrayUnitReference(candidate))
     if (!result.ok) return null
     validated.push(result.record)
   }

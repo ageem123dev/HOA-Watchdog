@@ -124,4 +124,70 @@ describe('a deposit the provider read', () => {
     if (!result.ok) return
     expect(result.records[0]!.unitReference).toBe('4B')
   })
+
+  it('ignores a unit the provider attached to something that is not a deposit', async () => {
+    // Raised by review. `validate` refuses `unitReference` on any kind but
+    // `deposit`, and this adapter turns *any* validation failure into `null` --
+    // which the caller reports as `unreadable`. So a provider hallucinating a
+    // unit on an invoice does not lose the field, it loses **the whole
+    // document**, and the treasurer is told their scan is bad.
+    //
+    // The same shape as the three defects story 2.4 found: the schema refusing
+    // something the pipeline can still produce. The tabular reader already
+    // ignores the column on a non-deposit; this makes the two producers agree.
+    const invoice = JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  records: [
+                    {
+                      documentKind: 'invoice',
+                      vendorName: 'Acme Plumbing',
+                      documentNumber: 'INV-1',
+                      issuedOn: '2026-03-01',
+                      totalAmount: '250.00',
+                      currency: 'USD',
+                      unitReference: '4B',
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    })
+
+    const extractor = createGeminiExtractor({
+      env: ENV,
+      fetch: vi.fn(async () => new Response(invoice, { status: 200 })),
+    })
+
+    const result = await extractor.extract({ bytes: PDF_BYTES, mediaType: 'application/pdf' })
+
+    // Read, not refused.
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.records[0]!.documentKind).toBe('invoice')
+    // Dropped, not carried: a unit means nothing on an invoice.
+    expect(result.records[0]!.unitReference).toBeNull()
+  })
+
+  it('still keeps the unit on a deposit while dropping it elsewhere', async () => {
+    // The discriminator. A fix that nulled the field unconditionally would pass
+    // the test above and silently undo the whole story.
+    const extractor = createGeminiExtractor({
+      env: ENV,
+      fetch: vi.fn(async () => new Response(reply, { status: 200 })),
+    })
+
+    const result = await extractor.extract({ bytes: PDF_BYTES, mediaType: 'application/pdf' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.records[0]!.unitReference).toBe('4B')
+  })
 })
