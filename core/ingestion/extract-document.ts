@@ -254,7 +254,7 @@ export async function extractDocument(
       // the document is still `held` is re-read by the next poll and healed.
       // `PaymentRepository.replace` is set-replacement (AD-13), so that retry
       // writes the same set rather than a second copy of it.
-      await recordPayments(documentId, result.records, deps)
+      await recordPayments(documentId, result.records, deps, { token: claim.token })
 
       // The fence goes with the write. `replace` clears the claim in the same
       // transaction as the state change, which is why nothing releases it here:

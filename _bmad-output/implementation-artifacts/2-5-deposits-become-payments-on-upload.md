@@ -217,6 +217,42 @@ proven, so it is written down here rather than called fixed.
 
 ### Review Findings
 
+**MR round 1 — 1 actionable, and it was a real defect this story introduced.**
+
+**[major] The payment write was not fenced by the extraction claim.** Confirmed against the code, and
+the sequence is exact: run A claims and its provider call outlives the 300s TTL; run B claims, writes
+payments, and its *fenced* extraction write settles the document as `read`; run A returns, calls
+`recordPayments`, and — with no fence — replaces B's payments with its own. A's `extractions.replace`
+then correctly throws `StaleExtractionClaimError`, so A's *records* are discarded. The document is
+`read`, so nothing polls it again: extraction rows from B, payment rows from A, permanently.
+
+This is a direct consequence of the ordering decided in Task 3. Writing payments *before* the fenced
+write is what makes a mid-way failure recoverable — and it is also what leaves the payment write
+outside the fence. Both halves of that are worth stating together, because the fix is not to reorder.
+
+Fixed by giving `PaymentRepository.replace` an optional fence and checking it **in the same statement
+as the row lock**, exactly as `extraction-repository-postgres.ts` does and for the reason its comment
+gives: checked before `begin` there is a window in which the claim expires between the check and the
+write. Optional because the upload path has no claim to fence against — a CSV is read synchronously
+inside the request that uploaded it, and there is no second runner to race.
+
+*Sensitivity check — three mutations:*
+
+| Mutation | Result |
+| --- | --- |
+| drop the fence check (the defect as reported) | 1 of 536 failed |
+| fence refuses everything | 1 of 536 failed |
+| call site stops passing its claim | 1 of 5 failed |
+
+The middle one is the discriminator: a fence that refused every write would satisfy the first test
+and stop the deferred path recording any payment at all.
+
+*`tsc` earned its place in the gate a second time.* The `vi.fn()` fake was inferred from a
+zero-argument implementation, so `replace.mock.calls[0]` was a zero-length tuple and every assertion
+about the new third argument was a **type error rather than a test** — while the suite ran green.
+The baseline moved 8 to 12 and named all four. The fake is now typed from the port's own signature.
+
+
 **Argus, second run — on the fix commit, after `argus_ingest` wrote its lessons.** The first run found
 nothing; this one found three, one critical. The ingest is the difference, and it is the clearest
 evidence so far that the memory loop does something.

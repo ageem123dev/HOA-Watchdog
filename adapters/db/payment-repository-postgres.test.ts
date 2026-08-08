@@ -13,6 +13,7 @@ import { Client, Pool } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import type { ResolvedLine } from '../../core/payment/resolve-line'
+import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import { createPaymentRepository } from './payment-repository-postgres'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
@@ -335,5 +336,63 @@ describeWithDatabase('the payment repository', () => {
       [first],
     )
     expect(rows[0]?.amount).toBe('120.00')
+  })
+
+  it('refuses to replace payments when the claim has moved on', async () => {
+    // The fence, against the real database. Raised on the merge request: the
+    // payment write happens before the fenced extraction write, so a stale run
+    // could replace a fresher run's payments on a document already settled as
+    // `read` -- never polled again, and permanently half from each reading.
+    const documentId = await newDocument()
+    const unitId = await newUnit()
+
+    await writer.query(
+      `update document
+          set extraction_claim_token = gen_random_uuid(),
+              extraction_claim_expires_at = now() + interval '5 minutes'
+        where id = $1`,
+      [documentId],
+    )
+
+    const repository = createPaymentRepository({ pool })
+    const lines: readonly ResolvedLine[] = [
+      { kind: 'attributed', unitId, paidOn: '2026-03-01', amount: '250.00' },
+    ]
+
+    // A token that is not the one on the row: a runner whose claim lapsed.
+    await expect(
+      repository.replace(documentId, lines, { token: '00000000-0000-4000-8000-00000000dead' }),
+    ).rejects.toBeInstanceOf(StaleExtractionClaimError)
+
+    // And nothing written -- the refusal happens before the deletes.
+    const { rows } = await writer.query('select 1 from payment where document_id = $1', [documentId])
+    expect(rows).toHaveLength(0)
+  })
+
+  it('replaces when the claim it was given is the one on the document', async () => {
+    // The discriminator. A fence that refused everything would pass the test
+    // above and stop the deferred path writing any payment at all.
+    const documentId = await newDocument()
+    const unitId = await newUnit()
+
+    const { rows: claimed } = await writer.query<{ token: string }>(
+      `update document
+          set extraction_claim_token = gen_random_uuid(),
+              extraction_claim_expires_at = now() + interval '5 minutes'
+        where id = $1
+        returning extraction_claim_token as token`,
+      [documentId],
+    )
+
+    const repository = createPaymentRepository({ pool })
+
+    await repository.replace(
+      documentId,
+      [{ kind: 'attributed', unitId, paidOn: '2026-03-01', amount: '250.00' }],
+      { token: claimed[0]!.token },
+    )
+
+    const { rows } = await writer.query('select 1 from payment where document_id = $1', [documentId])
+    expect(rows).toHaveLength(1)
   })
 })

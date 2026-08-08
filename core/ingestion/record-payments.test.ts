@@ -58,7 +58,18 @@ const directoryOf = (answers: Record<string, string>) => {
 }
 
 const repository = () => {
-  const replace = vi.fn(async () => undefined)
+  // Typed by the port's own signature rather than inferred from a zero-argument
+  // implementation: inferred, `replace.mock.calls[0]` is a tuple of length 0 and
+  // an assertion about the third argument is a type error rather than a test.
+  const replace =
+    vi.fn<
+      (
+        documentId: string,
+        lines: readonly ResolvedLine[],
+        fence?: { readonly token: string },
+      ) => Promise<void>
+    >(async () => undefined)
+
   return { payments: { replace } as unknown as PaymentRepository, replace }
 }
 
@@ -77,9 +88,11 @@ describe('recording payments from a read document', () => {
 
     await recordPayments(DOCUMENT, [deposit()], { units: directory, payments })
 
-    expect(replace).toHaveBeenCalledWith(DOCUMENT, [
-      { kind: 'attributed', unitId: 'unit-4b', paidOn: '2026-03-01', amount: '250.00' },
-    ])
+    expect(replace).toHaveBeenCalledWith(
+      DOCUMENT,
+      [{ kind: 'attributed', unitId: 'unit-4b', paidOn: '2026-03-01', amount: '250.00' }],
+      undefined,
+    )
   })
 
   it('holds a line naming a unit nobody has recorded', async () => {
@@ -267,5 +280,30 @@ describe('recording payments from a read document', () => {
     expect(
       unstorableUnitReference([deposit(), deposit({ unitReference: `5C\u0000` })]),
     ).toBe(true)
+  })
+
+  it('passes the extraction claim through to the write', async () => {
+    // Raised on the merge request. Unfenced, a stale run's payments could
+    // overwrite a fresher run's on a document already settled as `read` -- so
+    // never polled again, and permanently half from each reading. The payment
+    // write happens *before* the fenced extraction write, which is what left it
+    // exposed.
+    const { directory } = directoryOf({ '4B': 'unit-4b' })
+    const { payments, replace } = repository()
+
+    await recordPayments(DOCUMENT, [deposit()], { units: directory, payments }, { token: 'tok-1' })
+
+    expect(replace.mock.calls[0]![2]).toEqual({ token: 'tok-1' })
+  })
+
+  it('writes without a fence when the caller has no claim', async () => {
+    // The upload path reads a CSV synchronously inside the request that uploaded
+    // it. There is no claim, and no second runner to race.
+    const { directory } = directoryOf({ '4B': 'unit-4b' })
+    const { payments, replace } = repository()
+
+    await recordPayments(DOCUMENT, [deposit()], { units: directory, payments })
+
+    expect(replace.mock.calls[0]![2]).toBeUndefined()
   })
 })

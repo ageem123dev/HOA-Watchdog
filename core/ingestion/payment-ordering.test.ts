@@ -147,4 +147,16 @@ describe('the order the two writes happen in', () => {
     // Nothing written, to either table -- the refusal happens before the writes.
     expect(order).toEqual([])
   })
+
+  it('fences the payment write with the claim it is holding', async () => {
+    // The call site half of the fix. The repository can only refuse a stale run
+    // if the caller actually hands it the token -- and this write happens before
+    // the fenced extraction write, so nothing else would catch it.
+    const { deps, payments } = harness({ extractionFails: false })
+
+    await extractDocument('doc-1', deps)
+
+    const call = (payments.replace as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!
+    expect(call[2]).toEqual({ token: 'token-1' })
+  })
 })

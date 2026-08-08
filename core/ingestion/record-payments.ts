@@ -128,6 +128,7 @@ export async function recordPayments(
   documentId: string,
   records: readonly ExtractionRecord[],
   deps: PaymentRecordingDependencies,
+  fence?: { readonly token: string },
 ): Promise<void> {
   const { units, payments } = deps
   if (units === undefined || payments === undefined) return
@@ -155,5 +156,9 @@ export async function recordPayments(
     resolveLine(asDepositLine(record), (key) => lookup.get(key) ?? null),
   )
 
-  await payments.replace(documentId, lines)
+  // Fenced with the same claim the extraction write uses, where there is one.
+  // Unfenced this write let a stale run overwrite a fresher run's payments on a
+  // document already settled as `read` -- so never polled again, and permanently
+  // half from each reading. Raised on the merge request.
+  await payments.replace(documentId, lines, fence)
 }
