@@ -111,6 +111,30 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
       expect(await countFor(documentId)).toBe(3)
     })
 
+  it('round-trips the unit reference on a deposit line', async () => {
+    // Every other fixture sets `unitReference: null`, so nothing proved a real
+    // value survives the insert, the select and the mapping. Raised by review,
+    // and it was reachable: the column could have been dropped from any of the
+    // three and the whole suite would still have passed.
+    const documentId = await newDocument()
+    const written = {
+      documentKind: 'deposit' as const,
+      vendorName: null,
+      documentNumber: null,
+      issuedOn: '2026-03-01',
+      totalAmount: '120.00',
+      unitReference: '  4b Upper ',
+      currency: 'USD' as const,
+    }
+
+    await repository.replace(documentId, [written])
+    const [read] = await repository.findByDocument(documentId)
+
+    // Unfolded, as the document spelled it — the folded form is a comparison
+    // key and never leaves the database.
+    expect(read?.unitReference).toBe('  4b Upper ')
+    expect(read).toEqual(written)
+  })
     it('round-trips every field unchanged', async () => {
       // The inverse check. Amounts are compared by Postgres below rather than
       // read into a JavaScript number, which is the conversion the column exists

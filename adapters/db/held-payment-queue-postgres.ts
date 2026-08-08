@@ -38,7 +38,17 @@ function getPool(): Pool {
   return sharedPool
 }
 
-export function createHeldPaymentQueue(): HeldPaymentQueue {
+/**
+ * The pool is injectable so the SQL can actually be executed in a test.
+ *
+ * Raised by review, and it was a real gap: the connection test mocks `pg`, so
+ * without this the query below was never run against a database. A malformed
+ * column name or a bad `to_char` would have passed every test in this repo.
+ * `payment-repository-postgres.ts` takes the same option for the same reason.
+ */
+export function createHeldPaymentQueue(options: { pool?: Pool } = {}): HeldPaymentQueue {
+  const resolvePool = () => options.pool ?? getPool()
+
   return {
     async held(): Promise<readonly HeldPayment[]> {
       // Columns named one by one rather than `select *`: `held_payment` carries
@@ -54,7 +64,7 @@ export function createHeldPaymentQueue(): HeldPaymentQueue {
       // by one replacement share `now()` to the microsecond, and without it the
       // order is whatever the plan produced. Two renders of an unchanged queue
       // would then disagree.
-      const { rows } = await getPool().query<HeldPayment>(
+      const { rows } = await resolvePool().query<HeldPayment>(
         `select held_payment.document_id     as "documentId",
                 document.filename            as "filename",
                 held_payment.unit_reference  as "unitReference",

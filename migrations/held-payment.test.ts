@@ -262,3 +262,116 @@ describeWithDatabase('a held payment', () => {
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
   })
 })
+
+describeWithDatabase('migration 017: a held line may be incomplete', () => {
+  let writer: Client
+  let boardMemberId = ''
+
+  beforeAll(async () => {
+    writer = new Client({ connectionString: writerUrl })
+    await writer.connect()
+    const { rows } = await writer.query<{ id: string }>(
+      `insert into board_member (email, password_hash)
+       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+       returning id`,
+      [`held-017-${RUN_PREFIX}@example.test`],
+    )
+    boardMemberId = rows[0]!.id
+  })
+
+  afterAll(async () => {
+    if (boardMemberId) {
+      await writer.query('delete from document where uploaded_by = $1', [boardMemberId])
+      await writer.query('delete from board_member where id = $1', [boardMemberId])
+    }
+    await writer.end()
+  })
+
+  const doc = async (): Promise<string> => {
+    const hash = randomBytes(32).toString('hex')
+    const { rows } = await writer.query<{ id: string }>(
+      `insert into document
+         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
+       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3) returning id`,
+      [hash, `documents/${hash}`, boardMemberId],
+    )
+    return rows[0]!.id
+  }
+
+  it.each([
+    ['no reference', 'unit_reference', 'missing-reference'],
+    ['no date', 'paid_on', 'missing-date'],
+    ['no amount', 'amount', 'missing-amount'],
+  ])('holds a line with %s', async (_label, column, reason) => {
+    // Migration 016 made these `not null`, copied from `payment`, which made the
+    // table unable to hold the very lines it exists for. One malformed line then
+    // aborted the whole replacement and lost every payment in the document.
+    const documentId = await doc()
+    const values: Record<string, unknown> = {
+      unit_reference: '9Z',
+      paid_on: '2024-03-01',
+      amount: '60.00',
+    }
+    values[column] = null
+
+    await expect(
+      writer.query(
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
+         values ($1, $2, $3::date, $4, $5)`,
+        [documentId, values.unit_reference, values.paid_on, values.amount, reason],
+      ),
+    ).resolves.toBeDefined()
+  })
+
+  it('still refuses a present-but-nonsense value', async () => {
+    // Absence is not the same as nonsense. A reference that is there must still
+    // be a real reference, and an amount that is there must still be positive.
+    const documentId = await doc()
+
+    await expect(
+      writer.query(
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
+         values ($1, '   ', null, null, 'unknown-unit')`,
+        [documentId],
+      ),
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION })
+
+    await expect(
+      writer.query(
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
+         values ($1, '9Z', null, '-1.00', 'unknown-unit')`,
+        [documentId],
+      ),
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION })
+  })
+
+  it('refuses a hold reason outside the vocabulary', async () => {
+    const documentId = await doc()
+
+    await expect(
+      writer.query(
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
+         values ($1, '9Z', null, null, 'because-i-said-so')`,
+        [documentId],
+      ),
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION })
+  })
+
+  it('leaves the folded reference null when there is no reference to fold', async () => {
+    // `unit_normalised_number` is `strict`, so a null in gives a null out. Worth
+    // pinning: a generated column silently producing '' would group every
+    // reference-less line together as one unknown unit.
+    const documentId = await doc()
+    await writer.query(
+      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
+       values ($1, null, null, null, 'missing-reference')`,
+      [documentId],
+    )
+
+    const { rows } = await writer.query<{ normalised_reference: string | null }>(
+      'select normalised_reference from held_payment where document_id = $1',
+      [documentId],
+    )
+    expect(rows[0]?.normalised_reference).toBeNull()
+  })
+})

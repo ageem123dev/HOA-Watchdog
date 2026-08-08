@@ -220,11 +220,20 @@ describeWithDatabase('the payment repository', () => {
     expect(rows[0]?.amount).toBe('120.00')
   })
 
+  const heldLine = (over: Partial<Extract<ResolvedLine, { kind: 'held' }>>): ResolvedLine => ({
+    kind: 'held',
+    unitReference: '9Z',
+    paidOn: '2024-03-01',
+    amount: '60.00',
+    reason: 'unknown-unit',
+    ...over,
+  })
+
   it.each([
-    ['a missing reference', { unitReference: '', reason: 'missing-reference' }],
-    ['a missing date', { paidOn: '', reason: 'missing-date' }],
-    ['a missing amount', { amount: '', reason: 'missing-amount' }],
-  ])('stores a held line with %s rather than losing the whole document', async (_label, over) => {
+    ['a missing reference', heldLine({ unitReference: '', reason: 'missing-reference' })],
+    ['a missing date', heldLine({ paidOn: '', reason: 'missing-date' })],
+    ['a missing amount', heldLine({ amount: '', reason: 'missing-amount' })],
+  ])('stores a held line with %s rather than losing the whole document', async (_label, line) => {
     // The seam neither side's tests covered. `resolveLine` holds a malformed
     // line rather than dropping it -- proved in core -- and this repository
     // writes held lines -- proved above with well-formed ones. Nobody put the
@@ -232,19 +241,64 @@ describeWithDatabase('the payment repository', () => {
     // a `not null date` raises 22007, into `numeric` raises 22P02, and into the
     // reference's length check raises 23514.
     //
-    // Each of those aborts the transaction, so ONE malformed line in a deposit
-    // loses every payment in that document. The rule the story states is that a
-    // line is held rather than dropped; this was dropping all of them.
+    // Each aborts the transaction, so ONE malformed line in a deposit lost every
+    // payment in that document. The rule the story states is that a line is held
+    // rather than dropped; this was dropping all of them.
     const documentId = await newDocument()
     const unitId = await newUnit()
 
     await createPaymentRepository({ pool }).replace(documentId, [
       attributed(unitId, '120.00'),
-      { kind: 'held', unitReference: '9Z', paidOn: '2024-03-01', amount: '60.00', ...over } as ResolvedLine,
+      line,
     ])
 
     // Both survive: the good payment and the question about the bad line.
     expect(await counts(documentId)).toEqual({ payments: '1', held: '1' })
+  })
+
+  it('stores what a held line actually said, not merely a row', async () => {
+    // Counting rows proves a row exists. Raised by review, and correctly: every
+    // held assertion above was a count, so an insert that wrote nulls into every
+    // column -- or swapped the reference and the amount -- would have passed all
+    // of them.
+    const documentId = await newDocument()
+
+    await createPaymentRepository({ pool }).replace(documentId, [
+      { kind: 'held', unitReference: '  9z Upper ', paidOn: '2024-05-04', amount: '61.23', reason: 'unknown-unit' },
+    ])
+
+    const { rows } = await writer.query(
+      `select unit_reference, to_char(paid_on, 'YYYY-MM-DD') as paid_on, amount, hold_reason
+         from held_payment where document_id = $1`,
+      [documentId],
+    )
+
+    // The reference unfolded, as the document spelled it -- a human is being
+    // asked which unit this is.
+    expect(rows[0]).toEqual({
+      unit_reference: '  9z Upper ',
+      paid_on: '2024-05-04',
+      amount: '61.23',
+      hold_reason: 'unknown-unit',
+    })
+  })
+
+  it('records absence as null, and says why', async () => {
+    // The other half: a line held because a field was missing must store the
+    // absence as null rather than as an empty string, and carry the reason so a
+    // human is not asked a question with no context.
+    const documentId = await newDocument()
+
+    await createPaymentRepository({ pool }).replace(documentId, [
+      { kind: 'held', unitReference: '9Z', paidOn: '', amount: '60.00', reason: 'missing-date' },
+    ])
+
+    const { rows } = await writer.query(
+      'select paid_on, hold_reason from held_payment where document_id = $1',
+      [documentId],
+    )
+
+    expect(rows[0]).toEqual({ paid_on: null, hold_reason: 'missing-date' })
   })
 
   it('does not touch another document rows', async () => {
