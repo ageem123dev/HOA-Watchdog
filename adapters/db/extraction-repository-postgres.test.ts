@@ -42,6 +42,7 @@ const record = (over: Partial<ExtractionRecord> = {}): ExtractionRecord => ({
   documentNumber: null,
   issuedOn: '2026-06-01',
   totalAmount: '1450.00',
+unitReference: null,
   currency: 'USD',
   ...over,
 })
@@ -121,6 +122,7 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
         documentNumber: 'INV-4471',
         issuedOn: '2026-06-30',
         totalAmount: '8421.55',
+unitReference: null,
       })
 
       await repository.replace(documentId, [written])
@@ -158,6 +160,7 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
         documentNumber: null,
         issuedOn: null,
         totalAmount: null,
+unitReference: null,
       })
 
       await repository.replace(documentId, [sparse])

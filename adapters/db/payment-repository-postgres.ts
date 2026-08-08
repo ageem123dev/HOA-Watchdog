@@ -37,6 +37,12 @@ function getPool(): Pool {
   return sharedPool
 }
 
+
+/** Absent, not empty. See the note at the held-payment insert. */
+function blankToNull(value: string): string | null {
+  return value.trim().length === 0 ? null : value
+}
+
 export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentRepository {
   const pool = () => options.pool ?? getPool()
 
@@ -87,10 +93,22 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
               [line.unitId, documentId, line.paidOn, line.amount],
             )
           } else {
+            // Empty means absent, and absent is the whole reason the line is
+            // held. Migration 017 made these columns nullable for exactly this:
+            // an empty string into a `date` raises 22007 and into `numeric`
+            // 22P02, and either aborts the transaction -- so one malformed line
+            // in a deposit used to lose every payment in that document.
             await client.query(
-              `insert into held_payment (document_id, unit_reference, paid_on, amount)
-               values ($1, $2, $3::date, $4)`,
-              [documentId, line.unitReference, line.paidOn, line.amount],
+              `insert into held_payment
+                 (document_id, unit_reference, paid_on, amount, hold_reason)
+               values ($1, $2, $3::date, $4, $5)`,
+              [
+                documentId,
+                blankToNull(line.unitReference),
+                blankToNull(line.paidOn),
+                blankToNull(line.amount),
+                line.reason,
+              ],
             )
           }
         }

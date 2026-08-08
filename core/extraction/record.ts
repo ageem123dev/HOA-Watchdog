@@ -30,6 +30,9 @@ export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number]
 export const VENDOR_NAME_MAX_LENGTH = 200
 export const DOCUMENT_NUMBER_MAX_LENGTH = 64
 
+/** Matches `unit.unit_number` and migration 014: the same thing read off a different document. */
+export const UNIT_REFERENCE_MAX_LENGTH = 64
+
 /** `numeric(14,2)` — twelve digits ahead of the point, two behind. */
 export const AMOUNT_PRECISION = 14
 export const AMOUNT_SCALE = 2
@@ -70,6 +73,17 @@ export interface ExtractionRecord {
   /** ISO 8601 calendar date, `YYYY-MM-DD`. */
   readonly issuedOn: string | null
   readonly totalAmount: string | null
+
+  /**
+   * Which unit a deposit line pays for, as the document spelled it.
+   *
+   * Null for every other kind: an invoice pays a vendor, a statement names
+   * nobody. Resolved against `unit_normalised_number()` when the payment is
+   * written, never through `vendor_normalised_name()` — migration 011 refused
+   * that coupling because a later change to vendor matching would otherwise
+   * silently change which units are considered the same unit.
+   */
+  readonly unitReference: string | null
   readonly currency: SupportedCurrency
 }
 

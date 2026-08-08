@@ -18,6 +18,7 @@ const wellFormed = {
   documentNumber: 'INV-4471',
   issuedOn: '2026-06-01',
   totalAmount: '1450.00',
+  unitReference: null,
   currency: 'USD',
 }
 
@@ -43,6 +44,7 @@ describe('validate', () => {
         documentNumber: null,
         issuedOn: null,
         totalAmount: null,
+        unitReference: null,
         currency: 'USD',
       }
 

@@ -41,7 +41,22 @@ export type ResolvedLine =
       readonly reason: HoldReason
     }
 
-export type HoldReason = 'unknown-unit' | 'missing-reference' | 'missing-amount' | 'missing-date'
+/**
+ * Why a line could not become a payment.
+ *
+ * Stated here and in migration 017's `held_payment_reason_known` constraint,
+ * with a test reading the migration to prove the two agree. Migration 007's note
+ * gives the reason a second statement is allowed at all: it is only safe when
+ * something fails on disagreement.
+ */
+export const HOLD_REASONS = Object.freeze([
+  'unknown-unit',
+  'missing-reference',
+  'missing-amount',
+  'missing-date',
+] as const)
+
+export type HoldReason = (typeof HOLD_REASONS)[number]
 
 /**
  * The same folding migration 011 applies to `unit.unit_number`.

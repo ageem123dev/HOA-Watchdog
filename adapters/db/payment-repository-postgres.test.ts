@@ -220,6 +220,33 @@ describeWithDatabase('the payment repository', () => {
     expect(rows[0]?.amount).toBe('120.00')
   })
 
+  it.each([
+    ['a missing reference', { unitReference: '', reason: 'missing-reference' }],
+    ['a missing date', { paidOn: '', reason: 'missing-date' }],
+    ['a missing amount', { amount: '', reason: 'missing-amount' }],
+  ])('stores a held line with %s rather than losing the whole document', async (_label, over) => {
+    // The seam neither side's tests covered. `resolveLine` holds a malformed
+    // line rather than dropping it -- proved in core -- and this repository
+    // writes held lines -- proved above with well-formed ones. Nobody put the
+    // two together, and the join is where the defect was: an empty string into
+    // a `not null date` raises 22007, into `numeric` raises 22P02, and into the
+    // reference's length check raises 23514.
+    //
+    // Each of those aborts the transaction, so ONE malformed line in a deposit
+    // loses every payment in that document. The rule the story states is that a
+    // line is held rather than dropped; this was dropping all of them.
+    const documentId = await newDocument()
+    const unitId = await newUnit()
+
+    await createPaymentRepository({ pool }).replace(documentId, [
+      attributed(unitId, '120.00'),
+      { kind: 'held', unitReference: '9Z', paidOn: '2024-03-01', amount: '60.00', ...over } as ResolvedLine,
+    ])
+
+    // Both survive: the good payment and the question about the bad line.
+    expect(await counts(documentId)).toEqual({ payments: '1', held: '1' })
+  })
+
   it('does not touch another document rows', async () => {
     // A delete missing its `where document_id` would pass every test above,
     // because each uses a fresh document.

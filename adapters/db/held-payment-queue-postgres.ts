@@ -59,7 +59,8 @@ export function createHeldPaymentQueue(): HeldPaymentQueue {
                 document.filename            as "filename",
                 held_payment.unit_reference  as "unitReference",
                 to_char(held_payment.paid_on, 'YYYY-MM-DD') as "paidOn",
-                held_payment.amount          as "amount"
+                held_payment.amount          as "amount",
+                held_payment.hold_reason     as "reason"
            from held_payment
            join document on document.id = held_payment.document_id
           order by held_payment.created_at asc, held_payment.id asc`,

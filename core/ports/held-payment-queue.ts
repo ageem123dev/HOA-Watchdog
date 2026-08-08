@@ -13,6 +13,8 @@
  * cannot quietly reach for a method that was never declared.
  */
 
+import type { HoldReason } from '../payment/resolve-line'
+
 /** One deposit line waiting on a human to name its unit. */
 export interface HeldPayment {
   readonly documentId: string
@@ -33,13 +35,22 @@ export interface HeldPayment {
    * and the answer depends on seeing what was actually read — the same argument
    * `quarantine-queue.ts` makes about an extracted vendor name.
    */
-  readonly unitReference: string
+  readonly unitReference: string | null
 
-  /** `YYYY-MM-DD`. A calendar date, never a `Date`. */
-  readonly paidOn: string
+  /** `YYYY-MM-DD`. A calendar date, never a `Date`. Null when the document gave none. */
+  readonly paidOn: string | null
 
-  /** A decimal string, as every amount in this system crosses. */
-  readonly amount: string
+  /** A decimal string, as every amount in this system crosses. Null when the document gave none. */
+  readonly amount: string | null
+
+  /**
+   * Why it is held.
+   *
+   * Without it, a row with a null amount says nothing about whether the
+   * document omitted the figure or the reader failed to find it, and a human is
+   * asked a question with no context.
+   */
+  readonly reason: HoldReason
 }
 
 export interface HeldPaymentQueue {

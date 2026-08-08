@@ -1,6 +1,7 @@
 import {
   AMOUNT_PATTERN,
   DOCUMENT_NUMBER_MAX_LENGTH,
+  UNIT_REFERENCE_MAX_LENGTH,
   type ExtractionRecord,
   VENDOR_NAME_MAX_LENGTH,
   isDocumentKind,
@@ -145,6 +146,12 @@ export function validate(candidate: unknown): Validation {
     DOCUMENT_NUMBER_MAX_LENGTH,
     problems,
   )
+  const unitReference = checkText(
+    source.unitReference,
+    'unitReference',
+    UNIT_REFERENCE_MAX_LENGTH,
+    problems,
+  )
 
   let issuedOn: string | null = null
   const rawDate = source.issuedOn
@@ -190,6 +197,7 @@ export function validate(candidate: unknown): Validation {
       documentNumber,
       issuedOn,
       totalAmount,
+      unitReference,
       currency: currency as ExtractionRecord['currency'],
     },
   }

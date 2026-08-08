@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { resolveLine, type DepositLine } from './resolve-line'
+import { HOLD_REASONS, resolveLine, type DepositLine } from './resolve-line'
 
 const line = (over: Partial<DepositLine> = {}): DepositLine => ({
   unitReference: '4B',
@@ -174,4 +174,50 @@ describe('the module reads nothing ambient', () => {
       expect(source()).not.toContain(forbidden)
     },
   )
+})
+
+describe('the hold reason vocabulary', () => {
+  const migration = (): string =>
+    readFileSync(
+      join(process.cwd(), 'migrations', '017_held_payment_incomplete_lines.sql'),
+      'utf8',
+    )
+
+  it('publishes exactly the reasons the database admits', () => {
+    // Set equality, so it fails in BOTH directions. A one-way check passes when
+    // the migration carries a fifth value the application has never heard of,
+    // and a row written with it would be admitted by the database and unhandled
+    // by every consumer. `core/assessment/billing-cycle.test.ts` and
+    // `core/extraction/record.test.ts` make the same comparison the same way.
+    const clause = /held_payment_reason_known check \(\s*[a-z_]+ in \(([^)]*)\)/.exec(migration())
+
+    expect(clause, 'migration 017 no longer declares held_payment_reason_known').not.toBeNull()
+
+    const declared = Array.from(clause![1]!.matchAll(/'([^']+)'/g), (m) => m[1]!).sort()
+
+    // Without this the comparison can pass by comparing nothing to nothing.
+    expect(declared.length).toBe(4)
+    expect([...HOLD_REASONS].sort()).toEqual(declared)
+  })
+
+  it('is frozen, so a caller cannot invent a reason the database rejects', () => {
+    expect(Object.isFrozen(HOLD_REASONS)).toBe(true)
+  })
+
+  it('names a reason for every way resolveLine can hold a line', () => {
+    // The vocabulary and the function must not drift either. Every reason the
+    // decision can produce has to be one the database will accept.
+    const produced = new Set(
+      [
+        resolveLine(line({ unitReference: '9Z' }), () => null),
+        resolveLine(line({ unitReference: '' }), () => null),
+        resolveLine(line({ amount: '' }), () => null),
+        resolveLine(line({ paidOn: '' }), () => null),
+      ]
+        .filter((r): r is Extract<typeof r, { kind: 'held' }> => r.kind === 'held')
+        .map((r) => r.reason),
+    )
+
+    expect([...produced].sort()).toEqual([...HOLD_REASONS].sort())
+  })
 })
