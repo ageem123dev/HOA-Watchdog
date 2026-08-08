@@ -3,9 +3,12 @@ import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
+import type { PaymentRepository } from '../ports/payment-repository'
 import type { Quarantine } from '../ports/quarantine'
+import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
+import { recordPayments } from './record-payments'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
@@ -91,6 +94,15 @@ export interface IngestDependencies {
   readonly vendors?: VendorDirectory
   /** Where a name nobody recognises waits for a human (AD-8). */
   readonly quarantine?: Quarantine
+  /**
+   * Asked which unit a deposit reference names. Never asked to create one.
+   *
+   * Optional for the same reason as `vendors`, and with the same caveat: absent,
+   * a deposit CSV is read and no money is recorded against anybody.
+   */
+  readonly units?: UnitDirectory
+  /** Where an attributed payment and a held one are written together. */
+  readonly payments?: PaymentRepository
   /**
    * Where the real error goes. It is deliberately absent from the outcome — an
    * exception's text can name a path, a bucket, or a library — but discarding it
@@ -180,6 +192,13 @@ async function ingestOne(
       // holds first: a hold that fails leaves nothing stored and the upload can
       // be retried, where records stored without a hold is silent.
       await holdUnknownVendors(recorded.id, reading.records, deps)
+
+      // The half a story about `extract-document.ts` would have missed. A CSV
+      // never reaches the provider path at all — it is refused there with
+      // `no-provider-path` — and a bank feed is the format the pilot actually
+      // uploads, so wiring only the deferred path would have recorded payments
+      // for scanned slips and none for the documents that really arrive.
+      await recordPayments(recorded.id, reading.records, deps)
 
       await deps.extractions.replace(recorded.id, reading.records)
     } catch (error) {

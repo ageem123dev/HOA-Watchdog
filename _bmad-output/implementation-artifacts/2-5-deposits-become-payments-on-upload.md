@@ -82,17 +82,17 @@ real ingestion path rather than through a repository called directly
   - [x] Both producers, or say which and why: the Gemini extractor and the tabular reader. A CSV bank
         feed goes through the second, and that is the shape the pilot actually ingests.
   - [x] A deposit fixture end to end: bytes in, records out, with the reference populated.
-- [ ] **Task 3 — Ingestion writes payments** (AC1, AC3, AC4)
-  - [ ] Thread a `PaymentRepository` into `extract-document.ts` as a dependency, beside `quarantine`.
+- [x] **Task 3 — Ingestion writes payments** (AC1, AC3, AC4)
+  - [x] Thread a `PaymentRepository` into `extract-document.ts` as a dependency, beside `quarantine`.
         It is the same shape as the vendor hold, which is the precedent to follow rather than invent
         around.
-  - [ ] **Only for `deposit` documents.** AC3 is the guard: an invoice must write nothing to either
+  - [x] **Only for `deposit` documents.** AC3 is the guard: an invoice must write nothing to either
         table, and the vendor path must be untouched. Assert it — a change that quietly wrote empty
         payment sets for every document would pass every other test here.
-  - [ ] The payment write and the extraction write must both land or neither. Decide and record
+  - [x] The payment write and the extraction write must both land or neither. Decide and record
         whether they share a transaction or are ordered so a failure between them is recoverable —
         `extraction-repository-postgres.ts` records the same hazard for its own state write.
-  - [ ] **An entirely-held deposit is a success, not a failure.** Every line unresolved is an ordinary
+  - [x] **An entirely-held deposit is a success, not a failure.** Every line unresolved is an ordinary
         outcome, and the document's extraction state must reflect that it was read.
 - [ ] **Task 4 — Prove the path, not the parts** (AC1, AC4)
   - [ ] One test that starts at an uploaded deposit and ends with rows in `payment` and
@@ -218,6 +218,50 @@ proven, so it is written down here rather than called fixed.
 
 ### Completion Notes List
 
+**Task 3 — the wiring, in both paths.** Done, as one shared module rather than two copies.
+
+*The scope correction, carried out.* `core/ingestion/record-payments.ts` is called from
+`extract-document.ts` **and** `ingest.ts`. Wiring only the first — which is what the task text said —
+would have recorded payments for scanned deposit slips and none for CSV, the format the pilot
+actually uploads, because a CSV is refused by the deferred path with `no-provider-path` before it
+gets anywhere near a provider.
+
+*Ordering, decided and proved.* Payments are written **before** `extractions.replace`, which is what
+settles the document. A settled document is never re-read, so payments missing after it is silent and
+permanent; payments missing before it leaves the document unsettled, re-read on the next poll, and
+healed. AD-13 makes the retry safe. `payment-ordering.test.ts` asserts it by consequence — the
+extraction write is made to fail and the payment write has already happened — because a comment
+saying "call this first" constrains nothing.
+
+*The collision guard from failure mode 7, now real.* `byFoldedReference` drops a key rather than
+assigning it when two raw references fold together but name different units. Last-write-wins would
+put real money against whichever line arrived second.
+
+*The wiring is itself under test.* `units` and `payments` are optional on both dependency types, so
+their absence means "record nothing" and **nothing fails** — the exact shape of story 2.4.
+`payment-wiring.test.ts` reads both call sites and asserts each passes the real adapters; removing
+them fails 3 of 7, and setting them to `undefined` fails 1 of 7. That second mutation is why the
+test checks the constructor call and not merely the property name.
+
+*Lint caught a silent no-op edit.* Two `units:`/`payments:` insertions failed against CRLF files
+while their imports succeeded, so the call sites had the adapters imported and unused. An unused
+import is exactly the signal that wiring is missing, and it is the only reason this was noticed
+before the end-to-end test.
+
+*Sensitivity check — nine mutations across the module, the ordering and the wiring:*
+
+| Mutation | Result |
+| --- | --- |
+| record every document kind, not only deposits | 1 of 12 failed |
+| assign on a fold collision instead of dropping | 1 of 12 failed |
+| look up by the raw reference, not the folded one | 2 of 12 failed |
+| drop unreferenced lines instead of holding them | 1 of 12 failed |
+| skip the write when every line was held | 5 of 12 failed |
+| settle the extraction before writing payments | 2 of 3 failed |
+| remove the wiring from the upload action | 3 of 7 failed |
+| wire the collaborators as `undefined` | 1 of 7 failed |
+| (one invalid mutation produced a parse error and was redone) | — |
+
 **Task 2 — the producers.** Done, both of them.
 
 *A new `unit` column, not a second meaning for `reference`.* `reference` already lands in
@@ -316,6 +360,15 @@ three remain reads, which is what stops a deposit inventing a unit.
 - `adapters/extraction/extractor-gemini.ts` — modified, Task 2.
 - `adapters/extraction/extractor-gemini.test.ts` — modified, Task 2.
 - `adapters/extraction/extractor-gemini-unit.test.ts` — added, Task 2.
+- `core/ingestion/record-payments.ts` — added, Task 3.
+- `core/ingestion/record-payments.test.ts` — added, Task 3.
+- `core/ingestion/payment-ordering.test.ts` — added, Task 3.
+- `core/ingestion/payment-wiring.test.ts` — added, Task 3.
+- `core/ingestion/extract-document.ts` — modified, Task 3.
+- `core/ingestion/ingest.ts` — modified, Task 3.
+- `core/payment/resolve-line.ts` — modified, Task 3 (`fold` exported).
+- `app/upload/actions.ts` — modified, Task 3.
+- `app/api/documents/[id]/extract/route.ts` — modified, Task 3.
 
 ### Change Log
 
