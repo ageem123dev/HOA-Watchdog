@@ -78,4 +78,36 @@ export interface UnitDirectory {
    * ordering rule is a second answer to "which came first".
    */
   historyFor(unitNumber: string): Promise<readonly UnitHolding[]>
+
+  /**
+   * The units these references name, keyed by **the reference as given**.
+   *
+   * One call for a whole document, not one per line. A CSV bank feed is
+   * hundreds of lines, and a lookup per line is hundreds of round trips before
+   * ingestion can write anything.
+   *
+   * It does **not** run inside the write transaction, and an earlier draft of
+   * this note said it did. This port is answered on the reader connection
+   * (AD-4); the payment write opens its own transaction on the writer. So the
+   * cost being avoided is latency before the write, not a lock held during it —
+   * a distinction worth keeping straight, because the wrong version of it
+   * invites someone to "fix" this by passing a `PoolClient` in.
+   *
+   * A reference nobody recognises is **absent from the map**, not present with
+   * a null. `resolveLine` holds on a miss, and a null entry would make "we
+   * looked and found nothing" indistinguishable from "we never looked".
+   *
+   * Keyed by the caller's own string, and that is the load-bearing part.
+   * Matching is done by the database through `unit_normalised_number()`; the
+   * caller re-keys with core's `fold` before handing a lookup to `resolveLine`.
+   * So the database decides *which unit* and core decides *the key*, and the
+   * two foldings never have to agree — which matters, because they do not:
+   * JavaScript's `\s` matches U+3000 and migration 011's character set does
+   * not. Returning the database's normalised spelling here would turn that
+   * disagreement from harmless into a silent miss.
+   *
+   * Still a read. Nothing here can create a unit, so a deposit naming a unit
+   * nobody has recorded produces a question for a human rather than a new row.
+   */
+  unitIdsFor(references: readonly string[]): Promise<ReadonlyMap<string, string>>
 }
