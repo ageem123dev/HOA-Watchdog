@@ -5,7 +5,7 @@ merge_request: 25
 
 # Story 2.3: What is due, and by when
 
-Status: review
+Status: done
 
 > **Third of four stories in epic 2, the dues ledger.** 2.1 built the unit and who held it, 2.2 what
 > it owes for a year. This turns that annual figure into the instalments it is actually paid in. 2.4
@@ -188,6 +188,39 @@ while fixing a previous one**. The ones whose shape applies here:
 
 ### Review Findings
 
+## CodeRabbit, MR !25
+
+**The local IDE round never ran.** No record appeared in 75 minutes and it needs a manual start, so
+this MR was CodeRabbit's first look at the code. Recorded rather than left as an absence: a round
+that never happened and a round that found nothing are indistinguishable afterwards, and only one of
+them is evidence.
+
+**Round 1 — 2 findings, both mine, both tests that could not fail.**
+
+| Finding | What was true |
+| --- | --- |
+| Two tests assert only inside a `catch` | **Confirmed.** With no assertion outside, a test whose code stops throwing passes with **zero assertions**. Both now assert the throw first |
+| One of them aimed at an unreachable path | **Confirmed, and the sharper half.** It passed an *amount* carrying a newline — but `AMOUNT` rejects newlines, so `toMinorUnits` threw first and `describeValue` in `schedule.ts` was never reached. A well-formed amount **cannot** contain a newline, so the path is unreachable by construction. Repointed at `billingCycle`, which is the input that actually arrives unvalidated |
+| A duplicated source reader with no control | **Confirmed.** The second copy asserted only *absences*, so it would have passed with both `.replace` calls deleted — story 2.2's shape in a new place. One reader now, with `Date.parse` folded into the guarded list beside the control |
+
+*Sensitivity, each restored:* adding `Date.parse` to the module fails `does not call Date.parse`;
+removing the cycle guard fails the four hostile-cycle cases **and** the newline test, which now has
+an assertion outside its catch to fail with.
+
+**Round 2 — clean.** The incremental review of the fix commit (`d46ed3d..e9d95e9`) reports
+"No actionable comments were generated", and both threads are resolved.
+
+*A note-ordering trap worth recording.* The **newest** note by `created_at` was a re-statement of the
+original review of the *previous* head, showing 2 actionable. The clean review of the fix was posted
+six minutes earlier. Keying on "newest review note" would have read this MR as unconverged
+indefinitely. Convergence was decided by reading each note's stated commit **range**, not its
+timestamp.
+
+*Self-inflicted, and caught by a count rather than a failure.* Three string literals were mangled
+into real newlines while editing and stopped the file parsing. The suite went **123 -> 54 -> 123**,
+and nothing *failed* at 54 — the file simply stopped being collected. This is the second time in two
+epics that a silently-uncollected file was caught by reading the count.
+
 ### Completion Notes List
 
 **Tasks 3 and 4 — what is expected by a date, and AC2 as a property.** Done.
@@ -323,6 +356,8 @@ falling over. It now asserts the message.
 ### File List
 
 ### Change Log
+
+- 2026-08-07 — Ready to merge. MR !25 reviewed clean on `e9d95e9`. Status -> done.
 
 - 2026-08-07 — All four tasks complete. Status -> review.
 
