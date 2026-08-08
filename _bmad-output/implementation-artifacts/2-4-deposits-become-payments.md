@@ -356,6 +356,7 @@ with no generated normalisation — and verified: attaching
 ### Change Log
 
 - 2026-08-08 — All five tasks complete. Status -> review.
+- 2026-08-08 — MR round 3: a regression test for the rollback-failure release, which until now was an unproven guard. Three mutations confirm it discriminates.
 
 - 2026-08-07 — Story created. Two gaps in epic 1 were found before writing it: an extracted record has
   no unit field, and there is no `deposit` document kind. Matt chose a new `unit_reference` column on
