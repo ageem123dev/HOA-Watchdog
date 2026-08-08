@@ -16,7 +16,7 @@ import type { ExtractionRecord } from '../extraction/record'
 import type { ResolvedLine } from '../payment/resolve-line'
 import type { PaymentRepository } from '../ports/payment-repository'
 import type { UnitDirectory } from '../ports/unit-directory'
-import { recordPayments } from './record-payments'
+import { recordPayments, unstorableUnitReference } from './record-payments'
 
 const deposit = (over: Partial<ExtractionRecord> = {}): ExtractionRecord => ({
   documentKind: 'deposit',
@@ -243,5 +243,29 @@ describe('recording payments from a read document', () => {
     // than a neutral default, which is why both production call sites supply
     // them and a test asserts each does.
     await expect(recordPayments(DOCUMENT, [deposit()], {})).resolves.toBeUndefined()
+  })
+
+  it('reports a reference carrying a NUL as unstorable', () => {
+    // Raised by review, and the fourth appearance of migration 017's shape:
+    // `text` cannot hold a NUL, so this reaches the `held_payment` insert as a
+    // parameter, raises 22021, and aborts the transaction -- taking every
+    // payment in the document with it. `unitIdsFor` already refused to *send*
+    // one; nothing stopped it being *stored*.
+    //
+    // `validate` does not catch it either: `checkText` refuses null, wrong
+    // types, blank and too-long, and says nothing about control characters.
+    expect(unstorableUnitReference([deposit({ unitReference: `4B\u0000` })])).toBe(true)
+  })
+
+  it('does not call an ordinary reference unstorable', () => {
+    expect(unstorableUnitReference([deposit({ unitReference: '4B' })])).toBe(false)
+    expect(unstorableUnitReference([deposit({ unitReference: null })])).toBe(false)
+    expect(unstorableUnitReference([invoice()])).toBe(false)
+  })
+
+  it('checks every record, not only the first', () => {
+    expect(
+      unstorableUnitReference([deposit(), deposit({ unitReference: `5C\u0000` })]),
+    ).toBe(true)
   })
 })

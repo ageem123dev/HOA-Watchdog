@@ -217,6 +217,37 @@ proven, so it is written down here rather than called fixed.
 
 ### Review Findings
 
+**Argus, second run — on the fix commit, after `argus_ingest` wrote its lessons.** The first run found
+nothing; this one found three, one critical. The ingest is the difference, and it is the clearest
+evidence so far that the memory loop does something.
+
+**[critical] A NUL in a unit reference reached the write path.** `unitIdsFor` already refused to
+*send* one — and that read-path guard is exactly what made the write path look covered. Nothing
+stopped it being *stored*: `text` cannot hold a NUL, so the `held_payment` insert raises 22021, which
+aborts the transaction, takes every payment in the document with it, and reports as an outage rather
+than a bad document — so it retries forever. `validate` does not close it either; `checkText` refuses
+null, wrong types, blank and too-long and says nothing about control characters. **Migration 017's
+shape for the fourth time in this epic.**
+
+Fixed as `unstorableUnitReference`, reported rather than repaired, matching `unstorableName` beside
+it: both call sites turn it into `unreadable`. Stripping the NUL would store a reference the document
+does not contain, and might match a unit the payer never named.
+
+*Writing the test corrected the finding.* The first end-to-end attempt asserted `unreadable` on the
+CSV path and got `rejected` — `assess` refuses an upload containing a NUL before the bytes are even
+stored, so **that path was already safe**. The guard earns its place on the provider path, where the
+bytes are a valid PDF and the model supplies the reference. The CSV test now asserts what is true
+rather than what was expected, and the guard is proved where it actually bites.
+
+**[high] NUL guards on `heldBy`/`historyFor` — declined again, and re-verified.** Still no production
+caller: `unitIdsFor` is the only method this story wired, and the other two remain unreachable. A
+guard nothing can force is the shape this project deletes.
+
+**[low] A comment describing code that does not exist.** The note claimed `deposit` was compared
+against the record's vocabulary rather than a literal; it never was. Corrected rather than deleted —
+a comment describing absent code is worse than no comment, because it is the version a reader
+believes. My error, and the second of this kind in this story.
+
 **Local round (Argus + CodeRabbit IDE, on `c487ebe`).** Argus: **zero findings** on the whole-story
 diff — recorded rather than celebrated, since Argus also passed story 2.4, the story that shipped a
 complete and unreachable ledger. When the defect is *absence*, a clean second opinion is weak

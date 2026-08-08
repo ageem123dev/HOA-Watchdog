@@ -136,8 +136,11 @@ function responseSchema(): Record<string, unknown> {
  * adapter quietly correcting the provider, and the point of validating an
  * untrusted answer is to find out when it is wrong rather than to tidy it.
  *
- * `deposit` is compared against the record's own vocabulary rather than a
- * literal, so adding a kind that carries a unit changes one list.
+ * `deposit` is a literal here. An earlier draft of this note claimed it was
+ * compared against the record's own vocabulary, which it never was — flagged by
+ * review, and worth correcting rather than quietly deleting: a comment
+ * describing code that does not exist is worse than no comment, because it is
+ * the version a reader believes.
  */
 function withoutStrayUnitReference(candidate: unknown): unknown {
   if (typeof candidate !== 'object' || candidate === null) return candidate

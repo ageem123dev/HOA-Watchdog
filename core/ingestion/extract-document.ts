@@ -11,7 +11,7 @@ import type { Quarantine } from '../ports/quarantine'
 import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
-import { recordPayments } from './record-payments'
+import { recordPayments, unstorableUnitReference } from './record-payments'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -231,7 +231,13 @@ export async function extractDocument(
       // The quarantine rule, shared with the upload-time path in `ingest.ts`.
       // Extraction finishes in two places and the rule is about extraction
       // finishing, so it lives in one module rather than two copies.
-      if (unstorableName(result.records)) return await settle('unreadable', 'unreadable')
+      // Same rule for the unit reference: a NUL raises 22021 as a parameter and
+      // aborts the transaction, losing every payment in the document. Raised by
+      // review -- `unitIdsFor` refused to send one, and nothing stopped it being
+      // stored, which is what made the gap look closed.
+      if (unstorableName(result.records) || unstorableUnitReference(result.records)) {
+        return await settle('unreadable', 'unreadable')
+      }
 
       // Held *before* the records are stored, and the order is load-bearing.
       //

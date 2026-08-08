@@ -40,7 +40,7 @@ const DEPOSIT: ExtractionRecord = {
 const SCAN = new TextEncoder().encode('%PDF-1.7 deposit slip %%EOF')
 
 /** Everything `extractDocument` needs, with the extraction write set to fail. */
-function harness(options: { extractionFails: boolean }) {
+function harness(options: { extractionFails: boolean; unitReference?: string }) {
   const order: string[] = []
 
   const repository = {
@@ -66,7 +66,10 @@ function harness(options: { extractionFails: boolean }) {
   } as unknown as ExtractionRepository
 
   const extractor = {
-    extract: vi.fn(async () => ({ ok: true as const, records: [DEPOSIT] })),
+    extract: vi.fn(async () => ({
+      ok: true as const,
+      records: [{ ...DEPOSIT, unitReference: options.unitReference ?? DEPOSIT.unitReference }],
+    })),
   } as unknown as Extractor
 
   const vendors = {
@@ -122,5 +125,26 @@ describe('the order the two writes happen in', () => {
     const result = await extractDocument('doc-1', deps)
 
     expect(result.outcome).not.toBe('read')
+  })
+
+  it('refuses the document when the provider returns a reference the tables cannot store', async () => {
+    // Where the storability guard actually bites. The CSV path never gets here
+    // -- `assess` refuses an upload containing a NUL outright -- but a scan is
+    // a valid PDF and the model supplies the reference, so nothing upstream has
+    // looked at it.
+    //
+    // `text` cannot hold a NUL: as a parameter it raises 22021, which aborts the
+    // transaction and takes every payment in the document with it, and reports
+    // as an outage rather than a bad document -- so it would be retried forever.
+    // Migration 017's shape for the fourth time this epic. Raised by review,
+    // which noticed `unitIdsFor` refused to *send* one while nothing stopped it
+    // being *stored*.
+    const { deps, order } = harness({ extractionFails: false, unitReference: `4B${'\u0000'}` })
+
+    const result = await extractDocument('doc-1', deps)
+
+    expect(result.outcome).toBe('unreadable')
+    // Nothing written, to either table -- the refusal happens before the writes.
+    expect(order).toEqual([])
   })
 })

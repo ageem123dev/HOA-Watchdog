@@ -8,7 +8,7 @@ import type { Quarantine } from '../ports/quarantine'
 import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
-import { recordPayments } from './record-payments'
+import { recordPayments, unstorableUnitReference } from './record-payments'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
@@ -183,7 +183,12 @@ async function ingestOne(
     // `resolve`, Postgres refuses the parameter, and the upload reports
     // `figures-not-stored`: the treasurer is told their figures were not saved
     // rather than that the document could not be read.
-    if (unstorableName(reading.records)) {
+    // A unit reference is subject to the same rule, and for the same reason: a
+    // NUL raises 22021 as a parameter, which aborts the transaction and takes
+    // every payment in the document with it. Raised by review, which noticed
+    // that `unitIdsFor` refused to send one while nothing stopped it being
+    // stored — the read-path guard is exactly what made this look covered.
+    if (unstorableName(reading.records) || unstorableUnitReference(reading.records)) {
       return { filename, outcome: 'unreadable', documentId: recorded.id }
     }
 

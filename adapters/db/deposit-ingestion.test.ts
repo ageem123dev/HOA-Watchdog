@@ -311,4 +311,36 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
     )
     expect(rows[0]!.extraction_state).toBe('read')
   })
+
+  it('never lets a NUL in a CSV reach the ledger at all', async () => {
+    // Raised by review on the fix diff. `text` cannot hold a NUL: as a query
+    // parameter it raises 22021, which aborts the transaction and takes every
+    // payment in the document with it -- and reports as an outage rather than a
+    // bad document, so it would be retried forever.
+    //
+    // On this path it never gets that far, and the test says so rather than
+    // asserting what was expected: `assess` refuses the upload outright, so the
+    // bytes are not even stored. The storability guard added for this hazard is
+    // therefore unreachable *here* -- it earns its place on the provider path,
+    // where the bytes are a valid PDF and the model supplies the NUL, and
+    // `payment-ordering.test.ts` is where that is proved.
+    const [outcome] = await ingest(
+      [
+        {
+          filename: `${scope}-nul.csv`,
+          contentType: 'text/csv',
+          bytes: new TextEncoder().encode(
+            [
+              'date,description,amount,type,unit',
+              `2026-03-01,Dues ${scope},250.00,deposit,4B\u0000X`,
+            ].join('\n'),
+          ),
+        },
+      ],
+      boardMemberId,
+      dependencies(),
+    )
+
+    expect(outcome!.outcome).toBe('rejected')
+  })
 })

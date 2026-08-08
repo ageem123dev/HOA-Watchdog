@@ -64,6 +64,31 @@ function byFoldedReference(found: ReadonlyMap<string, string>): Map<string, stri
 }
 
 /**
+ * Whether any deposit line carries a reference the tables cannot store.
+ *
+ * `text` cannot hold a NUL. Passing one as a parameter raises 22021, which
+ * aborts the transaction — so a single such line would take every payment in
+ * the document with it, and `extraction.unit_reference` would refuse it too.
+ * Migration 017's defect shape for the fourth time in this epic.
+ *
+ * `unitIdsFor` already refuses to *send* one; nothing stopped it being
+ * *stored*, and the read-path guard is what made the write-path gap look
+ * covered. `validate` does not close it either: `checkText` refuses null, wrong
+ * types, blank and too-long, and says nothing about control characters.
+ *
+ * Reported rather than repaired, matching `unstorableName` beside it: both call
+ * sites turn this into `unreadable`, which is honest — the document arrived
+ * carrying something nothing here can record. Stripping the NUL instead would
+ * store a reference the document does not contain, and might match a unit the
+ * payer never named.
+ */
+export function unstorableUnitReference(records: readonly ExtractionRecord[]): boolean {
+  return records.some(
+    (record) => record.unitReference !== null && record.unitReference.includes('\u0000'),
+  )
+}
+
+/**
  * A record as `resolveLine` needs it.
  *
  * Null becomes empty rather than being filtered out, because `resolveLine`
