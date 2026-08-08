@@ -616,6 +616,49 @@ So that what arrived can be compared with what was owed.
 unit are both meaningless. 2.3 depends only on 2.2 and is pure logic, so it can be built and
 tested before any deposit exists. 2.4 is last because it is the only story that needs a document.
 
+### Story 2.5: A deposit becomes payments when it is uploaded
+
+*Added 2026-08-08, after 2.4.*
+
+As a treasurer,
+I want an uploaded deposit to become payments without further action,
+So that what arrived is in the ledger by the time I look at it.
+
+**Why it exists.** 2.4 built the `payment` and `held_payment` tables, the resolve-or-hold decision,
+and the repository that replaces both on re-ingest — and connected none of it to the upload path.
+Verified by search: outside their own tests, nothing calls `createPaymentRepository`, `resolveLine`
+or `createHeldPaymentQueue`. So 2.4's AC1 — "given an uploaded deposit document… each payment is
+stored against a unit" — is not true end to end.
+
+No review caught it, because every part is correct in itself and every test passes. **A set of green
+units does not add up to a working path.**
+
+**Acceptance Criteria:**
+
+**Given** a deposit document is uploaded and extracted
+**When** ingestion completes
+**Then** each line naming a known unit is stored as a payment against it, and each line that does
+not is held — without anyone invoking a second step
+
+**Given** a deposit line naming a unit in a spelling the roll does not use exactly
+**When** it is resolved
+**Then** it matches through `unit_normalised_number()` and only through it, and a reference that
+does not fold to a known unit is held rather than guessed at
+
+**Given** a document that is not a deposit
+**When** it is ingested
+**Then** nothing is written to `payment` or `held_payment`, and the vendor path behaves exactly as
+it did before
+
+**Given** the same deposit uploaded twice
+**When** it is ingested the second time
+**Then** its payments and held lines are replaced, not duplicated — AD-13 proved through the real
+ingestion path rather than through a repository called directly
+
+**Three gaps it closes:** `extract-document.ts` takes no payment repository; the extractor was never
+taught to emit `unitReference`, so the column is null in practice; and nothing resolves a reference
+to a `unit_id` — `resolveLine` takes the lookup as a parameter and no adapter implements one.
+
 ---
 
 ## Epic 3: The Oracle — ask a question, get an answer you can prove
