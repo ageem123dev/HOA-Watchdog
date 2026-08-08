@@ -4,7 +4,7 @@ baseline_commit: e09cd82f4d6b1f3e34a343c9195acce43a5c878f
 
 # Story 2.4: Deposits become payments
 
-Status: in-progress
+Status: review
 
 > **Last of four stories in epic 2, the dues ledger.** 2.1 built the unit and who held it, 2.2 what it
 > owes for a year, 2.3 the instalments that fall due. This records what actually arrived — the other
@@ -124,15 +124,15 @@ of keeping unit identity and vendor identity separate, and 2.1 already paid it o
         must be it". If the fold does not match exactly, it is held.
   - [x] A line missing a unit reference, an amount, or a date is held rather than dropped — a payment
         the system silently forgot is worse than one waiting for a human.
-- [ ] **Task 5 — Writing them, and replacing them on re-ingest** (AC1, AC3)
-  - [ ] One transaction per document: delete this document's payments **and** its held payments, then
+- [x] **Task 5 — Writing them, and replacing them on re-ingest** (AC1, AC3)
+  - [x] One transaction per document: delete this document's payments **and** its held payments, then
         insert the new reading of both. AD-13 is set-shaped, and a partial replacement that dropped
         one table and not the other would leave a document half-described.
-  - [ ] **Prove the replacement from outside**: ingest twice, assert the counts do not double and the
+  - [x] **Prove the replacement from outside**: ingest twice, assert the counts do not double and the
         second reading's values are the ones present.
-  - [ ] Prove a failure midway leaves the previous reading intact, not a document holding nothing.
+  - [x] Prove a failure midway leaves the previous reading intact, not a document holding nothing.
         `extraction-repository-postgres.ts` records this hazard for its own path.
-  - [ ] Reader-connection read port for held payments, following
+  - [x] Reader-connection read port for held payments, following
         `core/ports/quarantine-queue.ts` — read-only, with the reason in the header.
 
 ## Dev Notes
@@ -224,6 +224,38 @@ present at the time, so they stand.
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 5 — writing them, and replacing them on re-ingest.** Done.
+
+*The replacement follows `extraction-repository-postgres.ts` deliberately, including the part that
+is easy to leave out.* It locks the parent `document` row before touching anything — because the
+deletes only serialise two replacements when there are rows to lock, and on a document holding none
+both transactions would delete nothing, both insert, and both commit, leaving it holding two
+readings. The `document` row exists either way.
+
+*Both tables move together, and that is the assertion the signature exists for.* A line either became
+a payment or was held; they are one reading. Clearing `payment` and not `held_payment` would leave a
+document described half by this reading and half by the last — and after a treasurer names a unit,
+the same money would appear twice: once as a payment, once as an open question.
+
+*The empty-set bar is the **combined** set.* A deposit whose every line was held is an ordinary
+outcome — an unfamiliar reference format, a new roll — and refusing it would reject a real document.
+`replace(id, [])` is still refused, for the reason the extraction repository records.
+
+*Sensitivity, each restored:*
+
+| Mutation | Tests that failed |
+| --- | --- |
+| `held_payment` not cleared | the re-ingest count **and** `clears held payments too when the second reading resolves them` |
+| `where document_id` dropped from the payment delete | 4, including the cross-document case |
+| Empty-set refusal removed | `refuses an entirely empty reading` |
+
+A failure midway is proved to leave the previous reading intact, not a document holding nothing: a
+treasurer can see that last month's figures are old, and cannot see figures that are absent.
+
+*Gates, from three consecutive unit runs rather than one:* lint 0 errors and 1 pre-existing warning,
+`tsc --noEmit` **8** (= baseline), build clean, `npm test` **81 files / 1440 passed**,
+`npm run test:db` **27 files / 491 passed**.
 
 **Task 4 — resolving a line, or holding it.** Done. A pure function; the directory lookup is a
 parameter, so it is testable without a database and cannot consult one by accident.
@@ -321,6 +353,8 @@ with no generated normalisation — and verified: attaching
 ### File List
 
 ### Change Log
+
+- 2026-08-08 — All five tasks complete. Status -> review.
 
 - 2026-08-07 — Story created. Two gaps in epic 1 were found before writing it: an extracted record has
   no unit field, and there is no `deposit` document kind. Matt chose a new `unit_reference` column on
