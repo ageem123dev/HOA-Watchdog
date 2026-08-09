@@ -84,9 +84,18 @@ const tabulated = (title: string, column = 1): string[] => {
   const separator = lines.findIndex((cells) => /^-{3,}$/.test(cells[0]!))
   const rows = separator === -1 ? [] : lines.slice(separator + 1)
 
-  return rows
-    .map((cells) => /^`([^`]+)`/.exec(cells[column - 1] ?? '')?.[1])
-    .filter((code): code is string => code !== undefined)
+  // Column 1 is a code; later columns may be prose naming several codes. Return
+  // the backticked code when there is one and the raw cell otherwise, so a
+  // relation column ("Used by") can be read as well as a code column.
+  // A cell that is exactly one backticked token is a code; anything else is
+  // prose that may name several. Returning the code for the first and the raw
+  // text for the second lets one helper read both a code column and a relation
+  // column ("Used by"), which is what the roll-header check needs.
+  return rows.map((cells) => {
+    const cell = (cells[column - 1] ?? '').trim()
+    const only = /^`([^`]+)`$/.exec(cell)
+    return only ? only[1]! : cell
+  })
 }
 
 /**
@@ -94,7 +103,7 @@ const tabulated = (title: string, column = 1): string[] => {
  * code does not have.
  */
 const statesExactly = (members: readonly string[], title: string, column = 1): void => {
-  const listed = tabulated(title, column)
+  const listed = tabulated(title, column).filter((code) => code !== '')
 
   expect(listed.length, `no table rows found under "${title}"`).toBeGreaterThan(0)
 
@@ -168,8 +177,25 @@ describe('the written contract states the vocabularies exhaustively', () => {
     statesExactly([...OPTIONAL_HEADERS], '### Optional columns')
   })
 
-  it('names the roll columns as a set of their own', () => {
-    expect(ROLL_HEADERS.every((header) => tabulated('### Optional columns').includes(header))).toBe(true)
+  it('documents exactly the roll-only columns the code declares', () => {
+    // The first version asserted each roll header appeared *somewhere* in the
+    // optional-columns table, which passes if the document drops the roll
+    // relation entirely or attaches a header to the wrong kind. Raised by
+    // review: a guard must fail when the guarded thing regresses.
+    //
+    // The documented relation is the "Used by" column, so read that. A row is
+    // roll-only when it names `assessment_roll` and nothing else -- which is
+    // what `ROLL_HEADERS` means, and is why `unit` (shared with `deposit`) must
+    // not appear in this set.
+    const codes = tabulated('### Optional columns', 1)
+    const usedBy = tabulated('### Optional columns', 2)
+
+    const rollOnly = codes.filter((_code, index) => {
+      const audience = usedBy[index] ?? ''
+      return audience.includes('assessment_roll') && !audience.includes('deposit')
+    })
+
+    expect(new Set(rollOnly)).toEqual(new Set(ROLL_HEADERS))
   })
 
   it('names every reason a file is refused outright, and no others', () => {
@@ -214,12 +240,20 @@ describe('the test itself', () => {
   })
 
   it('would notice a vocabulary member the document dropped', () => {
-    expect(() => statesExactly(['a-kind-no-document-lists'], '### Document kinds')).toThrow()
+    // The message, not merely a throw. A bare `toThrow()` also passes when the
+    // section is missing or the helper crashes -- it cannot tell "the guard
+    // fired" from "the guard broke". Raised by review.
+    expect(() => statesExactly(['a-kind-no-document-lists'], '### Document kinds')).toThrow(
+      /absent from "### Document kinds": a-kind-no-document-lists/,
+    )
   })
 
   it('would notice a row the code does not have', () => {
     // The direction the first version could never fail in: the document lists
-    // five kinds, so a vocabulary of four must report the fifth as a stray.
-    expect(() => statesExactly(['invoice'], '### Document kinds')).toThrow()
+    // five kinds, so a vocabulary of one must report the rest as strays -- and
+    // the message must say so, or this passes on any unrelated failure.
+    expect(() => statesExactly(['invoice'], '### Document kinds')).toThrow(
+      /listed under "### Document kinds" but not in the code: .*statement/,
+    )
   })
 })

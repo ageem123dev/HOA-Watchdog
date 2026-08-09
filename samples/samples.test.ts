@@ -229,12 +229,25 @@ describe('the generated samples cannot drift from the rows that produce them', (
         Buffer.concat([readFileSync(copy), Buffer.from('2026-03-09,Extra,1.00\r\n')]),
       )
 
-      expect(() =>
+      // Not a bare `toThrow()`. That passes when node is missing, when the copy
+      // failed, or on any unrelated crash -- so it cannot tell "the check caught
+      // the drift" from "the check never ran". Raised by review, and it is this
+      // project's own rule about `toThrow` written down elsewhere.
+      let failure: { status?: number; stderr?: Buffer } | undefined
+      try {
         execFileSync('node', ['scripts/build-samples.mjs', '--check'], {
           cwd: scratch,
           stdio: 'pipe',
-        }),
-      ).toThrow()
+        })
+      } catch (error) {
+        failure = error as { status?: number; stderr?: Buffer }
+      }
+
+      expect(failure, 'the drift check accepted a corrupted sample').toBeDefined()
+      expect(failure?.status).toBe(1)
+      expect(String(failure?.stderr ?? '')).toContain(
+        'deposits.csv does not match what the rows produce',
+      )
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }

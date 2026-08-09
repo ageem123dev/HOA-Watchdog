@@ -64,7 +64,8 @@ The short version: **CSV and Excel are read immediately**, at upload time, and n
 
 ### Sample files
 
-One per accepted format, in [`samples/`](samples/):
+Seven files covering the six accepted formats, in [`samples/`](samples/). Two of them are CSVs —
+an assessment roll and a deposit feed are different documents in the same format:
 
 | File | Format | What it is | What happens |
 | --- | --- | --- | --- |

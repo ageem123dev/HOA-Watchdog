@@ -334,6 +334,35 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 
 ### Review Findings
 
+**MR round 1 — 3 actionable, all real, all in guards I wrote.**
+
+**The roll-header check tested almost nothing.** It asserted each `ROLL_HEADERS` value appeared
+*somewhere* in the optional-columns table — so it passed if the document dropped the roll relation
+entirely, or attached a header to the wrong kind. Now it reads the documented **"Used by"** column
+and compares the roll-only set exactly: a row is roll-only when it names `assessment_roll` and
+nothing else, which is what `ROLL_HEADERS` means and is why `unit` must not appear in it.
+
+**Two expected-failure controls passed on any exception.** Bare `.toThrow()` cannot tell "the guard
+fired" from "the guard broke" — it passes when node is missing, when a copy failed, or on any
+unrelated crash. The drift control now asserts exit status 1 **and** the specific diagnostic naming
+`deposits.csv`; the contract controls assert the missing-member and stray-member messages. This is
+the project's own rule about `toThrow`, which I had written into the story's Dev Notes and then not
+followed.
+
+**The README claimed one sample per format** while shipping two CSVs. Corrected to state coverage of
+the six formats across seven files, and why two are CSVs.
+
+*Sensitivity check — two mutations:*
+
+| Mutation | Result |
+| --- | --- |
+| attach a roll column to `deposit` as well | 1 of 20 failed |
+| make the drift script fail for an unrelated reason | 2 of 24 failed |
+
+The second is the point of the finding: an unrelated failure is now **distinguishable** from real
+drift, where before both read as success.
+
+
 **Local round — Argus, then the CodeRabbit CLI.** The skill's step 4b was rewritten for the CLI in
 story 2.7, so this is the first story to use it here.
 
