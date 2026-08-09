@@ -150,22 +150,22 @@ row reads as a register that never had it
         exactly that. Scope it to the samples here; the repo-wide renormalisation stays that item's
         work.
 
-- [ ] **Task 3 — The README a stranger can follow** (AC1)
-  - [ ] Correct every row of the defect table above. The Supabase paragraphs are replaced, not
+- [x] **Task 3 — The README a stranger can follow** (AC1)
+  - [x] Correct every row of the defect table above. The Supabase paragraphs are replaced, not
         patched: they name a vendor with no presence in this repository.
-  - [ ] Add the missing path to a running system: `npm run migrate`, then
+  - [x] Add the missing path to a running system: `npm run migrate`, then
         `scripts/add-board-member.mjs`, then `npm run dev`. A reader who never runs the migration has
         an application whose every upload fails on a foreign key.
-  - [ ] Correct the gate. Five commands, and **say that none of them run automatically** — AD-2's
+  - [x] Correct the gate. Five commands, and **say that none of them run automatically** — AD-2's
         amendment is explicit that a local run is not a gate, and a README claiming a pipeline that
         does not exist is the single most misleading sentence in the file.
-  - [ ] Add the upload section: the contract from Task 1, the samples from Task 2, and the
+  - [x] Add the upload section: the contract from Task 1, the samples from Task 2, and the
         `unknown-unit` warning above, stated where a reader meets it rather than in a footnote.
-  - [ ] Say what to do about it. Whether that is a documented `insert into unit` for the pilot or a
+  - [x] Say what to do about it. Whether that is a documented `insert into unit` for the pilot or a
         seed script is a call for the dev — but the sample deposit must be *usable*, and today it
         resolves nothing. If a seed lands, it is the smallest thing that makes the sample work, not
         a units admin surface; that is a story of its own.
-  - [ ] Correct the Layout section against the real tree.
+  - [x] Correct the Layout section against the real tree.
 
 - [ ] **Task 4 — The as-built system diagram** (AC4)
   - [ ] A diagram in the README itself, so a reader gets the shape without leaving the file. Mermaid
@@ -336,6 +336,35 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 
 ### Completion Notes List
 
+**Task 3 — the README, and a guard on it.** Every row of the defect table is corrected. Supabase is
+gone entirely rather than patched: it named a vendor with no presence in this repository.
+
+*The missing path to a running system is now the Getting Started block* — install, env, **migrate**,
+`add-board-member.mjs`, dev. A clone that stopped after `npm run dev` had an application whose every
+upload failed on a missing table, and nothing said so.
+
+*Task 3's open question is answered by story 2.7 rather than by a seed script.* "What to upload
+first" tells a reader to upload `samples/assessment-roll.csv` before anything else, because
+uploading a roll is the only way units come to exist. The deposit sample then resolves. A seed
+script would have been a worse answer: it is not the path a real association would use.
+
+*`docs/readme.test.ts` guards the countable claims*, because none of the original defects needed
+carelessness — they needed only time. It checks the environment variables in both directions, the
+gate commands, the migration count, every top-level directory, every sample named in both
+directions, that the file says plainly nothing runs automatically, and that the word "Supabase"
+never returns.
+
+*Sensitivity check — three mutations:*
+
+| Mutation | Result |
+| --- | --- |
+| mention Supabase again | 1 of 13 failed |
+| drop a sample from the table | 1 of 13 failed |
+| add a migration file | 1 of 13 failed |
+
+The third is the one that matters: it is drift with **nobody editing the README at all**, which is
+how every defect in the story's table arrived.
+
 **Task 2 — six samples, four generated and two verified.**
 
 *One source of truth.* `scripts/build-samples.mjs` holds the rows once and writes the CSV pair, the
@@ -428,6 +457,8 @@ Added `docs/**/*.ts`. A new source directory is a new hole in the gate unless so
   `samples/statement.xls`, `samples/deposit-slip.pdf` — added, Task 2 (generated).
 - `samples/deposit-slip.png`, `samples/deposit-slip.jpg` — added, Task 2 (committed, verified).
 - `.gitattributes` — added, Task 2.
+- `README.md` — rewritten, Task 3.
+- `docs/readme.test.ts` — added, Task 3.
 
 ### Change Log
 
