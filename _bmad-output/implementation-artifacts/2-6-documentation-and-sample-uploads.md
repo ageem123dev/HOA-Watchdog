@@ -334,6 +334,61 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 
 ### Review Findings
 
+**Local round — Argus, then the CodeRabbit CLI.** The skill's step 4b was rewritten for the CLI in
+story 2.7, so this is the first story to use it here.
+
+*Two obstacles, both worked around rather than skipped.* WSL cannot read a linked worktree — its
+`.git` is a file pointing at a Windows path — so the review ran against a throwaway clone at
+`c:/tmp/cr-2-6` checked out at the pushed head, verified from inside WSL as the same HEAD, base and
+21-file diff. The main checkout was on another branch's close-out and was left alone.
+
+**`argus_ingest` cannot read the CLI's output, and the skill's step 5 has therefore never worked.**
+Passing `from: .argus/cr.jsonl` with the commit returns `reviews_found: 0`. Not a path problem:
+tested against story **2.7's own capture and commit** in the main checkout — also zero — while
+auto-discovery against the VS Code extension's storage finds 8. The adapter parses the extension's
+JSON, not the CLI's JSONL. So the step reads as done and learns nothing, which is this project's
+recurring failure shape sitting inside its own review tooling. Recorded here; fixing the adapter is
+not this story's work.
+
+*CodeRabbit: `review_completed`, 21 of 21 changed paths reviewed, 4 findings. Argus: 4.* Three fixed,
+one declined.
+
+**[major, CodeRabbit] The CI-citation guard counted instead of associating.** It asserted two
+citations and two amendments existed *somewhere* in the file — which passes if one row carries both
+notes and another carries none. An aggregate count is not an association. Now each citation is
+checked against its own row.
+
+**[high, Argus] The drift control mutated the tracked fixture.** It corrupted `samples/deposits.csv`
+and restored it, which loops a watcher and leaves a dirty tree if the run aborts. It was already my
+leading suspect for the task-2 transient. Now it copies the script and samples into `.probe/`
+(gitignored, inside the repo so `xlsx` still resolves) and corrupts the copy.
+
+**[minor, CodeRabbit] `assessment-roll.csv` was never assessed.** The `SAMPLES` list was one entry
+per content type because the coverage assertion compared sorted lists — so *the assertion shaped the
+fixture*, and the fixture quietly excluded the second CSV. That CSV is the sample a new installer
+uploads first. Coverage is a set comparison now, and a new test asserts every committed file appears
+in the list.
+
+**[minor, CodeRabbit] Declined, verified first: the diagram's vendor branch.** It asked that only
+invoices route through vendor validation. `holdUnknownVendors` does not filter by kind at all — every
+record with a non-null vendor name goes through it, deposits and statements included. The diagram is
+right and the suggestion would have made it wrong.
+
+*Sensitivity check — five mutations:*
+
+| Mutation | Result |
+| --- | --- |
+| drop the roll from `SAMPLES` | 1 of 22 failed |
+| make the drift script always exit 0 | 1 of 24 failed |
+| a CI citation without its withdrawal | 1 of 7 failed |
+| a new top-level directory the README omits | 1 of 13 failed |
+| delete the `npm test` line (earlier round) | 1 of 13 failed |
+
+**A mistake of my own, worth recording.** Restoring a mutated file with `git checkout --` discarded
+four *uncommitted* fixes in it, and the next run passed — so the loss looked like success. Mutations
+must be restored from a copy, never from git, on a file with uncommitted work.
+
+
 **Rebased onto `main` once story 2.7 merged (`fe86f5f`).** The branch was cut from 2.7's head so a
 "sample of every format" would not ship one short; with 2.7 in `main` the diff is 21 files, all this
 story's own. Gates re-run on the new base.

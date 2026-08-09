@@ -114,11 +114,33 @@ describe('the README describes this tree', () => {
   })
 
   it('names every top-level source directory that exists', () => {
-    // The old README said the remaining directories "arrive with the stories
-    // that need them", by which time four of them had arrived.
-    for (const directory of ['app/', 'core/', 'adapters/', 'migrations/', 'scripts/', 'samples/', 'docs/']) {
-      expect(readme, `the Layout block omits ${directory}`).toContain(directory)
-    }
+    // Derived from the tree, not hard-coded. A list written by hand is the same
+    // artefact as the Layout block it checks, and would go stale the same way --
+    // which is how the old README came to say the remaining directories 'arrive
+    // with the stories that need them' after four of them had arrived. Raised by
+    // review.
+    const ignored = new Set([
+      'node_modules',
+      '.next',
+      '.git',
+      '.claude',
+      '.agents',
+      '.probe',
+      '.argus',
+      '_bmad',
+      '_bmad-output',
+      '.vscode',
+      '.github',
+    ])
+
+    const directories = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !ignored.has(entry.name))
+      .map((entry) => `${entry.name}/`)
+
+    expect(directories.length, 'no source directories found -- wrong root?').toBeGreaterThan(3)
+
+    const missing = directories.filter((directory) => !readme.includes(directory))
+    expect(missing, `the Layout block omits: ${missing.join(', ')}`).toEqual([])
   })
 
   it('names no vendor this project does not use', () => {

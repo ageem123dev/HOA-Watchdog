@@ -1,9 +1,10 @@
 /**
  * Build the sample uploads from one source of truth.
  *
- * Six files, one per accepted content type. Four are written from the rows
- * below; two are photographs of a document and are **verified, not written** —
- * see `RASTERS`.
+ * Seven files covering the six accepted content types — two are CSVs, because
+ * the assessment roll and a deposit feed are different documents in the same
+ * format. Five are written from the rows below; two are images of a document and
+ * are **verified, not written** — see `RASTERS`.
  *
  * The reason this is a script rather than six committed files a human keeps in
  * step: six files hand-maintained against one contract is six chances for the

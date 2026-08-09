@@ -81,12 +81,29 @@ describe('the security posture keeps the rows whose evidence was withdrawn', () 
     expect(security).toContain('2026-08-07')
   })
 
-  it('does not leave a CI claim standing unqualified', () => {
-    // Every mention of CI as evidence must sit beside its withdrawal. Counting
-    // is what makes that checkable: a third row citing CI, added later, fails
-    // here rather than quietly asserting a control nothing enforces.
-    const citations = security.match(/CI (?:check|diff check)/g) ?? []
-    expect(citations).toHaveLength(2)
+  it('ties every CI citation to its own withdrawal', () => {
+    // Counted independently, this proved nothing: two citations and two
+    // amendments *somewhere* in the file would pass even if one row carried
+    // both notes and another carried none. An aggregate count is not an
+    // association. Raised by review.
+    //
+    // Each citation is now checked against the text that follows it, up to the
+    // next row, so a third CI claim added later fails here rather than sitting
+    // unqualified beside somebody else's amendment.
+    const citations = [...security.matchAll(/CI (?:check|diff check)/g)]
+    expect(citations.length, 'no CI citation found at all').toBeGreaterThan(0)
+
+    for (const citation of citations) {
+      const after = security.slice(citation.index!, citation.index! + 1200)
+      const row = after.split('</td>')[0] ?? after
+
+      expect(row, `a CI citation carries no withdrawal: ${citation[0]}`).toContain(
+        'Evidence amended 2026-08-09',
+      )
+      expect(row, `a CI citation does not date the withdrawal: ${citation[0]}`).toContain(
+        '2026-08-07',
+      )
+    }
   })
 })
 

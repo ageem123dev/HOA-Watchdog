@@ -75,7 +75,7 @@ One per accepted format, in [`samples/`](samples/):
 | `deposit-slip.pdf` | PDF | The same deposit table, as a document | Stored, then read by the model |
 | `deposit-slip.png`, `deposit-slip.jpg` | PNG, JPG | An image of that slip | Stored, then read by the model |
 
-Four of these are **generated** from one source of truth by
+Five of these are **generated** from one source of truth by
 [`scripts/build-samples.mjs`](scripts/build-samples.mjs), which holds the rows once. Edit the script
 and re-run it; editing a generated sample by hand fails the gate.
 
