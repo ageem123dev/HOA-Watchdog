@@ -477,6 +477,17 @@ and the failures were in the test harness, not the adapter:
 Both were invisible under the loose bound. The property now pinned is the one that matters: the
 statement count does not depend on the length of the roll at all.
 
+#### Argus on the fix commit — and it caught the fix
+
+One medium finding, **confirmed and mine**: the counting wrapper permanently mutated `client.query`
+on a pooled client, poisoning the shared pool — and the reset-after-setup above was a patch over that
+rather than a fix for it. Replaced with a `Proxy` that delegates and leaves the pooled client
+untouched, so nothing outside the measurement can be counted and nothing leaks past it.
+
+That is the review gate's own thesis landing on this story: *a fix is the highest-risk diff, not the
+lowest.* Two bugs came out of one loosened assertion, the second was worked around rather than
+solved, and only a review of the fix diff said so.
+
 *`argus_ingest` found nothing to learn from.* It was called with `from: .argus/cr.jsonl` and the
 commit SHA, exactly as the refreshed workflow specifies, and returned `reviews_found: 0` — the
 ingest adapter does not parse the CLI's JSONL event stream, which is a different shape from the IDE

@@ -567,41 +567,42 @@ describeWithDatabase('applying an assessment roll', () => {
       // no reason to add a third.
       const counting = { count: 0 }
 
-      // Wrapped once per client, not once per `connect`. `pool.connect()` hands
-      // back a *pooled* client, so re-wrapping on every checkout stacks the
-      // counter on a client that has been used before — the second measurement
-      // counted every statement twice. The absolute `< 12` bound this replaced
-      // was loose enough to hide that; the equality assertion found it on its
-      // first run.
-      const WRAPPED = Symbol.for('roll-repository-test/counted')
+      // A delegating wrapper, not a mutation of the pooled client.
+      //
+      // The first version reassigned `client.query` on whatever `pool.connect()`
+      // handed back. That poisons the shared pool: the wrapper survives release,
+      // so a client reused later is still counting. It produced two bugs in a
+      // row — every statement counted twice once a client was checked out
+      // twice, and then `newDocument()` adding one because it happened to get
+      // the wrapped client — and the second was patched around with a
+      // reset-after-setup rather than fixed. Raised by review on that fix.
+      //
+      // A proxy leaves the pooled client untouched, so nothing outside this
+      // measurement can be counted and nothing leaks past it.
       const countingPool = {
         connect: async () => {
           const client = await pool.connect()
-          const marked = client as unknown as Record<PropertyKey, unknown>
 
-          if (marked[WRAPPED] !== true) {
-            const query = client.query.bind(client)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            client.query = ((...args: any[]) => {
-              counting.count += 1
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return (query as any)(...args)
-            }) as typeof client.query
-            marked[WRAPPED] = true
-          }
+          return new Proxy(client, {
+            get(target, property, receiver) {
+              if (property === 'query') {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return (...args: any[]) => {
+                  counting.count += 1
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  return (target.query as any)(...args)
+                }
+              }
 
-          return client
+              const value = Reflect.get(target, property, receiver)
+              return typeof value === 'function' ? value.bind(target) : value
+            },
+          })
         },
       } as unknown as Pool
 
       const measure = async (length: number, label: string): Promise<number> => {
         const documentId = await newDocument()
-
-        // Reset *after* the setup, not before it. The wrapper is attached to a
-        // pooled client, so `newDocument`'s own query is counted whenever the
-        // pool hands it the same one — which it did on the second measurement
-        // and not the first, producing an off-by-one that looked like the
-        // adapter growing with the roll.
         counting.count = 0
 
         await createRollRepository({ pool: countingPool }).apply(
