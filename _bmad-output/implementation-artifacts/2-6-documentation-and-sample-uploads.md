@@ -108,17 +108,17 @@ row reads as a register that never had it
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — State the upload contract, from the code rather than from memory** (AC1, AC2, AC3)
-  - [ ] Write the contract down once: required and optional headers, the accepted `type` values, the
+- [x] **Task 1 — State the upload contract, from the code rather than from memory** (AC1, AC2, AC3)
+  - [x] Write the contract down once: required and optional headers, the accepted `type` values, the
         date and amount shapes, the per-file and per-batch limits, and what one bad row costs. The
         table in Dev Notes below is a starting draft and **must be re-derived from the source**, not
         copied — it was assembled by reading, and reading is exactly what this story exists to spare
         the next person.
-  - [ ] Every number and every list in it is already a constant. Cite the constant beside the value
+  - [x] Every number and every list in it is already a constant. Cite the constant beside the value
         so a later reader knows where the truth lives: `REQUIRED_HEADERS`, `OPTIONAL_HEADERS`,
         `DOCUMENT_KINDS`, `AMOUNT_PATTERN`, `MAX_DOCUMENT_BYTES`, `MAX_UPLOAD_BATCH_BYTES`,
         `MAX_FILES_PER_UPLOAD`, `MAX_WORKBOOK_CELLS`, `HOLD_REASONS`.
-  - [ ] Say what happens when a file is refused, in the words the surface actually uses. The four
+  - [x] Say what happens when a file is refused, in the words the surface actually uses. The four
         `REJECTION_REASONS` and the tabular `TABULAR_PROBLEMS` are different sets with different
         remedies — "unreadable" from the gate means the container lied about its type; "unreadable"
         from the tabular reader means the columns were wrong.
@@ -328,7 +328,49 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 
 ### Completion Notes List
 
+**Task 1 — the contract, and the guard that keeps it true.** `docs/upload-contract.md` states it
+once; `docs/upload-contract.test.ts` derives every value from the constants and fails when the two
+disagree. The story insisted the draft table be re-derived rather than copied, and it was right
+twice over.
+
+*The re-derivation caught its own first attempt.* `BILLING_CYCLES` is three values, not two —
+`six_monthly` sits between them. The draft said two because the value had been read with a grep whose
+character class excluded the underscore, and the same omission would have made `six_monthly`
+invisible to the stray check meant to catch it. The test failed on it before the page shipped.
+
+*The guard was, at first, a guard that proved nothing.* Version one took a regex describing the
+family and reported document tokens matching it that were not members — but every call site built
+that regex from the member list itself, so the stray set was empty by construction. An invented
+`receipt` kind passed. A control test covered the mechanism and every real call was shaped so it
+could never fire; the control passed for a case no caller exercised. Rebuilt to read the document's
+own tables, so "listed but not in the code" is answerable at all.
+
+*Its first row filter silently emptied a table.* It skipped rows whose first cell began with a
+capital, meaning to skip a header, and dropped every row of the Formats table — whose codes are PDF,
+PNG and JPG. Now it slices after the `| --- |` separator, and `statesExactly` refuses a table with
+no rows.
+
+*Sensitivity check — three mutations:*
+
+| Mutation | Result |
+| --- | --- |
+| invent a `receipt` kind on the page | 2 of 20 failed *(passed before the rebuild)* |
+| drop `missing-date` from the hold reasons | 1 of 20 failed |
+| change `VENDOR_NAME_MAX_LENGTH` in the code | 1 of 20 failed |
+
+The third matters most: the page is guarded against drift from **both** sides, so a constant moving
+under it fails as loudly as a sentence edited over it.
+
+*`tsconfig-coverage.test.ts` earned its place.* `docs/` was outside tsconfig's `include`, so the new
+test was not being type-checked at all and `tsc` stayed at 8 while an untyped file sat in the tree.
+Added `docs/**/*.ts`. A new source directory is a new hole in the gate unless something says so.
+
+
 ### File List
+
+- `docs/upload-contract.md` — added, Task 1.
+- `docs/upload-contract.test.ts` — added, Task 1.
+- `tsconfig.json` — modified, Task 1.
 
 ### Change Log
 

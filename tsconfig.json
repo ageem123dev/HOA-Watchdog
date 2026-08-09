@@ -40,6 +40,7 @@
     "adapters/**/*.ts",
     "migrations/**/*.ts",
     "scripts/**/*.ts",
+    "docs/**/*.ts",
     "*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
