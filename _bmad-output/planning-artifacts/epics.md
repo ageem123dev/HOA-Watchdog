@@ -659,6 +659,121 @@ ingestion path rather than through a repository called directly
 taught to emit `unitReference`, so the column is null in practice; and nothing resolves a reference
 to a `unit_id` — `resolveLine` takes the lookup as a parameter and no adapter implements one.
 
+### Story 2.6: The documentation says what the code does, and ships a sample of every format
+
+*Added 2026-08-08, to close the epic.*
+
+As someone installing this application,
+I want documentation that matches the code and a sample of every format it accepts,
+So that I can get from a clone to a document the system has actually read, without reading source.
+
+**Why it exists.** Epic 2 is finished as code and is not installable by anyone who was not in the
+room. The README's Environment section still instructs a reader to take "the two values from the
+Supabase project's API settings" and to provision directors "in the Supabase dashboard" — Supabase
+was dropped on 2026-07-31 for Railway Postgres, Auth.js and Cloudflare R2, and `.env.example` names
+ten variables. It still claims a CI pipeline that AD-2's amendment withdrew on 2026-08-07. It never
+mentions `npm run migrate`, so a reader who follows it exactly ends with no tables.
+
+And **nothing in the repository states what may be uploaded.** The contract is precise and enforced —
+`REQUIRED_HEADERS`, `AMOUNT_PATTERN`, `DOCUMENT_KINDS`, `MAX_DOCUMENT_BYTES` — and lives only as
+constants in five source files. Epic 1 built the gate, Epic 2 built the ledger behind it, and neither
+can be used by a stranger.
+
+**Acceptance Criteria:**
+
+**Given** a clean clone and the README alone
+**When** a reader follows it from the top
+**Then** they reach a running application with a migrated database and a signed-in board member, and
+every instruction is true of the code at HEAD — no step requires opening a source file, and no step
+names a vendor this project does not use
+
+**Given** the six content types the acceptance gate admits — PDF, PNG, JPG, CSV, `.xls`, `.xlsx`
+**When** the README is read
+**Then** there is a committed sample for each, and the README states what it contains, what the
+system does with it, and what appears afterwards
+
+**Given** a change to the upload contract — a required header, the amount pattern, a limit, a
+document kind
+**When** the gate runs
+**Then** a test fails, naming the sample and the document that now disagree with the code. Silent
+drift between the prose and the constants is the whole failure mode this story guards
+
+**Given** the system diagram
+**When** it is read
+**Then** it shows the path as built — the acceptance gate, the fork between the deterministic tabular
+path and the provider path, the vendor hold, and the payment write — and nothing only planned appears
+unmarked
+
+**Given** the board explainer, the walkthrough deck and the security posture
+**When** a claim in one is no longer true
+**Then** it is amended in place with a dated note, in the manner AD-2's own amendment uses.
+Withdrawn claims are not deleted — a control register that quietly loses a row reads as one that
+never had it
+
+**The trap it has to name.** Units are not created by upload: `unit`, `unit_holder`,
+`unit_membership` and `assessment` have no ingestion path and no admin surface. Upload a deposit to
+a fresh install and every line is held `unknown-unit`. The system is behaving correctly and looks
+broken, so a sample deposit shipped without that warning is worse than no sample.
+
+**Sequencing note (2026-08-09).** Story 2.7 removes that trap. If 2.7 ships first — the better
+order — this story's warning becomes an instruction instead: upload the roll, then the deposits.
+
+### Story 2.7: An uploaded assessment roll becomes units, holders and assessments
+
+*Added 2026-08-09, after 2.6 surfaced the gap.*
+
+As a treasurer,
+I want to upload the association's assessment roll and have it become the units, the people who hold
+them and what each owes,
+So that the deposits I upload afterwards are attributed instead of held.
+
+**Why it exists.** This epic opens by promising that *"the association's assessment roll and its
+deposits become typed records"*, and AD-1 names the roll explicitly among the things that arrive by
+upload. The deposits half is built. **The roll half does not exist.** `unit`, `unit_holder`,
+`unit_membership` and `assessment` have no ingestion path and no admin surface — verified by search:
+outside `migrations/`, only `*.test.ts` files insert into any of the four. Uploading an
+`assessment_roll` writes extraction rows and creates nothing.
+
+So every deposit on a real installation is held `unknown-unit`, and stories 2.1, 2.2, 2.3 and 2.5
+are each correct and collectively produce nothing. **This is the third time in this epic**: 2.4 built
+the payment ledger and connected none of it, 2.5 existed to fix that, and 2.1/2.2 have been sitting
+in the same state the whole while.
+
+**Acceptance Criteria:**
+
+**Given** an assessment roll is uploaded
+**When** ingestion completes
+**Then** each row has created or updated a unit, its holder, their membership and that unit's
+assessment for the year — without anyone invoking a second step
+
+**Given** a roll has been uploaded, and then a deposit naming those units
+**When** the deposit is ingested
+**Then** its lines become payments against those units rather than being held `unknown-unit`. This is
+the criterion the story exists for; the others constrain how it is met
+
+**Given** the same roll uploaded twice, or a corrected roll over an earlier one
+**When** it is ingested again
+**Then** nothing is duplicated, **and nothing already recorded against a unit is destroyed** — a
+payment written before the re-upload is still there afterwards, against the same unit
+
+**Given** a roll row that is defective
+**When** the document is read
+**Then** nothing from that document is written at all. A half-loaded roll is a set of units that look
+complete and are not
+
+**Given** `UnitDirectory` and `AssessmentDirectory`
+**When** the story is finished
+**Then** both are still read-only and their exhaustive port tests still pass unmodified. The
+capability to create a unit lives in exactly one new place, and a deposit still cannot reach it
+
+**The hazard it must not walk into.** `unit_membership.unit_id`, `assessment.unit_id` and
+`payment.unit_id` all reference `unit (id)` with **no `on delete` action**, so all three are
+`RESTRICT`. AD-13's "a re-uploaded roll replaces its rows", read literally, therefore fails the
+moment a unit has a payment — and the fix a developer reaches for, `on delete cascade` on
+`payment.unit_id`, makes re-uploading a corrected roll erase the ledger it exists to check. Units are
+upserted on `normalised_number` and never deleted; assessments are upserted at the
+`(unit_id, assessment_year)` grain the schema already names.
+
 ---
 
 ## Epic 3: The Oracle — ask a question, get an answer you can prove
