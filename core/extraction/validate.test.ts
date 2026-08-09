@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { DOCUMENT_KINDS, VENDOR_NAME_MAX_LENGTH } from './record'
+import { DOCUMENT_KINDS, KINDS_WITH_UNIT_REFERENCE, VENDOR_NAME_MAX_LENGTH } from './record'
 import { PROBLEM_REASONS, UNREADABLE_MESSAGE, validate } from './validate'
 
 const wellFormed = {
@@ -241,7 +241,18 @@ describe('validate', () => {
   })
 })
 
-describe('a unit reference belongs to a deposit', () => {
+describe('a unit reference belongs to the kinds that are about a unit', () => {
+  /**
+   * Re-specified by story 2.7, which moved `assessment_roll` from the refusing
+   * side to the accepting one — a roll row is *about* a unit as surely as a
+   * deposit line pays *for* one.
+   *
+   * The premise expired rather than the test being wrong when written: "a unit
+   * reference belongs to a deposit" was exactly true for stories 2.4 and 2.5.
+   * Both lists are now derived from `KINDS_WITH_UNIT_REFERENCE` instead of
+   * written out, so the next kind to join it cannot leave this test asserting
+   * the opposite of the rule.
+   */
   const base = {
     vendorName: null,
     documentNumber: null,
@@ -250,30 +261,44 @@ describe('a unit reference belongs to a deposit', () => {
     currency: 'USD',
   }
 
-  it('accepts one on a deposit', () => {
-    const result = validate({ ...base, documentKind: 'deposit', unitReference: '4B' })
-
-    expect(result.ok).toBe(true)
-  })
-
-  it.each(['invoice', 'statement', 'assessment_roll', 'other'])(
-    'refuses one on %s',
-    (documentKind) => {
-      // An invoice pays a vendor and a statement names nobody. Accepting a
-      // reference on those would store something no code path resolves, and it
-      // would read as a successful extraction.
-      const result = validate({ ...base, documentKind, unitReference: '4B' })
-
-      expect(result.ok).toBe(false)
-      if (!result.ok) {
-        expect(result.problems).toContainEqual({ field: 'unitReference', reason: 'unknown-value' })
-      }
-    },
+  const admitted = [...KINDS_WITH_UNIT_REFERENCE]
+  const refused = DOCUMENT_KINDS.filter(
+    (kind) => !(KINDS_WITH_UNIT_REFERENCE as readonly string[]).includes(kind),
   )
 
+  it('admits and refuses between them every kind there is', () => {
+    // The control. Without it, an empty `refused` list would make the refusal
+    // cases below vacuous and nothing would say so.
+    expect([...admitted, ...refused].sort()).toEqual([...DOCUMENT_KINDS].sort())
+    expect(admitted.length).toBeGreaterThan(0)
+    expect(refused.length).toBeGreaterThan(0)
+  })
+
+  it.each(admitted)('accepts one on %s and keeps it', (documentKind) => {
+    // Not `ok` alone: a validator that admitted the kind and then dropped the
+    // reference to null would satisfy that, and dropping it is exactly the
+    // failure the roll path would suffer in silence. Raised by review.
+    const result = validate({ ...base, documentKind, unitReference: '4B' })
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.record.unitReference).toBe('4B')
+  })
+
+  it.each(refused)('refuses one on %s', (documentKind) => {
+    // An invoice pays a vendor and a statement names nobody. Accepting a
+    // reference on those would store something no code path resolves, and it
+    // would read as a successful extraction.
+    const result = validate({ ...base, documentKind, unitReference: '4B' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.problems).toContainEqual({ field: 'unitReference', reason: 'unknown-value' })
+    }
+  })
+
   it('still accepts those kinds without a reference', () => {
-    // Beside the cases above: a rule that rejected every non-deposit record
-    // would satisfy them and break ingestion entirely.
+    // Beside the cases above: a rule that rejected every record outside the
+    // admitted set would satisfy them and break ingestion entirely.
     expect(validate({ ...base, documentKind: 'invoice', vendorName: 'Acme' }).ok).toBe(true)
   })
 })

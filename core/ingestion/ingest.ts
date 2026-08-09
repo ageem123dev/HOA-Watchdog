@@ -5,10 +5,12 @@ import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
 import type { PaymentRepository } from '../ports/payment-repository'
 import type { Quarantine } from '../ports/quarantine'
+import type { RollRepository } from '../ports/roll-repository'
 import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
+import { recordRoll } from './record-roll'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
@@ -103,6 +105,15 @@ export interface IngestDependencies {
   readonly units?: UnitDirectory
   /** Where an attributed payment and a held one are written together. */
   readonly payments?: PaymentRepository
+  /**
+   * Where an uploaded assessment roll becomes units, holders and assessments.
+   *
+   * Optional for the same reason as `units`, and with the same caveat, one step
+   * earlier in the chain: absent, a roll is read and no unit is created — so
+   * every deposit uploaded afterwards is held `unknown-unit` and the system
+   * looks broken while behaving correctly.
+   */
+  readonly rolls?: RollRepository
   /**
    * Where the real error goes. It is deliberately absent from the outcome — an
    * exception's text can name a path, a bucket, or a library — but discarding it
@@ -203,6 +214,14 @@ async function ingestOne(
       // `no-provider-path` — and a bank feed is the format the pilot actually
       // uploads, so wiring only the deferred path would have recorded payments
       // for scanned slips and none for the documents that really arrive.
+      // Before the payments, because a roll is what makes a payment
+      // attributable. Within one document the two are exclusive — a row is a
+      // deposit line or a roll row, never both — but a treasurer selecting the
+      // roll and the deposits in one submission gets them in the order they
+      // chose, and `ingest` processes a batch sequentially. Roll first here
+      // costs nothing and is the order that works when both arrive together.
+      await recordRoll(recorded.id, reading.rollRows, deps)
+
       await recordPayments(recorded.id, reading.records, deps)
 
       await deps.extractions.replace(recorded.id, reading.records)

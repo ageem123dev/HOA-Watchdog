@@ -22,6 +22,22 @@ export const DOCUMENT_KINDS = Object.freeze([
   'other',
 ] as const)
 
+/**
+ * The kinds a `unitReference` belongs to.
+ *
+ * A deposit line pays for a unit; a roll row is about one. An invoice pays a
+ * vendor and a statement names nobody, so a reference on either is a value no
+ * code path resolves, stored in a way that reads as a successful extraction.
+ *
+ * One statement, two readers: `validate` refuses a reference on any other kind,
+ * and `tabular` reads the `unit` column only for these. Splitting that into two
+ * lists is how the parser comes to produce a value the validator then rejects.
+ */
+export const KINDS_WITH_UNIT_REFERENCE = Object.freeze([
+  'deposit',
+  'assessment_roll',
+] as const satisfies readonly DocumentKind[])
+
 export const SUPPORTED_CURRENCIES = Object.freeze(['USD'] as const)
 
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number]
@@ -75,13 +91,16 @@ export interface ExtractionRecord {
   readonly totalAmount: string | null
 
   /**
-   * Which unit a deposit line pays for, as the document spelled it.
+   * Which unit the line is about, as the document spelled it.
    *
-   * Null for every other kind: an invoice pays a vendor, a statement names
-   * nobody. Resolved against `unit_normalised_number()` when the payment is
-   * written, never through `vendor_normalised_name()` — migration 011 refused
-   * that coupling because a later change to vendor matching would otherwise
-   * silently change which units are considered the same unit.
+   * Carried by the kinds in `KINDS_WITH_UNIT_REFERENCE` and null for the rest:
+   * an invoice pays a vendor, a statement names nobody. A deposit line pays
+   * *for* a unit; a roll row *describes* one.
+   *
+   * Resolved against `unit_normalised_number()`, never through
+   * `vendor_normalised_name()` — migration 011 refused that coupling because a
+   * later change to vendor matching would otherwise silently change which units
+   * are considered the same unit.
    */
   readonly unitReference: string | null
   readonly currency: SupportedCurrency
