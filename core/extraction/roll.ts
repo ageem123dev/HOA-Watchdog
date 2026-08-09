@@ -21,6 +21,7 @@
  */
 
 import { BILLING_CYCLES, type BillingCycle } from '../assessment/billing-cycle'
+import { isRealDate } from './calendar-date'
 import { AMOUNT_PATTERN, UNIT_REFERENCE_MAX_LENGTH } from './record'
 
 /**
@@ -45,8 +46,20 @@ export const MAX_ASSESSMENT_YEAR = 2200
 /** The two columns a roll needs and no other document kind does. */
 export const ROLL_HEADERS = ['cycle', 'year'] as const
 
+/**
+ * Every column a roll row cannot be read without.
+ *
+ * `unit` belongs here and not in `ROLL_HEADERS`: the column is shared with a
+ * deposit, where it is genuinely optional — a deposit line naming no unit is
+ * held, not refused. Only a roll cannot do without it.
+ *
+ * Separate from the per-row check because the remedy is different. A roll
+ * exported with no `unit` column at all made every row defective, so the reader
+ * answered `invalid-row` forty times and never said which column to add.
+ */
+export const ROLL_REQUIRED_HEADERS = ['unit', ...ROLL_HEADERS] as const
+
 const AMOUNT = new RegExp(AMOUNT_PATTERN)
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const WHOLE_NUMBER = /^\d+$/
 
 export interface RollRow {
@@ -113,23 +126,6 @@ function tooLong(value: string, max: number): boolean {
   }
 
   return false
-}
-
-/** A calendar date that exists — `2026-02-30` matches the format and is not a day. */
-function isRealDate(value: string): boolean {
-  const parts = ISO_DATE.exec(value)
-  if (parts === null) return false
-
-  const year = Number(parts[1])
-  const month = Number(parts[2])
-  const day = Number(parts[3])
-  const asDate = new Date(Date.UTC(year, month - 1, day))
-
-  return (
-    asDate.getUTCFullYear() === year &&
-    asDate.getUTCMonth() === month - 1 &&
-    asDate.getUTCDate() === day
-  )
 }
 
 /**

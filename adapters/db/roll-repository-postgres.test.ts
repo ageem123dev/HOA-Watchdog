@@ -183,6 +183,17 @@ describeWithDatabase('applying an assessment roll', () => {
       expect((await assessmentsFor(b))[0]!.annual_amount).toBe('4800.00')
     })
 
+    it('names a document that does not exist, rather than failing on a foreign key', async () => {
+      // The lock is a `select ... for update`, which matches nothing and
+      // succeeds when the id is unknown — the transaction then ran on to a raw
+      // 23503 from `unit_holder`. Raised by review.
+      const absent = '00000000-0000-4000-8000-000000000000'
+
+      await expect(
+        createRollRepository({ pool }).apply(absent, [row({ unitNumber: unitNumber('ghost') })]),
+      ).rejects.toThrow(/document .* was not found/i)
+    })
+
     it('refuses an empty roll rather than deleting what the document wrote', async () => {
       const documentId = await newDocument()
 
@@ -415,11 +426,18 @@ describeWithDatabase('applying an assessment roll', () => {
       ])
 
       const third = await newDocument()
-      await expect(
-        repository.apply(third, [
+      // The date named must be the roll's row, not the recorded tenure's start —
+      // 2019-03-01 appears nowhere on the treasurer's document. Raised by review.
+      const refusal = await repository
+        .apply(third, [
           row({ unitNumber: number, heldFrom: '2022-01-01', holderName: `${RUN_PREFIX} Third` }),
-        ]),
-      ).rejects.toThrow(ConflictingTenureError)
+        ])
+        .catch((error: unknown) => error)
+
+      expect(refusal).toBeInstanceOf(ConflictingTenureError)
+      expect((refusal as Error).message).toMatch(
+        /another document already records .* from 2022-01-01/i,
+      )
 
       // And the two recorded tenures are untouched.
       expect(await tenuresFor(number)).toHaveLength(2)
@@ -464,11 +482,16 @@ describeWithDatabase('applying an assessment roll', () => {
 
       const second = await newDocument()
 
-      await expect(
-        repository.apply(second, [
+      const refusal = await repository
+        .apply(second, [
           row({ unitNumber: number, heldFrom: '2020-01-01', holderName: `${RUN_PREFIX} Other` }),
-        ]),
-      ).rejects.toThrow(ConflictingTenureError)
+        ])
+        .catch((error: unknown) => error)
+
+      expect(refusal).toBeInstanceOf(ConflictingTenureError)
+      expect((refusal as Error).message).toMatch(
+        /another document already records .* from 2020-01-01/i,
+      )
 
       // And nothing from the refused document was written.
       expect(await tenuresFor(number)).toHaveLength(1)
@@ -508,16 +531,22 @@ describeWithDatabase('applying an assessment roll', () => {
       const number = unitNumber('contradiction')
       const documentId = await newDocument()
 
-      await expect(
-        createRollRepository({ pool }).apply(documentId, [
+      // The message, not only the type. `ConflictingTenureError` carries two
+      // remedies — correct this roll, or remove the other document — and
+      // `toThrow(SomeType)` passes whichever one is reported. Raised by review.
+      const refusal = await createRollRepository({ pool })
+        .apply(documentId, [
           row({ unitNumber: number, assessmentYear: 2026 }),
           row({
             unitNumber: number,
             assessmentYear: 2027,
             holderName: `${RUN_PREFIX} Someone Else`,
           }),
-        ]),
-      ).rejects.toThrow(ConflictingTenureError)
+        ])
+        .catch((error: unknown) => error)
+
+      expect(refusal).toBeInstanceOf(ConflictingTenureError)
+      expect((refusal as Error).message).toMatch(/this roll gives unit .* more than one holder/i)
     })
   })
 

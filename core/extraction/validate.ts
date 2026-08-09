@@ -1,3 +1,4 @@
+import { isRealDate } from './calendar-date'
 import {
   AMOUNT_PATTERN,
   type DocumentKind,
@@ -73,25 +74,6 @@ export const UNREADABLE_MESSAGE =
  * because the column has already coerced the value before any constraint runs.
  */
 const AMOUNT = new RegExp(AMOUNT_PATTERN)
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-/** A calendar date that exists — `2026-02-30` matches the format and is not a day. */
-function isRealDate(value: string): boolean {
-  const parts = ISO_DATE.exec(value)
-  if (parts === null) return false
-
-  const year = Number(parts[1])
-  const month = Number(parts[2])
-  const day = Number(parts[3])
-  const asDate = new Date(Date.UTC(year, month - 1, day))
-
-  return (
-    asDate.getUTCFullYear() === year &&
-    asDate.getUTCMonth() === month - 1 &&
-    asDate.getUTCDate() === day
-  )
-}
 
 function checkText(
   value: unknown,

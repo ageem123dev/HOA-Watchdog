@@ -198,7 +198,7 @@ describeWithDatabase('against the live schema', () => {
   })
 
   it('still accepts a tenure with no document, as rows written before it have', async () => {
-    const { unitId } = await seed()
+    await seed()
 
     const holder = await client.query<{ id: string }>(
       'insert into unit_holder (full_name) values ($1) returning id',
@@ -228,7 +228,6 @@ describeWithDatabase('against the live schema', () => {
 
     expect(rows).toHaveLength(1)
     expect(rows[0]!.document_id).toBeNull()
-    expect(unitId).toBeTruthy()
   })
 
   it('takes the tenures with the document, and leaves the unit and its money', async () => {

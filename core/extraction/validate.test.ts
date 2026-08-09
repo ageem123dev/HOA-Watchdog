@@ -274,10 +274,14 @@ describe('a unit reference belongs to the kinds that are about a unit', () => {
     expect(refused.length).toBeGreaterThan(0)
   })
 
-  it.each(admitted)('accepts one on %s', (documentKind) => {
+  it.each(admitted)('accepts one on %s and keeps it', (documentKind) => {
+    // Not `ok` alone: a validator that admitted the kind and then dropped the
+    // reference to null would satisfy that, and dropping it is exactly the
+    // failure the roll path would suffer in silence. Raised by review.
     const result = validate({ ...base, documentKind, unitReference: '4B' })
 
     expect(result.ok).toBe(true)
+    expect(result.ok && result.record.unitReference).toBe('4B')
   })
 
   it.each(refused)('refuses one on %s', (documentKind) => {

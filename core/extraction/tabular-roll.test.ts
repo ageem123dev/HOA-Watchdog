@@ -170,6 +170,35 @@ describe('the columns a roll row cannot do without', () => {
     expect(problems[0]!.expected).toEqual(expect.arrayContaining(['cycle', 'year']))
   })
 
+  it('refuses a roll with no unit column, naming it', () => {
+    // Without this the reader reports `invalid-row` for every row in the file —
+    // a treasurer who forgot one column is told forty times that their data is
+    // bad, and never which column to add. Raised by review.
+    const problems = problemsOf(
+      readRows([
+        ['date', 'description', 'amount', 'type', 'cycle', 'year'],
+        ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', 'monthly', '2026'],
+      ]),
+    )
+
+    expect(problems[0]!.reason).toBe('missing-headers')
+    expect(problems[0]!.expected).toEqual(['unit'])
+  })
+
+  it('names only the roll column that is actually missing', () => {
+    // The whole list was reported whichever one was absent, so a roll exported
+    // with `cycle` and no `year` was told to add both. Raised by review.
+    const problems = problemsOf(
+      readRows([
+        ['date', 'description', 'amount', 'type', 'unit', 'cycle'],
+        ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly'],
+      ]),
+    )
+
+    expect(problems[0]!.reason).toBe('missing-headers')
+    expect(problems[0]!.expected).toEqual(['year'])
+  })
+
   it('refuses a roll row with a blank cycle', () => {
     const problems = problemsOf(
       readRows(roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', '', '2026']])),
@@ -449,6 +478,18 @@ describe('readRollRow measures length the way the database does', () => {
 
   it('refuses 65 code points', () => {
     expect(readRollRow({ ...wellFormed, unitNumber: '𐐷'.repeat(65) }).ok).toBe(false)
+  })
+
+  it.each([
+    ['unit number', { unitNumber: '4B ' }],
+    ['holder name', { holderName: 'Jane Smith' }],
+  ])('refuses a NUL in the %s', (_label, override) => {
+    // Tested here, not through `readRows`. `validate` runs on the same cells
+    // first and also yields `invalid-row`, so the table-level assertion cannot
+    // tell which guard refused the value — it would still pass with `hasNul`
+    // deleted. The length guards were already moved here for that reason; the
+    // NUL guards had been left behind. Raised by review.
+    expect(readRollRow({ ...wellFormed, ...override }).ok).toBe(false)
   })
 
   it('accepts a holder of exactly 200 code points and refuses 201', () => {

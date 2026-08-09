@@ -1,7 +1,7 @@
 import { fold } from '../payment/resolve-line'
 import { parseCsv } from './csv'
 import { KINDS_WITH_UNIT_REFERENCE, type ExtractionRecord } from './record'
-import { ROLL_HEADERS, readRollRow, type RollRow } from './roll'
+import { ROLL_HEADERS, ROLL_REQUIRED_HEADERS, readRollRow, type RollRow } from './roll'
 import { validate } from './validate'
 
 /**
@@ -58,8 +58,6 @@ export interface TableProblem {
   /** 1-based index among the data rows, so a treasurer can find it in the file. */
   readonly row?: number
   readonly expected?: readonly string[]
-  /** The unit two roll rows disagreed about, as the document spelled it. */
-  readonly unit?: string
 }
 
 export type TableResult =
@@ -151,12 +149,14 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
   // read, so a roll exported without them says which columns are missing rather
   // than reporting every one of its rows as defective.
   if (dataRows.some((row) => kindOf(row) === 'assessment_roll')) {
-    const missingRollHeaders = ROLL_HEADERS.filter((header) => !headers.includes(header))
+    const missingRollHeaders = ROLL_REQUIRED_HEADERS.filter((header) => !headers.includes(header))
 
     if (missingRollHeaders.length > 0) {
+      // The ones actually absent, not the whole list. A roll exported with
+      // `cycle` but no `year` was being told to add both. Raised by review.
       return {
         ok: false,
-        problems: [{ reason: 'missing-headers', expected: [...ROLL_HEADERS] }],
+        problems: [{ reason: 'missing-headers', expected: missingRollHeaders }],
       }
     }
   }
@@ -174,7 +174,7 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
    * `assessment_one_per_unit_year` is on the pair: one unit may legitimately
    * appear on rolls for two years in one file.
    */
-  const seenUnitYears = new Map<string, string>()
+  const seenUnitYears = new Set<string>()
 
   dataRows.forEach((row, index) => {
     const documentKind = kindOf(row)
@@ -232,14 +232,13 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
     }
 
     const key = `${fold(roll.row.unitNumber)}::${roll.row.assessmentYear}`
-    const already = seenUnitYears.get(key)
 
-    if (already !== undefined) {
-      problems.push({ reason: 'duplicate-unit', row: index + 1, unit: already })
+    if (seenUnitYears.has(key)) {
+      problems.push({ reason: 'duplicate-unit', row: index + 1 })
       return
     }
 
-    seenUnitYears.set(key, roll.row.unitNumber)
+    seenUnitYears.add(key)
     rollRows.push(roll.row)
   })
 

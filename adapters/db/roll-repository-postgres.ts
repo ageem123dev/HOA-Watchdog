@@ -71,7 +71,17 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
         // Lock the parent row first, as the payment repository does. Two
         // applications of the same document would otherwise both delete, both
         // insert, and leave the document holding two readings at once.
-        await client.query('select 1 from document where id = $1 for update', [documentId])
+        const locked = await client.query('select 1 from document where id = $1 for update', [
+          documentId,
+        ])
+
+        // `select ... for update` matches nothing and succeeds when the id is
+        // unknown, so the transaction ran on and met a raw 23503 from
+        // `unit_holder` several statements later. Said plainly here instead.
+        // Raised by review.
+        if (locked.rowCount === 0) {
+          throw new Error(`document ${documentId} was not found, so its roll cannot be applied`)
+        }
 
         // Units, upserted and never deleted.
         //
@@ -159,6 +169,12 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
         //     failed with a raw 23P01 instead of a sentence naming the unit.
         //     Raised by CodeRabbit.
         //
+        // The date reported is **the roll's**, not the recorded tenure's. They
+        // are equal for the exact-start case and differ for the other: a row
+        // stating 2022-01-01 against a recorded `[2019-03-01, 2026-07-01)` would
+        // otherwise be told to correct 2019-03-01, which is not a date on the
+        // treasurer's document at all. Raised by review.
+        //
         // `not upper_inf(...)` is what keeps ordinary succession out of this:
         // an open tenure contains every later day, and a unit changing hands is
         // exactly that — handled by closing it, not by refusing the document.
@@ -169,7 +185,7 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
           held_from: string
         }>(
           `select u.unit_number as "unit_number",
-                  to_char(lower(m.held_during), 'YYYY-MM-DD') as "held_from"
+                  to_char(r.held_from, 'YYYY-MM-DD') as "held_from"
              from unnest($1::uuid[], $2::date[]) as r(unit_id, held_from)
              join unit_membership m
                on m.unit_id = r.unit_id
