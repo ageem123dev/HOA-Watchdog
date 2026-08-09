@@ -1,6 +1,7 @@
 import {
   AMOUNT_PATTERN,
   DOCUMENT_NUMBER_MAX_LENGTH,
+  KINDS_WITH_UNIT_REFERENCE,
   UNIT_REFERENCE_MAX_LENGTH,
   type ExtractionRecord,
   VENDOR_NAME_MAX_LENGTH,
@@ -153,15 +154,25 @@ export function validate(candidate: unknown): Validation {
     problems,
   )
 
-  // A unit reference belongs to a deposit line and to nothing else. An invoice
-  // pays a vendor; a statement names nobody. Accepting one on another kind would
-  // store a reference that no code path ever resolves, and it would read as a
-  // successful extraction. Raised by review.
-  // Only for a *known* non-deposit kind. When the kind is missing or unknown
-  // that is already reported, and adding a second problem here would blame the
-  // reference for a fault it did not cause -- the caller would be told to fix
-  // two things when there is one. Raised by review.
-  if (unitReference !== null && isDocumentKind(documentKind) && documentKind !== 'deposit') {
+  // A unit reference belongs to the kinds that are about a unit and to nothing
+  // else. An invoice pays a vendor; a statement names nobody. Accepting one on
+  // another kind would store a reference that no code path ever resolves, and it
+  // would read as a successful extraction. Raised by review.
+  //
+  // The admitted set is `KINDS_WITH_UNIT_REFERENCE` rather than a literal, so
+  // this rule and the parser that decides when to read the `unit` column cannot
+  // drift apart — a second list is how a producer comes to emit a value the
+  // validator then rejects.
+  //
+  // Only for a *known* kind outside that set. When the kind is missing or
+  // unknown that is already reported, and adding a second problem here would
+  // blame the reference for a fault it did not cause -- the caller would be told
+  // to fix two things when there is one. Raised by review.
+  if (
+    unitReference !== null &&
+    isDocumentKind(documentKind) &&
+    !(KINDS_WITH_UNIT_REFERENCE as readonly string[]).includes(documentKind)
+  ) {
     problems.push({ field: 'unitReference', reason: 'unknown-value' })
   }
 

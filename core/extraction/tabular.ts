@@ -1,5 +1,7 @@
+import { fold } from '../payment/resolve-line'
 import { parseCsv } from './csv'
-import type { ExtractionRecord } from './record'
+import { KINDS_WITH_UNIT_REFERENCE, type ExtractionRecord } from './record'
+import { ROLL_HEADERS, readRollRow, type RollRow } from './roll'
 import { validate } from './validate'
 
 /**
@@ -27,7 +29,7 @@ export const REQUIRED_HEADERS = ['date', 'description', 'amount'] as const
  * meaning depends on the value of a sibling cell is a rule nobody can read off
  * the header row.
  */
-export const OPTIONAL_HEADERS = ['reference', 'type', 'unit'] as const
+export const OPTIONAL_HEADERS = ['reference', 'type', 'unit', ...ROLL_HEADERS] as const
 
 /** A tabular upload with no `type` column is a bank statement, which is what the pilot ingests. */
 const DEFAULT_DOCUMENT_KIND = 'statement'
@@ -38,6 +40,15 @@ export const TABULAR_PROBLEMS = [
   'duplicate-headers',
   'no-rows',
   'invalid-row',
+  /**
+   * Two roll rows for one unit and one year.
+   *
+   * Its own reason rather than `invalid-row`, because neither row is defective —
+   * the pair is. `assessment_one_per_unit_year` would refuse the second and
+   * abort the transaction the whole roll is written in, so catching it here
+   * turns a failed upload into a sentence naming the unit.
+   */
+  'duplicate-unit',
 ] as const
 
 export type TabularProblem = (typeof TABULAR_PROBLEMS)[number]
@@ -47,10 +58,24 @@ export interface TableProblem {
   /** 1-based index among the data rows, so a treasurer can find it in the file. */
   readonly row?: number
   readonly expected?: readonly string[]
+  /** The unit two roll rows disagreed about, as the document spelled it. */
+  readonly unit?: string
 }
 
 export type TableResult =
-  | { readonly ok: true; readonly records: readonly ExtractionRecord[] }
+  | {
+      readonly ok: true
+      readonly records: readonly ExtractionRecord[]
+      /**
+       * The roll rows this document stated, empty for every other kind.
+       *
+       * Carried beside the records rather than instead of them: a roll is still
+       * a document that said something, and `extraction` still records what it
+       * said. These are the additional facts only a roll carries — who holds the
+       * unit, from when, and what it owes for the year on what cadence.
+       */
+      readonly rollRows: readonly RollRow[]
+    }
   | { readonly ok: false; readonly problems: readonly TableProblem[] }
 
 const normalise = (header: string): string => header.trim().toLowerCase()
@@ -118,11 +143,53 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
     return value === undefined || value.trim() === '' ? null : value
   }
 
+  const kindOf = (row: readonly string[]): string =>
+    optional(row, 'type') ?? DEFAULT_DOCUMENT_KIND
+
+  // The roll's two columns are required only of a document that has roll rows,
+  // which is why this is not part of REQUIRED_HEADERS. Checked before any row is
+  // read, so a roll exported without them says which columns are missing rather
+  // than reporting every one of its rows as defective.
+  if (dataRows.some((row) => kindOf(row) === 'assessment_roll')) {
+    const missingRollHeaders = ROLL_HEADERS.filter((header) => !headers.includes(header))
+
+    if (missingRollHeaders.length > 0) {
+      return {
+        ok: false,
+        problems: [{ reason: 'missing-headers', expected: [...ROLL_HEADERS] }],
+      }
+    }
+  }
+
   const records: ExtractionRecord[] = []
+  const rollRows: RollRow[] = []
   const problems: TableProblem[] = []
 
+  /**
+   * One roll row per unit per year, keyed the way the database keys it.
+   *
+   * Folded with core's `fold` — the same folding migration 011 applies to
+   * `unit_number` — so `4B` and `4b  ` collide here exactly as the unique index
+   * makes them collide there. Keyed on the year as well, because
+   * `assessment_one_per_unit_year` is on the pair: one unit may legitimately
+   * appear on rolls for two years in one file.
+   */
+  const seenUnitYears = new Map<string, string>()
+
   dataRows.forEach((row, index) => {
-    const documentKind = optional(row, 'type') ?? DEFAULT_DOCUMENT_KIND
+    const documentKind = kindOf(row)
+
+    // Read for the kinds that are about a unit, because `validate` refuses
+    // `unitReference` on every other kind — and one invalid row fails the whole
+    // document here. Reading it unconditionally would turn a stray `unit` column
+    // on an invoice export into a refusal of the entire upload.
+    //
+    // Ignored rather than refused, which is the choice worth naming: a unit
+    // means nothing on an invoice, and turning a column nobody asked about
+    // into a rejection helps no treasurer.
+    const unitReference = (KINDS_WITH_UNIT_REFERENCE as readonly string[]).includes(documentKind)
+      ? optional(row, 'unit')
+      : null
 
     const candidate = {
       documentKind,
@@ -131,16 +198,7 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
       issuedOn: required(row, 'date'),
       totalAmount: required(row, 'amount'),
       currency: 'USD',
-
-      // Read only for a deposit, because `validate` refuses `unitReference` on
-      // every other kind — and one invalid row fails the whole document here.
-      // Reading it unconditionally would turn a stray `unit` column on an
-      // invoice export into a refusal of the entire upload.
-      //
-      // Ignored rather than refused, which is the choice worth naming: a unit
-      // means nothing on an invoice, and turning a column nobody asked about
-      // into a rejection helps no treasurer.
-      unitReference: documentKind === 'deposit' ? optional(row, 'unit') : null,
+      unitReference,
     }
 
     const validation = validate(candidate)
@@ -149,6 +207,40 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
     } else {
       problems.push({ reason: 'invalid-row', row: index + 1 })
     }
+
+    if (documentKind !== 'assessment_roll') return
+
+    // Built from the same cells, and deliberately not from the record above: the
+    // record has already dropped the cycle and the year, and it has trimmed the
+    // holder's name into `vendorName`, which is the field a roll must never
+    // travel in.
+    const roll = readRollRow({
+      unitNumber: unitReference,
+      holderName: required(row, 'description'),
+      heldFrom: required(row, 'date'),
+      annualAmount: required(row, 'amount'),
+      cycle: optional(row, 'cycle'),
+      year: optional(row, 'year'),
+    })
+
+    if (!roll.ok) {
+      // Not reported twice. `validate` catches most of what makes a roll row
+      // defective, and a treasurer told the same row is wrong for two reasons
+      // has to work out that it is one fault.
+      if (validation.ok) problems.push({ reason: 'invalid-row', row: index + 1 })
+      return
+    }
+
+    const key = `${fold(roll.row.unitNumber)}::${roll.row.assessmentYear}`
+    const already = seenUnitYears.get(key)
+
+    if (already !== undefined) {
+      problems.push({ reason: 'duplicate-unit', row: index + 1, unit: already })
+      return
+    }
+
+    seenUnitYears.set(key, roll.row.unitNumber)
+    rollRows.push(roll.row)
   })
 
   // One bad row fails the document. Storing the other 199 is precisely how "no
@@ -157,5 +249,5 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
   // refused outright.
   if (problems.length > 0) return { ok: false, problems }
 
-  return { ok: true, records }
+  return { ok: true, records, rollRows }
 }

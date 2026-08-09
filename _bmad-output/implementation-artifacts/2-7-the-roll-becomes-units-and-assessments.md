@@ -4,7 +4,7 @@ baseline_commit: 3281477
 
 # Story 2.7: An uploaded assessment roll becomes units, holders and assessments
 
-Status: ready-for-dev
+Status: in-progress
 
 > **Sequencing, and it is a real choice.** Story 2.6 documents the trap this story removes. If 2.7
 > ships first, 2.6's "the thing a reader most needs told" section stops being a warning and becomes
@@ -85,27 +85,27 @@ capability to create a unit lives in exactly one new place, and a deposit still 
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The roll's shape, decided and parsed** (AC1, AC4)
-  - [ ] A roll row names four things — a unit, a person, a year's dues and a cadence. The current
+- [x] **Task 1 — The roll's shape, decided and parsed** (AC1, AC4)
+  - [x] A roll row names four things — a unit, a person, a year's dues and a cadence. The current
         vocabulary carries one figure per row, so decide and record whether the roll gets its own
         record type or `ExtractionRecord` is widened.
         **Recommended: its own type.** Widening means four more nullable fields that are null on
         every other kind, four more `validate` rules refusing them on every other kind, four more
         columns on `extraction`, and four more fields on the provider schema — for a shape that is
         not "a figure read off a document" at all. `unitReference` already cost one of each.
-  - [ ] Extend the tabular contract with the columns a roll needs, following exactly the precedent
+  - [x] Extend the tabular contract with the columns a roll needs, following exactly the precedent
         `unit` set in story 2.5: **optional headers, read only when the row's kind calls for them.**
         A stray `cycle` column on an invoice export must be ignored, not turned into a refusal of the
         whole upload.
-  - [ ] `validate.ts` currently refuses `unitReference` on every kind but `deposit`. A roll row needs
+  - [x] `validate.ts` currently refuses `unitReference` on every kind but `deposit`. A roll row needs
         the unit too, so that rule widens to admit `assessment_roll`. **No migration is needed for
         this**: migration 014 added no database-level tie between `unit_reference` and
         `document_kind` — the rule lives only in the validator. Update 014's column comment, which
         says "Null for every other document kind" and would become false.
-  - [ ] `billing_cycle` is `monthly`, `six_monthly`, `annual`, lower-case, and migration 013's check
+  - [x] `billing_cycle` is `monthly`, `six_monthly`, `annual`, lower-case, and migration 013's check
         constraint enforces it. Reuse `BILLING_CYCLES` from `core/assessment/billing-cycle.ts`;
         a hand-written list here is the third statement of it.
-  - [ ] One defective row fails the document, matching `readTable`'s existing rule. Say it in the
+  - [x] One defective row fails the document, matching `readTable`'s existing rule. Say it in the
         problem set rather than relying on the reader to infer it.
 
 - [ ] **Task 2 — The one port that may create a unit** (AC1, AC3, AC5)
@@ -284,13 +284,188 @@ file — take it only if the story is genuinely too large in flight, not up fron
 
 ### Test Design
 
+#### The record-shape decision, settled before any test was written
+
+Task 1 asked whether the roll gets its own type or `ExtractionRecord` is widened, and recommended
+its own. **Re-derived from the source rather than taken on trust, and the recommendation survives —
+but for a different and much stronger reason than the one the story gave.**
+
+The story's argument was arithmetic: four new nullable fields. That was wrong. A roll row needs six
+values and `ExtractionRecord` already carries four of them plausibly — the unit in `unitReference`,
+the amount in `totalAmount`, the date in `issuedOn`, and the holder's name in `vendorName`. Only
+`billingCycle` and `assessmentYear` are genuinely new. On the story's own reasoning, widening would
+have been the cheaper option.
+
+**The real argument is `holdUnknownVendors`.** It quarantines every distinct non-null `vendorName` a
+reading produces, from both call sites, before anything is stored. Route a holder's name through that
+field and **every unit holder on the roll is quarantined as an unknown vendor** — a treasurer
+uploading a 40-unit roll gets 40 questions asking whether "Jane Smith" is a vendor they recognise.
+Nothing in the type system would have caught it; the field is a `string | null` either way.
+
+So the roll gets its own row type, and the holder's name never touches `vendorName`.
+
+#### The scope decision: tabular only, and why — stated rather than discovered
+
+Story 2.5's rule is "both producers, or say which and why". This story wires **the tabular path
+only**, and the reason is structural rather than a matter of effort.
+
+`core/ports/extractor.ts` states a safety property about its own return type: `ExtractionRecord[]`
+has "no free-form field, so there is nowhere for a poisoned document to smuggle a paragraph of
+instructions through a value". A roll row carries a **person's name** — a second free-text field, on
+the untrusted side of AD-8's boundary, reaching a table whose column is 200 characters. Widening the
+provider's result to carry it is an AD-8 change and wants a decision record, not a story task.
+
+The asymmetry also runs the opposite way to 2.5's. There, the unwired path (CSV) was the one the
+pilot actually uploads, which is what made the gap fatal. Here the wired path is that one: an
+assessment roll is a spreadsheet the association already maintains, and a scanned roll is the unusual
+case. **The limitation is real and is recorded rather than hidden**: a scanned roll stores extraction
+rows and creates no units, exactly as today. Story 2.6's README must say so, and it is listed in
+Completion Notes as a follow-up.
+
+#### Behaviour 1 — `readRows` also yields the roll rows
+
+1. *If it ran correctly, how would I know?* For each row whose `type` is `assessment_roll`, a
+   `RollRow` carrying unit, holder, held-from date, annual amount as a decimal string, cycle and
+   year. Rows of every other kind produce none.
+2. *How do I test it?* Pure function over a rectangle of strings — no seams, no fakes. Cross-check by
+   round-tripping through `serialiseCsv` → `parseCsv` → `readRows`.
+3. *What else can go wrong?* Below.
+4. *Siblings?* `readRows` itself, and `tabular-deposit.test.ts` is the test this one is modelled on.
+
+**The header contract**, following the precedent `unit` set in 2.5 — optional headers, read only when
+the row's kind calls for them:
+
+| Column | Roll meaning |
+| --- | --- |
+| `date` | the day the membership begins |
+| `description` | the holder's name |
+| `amount` | the **annual** assessment, never the instalment |
+| `unit` | the unit number |
+| `type` | `assessment_roll` |
+| `cycle` *(new)* | `monthly`, `six_monthly`, `annual` |
+| `year` *(new)* | the assessment year |
+
+**`year` is explicit and is deliberately not derived from `date`.** Deriving it looks free and is
+wrong: `date` is when the *membership* started, so a member who bought in 2019 and appears on the
+2027 roll would derive an `assessment_year` of 2019. The two are different facts that a roll row
+happens to carry together.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | No `cycle`/`year` column at all on a file containing roll rows | GUARD: missing-headers, naming both |
+| 2 | Blank `cycle` or `year` on a roll row | GUARD: invalid-row |
+| 3 | `Monthly` — capitalised | GUARD: case-folded, matching `validate`'s treatment of a currency code. A closed vocabulary's case cannot change its meaning |
+| 4 | `quarterly` — a cycle migration 013 does not admit | GUARD: invalid-row |
+| 5 | `year` not an integer, or outside 1900–2200 | GUARD: invalid-row, matching `assessment_year_plausible` |
+| 6 | `amount` zero or negative | GUARD: `AMOUNT_PATTERN` admits both and `assessment_amount_positive` refuses them. Caught here, or the whole transaction aborts |
+| 7 | `amount` with a symbol, separator, or third decimal | GUARD: `AMOUNT_PATTERN` already refuses; asserted so the roll path is known to apply it |
+| 8 | Blank `unit` or blank `description` on a roll row | GUARD: invalid-row — a roll row that names no unit or nobody is defective, not partial |
+| 9 | `unit` over 64, holder over 200 | GUARD: `unit_number_length`, `unit_holder_name_length` |
+| 10 | A NUL in either | GUARD: `text` cannot store one; the same shape as `unstorableUnitReference` |
+| 11 | Malformed or impossible `date` | GUARD: invalid-row |
+| 12 | Invoice rows and roll rows in one file | GUARD: only roll rows yield roll rows; the others are untouched |
+| 13 | No roll rows at all — an ordinary invoice CSV | GUARD: an empty list and **not** a problem. Every upload goes through this reader |
+| 14 | The same unit twice in one roll | GUARD: refuse. Two rows for one unit are two answers about who holds it; `assessment_one_per_unit_year` would abort the transaction anyway. Detected on the **folded** number, so `4B` and `4b` collide as migration 011 makes them collide |
+| 15 | A defective roll row among good ones | GUARD: the whole document fails, matching `readRows`' existing rule |
+
+No PROPAGATE modes: the function is pure and returns its refusals.
+
+**Out of scope, recorded:** the provider path (above), and closing a superseded membership — that is
+temporal logic against the exclusion constraint and belongs to Task 2, where the database is.
+
 ### Debug Log References
 
 ### Review Findings
 
 ### Completion Notes List
 
+**Task 1 — the roll's shape and its reader.** Done. `readRows` now yields `rollRows` beside the
+records, and a roll row is its own type rather than four more fields on `ExtractionRecord`.
+
+*The story's stated reason for that was wrong, and the right one is stronger.* The story argued field
+count; re-derived, `ExtractionRecord` already had a plausible home for four of the six values and
+only two were genuinely new, so on that argument widening was cheaper. The decisive reason is
+`holdUnknownVendors`: it resolves and quarantines **every distinct non-null `vendorName`**, so a
+holder routed through that field would ask a treasurer whether each of their owners is a vendor they
+recognise, on every roll upload. Nothing in the type system would have caught it — the field is
+`string | null` either way.
+
+*`year` is explicit and deliberately not derived from `date`.* Deriving looks free and is wrong:
+`date` is when the *membership* began, so a member who bought in 2019 and appears on the 2026 roll
+would get an assessment against 2019. There is a test whose only job is to pin that apart.
+
+*Two guards exist that no database constraint would have caught.* `AMOUNT_PATTERN` admits `0`, `0.00`
+and `-100.00`; `assessment_amount_positive` refuses all three **by aborting the transaction the whole
+roll is written in**, so one bad cell would have cost the document rather than the row. Positivity is
+decided without a float — the shape is already known, so any digit `1-9` means greater than zero.
+
+*One statement of which kinds carry a unit.* `KINDS_WITH_UNIT_REFERENCE` is read by both `validate`
+and `tabular`. A second list is precisely how a producer comes to emit a value the validator rejects,
+which is the defect story 2.5 spent a task on.
+
+*An expired test premise, re-specified rather than weakened.* `validate.test.ts` asserted "a unit
+reference belongs to a deposit" with `assessment_roll` in the **refusing** list. That was exactly true
+for stories 2.4 and 2.5 and is made wrong by this story. It was re-specified so both the admitted and
+refused lists derive from `KINDS_WITH_UNIT_REFERENCE`, plus a control asserting the two partitions
+cover `DOCUMENT_KINDS` and neither is empty — without which an empty refused list would make those
+cases vacuous and nothing would say so. Net +1 test, no coverage lost.
+
+*Sensitivity check — eight mutations, every one verified to have applied (`subs=1`):*
+
+| Mutation | Result |
+| --- | --- |
+| never produce a roll row | **36 of 117 failed** |
+| drop the amount positivity check | 3 failed |
+| drop the assessment-year range check | 2 failed |
+| drop the duplicate-unit detection | 2 failed |
+| match duplicates on the raw spelling, not the folded one | 1 failed |
+| drop the cycle case-fold | 1 failed |
+| drop the NUL guards | 1 failed |
+| read the unit column for every kind | **0 failed in scope** — caught only by story 2.5's deposit suite |
+
+**The surviving mutation is the one worth keeping.** The guard this story *widened* — from
+`=== 'deposit'` to a set — was covered only by a test file outside the scope I mutated. An assertion
+now lives beside the change, so the file that owns the guard also proves it.
+
+*Argus review of the task diff — three findings, each verified against the real file before acting:*
+
+| Finding | Verdict |
+| --- | --- |
+| `optional()` throws on a `null` cell (high) | **disagree** — pre-existing and unchanged by this diff, and unreachable: `asText()` converts null/undefined to `''` before the rectangle exists, and `parseCsv` only builds strings |
+| `normalise()` throws on a nullish header (medium) | **disagree** — same, and same producers |
+| `tooLong` spreads the whole string (low) | **confirmed** — my code. An untrusted cell is bounded only by the 25 MiB upload limit, so a hostile cell allocated hundreds of megabytes to answer a question settled after 65 characters. Replaced with an early-exit code-point count behind a free UTF-16 upper bound |
+
+*The `tooLong` fix had no failing-first test, and that is stated rather than glossed.* The finding is
+about allocation, not output, so no behavioural test can separate the two implementations. What the
+fix got instead is a set of tests pinning the *semantics* it must not change — code points, not
+UTF-16 units — which would fail against the obvious "optimisation" of dropping to `.length`.
+
+*Writing those tests found a real inconsistency, recorded as a follow-up.* Through `readRows` a
+64-code-point astral unit number is **refused**, because `validate.checkText` bounds text with
+`trimmed.length` (UTF-16 units) while the database and `isStorableName` both count code points. So
+the application refuses a unit number the column would store. Pre-existing, outside this story, and
+listed below. The roll's own guards are therefore tested directly against `readRollRow`, where they
+decide — with a control asserting the ordinary case, so the refusals are not satisfied by a function
+that refuses everything.
+
+*Follow-ups found and deliberately not fixed here:*
+
+1. **`validate.checkText` measures UTF-16 units where the database counts code points.** Affects
+   `vendorName`, `documentNumber` and `unitReference` alike. The fix is the one `isStorableName`
+   already uses (`[...value].length`), applied consistently — but it changes vendor-name behaviour
+   across epic 1's path, which this story does not cover.
+2. **`isStorableName` in `hold-unknown-vendors.ts` has the same unbounded spread** the Argus finding
+   raised, on the same untrusted path. Fixing one and not the other is how two implementations of one
+   rule come to disagree, so both want the same change together.
+
 ### File List
+
+- `core/extraction/roll.ts` — added, Task 1.
+- `core/extraction/tabular-roll.test.ts` — added, Task 1.
+- `core/extraction/tabular.ts` — modified, Task 1.
+- `core/extraction/record.ts` — modified, Task 1 (`KINDS_WITH_UNIT_REFERENCE`).
+- `core/extraction/validate.ts` — modified, Task 1.
+- `core/extraction/validate.test.ts` — modified, Task 1 (expired premise re-specified).
 
 ### Change Log
 
