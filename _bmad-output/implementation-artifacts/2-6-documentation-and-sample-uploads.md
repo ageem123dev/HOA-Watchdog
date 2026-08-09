@@ -334,6 +334,29 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 
 ### Review Findings
 
+**Rebased onto `main` once story 2.7 merged (`fe86f5f`).** The branch was cut from 2.7's head so a
+"sample of every format" would not ship one short; with 2.7 in `main` the diff is 21 files, all this
+story's own. Gates re-run on the new base.
+
+**Argus, on the rebased head — one finding, and it is this story's own failure mode.**
+
+**[medium] The README gate assertion passed vacuously.** It looped over the npm scripts asserting
+`readme.toContain(\`npm run ${script}\`)`, with a `.replace('npm run test
+', 'npm test')` that never
+matched because the template has no newline. So for the `test` script it asserted `npm run test` —
+which is a **prefix of `npm run test:db`**, already in the file. Confirmed rather than assumed:
+deleting the `npm test` line from the README left all thirteen green.
+
+A documentation guard that cannot notice a missing gate command, in the story whose entire subject is
+documentation drift. Now matched line-anchored against an explicit command map, because `toContain`
+on a command that prefixes another command is a coincidence rather than a check.
+
+| Mutation | Result |
+| --- | --- |
+| delete the `npm test` line | 1 of 13 failed *(passed before the fix)* |
+| delete the `tsc --noEmit` line | 1 of 13 failed |
+
+
 ### Completion Notes List
 
 **Task 4 — the diagram.** A Mermaid flowchart in the README so a reader gets the shape without

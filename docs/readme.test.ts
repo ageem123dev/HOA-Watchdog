@@ -61,9 +61,29 @@ describe('the README describes this environment', () => {
 
 describe('the README describes this gate', () => {
   it('shows a command for every npm script the gate uses', () => {
-    for (const script of ['lint', 'build', 'test', 'test:db']) {
+    // `npm test` is spelled without `run`, and getting that wrong made this
+    // assertion vacuous: the first version asserted `npm run test`, which is a
+    // prefix of `npm run test:db`, so the README could lose `npm test`
+    // altogether and this still passed. Raised by Argus, and confirmed by
+    // deleting the line and watching all thirteen stay green.
+    //
+    // Anchored to the start of a line for the same reason: `toContain` on a
+    // command that prefixes another command is a coincidence, not a check.
+    const commands: Record<string, string> = {
+      lint: 'npm run lint',
+      build: 'npm run build',
+      test: 'npm test',
+      'test:db': 'npm run test:db',
+    }
+
+    for (const [script, command] of Object.entries(commands)) {
       expect(scripts[script], `package.json has no "${script}" script`).toBeDefined()
-      expect(readme).toContain(`npm run ${script}`.replace('npm run test\n', 'npm test'))
+
+      const shown = readme
+        .split(/\r?\n/)
+        .some((line) => line === command || line.startsWith(command + ' '))
+
+      expect(shown, `the README never shows the command ${command}`).toBe(true)
     }
   })
 
