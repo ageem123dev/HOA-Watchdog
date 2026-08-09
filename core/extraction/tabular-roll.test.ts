@@ -539,6 +539,38 @@ describe('one unit, one row', () => {
     expect(problems[0]!.reason).toBe('duplicate-unit')
   })
 
+  it('keeps apart two unit numbers the database keeps apart', () => {
+    // The dedup used core's `fold`, which collapses JavaScript's whitespace
+    // class — U+3000 included — while migration 011's character set does not.
+    // These two are one key to `fold` and two units to Postgres, so the roll was
+    // refused as a duplicate when the database would have stored both. Raised
+    // by review.
+    const rows = rollRowsOf(
+      readRows(
+        roll([
+          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4\u3000B', 'monthly', '2026'],
+          ['2019-03-01', 'John Doe', '4800.00', 'assessment_roll', '4 B', 'monthly', '2026'],
+        ]),
+      ),
+    )
+
+    expect(rows).toHaveLength(2)
+  })
+
+  it('still refuses two spellings the database does merge', () => {
+    // The other direction, so the fix is not simply "stop deduplicating".
+    const problems = problemsOf(
+      readRows(
+        roll([
+          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4\u00a0B', 'monthly', '2026'],
+          ['2019-03-01', 'John Doe', '4800.00', 'assessment_roll', '4 B', 'monthly', '2026'],
+        ]),
+      ),
+    )
+
+    expect(problems[0]!.reason).toBe('duplicate-unit')
+  })
+
   it('allows one unit to appear on rolls for different years in one file', () => {
     // The grain is the unit and the year, matching assessment_one_per_unit_year.
     const rows = rollRowsOf(

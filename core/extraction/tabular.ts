@@ -1,4 +1,4 @@
-import { fold } from '../payment/resolve-line'
+import { normaliseUnitNumber } from '../unit/normalised-number'
 import { parseCsv } from './csv'
 import { KINDS_WITH_UNIT_REFERENCE, type ExtractionRecord } from './record'
 import { ROLL_HEADERS, ROLL_REQUIRED_HEADERS, readRollRow, type RollRow } from './roll'
@@ -168,9 +168,12 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
   /**
    * One roll row per unit per year, keyed the way the database keys it.
    *
-   * Folded with core's `fold` — the same folding migration 011 applies to
-   * `unit_number` — so `4B` and `4b  ` collide here exactly as the unique index
-   * makes them collide there. Keyed on the year as well, because
+   * Folded with `normaliseUnitNumber`, which mirrors `unit_normalised_number()`
+   * exactly — **not** with `fold` from the payment path. `fold` collapses
+   * JavaScript's whitespace class, which matches U+3000 while migration 011's
+   * character set does not, so it merged two unit numbers the database stores
+   * separately and refused a roll Postgres would have accepted. Raised by
+   * review. Keyed on the year as well, because
    * `assessment_one_per_unit_year` is on the pair: one unit may legitimately
    * appear on rolls for two years in one file.
    */
@@ -231,7 +234,7 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
       return
     }
 
-    const key = `${fold(roll.row.unitNumber)}::${roll.row.assessmentYear}`
+    const key = `${normaliseUnitNumber(roll.row.unitNumber)}::${roll.row.assessmentYear}`
 
     if (seenUnitYears.has(key)) {
       problems.push({ reason: 'duplicate-unit', row: index + 1 })
