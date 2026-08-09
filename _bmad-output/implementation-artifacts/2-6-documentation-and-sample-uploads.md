@@ -123,28 +123,28 @@ row reads as a register that never had it
         remedies — "unreadable" from the gate means the container lied about its type; "unreadable"
         from the tabular reader means the columns were wrong.
 
-- [ ] **Task 2 — A sample for every accepted format** (AC2, AC3)
-  - [ ] One file per content type, six in all, under `samples/`. Each must pass `assess()` and then
+- [x] **Task 2 — A sample for every accepted format** (AC2, AC3)
+  - [x] One file per content type, six in all, under `samples/`. Each must pass `assess()` and then
         do the thing the README says it does.
-  - [ ] **Generated from one source of truth, not six hand-authored files.**
+  - [x] **Generated from one source of truth, not six hand-authored files.**
         `scripts/build-samples.mjs` holds the rows once and writes the CSV, the `.xlsx`, the `.xls`
         and the PDF from them. Six files hand-maintained against one contract is six chances for the
         README to be right about five of them.
-  - [ ] **The two rasters are the exception, and say so.** PNG and JPG carry figures a model reads,
+  - [x] **The two rasters are the exception, and say so.** PNG and JPG carry figures a model reads,
         which means they must be real images of a real document. Committing them and having the
         script *verify* rather than regenerate them is the recommended shape — the alternative is a
         rasterising devDependency, which is a defensible call but a new dependency in a repo that has
         avoided one for the PDF path. Whichever is chosen, the README states which samples are
         generated and which are fixed, because a reader who edits a fixed one and re-runs the script
         will otherwise think it silently ignored them.
-  - [ ] **Verify the `.xls` signature rather than trusting the writer.** `assess()` requires the OLE
+  - [x] **Verify the `.xls` signature rather than trusting the writer.** `assess()` requires the OLE
         compound header `D0 CF 11 E0 A1 B1 1A E1`, and SheetJS's `xls` book type does not
         unconditionally produce BIFF8. A sample that fails the gate it exists to demonstrate is the
         worst possible sample.
-  - [ ] Cover the kinds, not just the containers: a deposit bank feed with a `unit` column, an
+  - [x] Cover the kinds, not just the containers: a deposit bank feed with a `unit` column, an
         invoice batch, and a statement with no `type` column at all — which is the default and the
         one most likely to surprise.
-  - [ ] **Add `.gitattributes`** marking the sample binaries `binary`. Without it a CRLF
+  - [x] **Add `.gitattributes`** marking the sample binaries `binary`. Without it a CRLF
         renormalisation corrupts every one of them, and the open epic-1 action item
         ("Add .gitattributes and renormalise the repo-wide CRLF") means someone intends to run
         exactly that. Scope it to the samples here; the repo-wide renormalisation stays that item's
@@ -313,6 +313,14 @@ alike and only one of them changes AC2.
 
 ### Debug Log References
 
+**A transient failure in one full run, unexplained, recorded rather than buried.** During task 2 one
+`npm test` reported `dual-llm-boundary.test.ts` failing two clauses, including *"scans a non-empty
+set of source files"*. The file passes alone (23/23), passes beside `samples.test.ts` (44/44), and
+five subsequent full runs are identical at 1633. My first suspicion was the samples control, which
+rewrites `samples/deposits.csv` while other suites walk the tree — but that scan reads only `.ts`,
+`.tsx`, `.mjs` and `.js`, so a `.csv` write cannot reach it. No attribution, so no claim of a fix.
+
+
 **Worktree baseline, `c:/tmp/hoa-story-2-6` on `7bfcb82`.** Unit suite 97 files / 1580 passed.
 
 **A fresh worktree silently skips the database suite.** `npm run test:db` reads `.env.local`, which
@@ -327,6 +335,49 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 ### Review Findings
 
 ### Completion Notes List
+
+**Task 2 — six samples, four generated and two verified.**
+
+*One source of truth.* `scripts/build-samples.mjs` holds the rows once and writes the CSV pair, the
+`.xlsx`, the `.xls` and the PDF. `--check` compares byte for byte, and `samples/samples.test.ts`
+runs it, so editing a sample by hand or editing the rows without rebuilding fails the gate.
+
+*The PDF is hand-built.* This repository has no PDF dependency and a sample is not a reason to
+acquire one — catalog, pages, page, Helvetica, one content stream, with the cross-reference offsets
+computed from the assembled bytes so editing the text cannot silently produce a broken file.
+
+*The two rasters are committed, not generated,* which is the shape the story recommended. They were
+authored once by rendering an SVG through `sharp` — which is present only as a transitive dependency
+of Next, so the script deliberately **verifies** them rather than depending on it. Stated in the
+script and in the README, because a reader who edits one and re-runs the script would otherwise think
+it was ignored.
+
+*The `.xls` signature is checked, not trusted.* SheetJS's `biff8` output does begin
+`D0 CF 11 E0 A1 B1 1A E1`, and a second assertion proves it is **not** a ZIP — asserting only the OLE
+header would pass for an encrypted `.xlsx`, which is also an OLE compound file and is exactly why
+`acceptance.ts` keeps the two signatures apart.
+
+*The samples exercise the contract rather than illustrating it.* The roll carries all three billing
+cycles; the deposits carry a reference the roll spells differently and one unit the roll does not
+have, so a reader sees a held line on purpose; the statement has no `type` column at all and carries
+a negative amount.
+
+*A finding the samples produced:* `4b ` in the file reads back as `4b`, because `validate` trims
+every text field before it becomes a record. A trailing space cannot reach the ledger, so a sample
+cannot demonstrate one. The test asserts what the system does rather than what the file says, and
+`upload-contract.md` gained a line stating that cell values are trimmed.
+
+*The control corrupts a real sample and restores it* rather than asking the script for a sabotage
+flag: production code gains nothing to make itself testable, and a `--check` that exited 0
+unconditionally would make the drift assertion pass forever.
+
+*`.gitattributes` is scoped to `samples/`.* An open action item intends a repo-wide CRLF
+renormalisation, and that pass would rewrite line endings inside these fixtures — changing the
+`.xls` signature bytes and the PNG's deflate stream. The CSVs are marked `-text` because their CRLF
+endings are RFC 4180's and the byte comparison depends on them.
+
+*Two guards fired and were widened deliberately:* `tsconfig-coverage.test.ts` caught `docs/` and then
+`samples/` sitting outside tsconfig's `include`, so neither new test was being type-checked.
 
 **Task 1 — the contract, and the guard that keeps it true.** `docs/upload-contract.md` states it
 once; `docs/upload-contract.test.ts` derives every value from the constants and fails when the two
@@ -370,7 +421,13 @@ Added `docs/**/*.ts`. A new source directory is a new hole in the gate unless so
 
 - `docs/upload-contract.md` — added, Task 1.
 - `docs/upload-contract.test.ts` — added, Task 1.
-- `tsconfig.json` — modified, Task 1.
+- `tsconfig.json` — modified, Tasks 1 and 2.
+- `scripts/build-samples.mjs` — added, Task 2.
+- `samples/samples.test.ts` — added, Task 2.
+- `samples/assessment-roll.csv`, `samples/deposits.csv`, `samples/invoices.xlsx`,
+  `samples/statement.xls`, `samples/deposit-slip.pdf` — added, Task 2 (generated).
+- `samples/deposit-slip.png`, `samples/deposit-slip.jpg` — added, Task 2 (committed, verified).
+- `.gitattributes` — added, Task 2.
 
 ### Change Log
 

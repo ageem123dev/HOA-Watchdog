@@ -65,6 +65,9 @@ uses below, which is about columns.
 The first row is a header row. Headers are matched case-insensitively after trimming, so `Date`,
 `date` and ` DATE ` are one column.
 
+**Cell values are trimmed too.** Leading and trailing spaces never reach the ledger, so ` 4B ` and
+`4B` are stored identically, and a cell holding only spaces counts as empty.
+
 ### Required columns
 
 `REQUIRED_HEADERS` — a file without all three is refused before any row is read.
