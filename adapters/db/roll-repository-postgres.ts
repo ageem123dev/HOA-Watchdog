@@ -144,11 +144,26 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
         await client.query('delete from unit_membership where document_id = $1', [documentId])
         await client.query('delete from unit_holder where document_id = $1', [documentId])
 
-        // A tenure another document already records beginning on exactly this
-        // day. Closing it at the new start would produce `[d,d)` — an empty
-        // range, which `unit_membership_has_a_start` refuses because every empty
-        // daterange has a null lower bound — and deleting it would let one
-        // upload silently overwrite what another recorded.
+        // A tenure another document records that this one cannot be fitted
+        // against. Two shapes, and the second was missed at first:
+        //
+        //   * it begins on **exactly** this day. Closing it at the new start
+        //     would produce `[d,d)` — an empty range, which
+        //     `unit_membership_has_a_start` refuses because every empty
+        //     daterange has a null lower bound — and deleting it would let one
+        //     upload silently overwrite what another recorded.
+        //
+        //   * this day falls **inside** a tenure that is already closed. The
+        //     close-update below only touches open ranges, and the insert would
+        //     then compute a range overlapping the bounded one — so the document
+        //     failed with a raw 23P01 instead of a sentence naming the unit.
+        //     Raised by CodeRabbit.
+        //
+        // `not upper_inf(...)` is what keeps ordinary succession out of this:
+        // an open tenure contains every later day, and a unit changing hands is
+        // exactly that — handled by closing it, not by refusing the document.
+        // `@>` is half-open like the column, so a start landing on the day a
+        // closed tenure *ended* is not contained and is admitted.
         const { rows: conflicts } = await client.query<{
           unit_number: string
           held_from: string
@@ -157,7 +172,9 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
                   to_char(lower(m.held_during), 'YYYY-MM-DD') as "held_from"
              from unnest($1::uuid[], $2::date[]) as r(unit_id, held_from)
              join unit_membership m
-               on m.unit_id = r.unit_id and lower(m.held_during) = r.held_from
+               on m.unit_id = r.unit_id
+              and m.held_during @> r.held_from
+              and (lower(m.held_during) = r.held_from or not upper_inf(m.held_during))
              join unit u on u.id = m.unit_id
             limit 1`,
           [rowUnitIds, heldFrom],

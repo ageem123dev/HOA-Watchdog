@@ -211,14 +211,23 @@ describeWithDatabase('against the live schema', () => {
       [uniq('9Z')],
     )
 
-    await expect(
-      client.query(
-        `insert into unit_membership (unit_id, holder_id, held_during)
-         values ($1, $2, daterange('2020-01-01'::date, null))`,
-        [other.rows[0]!.id, holder.rows[0]!.id],
-      ),
-    ).resolves.toBeDefined()
+    await client.query(
+      `insert into unit_membership (unit_id, holder_id, held_during)
+       values ($1, $2, daterange('2020-01-01'::date, null))`,
+      [other.rows[0]!.id, holder.rows[0]!.id],
+    )
 
+    // Read back rather than asserting the insert resolved. `resolves.toBeDefined()`
+    // holds for any query that did not throw, so it would pass with the column
+    // dropped entirely — and the point here is that a null is *stored*. Raised
+    // by review.
+    const { rows } = await client.query<{ document_id: string | null }>(
+      'select document_id from unit_membership where unit_id = $1',
+      [other.rows[0]!.id],
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.document_id).toBeNull()
     expect(unitId).toBeTruthy()
   })
 

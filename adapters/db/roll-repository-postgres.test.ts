@@ -395,6 +395,61 @@ describeWithDatabase('applying an assessment roll', () => {
       ])
     })
 
+    it('refuses a start that falls inside a tenure already closed', async () => {
+      // Raised by CodeRabbit. The conflict check matched only an exact start, so
+      // a date landing *within* a bounded tenure slipped past it: the close-update
+      // skips bounded ranges, and the insert then computed a range overlapping
+      // the recorded one. The result was a raw 23P01 rather than a sentence
+      // naming the unit — the treasurer gets an unhelpable error for a document
+      // that genuinely contradicts recorded history.
+      const number = unitNumber('inside')
+      const repository = createRollRepository({ pool })
+
+      const first = await newDocument()
+      await repository.apply(first, [row({ unitNumber: number, heldFrom: '2019-03-01' })])
+
+      // Closes the first at 2026-07-01, leaving it bounded.
+      const second = await newDocument()
+      await repository.apply(second, [
+        row({ unitNumber: number, heldFrom: '2026-07-01', holderName: `${RUN_PREFIX} John Doe` }),
+      ])
+
+      const third = await newDocument()
+      await expect(
+        repository.apply(third, [
+          row({ unitNumber: number, heldFrom: '2022-01-01', holderName: `${RUN_PREFIX} Third` }),
+        ]),
+      ).rejects.toThrow(ConflictingTenureError)
+
+      // And the two recorded tenures are untouched.
+      expect(await tenuresFor(number)).toHaveLength(2)
+    })
+
+    it('still admits a start on the day a closed tenure ended', async () => {
+      // The boundary the rule above must not swallow. `held_during` is half-open,
+      // so a tenure ending 2026-07-01 does not contain that day — the next one
+      // begins on it, with no overlap and no gap.
+      const number = unitNumber('abutting')
+      const repository = createRollRepository({ pool })
+
+      const first = await newDocument()
+      await repository.apply(first, [row({ unitNumber: number, heldFrom: '2019-03-01' })])
+
+      const second = await newDocument()
+      await repository.apply(second, [
+        row({ unitNumber: number, heldFrom: '2026-07-01', holderName: `${RUN_PREFIX} John Doe` }),
+      ])
+
+      expect(await tenuresFor(number)).toEqual([
+        {
+          full_name: `${RUN_PREFIX} Jane Smith`,
+          held_from: '2019-03-01',
+          held_until: '2026-07-01',
+        },
+        { full_name: `${RUN_PREFIX} John Doe`, held_from: '2026-07-01', held_until: null },
+      ])
+    })
+
     it('refuses two documents claiming one unit from the same day', async () => {
       // Closing the earlier tenure at the new start would make `[d,d)` — an
       // empty range, which `unit_membership_has_a_start` refuses because every
@@ -511,30 +566,60 @@ describeWithDatabase('applying an assessment roll', () => {
       // carry an open action item for it. A roll is the same shape and there is
       // no reason to add a third.
       const counting = { count: 0 }
+
+      // Wrapped once per client, not once per `connect`. `pool.connect()` hands
+      // back a *pooled* client, so re-wrapping on every checkout stacks the
+      // counter on a client that has been used before — the second measurement
+      // counted every statement twice. The absolute `< 12` bound this replaced
+      // was loose enough to hide that; the equality assertion found it on its
+      // first run.
+      const WRAPPED = Symbol.for('roll-repository-test/counted')
       const countingPool = {
         connect: async () => {
           const client = await pool.connect()
-          const query = client.query.bind(client)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          client.query = ((...args: any[]) => {
-            counting.count += 1
+          const marked = client as unknown as Record<PropertyKey, unknown>
+
+          if (marked[WRAPPED] !== true) {
+            const query = client.query.bind(client)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return (query as any)(...args)
-          }) as typeof client.query
+            client.query = ((...args: any[]) => {
+              counting.count += 1
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              return (query as any)(...args)
+            }) as typeof client.query
+            marked[WRAPPED] = true
+          }
+
           return client
         },
       } as unknown as Pool
 
-      const documentId = await newDocument()
-      const many = Array.from({ length: 12 }, (_, index) =>
-        row({ unitNumber: unitNumber(`bulk-${index}`) }),
-      )
+      const measure = async (length: number, label: string): Promise<number> => {
+        const documentId = await newDocument()
 
-      await createRollRepository({ pool: countingPool }).apply(documentId, many)
+        // Reset *after* the setup, not before it. The wrapper is attached to a
+        // pooled client, so `newDocument`'s own query is counted whenever the
+        // pool hands it the same one — which it did on the second measurement
+        // and not the first, producing an off-by-one that looked like the
+        // adapter growing with the roll.
+        counting.count = 0
 
-      // Twelve rows must not cost twelve inserts. The bound is generous on
-      // purpose — it pins the shape (set-based) rather than the exact plan.
-      expect(counting.count).toBeLessThan(12)
+        await createRollRepository({ pool: countingPool }).apply(
+          documentId,
+          Array.from({ length }, (_, index) => row({ unitNumber: unitNumber(`${label}-${index}`) })),
+        )
+        return counting.count
+      }
+
+      const few = await measure(2, 'few')
+      const many = await measure(12, 'many')
+
+      // Equal, not merely "fewer than twelve". An absolute bound passes against
+      // a loop that happens to be under it, and says nothing about growth — the
+      // property worth pinning is that the count does not depend on the length
+      // of the roll at all. Raised by review.
+      expect(many).toBe(few)
+      expect(few).toBeGreaterThan(0)
     })
   })
 })

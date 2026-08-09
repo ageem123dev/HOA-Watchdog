@@ -430,6 +430,60 @@ overlap.
 
 ### Review Findings
 
+#### Integration pass — Argus over `main...HEAD`
+
+One low finding: `cell()` indexes `row[headers.indexOf(header)]`, which is `row[-1]` for an absent
+header. **Disagree** — pre-existing and unchanged by this branch (verified: it appears in the diff
+only as context), and correct as written: the return type is `string | undefined` and JavaScript
+yields `undefined` for a missing index, which is exactly what `optional()` and `required()` expect.
+
+*Two Argus calls failed before this one returned* — `agy` reported success and returned neither
+structured output nor prose, once on the task-2 diff and once on the branch diff. Both succeeded on
+retry. Recorded rather than hidden: a review that errors is not a review that passed.
+
+#### The one local CodeRabbit round, from the CLI
+
+`status: review_completed`, **23 files reviewed against 23 changed** — reconciled both directions,
+nothing unreviewed and nothing out of scope. Eight findings: one major, one minor, six trivial.
+
+**The major one was real and is the best finding of the story.** The conflict check matched only a
+tenure beginning on *exactly* the requested day, so a date landing **inside** a tenure that had
+already been closed slipped past it — the close-update skips bounded ranges, and the insert then
+computed a range overlapping the recorded one. A treasurer uploading a roll that genuinely
+contradicts recorded history got a raw `23P01` instead of a sentence naming the unit. Fixed with
+`m.held_during @> r.held_from and (lower(...) = r.held_from or not upper_inf(...))`, where
+`not upper_inf` is what keeps ordinary succession out of it and `@>` being half-open admits a start
+on the day a closed tenure ended. Both cases now have tests; the first was watched failing with
+`23P01` before the fix.
+
+| # | Severity | Verdict |
+| --- | --- | --- |
+| 7 | major | **fixed** — the conflict check above |
+| 1, 6 | trivial | **fixed** — `KINDS_WITH_UNIT_REFERENCE` now carries `satisfies readonly DocumentKind[]`, so a member that is not a document kind fails compilation rather than at runtime |
+| 2 | trivial | **fixed** — a test asserted `resolves.toBeDefined()`, which holds for any query that does not throw and would pass with the column dropped. It now reads the row back and asserts the null is stored |
+| 3 | trivial | **fixed** — the `this-roll` message discriminator was added in task 2 with no test for its branch. Now covered, including that the two wordings differ |
+| 8 | trivial | **fixed, and it found two more bugs** — see below |
+| 4, 5 | minor, trivial | **skipped** — both are about `.claude/skills/bmad-ship-story/SKILL.md`, which arrived on this branch from a separate commit and is not this story's work |
+
+**Finding 8 is the one worth keeping.** It asked that the query-count test compare two roll lengths
+and assert equality rather than assert an absolute `< 12`. Making that change immediately failed —
+and the failures were in the test harness, not the adapter:
+
+1. the counting wrapper re-wrapped `client.query` on every `connect()`, so a **pooled** client reused
+   by the second measurement counted every statement twice (23 against 11);
+2. once that was fixed, `newDocument()` running through the same pool could land on the wrapped
+   client and add one to the count before the call under test (12 against 11).
+
+Both were invisible under the loose bound. The property now pinned is the one that matters: the
+statement count does not depend on the length of the roll at all.
+
+*`argus_ingest` found nothing to learn from.* It was called with `from: .argus/cr.jsonl` and the
+commit SHA, exactly as the refreshed workflow specifies, and returned `reviews_found: 0` — the
+ingest adapter does not parse the CLI's JSONL event stream, which is a different shape from the IDE
+extension's stored review. So Argus was **not** scored against this round. Stated plainly rather than
+recorded as a pass: this is a gap between the refreshed step 4b and the ingest adapter, and it wants
+fixing before the next story leans on it.
+
 ### Completion Notes List
 
 **Task 1 — the roll's shape and its reader.** Done. `readRows` now yields `rollRows` beside the

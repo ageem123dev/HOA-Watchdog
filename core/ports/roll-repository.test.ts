@@ -83,6 +83,24 @@ describe('a tenure two documents disagree about', () => {
     expect(error.name).toBe('ConflictingTenureError')
   })
 
+  it('says something different when the roll contradicts itself', () => {
+    // Two conflicts, two remedies: remove the other document, or correct the
+    // duplicate rows in this one. A treasurer told only "there is a conflict"
+    // has to go and work out which situation they are in. The discriminator was
+    // added without a test for its branch — raised by review.
+    const internal = new ConflictingTenureError('4B', '2026-07-01', 'this-roll')
+    const external = new ConflictingTenureError('4B', '2026-07-01', 'another-document')
+
+    expect(internal.message).toContain('4B')
+    expect(internal.message).toContain('2026-07-01')
+    expect(internal.message).not.toEqual(external.message)
+    expect(internal.message).toMatch(/this roll/i)
+  })
+
+  it('defaults to the cross-document wording', () => {
+    expect(new ConflictingTenureError('4B', '2026-07-01').message).toMatch(/another document/i)
+  })
+
   it('is an Error, so an unhandled one still reports as one', () => {
     expect(new ConflictingTenureError('4B', '2026-07-01')).toBeInstanceOf(Error)
   })

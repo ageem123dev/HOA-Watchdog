@@ -36,7 +36,7 @@ export const DOCUMENT_KINDS = Object.freeze([
 export const KINDS_WITH_UNIT_REFERENCE = Object.freeze([
   'deposit',
   'assessment_roll',
-] as const)
+] as const satisfies readonly DocumentKind[])
 
 export const SUPPORTED_CURRENCIES = Object.freeze(['USD'] as const)
 

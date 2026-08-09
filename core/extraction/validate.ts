@@ -1,5 +1,6 @@
 import {
   AMOUNT_PATTERN,
+  type DocumentKind,
   DOCUMENT_NUMBER_MAX_LENGTH,
   KINDS_WITH_UNIT_REFERENCE,
   UNIT_REFERENCE_MAX_LENGTH,
@@ -171,7 +172,7 @@ export function validate(candidate: unknown): Validation {
   if (
     unitReference !== null &&
     isDocumentKind(documentKind) &&
-    !(KINDS_WITH_UNIT_REFERENCE as readonly string[]).includes(documentKind)
+    !(KINDS_WITH_UNIT_REFERENCE as readonly DocumentKind[]).includes(documentKind)
   ) {
     problems.push({ field: 'unitReference', reason: 'unknown-value' })
   }
