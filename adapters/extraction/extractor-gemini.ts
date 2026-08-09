@@ -3,6 +3,7 @@ import {
   DOCUMENT_KINDS,
   DOCUMENT_NUMBER_MAX_LENGTH,
   SUPPORTED_CURRENCIES,
+  UNIT_REFERENCE_MAX_LENGTH,
   VENDOR_NAME_MAX_LENGTH,
 } from '../../core/extraction/record'
 import type { ExtractionRecord } from '../../core/extraction/record'
@@ -101,6 +102,21 @@ function responseSchema(): Record<string, unknown> {
               nullable: true,
             },
             currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES] },
+            // The unit a deposit line pays for, and null on everything else.
+            //
+            // Absent from the schema means absent from the answer: structured
+            // output returns the schema it was given, not the one the record
+            // type wishes it had. Story 2.4 added this field to the record and
+            // the validator without adding it here, so it was null on every
+            // document a provider ever read.
+            //
+            // Not in `required` — most documents name no unit, and `validate`
+            // refuses a reference on any kind but `deposit`.
+            unitReference: {
+              type: 'string',
+              maxLength: UNIT_REFERENCE_MAX_LENGTH,
+              nullable: true,
+            },
           },
           // Exactly the two columns migration 006 declares `not null`.
           required: ['documentKind', 'currency'],
@@ -109,6 +125,31 @@ function responseSchema(): Record<string, unknown> {
     },
     required: ['records'],
   }
+}
+
+/**
+ * The candidate with a unit reference removed unless it is a deposit.
+ *
+ * Deliberately narrow: it clears exactly one field on exactly the kinds that
+ * cannot carry it, and leaves everything else — including an unrecognised
+ * `documentKind` — for `validate` to judge. Anything broader would be this
+ * adapter quietly correcting the provider, and the point of validating an
+ * untrusted answer is to find out when it is wrong rather than to tidy it.
+ *
+ * `deposit` is a literal here. An earlier draft of this note claimed it was
+ * compared against the record's own vocabulary, which it never was — flagged by
+ * review, and worth correcting rather than quietly deleting: a comment
+ * describing code that does not exist is worse than no comment, because it is
+ * the version a reader believes.
+ */
+function withoutStrayUnitReference(candidate: unknown): unknown {
+  if (typeof candidate !== 'object' || candidate === null) return candidate
+
+  const source = candidate as { documentKind?: unknown; unitReference?: unknown }
+  if (source.unitReference === undefined || source.unitReference === null) return candidate
+  if (source.documentKind === 'deposit') return candidate
+
+  return { ...source, unitReference: null }
 }
 
 export class MissingExtractionConfigError extends Error {
@@ -271,7 +312,16 @@ function validateAll(payload: unknown): readonly ExtractionRecord[] | null {
   const validated: ExtractionRecord[] = []
 
   for (const candidate of records) {
-    const result = validate(candidate)
+    // A unit means nothing on anything but a deposit, and `validate` refuses one
+    // there — so a provider that attaches `unitReference` to an invoice would
+    // fail validation, and this loop turns any failure into `null`, which the
+    // caller reports as `unreadable`. One hallucinated reference would lose the
+    // whole document and tell the treasurer their scan was bad.
+    //
+    // Dropped rather than refused, which is what the tabular reader already does
+    // with its `unit` column: the two producers have to agree, or the same
+    // document read two ways gives two answers. Raised by review.
+    const result = validate(withoutStrayUnitReference(candidate))
     if (!result.ok) return null
     validated.push(result.record)
   }

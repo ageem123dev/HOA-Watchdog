@@ -4,7 +4,9 @@ import { auth } from '@/adapters/auth/auth'
 import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
+import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
+import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
 import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
 import {
@@ -103,6 +105,11 @@ export async function uploadDocuments(
     workbooks: workbookDecoder,
     vendors: createVendorDirectory(),
     quarantine: createQuarantine(),
+    // The line that makes story 2.5 real for the format the pilot uses. A CSV
+    // never reaches the provider path, so this call site — not the deferred
+    // one — is where a deposit bank feed becomes payments.
+    units: createUnitDirectory(),
+    payments: createPaymentRepository(),
     // The real error goes to the server log, never to the page — its text can
     // name a bucket, a path, or a library. The treasurer gets the per-file
     // outcome instead.

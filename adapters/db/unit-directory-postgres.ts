@@ -58,7 +58,25 @@ const TENURE_COLUMNS = `unit_holder.full_name as "holderName",
                 to_char(lower(unit_membership.held_during), 'YYYY-MM-DD') as "heldFrom",
                 to_char(upper(unit_membership.held_during), 'YYYY-MM-DD') as "heldUntil"`
 
-export function createUnitDirectory(): UnitDirectory {
+/**
+ * A reference the database cannot be sent at all.
+ *
+ * `text` cannot hold a NUL, so passing one as a parameter raises 22021 — which
+ * aborts the transaction the ingest is running in, so one malformed line would
+ * take every payment in the document with it. Exactly the shape migration 017
+ * was written to fix, in a new place.
+ *
+ * Dropped rather than cleaned. A reference containing a NUL cannot match a unit
+ * either way, because no `unit_number` can contain one; stripping it would
+ * invent a different reference and might match the wrong unit.
+ */
+function sendable(reference: string): boolean {
+  return !reference.includes('\u0000')
+}
+
+export function createUnitDirectory(options: { pool?: Pool } = {}): UnitDirectory {
+  const pool = () => options.pool ?? getPool()
+
   return {
     async heldBy(unitNumber: string, on: string): Promise<UnitHolding | null> {
       // `held_during @> $2::date` asks the database the containment question
@@ -77,7 +95,7 @@ export function createUnitDirectory(): UnitDirectory {
       // defensive length check is written here, because nothing could make it
       // fail without dropping that constraint, and a guard that cannot be made
       // to fire proves nothing.
-      const { rows } = await getPool().query<UnitHolding>(
+      const { rows } = await pool().query<UnitHolding>(
         `select ${TENURE_COLUMNS}
            from unit_membership
            join unit on unit.id = unit_membership.unit_id
@@ -97,7 +115,7 @@ export function createUnitDirectory(): UnitDirectory {
       // statement share `created_at` to the microsecond. The exclusion
       // constraint is what makes that true, which is why it is stated here
       // rather than left as something a reader has to work out.
-      const { rows } = await getPool().query<UnitHolding>(
+      const { rows } = await pool().query<UnitHolding>(
         `select ${TENURE_COLUMNS}
            from unit_membership
            join unit on unit.id = unit_membership.unit_id
@@ -108,6 +126,48 @@ export function createUnitDirectory(): UnitDirectory {
       )
 
       return rows
+    },
+
+    async unitIdsFor(references: readonly string[]): Promise<ReadonlyMap<string, string>> {
+      // Distinct before asking. A deposit where forty lines name the same unit
+      // is one question, and the map is keyed by reference either way.
+      //
+      // Order preserved rather than going through a Set alone, so the parameter
+      // a test asserts on is stable and a failure is readable.
+      const seen = new Set<string>()
+      const asking: string[] = []
+
+      for (const reference of references) {
+        if (!sendable(reference) || seen.has(reference)) continue
+        seen.add(reference)
+        asking.push(reference)
+      }
+
+      // Applied to what will actually be sent, not to what arrived — dropping
+      // the unsendable references can empty a non-empty list. An empty array
+      // would still be a round trip to answer a question with one possible
+      // answer.
+      if (asking.length === 0) return new Map()
+
+      // `unnest` and one round trip, not one query per line. The join does the
+      // folding on both sides through the function migration 011 defines, so a
+      // reference matches exactly what the roll would match and nothing else.
+      //
+      // `r.reference` is echoed back deliberately: the caller keys on its own
+      // string. Returning `unit.normalised_number` instead would silently
+      // require core's `fold` and `unit_normalised_number` to agree, and they
+      // do not — see the port's note on U+3000.
+      const { rows } = await pool().query<{ reference: string; id: string }>(
+        `select r.reference as "reference", unit.id as "id"
+           from unnest($1::text[]) as r(reference)
+           join unit on unit.normalised_number = unit_normalised_number(r.reference)`,
+        [asking],
+      )
+
+      const found = new Map<string, string>()
+      for (const row of rows) found.set(row.reference, row.id)
+
+      return found
     },
   }
 }

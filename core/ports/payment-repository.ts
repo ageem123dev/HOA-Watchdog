@@ -31,5 +31,9 @@ export interface PaymentRepository {
    * bar is the *combined* set: a deposit whose every line was held is a perfectly
    * ordinary outcome and must be allowed.
    */
-  replace(documentId: string, lines: readonly ResolvedLine[]): Promise<void>
+  replace(
+    documentId: string,
+    lines: readonly ResolvedLine[],
+    fence?: { readonly token: string },
+  ): Promise<void>
 }

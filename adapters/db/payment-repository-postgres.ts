@@ -1,5 +1,6 @@
 import { Pool, type PoolClient } from 'pg'
 
+import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import type { PaymentRepository } from '../../core/ports/payment-repository'
 import type { ResolvedLine } from '../../core/payment/resolve-line'
 import { readWriterDatabaseUrl } from '../auth/env'
@@ -47,7 +48,11 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
   const pool = () => options.pool ?? getPool()
 
   return {
-    async replace(documentId: string, lines: readonly ResolvedLine[]): Promise<void> {
+    async replace(
+      documentId: string,
+      lines: readonly ResolvedLine[],
+      fence?: { readonly token: string },
+    ): Promise<void> {
       // Refused rather than obeyed, for the reason the extraction repository
       // records: `replace(id, [])` reads identically to "extraction found
       // nothing", and obeying it would destroy a good set on a caller's mistake.
@@ -77,7 +82,32 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
         // one is present; a union of two is neither. The `document` row exists
         // either way, so locking it is what makes replacement serialise
         // regardless of what the document already holds.
-        await client.query('select 1 from document where id = $1 for update', [documentId])
+        // The fence, in the same statement as the lock -- checked outside the
+        // transaction there would be a window in which the claim expires between
+        // the check and the write, which is the gap it exists to close.
+        //
+        // Without it a stale run could overwrite a fresher run's payments and
+        // nothing would notice: `recordPayments` runs *before* the fenced
+        // extraction write, so run A finishing after run B settled the document
+        // replaced B's payments, then had its own records correctly refused --
+        // leaving extraction rows from B and payment rows from A, on a document
+        // marked `read` and never polled again. Raised on the merge request.
+        //
+        // Optional because the upload path has no claim to fence against: a CSV
+        // is read synchronously inside the request that uploaded it, and there
+        // is no second runner to race.
+        const guarded = await client.query(
+          fence === undefined
+            ? 'select 1 from document where id = $1 for update'
+            : `select 1 from document
+                where id = $1 and extraction_claim_token = $2
+                for update`,
+          fence === undefined ? [documentId] : [documentId, fence.token],
+        )
+
+        if (fence !== undefined && guarded.rowCount === 0) {
+          throw new StaleExtractionClaimError(documentId)
+        }
 
         // Both tables, in the same transaction. A line either became a payment
         // or was held, and the two are one reading — clearing one and not the

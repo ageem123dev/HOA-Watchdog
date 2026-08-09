@@ -532,8 +532,12 @@ describe('the Gemini extraction adapter', () => {
       const properties = (await recordSchema()).properties
       const nullable = Object.keys(properties).filter((name) => properties[name].nullable === true)
 
+      // `unitReference` joined the list in story 2.5, and belongs on it for the
+      // reason the list exists: migration 014 declares `unit_reference text`
+      // without `not null`. Most documents name no unit, so a provider obeying
+      // a non-nullable schema would have to invent one for every invoice.
       expect(nullable.sort()).toEqual(
-        ['documentNumber', 'issuedOn', 'totalAmount', 'vendorName'].sort(),
+        ['documentNumber', 'issuedOn', 'totalAmount', 'unitReference', 'vendorName'].sort(),
       )
     })
 

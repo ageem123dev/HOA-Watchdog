@@ -72,7 +72,7 @@ export type HoldReason = (typeof HOLD_REASONS)[number]
  */
 const WHITESPACE = /[\s  ]+/g
 
-function fold(reference: string): string {
+export function fold(reference: string): string {
   return reference.replace(WHITESPACE, ' ').trim().toLowerCase()
 }
 

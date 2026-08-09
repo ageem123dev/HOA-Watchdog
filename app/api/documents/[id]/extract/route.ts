@@ -2,7 +2,9 @@ import { auth } from '@/adapters/auth/auth'
 import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { createGeminiExtractor } from '@/adapters/extraction/extractor-gemini'
+import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
+import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
 import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
 import { extractDocument } from '@/core/ingestion/extract-document'
@@ -72,6 +74,12 @@ export async function POST(
     extractor,
     vendors,
     quarantine,
+    // Both optional on the dependency type, so callers predating story 2.5 keep
+    // working — which means absent here a deposit is read, stored, and recorded
+    // against nobody, with nothing failing. `route.test.ts` asserts this call
+    // passes them.
+    units: createUnitDirectory(),
+    payments: createPaymentRepository(),
     onError: (error) => {
       // The treasurer gets a state; an operator gets the cause. Discarding it
       // would make a provider outage look like a bad scan in the logs too.

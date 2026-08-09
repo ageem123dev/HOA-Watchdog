@@ -13,6 +13,7 @@ import { Client, Pool } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import type { ResolvedLine } from '../../core/payment/resolve-line'
+import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import { createPaymentRepository } from './payment-repository-postgres'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
@@ -335,5 +336,79 @@ describeWithDatabase('the payment repository', () => {
       [first],
     )
     expect(rows[0]?.amount).toBe('120.00')
+  })
+
+  it('refuses to replace payments when the claim has moved on', async () => {
+    // The fence, against the real database. Raised on the merge request: the
+    // payment write happens before the fenced extraction write, so a stale run
+    // could replace a fresher run's payments on a document already settled as
+    // `read` -- never polled again, and permanently half from each reading.
+    const documentId = await newDocument()
+    const unitId = await newUnit()
+
+    await writer.query(
+      `update document
+          set extraction_claim_token = gen_random_uuid(),
+              extraction_claim_expires_at = now() + interval '5 minutes'
+        where id = $1`,
+      [documentId],
+    )
+
+    const repository = createPaymentRepository({ pool })
+    const lines: readonly ResolvedLine[] = [
+      { kind: 'attributed', unitId, paidOn: '2026-03-01', amount: '250.00' },
+    ]
+
+    // The fresher run's reading, written first. Raised on the merge request:
+    // without it this test asserted zero rows on a document that never had any,
+    // so "refused before deleting" and "deleted, then refused" were
+    // indistinguishable -- and zero was true before the call was even made.
+    //
+    // What matters is not that nothing was written but that **the previous
+    // reading survived**, which is the whole point of the fence.
+    await writer.query(
+      `insert into payment (unit_id, document_id, paid_on, amount)
+       values ($1, $2, '2026-02-01'::date, '99.00')`,
+      [unitId, documentId],
+    )
+
+    // A token that is not the one on the row: a runner whose claim lapsed.
+    await expect(
+      repository.replace(documentId, lines, { token: '00000000-0000-4000-8000-00000000dead' }),
+    ).rejects.toBeInstanceOf(StaleExtractionClaimError)
+
+    const { rows } = await writer.query<{ amount: string }>(
+      'select amount::text from payment where document_id = $1',
+      [documentId],
+    )
+    // The earlier reading, untouched -- not the 250.00 the stale run carried.
+    expect(rows.map((row) => row.amount)).toEqual(['99.00'])
+  })
+
+  it('replaces when the claim it was given is the one on the document', async () => {
+    // The discriminator. A fence that refused everything would pass the test
+    // above and stop the deferred path writing any payment at all.
+    const documentId = await newDocument()
+    const unitId = await newUnit()
+
+    const { rows: claimed } = await writer.query<{ token: string }>(
+      `update document
+          set extraction_claim_token = gen_random_uuid(),
+              extraction_claim_expires_at = now() + interval '5 minutes'
+        where id = $1
+        returning extraction_claim_token as token`,
+      [documentId],
+    )
+
+    const repository = createPaymentRepository({ pool })
+
+    await repository.replace(
+      documentId,
+      [{ kind: 'attributed', unitId, paidOn: '2026-03-01', amount: '250.00' }],
+      { token: claimed[0]!.token },
+    )
+
+    const { rows } = await writer.query('select 1 from payment where document_id = $1', [documentId])
+    expect(rows).toHaveLength(1)
   })
 })

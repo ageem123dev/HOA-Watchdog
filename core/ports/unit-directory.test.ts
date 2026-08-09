@@ -73,10 +73,21 @@ const declaredMethods = (sql: string): readonly string[] => {
 }
 
 describe('the UnitDirectory port', () => {
-  it('declares exactly the two questions this story answers', () => {
+  it('declares exactly the three questions this port answers', () => {
     // D1. Listed exhaustively rather than checked for presence: `toContain`
     // would pass for a port that also declared `record` and `close`.
-    expect([...declaredMethods(source)].sort()).toEqual(['heldBy', 'historyFor'])
+    //
+    // Story 2.5 added the third — resolving a deposit reference to a unit id.
+    // This assertion failing is the guard working: a method reached the port
+    // and something had to say so out loud. The list is widened deliberately
+    // and stays exhaustive, which is the property that matters. What must not
+    // change is that all three are reads; the docblock's argument that this
+    // port cannot create a unit is what stops a deposit inventing one.
+    expect([...declaredMethods(source)].sort()).toEqual([
+      'heldBy',
+      'historyFor',
+      'unitIdsFor',
+    ])
   })
 
   it('reads the interface body rather than stopping at the first brace', () => {

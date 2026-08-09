@@ -6,9 +6,12 @@ import {
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { Extractor } from '../ports/extractor'
+import type { PaymentRepository } from '../ports/payment-repository'
 import type { Quarantine } from '../ports/quarantine'
+import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
+import { recordPayments, unstorableUnitReference } from './record-payments'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -72,6 +75,16 @@ export interface ExtractDocumentDependencies {
   readonly vendors: VendorDirectory
   /** Where a name nobody recognises goes to wait for a human (AD-8). */
   readonly quarantine: Quarantine
+  /**
+   * Asked which unit a deposit reference names. Never asked to create one.
+   *
+   * Optional, like `vendors` was before it — and, like it, the absence is a real
+   * gap rather than a neutral default: without it a deposit is read and no money
+   * is recorded at all. The production call site supplies both, and a test says so.
+   */
+  readonly units?: UnitDirectory
+  /** Where an attributed payment and a held one are written together. */
+  readonly payments?: PaymentRepository
   readonly onError?: (error: unknown, documentId: string) => void
 }
 
@@ -218,7 +231,13 @@ export async function extractDocument(
       // The quarantine rule, shared with the upload-time path in `ingest.ts`.
       // Extraction finishes in two places and the rule is about extraction
       // finishing, so it lives in one module rather than two copies.
-      if (unstorableName(result.records)) return await settle('unreadable', 'unreadable')
+      // Same rule for the unit reference: a NUL raises 22021 as a parameter and
+      // aborts the transaction, losing every payment in the document. Raised by
+      // review -- `unitIdsFor` refused to send one, and nothing stopped it being
+      // stored, which is what made the gap look closed.
+      if (unstorableName(result.records) || unstorableUnitReference(result.records)) {
+        return await settle('unreadable', 'unreadable')
+      }
 
       // Held *before* the records are stored, and the order is load-bearing.
       //
@@ -228,6 +247,14 @@ export async function extractDocument(
       // the document `held`, so the next poll re-extracts, holds again -- a
       // no-op, the database enforces that -- and stores. It heals itself.
       await holdUnknownVendors(documentId, result.records, deps)
+
+      // Before the records are stored, for the same reason the hold is. A
+      // deposit whose payments are missing after `replace` has settled the
+      // document is silent and permanent; one whose payments are missing while
+      // the document is still `held` is re-read by the next poll and healed.
+      // `PaymentRepository.replace` is set-replacement (AD-13), so that retry
+      // writes the same set rather than a second copy of it.
+      await recordPayments(documentId, result.records, deps, { token: claim.token })
 
       // The fence goes with the write. `replace` clears the claim in the same
       // transaction as the state change, which is why nothing releases it here:
