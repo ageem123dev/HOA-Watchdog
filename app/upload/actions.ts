@@ -6,6 +6,7 @@ import { createPostgresExtractionRepository } from '@/adapters/db/extraction-rep
 import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
 import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
+import { createRollRepository } from '@/adapters/db/roll-repository-postgres'
 import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
 import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
 import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
@@ -110,6 +111,10 @@ export async function uploadDocuments(
     // one — is where a deposit bank feed becomes payments.
     units: createUnitDirectory(),
     payments: createPaymentRepository(),
+    // The line that makes an assessment roll do anything at all. Without it a
+    // roll is read, its extraction rows are stored, and no unit is created — so
+    // every deposit uploaded afterwards is held `unknown-unit`.
+    rolls: createRollRepository(),
     // The real error goes to the server log, never to the page — its text can
     // name a bucket, a path, or a library. The treasurer gets the per-file
     // outcome instead.

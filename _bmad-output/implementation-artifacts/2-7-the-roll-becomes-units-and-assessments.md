@@ -4,7 +4,7 @@ baseline_commit: 3281477
 
 # Story 2.7: An uploaded assessment roll becomes units, holders and assessments
 
-Status: in-progress
+Status: review
 
 > **Sequencing, and it is a real choice.** Story 2.6 documents the trap this story removes. If 2.7
 > ships first, 2.6's "the thing a reader most needs told" section stops being a warning and becomes
@@ -131,39 +131,39 @@ capability to create a unit lives in exactly one new place, and a deposit still 
   - [x] Writer connection, AD-4. One transaction: a roll that creates units and then fails before the
         assessments is a roll that has to be diagnosed by hand.
 
-- [ ] **Task 3 — Wire it into ingestion** (AC1, AC4)
-  - [ ] One shared module called from **both** call sites, exactly as `core/ingestion/record-payments.ts`
+- [x] **Task 3 — Wire it into ingestion** (AC1, AC4)
+  - [x] One shared module called from **both** call sites, exactly as `core/ingestion/record-payments.ts`
         is called from `ingest.ts` and `extract-document.ts`. Story 2.5's Dev Notes set the rule:
         both producers, or say which and why — and its scope correction is the reason that rule
         exists.
-  - [ ] Which means the provider schema gains the roll's fields too. Story 2.5 found that structured
+  - [x] Which means the provider schema gains the roll's fields too. Story 2.5 found that structured
         output answers the schema it is given, so a field absent from the schema is null on every
         document a provider ever read — which is how 2.4's `unitReference` was dead in practice while
         the record and the validator both carried it. Bound the new fields from the shared constants,
         never a hand-written number.
-  - [ ] Called **before** `extractions.replace` settles the document, for the reason `recordPayments`
+  - [x] Called **before** `extractions.replace` settles the document, for the reason `recordPayments`
         and `holdUnknownVendors` are: a settled document is never re-read, so a roll missing after it
         is silent and permanent, while one missing before it is healed by the next poll. Assert the
         order by consequence — make the extraction write fail and show the roll write already
         happened — because a comment saying "call this first" constrains nothing.
-  - [ ] **Only for `assessment_roll` documents**, and assert it. An invoice must write nothing to any
+  - [x] **Only for `assessment_roll` documents**, and assert it. An invoice must write nothing to any
         of the four tables. A change that quietly wrote an empty roll for every document would pass
         every other test in this story.
 
-- [ ] **Task 4 — Prove the trap is gone** (AC2, AC3)
-  - [ ] **The test this story is for:** ingest a roll through the real entry point, then ingest a
+- [x] **Task 4 — Prove the trap is gone** (AC2, AC3)
+  - [x] **The test this story is for:** ingest a roll through the real entry point, then ingest a
         deposit naming those units through the same entry point, then read `payment` and
         `held_payment` directly. Before this story that deposit holds every line. After it, the lines
         resolve. `adapters/db/deposit-ingestion.test.ts` is the pattern and the place to start.
-  - [ ] Re-ingest the roll and assert AC3's destructive half: a payment written between the two roll
+  - [x] Re-ingest the roll and assert AC3's destructive half: a payment written between the two roll
         uploads is **still there**, still against the same unit. This is the assertion that catches
         the `on delete cascade` a developer will otherwise reach for when the FK refuses a delete.
-  - [ ] A roll where one row is defective, asserting nothing at all was written — the case where a
+  - [x] A roll where one row is defective, asserting nothing at all was written — the case where a
         partial write would be least visible.
-  - [ ] A roll naming a unit that already exists in a different spelling (`4b` against a recorded
+  - [x] A roll naming a unit that already exists in a different spelling (`4b` against a recorded
         `4B`), asserting one unit and not two. Migration 011's unique index on `normalised_number` is
         what decides this, and the test should fail if the adapter matches on the raw column.
-  - [ ] Mutation-check the wiring, as 2.5 did: remove the call from each call site and record how
+  - [x] Mutation-check the wiring, as 2.5 did: remove the call from each call site and record how
         many tests fail. A number near zero means the tests prove the parts and not the path.
 
 ## Dev Notes
@@ -566,6 +566,36 @@ the pre-fix adapter.
 output nor prose. Retried once and it returned normally. Recorded rather than hidden: a review that
 errors is not a review that passed, and the retry is what makes this gate satisfied.
 
+**Tasks 3 and 4 — the wiring, and the proof.** Done.
+
+*The mutation that matters.* Deleting the `recordRoll` call from `ingest.ts` reproduces the state
+this story found — stories 2.1 and 2.2 complete, tested, and reachable from nothing — and fails
+**5 of the 7 end-to-end tests**. Recording a roll for every document kind rather than only rolls
+fails 3 of 7. That is the check whose absence let this defect survive two stories.
+
+*Tabular only, and the asymmetry is asserted rather than left to drift.* `roll-wiring.test.ts` pins
+that `extract-document.ts` does **not** record a roll, with a control asserting it still records
+payments — so the assertion cannot be satisfied by a call site that wires nothing. If a scanned roll
+should ever create units, that is an AD-8 decision about widening the provider's result type to carry
+a person's name, and it should arrive as a failing test beside the reason rather than a quiet edit.
+
+*Ordering.* `recordRoll` runs before `recordPayments` and both run before `extractions.replace`
+settles the document. Within one document the two are exclusive, but a treasurer selecting the roll
+and the deposits in one submission gets them in the order they chose — and `ingest` processes a batch
+sequentially, so roll-first is the order that works when both arrive together.
+
+*Argus review of the diff — two findings:*
+
+| Finding | Verdict |
+| --- | --- |
+| roll rows skip the NUL validation applied to records (high) | **disagree** — verified: `readRollRow` guards NUL on both text fields a roll row sends to the database, one layer earlier than the cited line. The row is refused, the document reports `unreadable`, and `recordRoll` is never reached. `unstorableUnitReference` exists for the *records* path precisely because `validate` does not check NUL; the roll path does not need it because its own reader does |
+| the end-to-end teardown can leak a connection (medium) | **confirmed** — a teardown query that threw would leak the client and replace the real failure with its own. The client is now constructed eagerly (so there is always one to close), the sweep is wrapped in `try`, and `end()` runs in `finally`. `deposit-ingestion.test.ts` shares the shape and is listed as a follow-up |
+
+*A type error the suite could not have caught.* The first fix made `writer` optional, which broke
+every helper that used it and moved `tsc` from 8 to 15. Vitest does not typecheck, so all 571 tests
+stayed green while the file did not compile. Constructing the client eagerly is the shape that
+satisfies both.
+
 ### File List
 
 - `core/extraction/roll.ts` — added, Task 1.
@@ -580,8 +610,17 @@ errors is not a review that passed, and the retry is what makes this gate satisf
 - `core/ports/roll-repository.test.ts` — added, Task 2.
 - `adapters/db/roll-repository-postgres.ts` — added, Task 2.
 - `adapters/db/roll-repository-postgres.test.ts` — added, Task 2.
+- `core/ingestion/record-roll.ts` — added, Task 3.
+- `core/ingestion/record-roll.test.ts` — added, Task 3.
+- `core/ingestion/roll-wiring.test.ts` — added, Task 3.
+- `core/ingestion/ingest.ts` — modified, Task 3.
+- `app/upload/actions.ts` — modified, Task 3.
+- `adapters/db/roll-ingestion.test.ts` — added, Task 4.
 
 ### Change Log
+
+- 2026-08-09 — All four tasks complete. A roll uploaded now creates units, holders, tenures and
+  assessments, and a deposit uploaded after it is attributed instead of held. Status -> review.
 
 - 2026-08-09 — Story created. Epic 2 built four tables for the assessment roll across stories 2.1 and
   2.2 and never built the path that fills them, so every deposit on a real installation is held

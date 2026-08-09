@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: '2026-08-08'
+last_updated: '2026-08-09'
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -80,7 +80,7 @@ development_status:
   # Removes the trap 2.6 documents: nothing creates a unit, so every deposit on a
   # real installation is held unknown-unit. Better run BEFORE 2.6, which then
   # documents a working roll instead of warning about a missing one.
-  2-7-the-roll-becomes-units-and-assessments: ready-for-dev
+  2-7-the-roll-becomes-units-and-assessments: review
   epic-2-retrospective: optional
 
   epic-3: backlog
