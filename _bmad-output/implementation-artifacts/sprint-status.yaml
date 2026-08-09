@@ -72,15 +72,15 @@ development_status:
   2-1-units-and-who-holds-them: done
   2-2-what-each-unit-owes-this-year: done
   2-3-what-is-due-and-by-when: done
-  2-4-deposits-become-payments: backlog
+  2-4-deposits-become-payments: done
   2-5-deposits-become-payments-on-upload: done
   # Closes the epic. Re-baseline onto 2.5's merge commit before starting; it
   # documents the payment-on-upload path 2.5 builds.
-  2-6-documentation-and-sample-uploads: ready-for-dev
+  2-6-documentation-and-sample-uploads: review
   # Removes the trap 2.6 documents: nothing creates a unit, so every deposit on a
   # real installation is held unknown-unit. Better run BEFORE 2.6, which then
   # documents a working roll instead of warning about a missing one.
-  2-7-the-roll-becomes-units-and-assessments: review
+  2-7-the-roll-becomes-units-and-assessments: done
   epic-2-retrospective: optional
 
   epic-3: backlog

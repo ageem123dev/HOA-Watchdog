@@ -300,7 +300,7 @@
             <td class="ctl">AD-2</td>
             <td><span class="kind struct">Structural</span></td>
             <td class="mech">No banking or payment-rail credential exists in any environment, secret store, or CI configuration. The air-gap is an absence, not a scope.</td>
-            <td class="evid">Secret inventory across all deploy units; CI check asserting no matching key names. There is no rail to write to.</td>
+            <td class="evid">Secret inventory across all deploy units; CI check asserting no matching key names. There is no rail to write to.<br><span style="background:#fff3cd;border-left:3px solid #d39e00;padding:2px 6px;display:inline-block;font-size:0.85em;line-height:1.4;margin-top:6px;"><strong>Evidence amended 2026-08-09.</strong> The control is unchanged and still holds. What changed is its <em>evidence</em>: the GitLab pipeline was withdrawn on 2026-08-07 (AD-2&rsquo;s amendment &mdash; the account bills per minute), so this check runs only when a person runs it. Recorded rather than deleted: a control register that quietly loses a row reads as a register that never had it.</span></td>
           </tr>
           <tr>
             <td class="ctl">AD-3</td>
@@ -354,7 +354,7 @@
             <td class="ctl">AD-14</td>
             <td><span class="kind enforce">Enforced</span></td>
             <td class="mech">A catalog entry version, once used in production, is frozen. Changing SQL or the parameter schema mints a new version.</td>
-            <td class="evid">CI diff check on published catalog versions. Without this the audit trail cannot be replayed and AD-12's records become unverifiable.</td>
+            <td class="evid">CI diff check on published catalog versions. Without this the audit trail cannot be replayed and AD-12's records become unverifiable.<br><span style="background:#fff3cd;border-left:3px solid #d39e00;padding:2px 6px;display:inline-block;font-size:0.85em;line-height:1.4;margin-top:6px;"><strong>Evidence amended 2026-08-09.</strong> Two withdrawals, not one. The pipeline was removed on 2026-08-07 (AD-2&rsquo;s amendment), and the published catalogue this check would diff <em>does not exist yet</em> &mdash; it is epic 3. Stated rather than deleted, so a later reader finds a decision rather than an erosion.</span></td>
           </tr>
         </tbody>
       </table>

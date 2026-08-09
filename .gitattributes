@@ -1,0 +1,21 @@
+# The sample uploads are fixtures the acceptance gate checks byte for byte.
+#
+# Scoped to samples/ deliberately. An open action item intends a repo-wide CRLF
+# renormalisation, and that pass would rewrite line endings inside these files —
+# which changes the signature bytes of the .xls, the deflate stream of the .png,
+# and the byte-exact comparison scripts/build-samples.mjs makes. A corrupted
+# fixture would fail as "the application rejects its own sample", which reads as
+# a broken application rather than a broken checkout.
+#
+# The repo-wide renormalisation stays that action item's work; this only stops it
+# taking the samples with it.
+samples/*.pdf binary
+samples/*.png binary
+samples/*.jpg binary
+samples/*.xls binary
+samples/*.xlsx binary
+
+# The CSV samples are text, and their CRLF line endings are deliberate: RFC 4180
+# specifies them, and build-samples.mjs writes them. Marked -text so no
+# normalisation rewrites them into LF and breaks the byte comparison.
+samples/*.csv -text
