@@ -68,31 +68,34 @@ Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode
 
 Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`) and `git push -u origin story/{story_key}`.
 
-### 4b — The one local CodeRabbit review, in the IDE, before the MR exists
+### 4b — The one local CodeRabbit review, before the MR exists
 
-**Exactly one IDE round per story. Never ask for a second.** Fix everything it raises, then go to Section 5 — CodeRabbit reviews the MR itself, and that is the second look at the fixes. Asking again costs the user a manual action and an hour of the 1/hr rate limit to re-review work the MR is about to review anyway.
+**Exactly one CLI round per story.** Fix everything it raises, then Section 5 — CodeRabbit reviews the MR itself, and that is the second look at the fixes.
 
 The first review finds the most. Story 1.6b took 8 rounds and ~11 pushes; moving the first round here took 1.6c and 1.6d to one each.
 
-**One base for the whole step: local `main`, fast-forwarded at item 2.** The extension bases on it and cannot be told otherwise, so Argus and the diff checks use it too; mixing in `origin/main` means Argus and CodeRabbit score different diffs the moment anyone merges upstream mid-round.
+**One base for the whole step: local `main`, fast-forwarded at item 2.** Argus, the CLI and the diff checks all use it; mixing in `origin/main` means they score different diffs the moment anyone merges upstream mid-round.
 
-1. **Run `argus_review` on this commit first** (`git_range: main...HEAD`). `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on that commit, so reviewing second teaches nothing.
-2. Ask the user for **CodeRabbit → Start Review**, base `main`, scope **committed changes**. Fast-forward local `main` first (Section 2 does). Started by hand, and it does **not** re-trigger on a push; ask **once for the story** and STOP until it finishes (~8–11 min for a handful of files).
-3. Read the record at `%APPDATA%\Code\User\workspaceStorage\{ws}\coderabbit.coderabbit-vscode\{sha256}.json` — `{ws}` is the directory whose `workspace.json` names this repo, `{sha256}` hashes `{repoRoot}-{branch}-reviews`. Derive `{repoRoot}` from `git rev-parse --show-toplevel` as a Windows path with a lower-case drive letter (`c:\Users\...`), which is the form the extension hashes; do not hard-code it. It is **workspaceStorage, not globalStorage**.
-4. **Accept it only if `status` is `completed` AND `headCommitId` == `git rev-parse HEAD` AND `baseCommitId` == `git rev-parse main`.** Both stored values are 40-char SHAs, not ref names. The key alone also matches a clean review taken before your last fix commit, which would pass unreviewed code as converged — 8c's precondition, in a new place.
-5. **Reconcile the file lists, and fail on empty.** Let `A` = `git diff --name-only main...HEAD` and `D` = `A` less `path_filters`. **If `A` is empty, stop — you are on the wrong branch.** An empty list matches an empty `fileReviewMap` and reads as clean; that is how this step's first run passed with the tree on `main`. **If `A` is non-empty but `D` is empty**, the branch touches only excluded paths — a docs-only close-out — so there is nothing to review: skip the round, and do not record it as clean. Otherwise check both directions, neither of which is equality:
-   - **Every path in `D` must appear in *some* round's `fileReviewMap` on this branch, not necessarily this one.** Re-reviews are incremental — round 2 here skipped `.coderabbit.yaml` and `.gitlab-ci.yml` because they had not changed since round 1. Union the rounds; a path in no round is unreviewed.
-   - **Paths reviewed but not in `D` mean the scope leaked.** The extension picks up uncommitted and untracked files whatever the scope setting says — round 2 pulled in `.mcp.json`, `.gitignore` and `.claude/commands/`. Their findings are real but belong to another branch; triage them separately and do not fix them here.
-6. Findings: `fileReviewMap[path].comments[]` (`severity`, `startLine`, `comment`), totalled in `additionalDetails.counts`.
-7. **`argus_ingest` once the review is read.** It scores the Argus run from step 1 against this review and writes only Argus's *misses* to `.argus/memory.jsonl`; its own unconfirmed findings are deliberately not reinforced. Severities come from committed `argus.config.json` (critical + major). **Call it with the default `dry_run: false`** — that is the call that writes; `dry_run: true` previews and writes nothing, so a run that only ever previews learns nothing. Ingest before fixing — a later round reviews different code and cannot score this one.
-8. Fix test-first, run 8e's *gate* on the fix diff — sensitivity check and test-value pass — but not 8e's push, which belongs at step 9. Commit, then run `argus_review` on the **fix commit** so the MR round has a SHA to join on, and go to Section 5. **Do not loop back to step 2 for another IDE review.**
-9. **Push before Section 5** (*Merge request to main*, not step 5 above). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
+The CLI is Linux/macOS only, so it runs in WSL against the Windows checkout.
 
-`coderabbit.agentType: "Claude Code Extension"` routes **Fix with AI** into this session, but decide convergence from the stored record — a handoff proves findings arrived, never that none remain.
+1. **`argus_review` first** (`git_range: main...HEAD`). `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on that commit, so reviewing second teaches nothing.
+2. **Record the SHA, then review.** The stream carries no commit, so the join key is whatever is captured here — nothing may commit between these two lines:
 
-IDE reviews are their own rate pool — **1/hr on the OSS plan** — and they need the user to press Start Review by hand. Both are reasons the single round above is the rule, not a budget to spend.
+   ```bash
+   COMMIT=$(git rev-parse HEAD)
+   wsl.exe -e bash -lc 'export PATH="$HOME/.local/bin:$PATH"; coderabbit review      --dir /mnt/c/Users/magee/repos/HOA-Treasurer-Assistant      --base main --committed --agent' > .argus/cr.jsonl 2> .argus/cr.err
+   ```
 
-**The extension ignores `.coderabbit.yaml` `path_filters`.** Story 1.6c's review covered `_bmad-output/**`, which the file excludes. An earlier note here claimed the opposite on the strength of a branch that happened to contain no excluded paths — absence of exclusion is not evidence of filtering. Expect the IDE round to review more than the merge request will.
+   No user action, and it does not re-trigger on a push. Minutes, not seconds; `/mnt/c` is the slow part. Capture stderr — an error otherwise leaves an empty file and no reason.
+3. **Accept only `status: "review_completed"` on the `complete` event.** `review_skipped` is not a clean review, and neither is an empty or unparseable file: the adapter returns *zero reviews* for those, which is not the same as one review with zero findings. Treating them alike is the false-clean 8c exists to refuse.
+4. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Otherwise every path in `A` must appear in the `complete` event's `reviewedFiles`; a path in neither is unreviewed. `reviewedFiles` also names the files reviewed and *clean* — 25 against 10 findings in the first capture — which a finding list cannot express.
+5. **`argus_ingest` with both `from` and `commit`.** `from: .argus/cr.jsonl`, `commit: $COMMIT`. **Without `commit` it silently learns nothing**, because the stream has no SHA to join on and an unjoinable review is skipped. Severities come from committed `argus.config.json` (critical + major). **Default `dry_run: false`** — that is the call that writes. Ingest before fixing; a later round reviews different code and cannot score this one.
+6. Fix test-first, run 8e's *gate* on the fix diff — sensitivity check and test-value pass — but not 8e's push, which belongs at step 7. Commit, then run `argus_review` on the **fix commit** so the MR round has a SHA to join on. **Do not run a second CLI round.**
+7. **Push before Section 5** (*Merge request to main*). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
+
+CLI reviews are **3/hr per developer** on Free and OSS (Pro 5, Pro+ 10) — a rolling window, not a daily quota, so capacity returns as earlier reviews age out. That is three times the extension's 1/hr, and it is a *separate* pool from the MR reviews Section 8 spends. The single round above therefore stands on its own merits — the first review finds the most, and a second costs minutes for little — not on scarcity.
+
+**The CLI ignores `.coderabbit.yaml` `path_filters` too.** The 2026-08-09 capture reviewed `_bmad-output/**`, which the file excludes. Expect the local round to review more than the merge request will.
 
 ### 5 — Merge request to main
 
