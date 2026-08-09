@@ -108,16 +108,16 @@ capability to create a unit lives in exactly one new place, and a deposit still 
   - [x] One defective row fails the document, matching `readTable`'s existing rule. Say it in the
         problem set rather than relying on the reader to infer it.
 
-- [ ] **Task 2 — The one port that may create a unit** (AC1, AC3, AC5)
-  - [ ] A **new** port with a write. `UnitDirectory` and `AssessmentDirectory` both argue in their
+- [x] **Task 2 — The one port that may create a unit** (AC1, AC3, AC5)
+  - [x] A **new** port with a write. `UnitDirectory` and `AssessmentDirectory` both argue in their
         docblocks that the absence of a write method *is* the design, and both have exhaustive tests
         that fail when a method is added. Neither may gain one. The new port is the single owner of
         this capability, in the manner AD-14 fixes single ownership for vendor identity.
-  - [ ] **Read the hazard below before designing `replace`.** AD-13 says a re-uploaded roll replaces
+  - [x] **Read the hazard below before designing `replace`.** AD-13 says a re-uploaded roll replaces
         its rows. Taken literally against this schema, that destroys the ledger — see *The AD-13
         collision* in Dev Notes. The grain of "replace" differs per table and the story is not done
         until each is decided and written down.
-  - [ ] Decide holder identity on re-upload and record the reasoning. Migration 012 refused a unique
+  - [x] Decide holder identity on re-upload and record the reasoning. Migration 012 refused a unique
         constraint on `unit_holder.full_name` in as many words — *"an association's second `John
         Smith` must be recordable; folding the two together would silently hand the first one the
         second one's unit"*. So a roll cannot match a holder by name, and re-uploading it must not
@@ -125,10 +125,10 @@ capability to create a unit lives in exactly one new place, and a deposit still 
         `unit_holder`, and `unit_membership` is referenced by nothing at all. Replacing the
         memberships and holders this **document** produced is the shape that fits; whatever is
         chosen, the argument goes in the adapter beside the code.
-  - [ ] One statement per table for the whole document, not one per row. `payment-repository-postgres.ts`
+  - [x] One statement per table for the whole document, not one per row. `payment-repository-postgres.ts`
         and `extraction-repository-postgres.ts` both loop per record and both carry an open action
         item for it; a roll is the same shape and there is no reason to add a third.
-  - [ ] Writer connection, AD-4. One transaction: a roll that creates units and then fails before the
+  - [x] Writer connection, AD-4. One transaction: a roll that creates units and then fails before the
         assessments is a roll that has to be diagnosed by hand.
 
 - [ ] **Task 3 — Wire it into ingestion** (AC1, AC4)
@@ -373,6 +373,59 @@ No PROPAGATE modes: the function is pure and returns its refusals.
 **Out of scope, recorded:** the provider path (above), and closing a superseded membership — that is
 temporal logic against the exclusion constraint and belongs to Task 2, where the database is.
 
+#### Behaviour 2 — `RollRepository.apply(documentId, rows)`
+
+1. *If it ran correctly, how would I know?* Rows in `unit`, `unit_holder`, `unit_membership` and
+   `assessment`, and a deposit naming those units afterwards resolving instead of holding.
+2. *How do I test it?* The real database. `unit_normalised_number()`, the unique index and the
+   exclusion constraint are the things under test, and a fake pool can answer for none of them. A
+   `pool` seam for the query-count assertions, as `createPaymentRepository` established.
+3. *What else can go wrong?* Below.
+4. *Siblings?* `payment-repository-postgres.ts` — same writer role, same one-transaction shape, and
+   the same open action item about looping per row.
+
+**Called `apply`, deliberately not `replace`.** The grain differs per table and that difference *is*
+the hazard the story was written around, so a name promising uniform replacement would be a lie in
+the signature:
+
+| Table | Grain | Why that one |
+| --- | --- | --- |
+| `unit` | upserted on `normalised_number`, **never deleted** | three tables reference it with no `on delete` action. Deleting fails loudly on a unit with a payment — and the `on delete cascade` reached for to "fix" that would erase the ledger |
+| `unit_holder` | owned by the document; deleted and re-inserted | migration 012 refused a unique constraint on `full_name` in as many words, so a holder cannot be matched by name and cannot be upserted |
+| `unit_membership` | owned by the document; a *prior* document's tenure is closed rather than replaced | the exclusion constraint refuses overlaps, so succession has to close |
+| `assessment` | upserted on `(unit_id, assessment_year)` | `assessment_one_per_unit_year` already names the grain |
+
+**Ownership needs a column, so this task carries migration 019.** `unit_membership` and
+`unit_holder` gain a nullable `document_id` cascading from `document`. Without it there is no way to
+make a re-upload idempotent: the rows a document wrote cannot be told from the rows another document
+wrote, and "delete what I wrote, write it again" is the only formulation that is exactly idempotent
+without matching holders by name — the thing migration 012 forbids.
+
+**The membership range is computed, not assumed.** For a row claiming a unit from `heldFrom`:
+
+- any *other* document's still-open tenure starting **before** `heldFrom` is closed at `heldFrom`;
+- the new tenure runs `[heldFrom, nextStart)` where `nextStart` is the earliest other tenure
+  beginning after it, or unbounded if there is none.
+
+That single rule satisfies the exclusion constraint in every ordering, including a roll uploaded out
+of order — a 2026 roll landing after a 2027 one produces `[2026-01-01, 2027-01-01)` rather than an
+overlap.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | An empty row list | GUARD: refuse, as `PaymentRepository.replace` does. Obeying it would delete the memberships this document wrote and call the deletion a roll |
+| 2 | A unit already recorded in another spelling (`4b` vs `4B`) | GUARD: one unit, and the roll's spelling wins — migration 011 stores what the treasurer typed |
+| 3 | A prior document's open tenure starting earlier | GUARD: closed at the new start, not deleted. Story 2.1's AC says a change of hands closes rather than overwrites |
+| 4 | A prior document's tenure starting on **exactly** the same day | GUARD: closing it would make `[d,d)` — an empty range, which `unit_membership_has_a_start` refuses because every empty `daterange` has a null lower bound. Refuse the document with a named error; two rolls disagreeing about one unit from one date is a question for a human |
+| 5 | A prior tenure starting **later** | GUARD: the new tenure ends where that one begins |
+| 6 | The same roll applied twice | GUARD: this document's own rows are deleted first, so the second apply writes the same set. AD-13 |
+| 7 | A payment already recorded against a unit in the roll | GUARD: it must still be there afterwards, against the same unit. **This is AC3's destructive half and the assertion that catches an `on delete cascade`** |
+| 8 | A failure midway | GUARD: one transaction, rolled back; a poisoned client destroyed rather than returned to the pool |
+| 9 | One roll row per statement | GUARD: assert the query count, as story 2.5 did for `unitIdsFor`. The per-row loop is already an open action item against two adapters and there is no reason to add a third |
+| 10 | Two roll documents applied concurrently naming one unit | PROPAGATE: the unique index and the exclusion constraint refuse it, loudly. Recorded rather than serialised — a roll is uploaded by one treasurer at a time |
+| 11 | A NUL or an over-long name reaching the adapter | OUT-OF-SCOPE: `readRollRow` is the boundary and refuses both before a row exists |
+| 12 | A third decimal on the amount | OUT-OF-SCOPE: `numeric(14,2)` rounds rather than errors, which is why `AMOUNT_PATTERN` refuses it in the reader |
+
 ### Debug Log References
 
 ### Review Findings
@@ -458,6 +511,61 @@ that refuses everything.
    raised, on the same untrusted path. Fixing one and not the other is how two implementations of one
    rule come to disagree, so both want the same change together.
 
+**Task 2 — the write port, its adapter and migration 019.** Done. `RollRepository.apply` is the only
+thing in this system that may create a unit; both read ports are untouched and their exhaustive tests
+still pass (AC5).
+
+*Named `apply`, not `replace`.* The grain differs per table, and a name promising uniform replacement
+would be a lie in the signature. Units are upserted and **never deleted**; holders and tenures are
+owned by the document (migration 019) and rewritten; assessments upsert at
+`(unit_id, assessment_year)`.
+
+*Migration 019 exists because idempotency needed a column.* Re-applying a roll must not duplicate its
+tenures, and the only exactly-idempotent formulation is "delete what this document wrote, write it
+again" — which needs a way to tell those rows from another roll's. The alternative is matching a
+tenure by holder name, which migration 012 forbids in as many words. **The column is deliberately
+absent from `unit` and `assessment`**, and that absence is asserted twice: against the migration text
+and against the live database, by deleting a roll document and finding the payments still there.
+
+*The membership range is computed, not assumed.* A tenure runs until the earliest other tenure for
+that unit beginning after it — whether already recorded or a sibling in the same roll — so a roll
+uploaded out of order lands as `[2019-03-01, 2026-07-01)` instead of overlapping.
+
+*Sensitivity check — seven mutations, each verified applied. Two survived the first pass and both
+were real coverage gaps:*
+
+| Mutation | First pass | After the gaps were closed |
+| --- | --- | --- |
+| stop deleting what this document wrote | 3 failed | — |
+| stop closing a prior open tenure | 2 failed | — |
+| drop the distinct-on tenure dedup | 1 failed | — |
+| drop the conflicting-tenure check | 1 failed | — |
+| assessment upsert does nothing on conflict | 1 failed | — |
+| **match units on the raw number, not the folded one** | **0 failed** | 1 failed |
+| **drop the sibling upper bound** | **0 failed** | 1 failed |
+
+**Why the raw-match mutation survived is the interesting part.** The upsert rewrites the stored
+spelling to the roll's, so a raw lookup finds what it just wrote — the defect is invisible unless one
+roll spells the same unit two ways. The new test does exactly that. The other gap was a unit changing
+hands *within* one roll, which nothing covered.
+
+*Argus review of the task diff — five findings, each verified against the real file:*
+
+| Finding | Verdict |
+| --- | --- |
+| `insert into unit` uses `distinct on` with no `order by` (high) | **confirmed** — which spelling wins was arbitrary. Fixed with `order by unit_normalised_number(x), n`, keeping the first spelling in the roll, as vendor names are deduplicated. Also gives concurrent upserts a consistent lock order |
+| assessment upsert can raise 21000 on a duplicate unit-year (high) | **confirmed** — unreachable through the reader today, but `apply` is a port boundary and a cardinality violation aborts the whole roll opaquely. Deduplicated deterministically, first row wins |
+| `update unit_membership ... from unnest(...)` picks a match arbitrarily (high) | **confirmed and the most serious.** With two new tenures for a unit that already has an open one, closing it at the *later* date leaves the earlier one overlapping and the exclusion constraint takes the document. Now a correlated `min()` per membership |
+| `distinct on` silently drops a self-contradictory roll (medium) | **confirmed** — two holders for one unit from one day would have kept whichever sorted first. Now refused with `ConflictingTenureError(..., 'this-roll')`, which has its own sentence because the remedy differs |
+| `create index` should be `concurrently` (medium) | **disagree** — `scripts/migrate.mjs` wraps every migration in a transaction, and `create index concurrently` cannot run inside one. The suggested fix would break the runner; the tables are pilot-sized and migrations are applied offline |
+
+All four confirmed findings were fixed test-first: each regression test was watched failing against
+the pre-fix adapter.
+
+*One Argus call failed before this one* — `agy` reported success and returned neither structured
+output nor prose. Retried once and it returned normally. Recorded rather than hidden: a review that
+errors is not a review that passed, and the retry is what makes this gate satisfied.
+
 ### File List
 
 - `core/extraction/roll.ts` — added, Task 1.
@@ -466,6 +574,12 @@ that refuses everything.
 - `core/extraction/record.ts` — modified, Task 1 (`KINDS_WITH_UNIT_REFERENCE`).
 - `core/extraction/validate.ts` — modified, Task 1.
 - `core/extraction/validate.test.ts` — modified, Task 1 (expired premise re-specified).
+- `migrations/019_roll_document_ownership.sql` — added, Task 2.
+- `migrations/roll-document-ownership.test.ts` — added, Task 2.
+- `core/ports/roll-repository.ts` — added, Task 2.
+- `core/ports/roll-repository.test.ts` — added, Task 2.
+- `adapters/db/roll-repository-postgres.ts` — added, Task 2.
+- `adapters/db/roll-repository-postgres.test.ts` — added, Task 2.
 
 ### Change Log
 
