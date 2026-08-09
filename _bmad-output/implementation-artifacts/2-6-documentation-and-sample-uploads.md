@@ -4,7 +4,7 @@ baseline_commit: 7bfcb82
 
 # Story 2.6: The documentation says what the code does, and ships a sample of every format
 
-Status: review
+Status: done
 
 > **Re-baselined twice.** First onto `3281477`, story 2.5's merge commit. Then onto `7bfcb82`,
 > story 2.7's branch head, because 2.7 is not merged and its absence would repeat the same mistake
@@ -613,6 +613,8 @@ Added `docs/**/*.ts`. A new source directory is a new hole in the gate unless so
 ### Change Log
 
 - 2026-08-09 — All five tasks complete. Status -> review.
+- 2026-08-09 — MR !32 merged as `80ff7ec` after a CLI round (4 findings) and one MR round (3).
+  Status -> done. Epic 2 closes with it: 2-1 through 2-7 are all done.
 - 2026-08-08 — Story created, to close epic 2 with documentation that matches the code. Ten
   documentation defects verified against the working tree rather than recalled, the largest being a
   README Environment section naming a vendor removed on 2026-07-31 and a CI pipeline withdrawn on
