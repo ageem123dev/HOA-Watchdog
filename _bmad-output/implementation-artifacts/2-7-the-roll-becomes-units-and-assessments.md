@@ -5,7 +5,7 @@ merge_request: 30
 
 # Story 2.7: An uploaded assessment roll becomes units, holders and assessments
 
-Status: review
+Status: done
 
 > **Sequencing, and it is a real choice.** Story 2.6 documents the trap this story removes. If 2.7
 > ships first, 2.6's "the thing a reader most needs told" section stops being a warning and becomes
@@ -489,6 +489,76 @@ That is the review gate's own thesis landing on this story: *a fix is the highes
 lowest.* Two bugs came out of one loosened assertion, the second was worked around rather than
 solved, and only a review of the fix diff said so.
 
+#### Merge request !30, round 1 — eleven findings
+
+Eight on this story's code, all fixed; three on `.claude/skills/bmad-ship-story/SKILL.md`, which reached
+this branch on a separate commit and is not this story's work, skipped with a reason on each thread.
+
+Two changed behaviour, and both were mutation-checked:
+
+| Finding | What it cost | Verdict |
+| --- | --- | --- |
+| `missing-headers` reported the whole `ROLL_HEADERS` list whichever column was absent | a roll with `cycle` and no `year` was told to add both | **fixed** — reverting fails 1 of 58 |
+| the conflict message reported the **recorded** tenure's date | a row stating `2022-01-01` against `[2019-03-01, 2026-07-01)` was told to correct `2019-03-01`, a date on no document the treasurer holds | **fixed** — reverting fails 1 of 574 |
+
+*Argus on that fix diff found two more, both confirmed.* A roll with **no `unit` column at all** made
+every row defective, so the reader answered `invalid-row` once per row and never named the column —
+`ROLL_REQUIRED_HEADERS` now drives the check, with `unit` deliberately outside `ROLL_HEADERS` because
+it is shared with a deposit where a line naming no unit is held rather than refused. And
+`select 1 from document ... for update` matches nothing and *succeeds* on an unknown id, so the
+transaction ran on to a raw 23503 several statements later; it now names the document.
+
+Four weak tests, each fixed rather than argued with. The one worth keeping: the NUL guards were
+asserted through `readRows`, where `validate` refuses the same cells first — so the test could not
+tell which guard fired and **would have passed with `hasNul` deleted**. The length guards had already
+been moved beside `readRollRow` for exactly that reason; I had left NUL behind.
+
+`isRealDate` and `ISO_DATE` were duplicated, and `roll.ts` claimed it *reused* the calendar check
+"rather than forking the project's single statement of either" — true of `AMOUNT_PATTERN`, false of
+the date. Extracted to `core/extraction/calendar-date.ts` so the comment is true. A duplicate nobody
+has noticed is cheap; one the documentation denies is how the next person stops checking.
+
+`TableProblem.unit` removed: nothing outside `tabular.ts` reads `.problems` — `ingest` maps the whole
+result to `unreadable` — so the detail could never reach a surface.
+
+#### Round 2 — one finding, and the best one on the merge request
+
+**The two-foldings hazard again, in the direction nobody had looked at.** The roll's duplicate-unit
+check keyed on `fold()` from the payment path. `fold` collapses JavaScript's whitespace class, which
+matches U+3000; migration 011's character set does not. So `4␣B` (ideographic) and `4 B` were one key
+to the reader and **two distinct units to Postgres** — the reader refused, as a duplicate, a roll the
+database would have stored.
+
+Which way it failed is worth recording: core folding *more* than the database can only over-merge, so
+it could never let a true duplicate through — only turn a valid document away. That is the safe
+direction, and it is still wrong, because the check exists to anticipate a database constraint and
+was applying a rule the database does not.
+
+`core/unit/normalised-number.ts` now mirrors `unit_normalised_number()` exactly. `fold` stays where it
+is: in `record-payments.ts` a collision drops **both** sides so the lines are held for a human, and
+over-merging there is deliberately safe. The two rules now have separate names and separate reasons.
+
+A second statement of a shape is only safe when something fails on disagreement (migration 007's
+note), so `normalised-number.test.ts` reads `011_unit.sql`, extracts every `chr(N)` it folds and
+compares the sets — with a control asserting it found all eight, so the comparison cannot pass against
+an empty match. Reverting the key to a `\s`-based fold fails 1 of 60.
+
+**Two things recorded rather than buried.** One `npm run test:db` run failed and three consecutive
+runs afterwards were green; the failing test's name was not captured before it passed again, so this
+is a flake that cannot be named — these run against a shared remote Postgres with several files
+writing the same tables. And **the adversarial review on round 2's diff did not run**: `argus_review`
+failed three times consecutively, `agy` reporting success while returning neither structured output
+nor prose (five such failures across this story; every earlier one recovered on the first retry). The
+sensitivity check and test-value pass both ran. Per `review-gate.md` the Claude fallback does not
+satisfy that gate, so it was stated as unsatisfied rather than reported as passed.
+
+**Retried later in the same session and it succeeded**, returning **no findings** — 7 of 7 files in
+context, confidence 0.98, audit chain intact. The gate on round 2's diff is therefore satisfied after
+all, and the earlier note is superseded rather than deleted: five `agy` failures across this story is
+worth knowing, and so is the fact that every one of them eventually cleared on a retry. The lesson is
+that the engine is flaky rather than unavailable, and that a failed call must never be reported as a
+clean one.
+
 *`argus_ingest` found nothing to learn from.* It was called with `from: .argus/cr.jsonl` and the
 commit SHA, exactly as the refreshed workflow specifies, and returned `reviews_found: 0` — the
 ingest adapter does not parse the CLI's JSONL event stream, which is a different shape from the IDE
@@ -685,6 +755,14 @@ satisfies both.
 
 ### Change Log
 
+- 2026-08-09 — **Merged** as `fe86f5f` (MR !30) from head `5bc7369`. Matt merged on the strength of
+  every thread being answered and every finding fixed, which was accurate. Recorded honestly: the
+  final head was never re-reviewed by CodeRabbit — two rounds were reviewed and answered, and the
+  round-2 diff carries a clean Argus pass (7 of 7 files, no findings), but the re-review the pipeline
+  normally waits for did not run, because CodeRabbit answered thread replies while declining an
+  explicit `@coderabbitai review` for 17 minutes, which reads as hourly review capacity. `main` was
+  verified green after the merge: lint 0 errors, build clean, 1606 tests across 82 files, test:db 574
+  across 35, tsc 8 against its baseline of 8. Status -> done.
 - 2026-08-09 — All four tasks complete. A roll uploaded now creates units, holders, tenures and
   assessments, and a deposit uploaded after it is attributed instead of held. Status -> review.
 

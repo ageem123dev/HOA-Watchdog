@@ -80,7 +80,7 @@ development_status:
   # Removes the trap 2.6 documents: nothing creates a unit, so every deposit on a
   # real installation is held unknown-unit. Better run BEFORE 2.6, which then
   # documents a working roll instead of warning about a missing one.
-  2-7-the-roll-becomes-units-and-assessments: review
+  2-7-the-roll-becomes-units-and-assessments: done
   epic-2-retrospective: optional
 
   epic-3: backlog
