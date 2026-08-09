@@ -4,7 +4,7 @@ baseline_commit: 7bfcb82
 
 # Story 2.6: The documentation says what the code does, and ships a sample of every format
 
-Status: in-progress
+Status: review
 
 > **Re-baselined twice.** First onto `3281477`, story 2.5's merge commit. Then onto `7bfcb82`,
 > story 2.7's branch head, because 2.7 is not merged and its absence would repeat the same mistake
@@ -167,29 +167,29 @@ row reads as a register that never had it
         a units admin surface; that is a story of its own.
   - [x] Correct the Layout section against the real tree.
 
-- [ ] **Task 4 — The as-built system diagram** (AC4)
-  - [ ] A diagram in the README itself, so a reader gets the shape without leaving the file. Mermaid
+- [x] **Task 4 — The as-built system diagram** (AC4)
+  - [x] A diagram in the README itself, so a reader gets the shape without leaving the file. Mermaid
         renders on GitLab, which is where this repository lives.
-  - [ ] A standalone page for the longer form, in the house style the three planning artifacts
+  - [x] A standalone page for the longer form, in the house style the three planning artifacts
         share. `docs/` is its home rather than `_bmad-output/planning-artifacts/`: this one describes
         what was built, and filing it with the planning set is how it comes to be read as a plan.
-  - [ ] It must show the fork that governs everything: CSV and Excel are parsed in `core/` at upload
+  - [x] It must show the fork that governs everything: CSV and Excel are parsed in `core/` at upload
         time and **never reach a provider**; PDF, PNG and JPG are stored and read later on a polled
         request. That single split explains most of the system's behaviour and is invisible in every
         current artifact.
-  - [ ] Mark Epic 3 and Epic 4 components as not built. The walkthrough deck describes the Oracle and
+  - [x] Mark Epic 3 and Epic 4 components as not built. The walkthrough deck describes the Oracle and
         the Watchdog in the present tense; neither exists.
 
-- [ ] **Task 5 — Amend the three planning artifacts** (AC5)
-  - [ ] `architecture-walkthrough.html`: the invariant count, twice. Present-tense claims about the
+- [x] **Task 5 — Amend the three planning artifacts** (AC5)
+  - [x] `architecture-walkthrough.html`: the invariant count, twice. Present-tense claims about the
         Oracle, the agent service and the anomaly detector become clearly-marked plans.
-  - [ ] `security-posture.html`: the two CI evidence rows. The control is unchanged; its *evidence*
+  - [x] `security-posture.html`: the two CI evidence rows. The control is unchanged; its *evidence*
         was withdrawn on 2026-08-07 and this page still asserts it. A security document asserting a
         control that nothing enforces is the one kind of staleness with a real consequence.
-  - [ ] `board-explainer.html`: check before editing. Its subject is the air-gap, which is intact, so
+  - [x] `board-explainer.html`: check before editing. Its subject is the air-gap, which is intact, so
         it may need little. If it needs little, say so in the completion notes rather than editing it
         to show work.
-  - [ ] Amend in place with dated notes. AD-2's own amendment is the model: it states the rule is
+  - [x] Amend in place with dated notes. AD-2's own amendment is the model: it states the rule is
         unchanged, states plainly what got weaker, and says a later reader should find a decision
         rather than an erosion.
 
@@ -336,6 +336,44 @@ does not run looks exactly like a suite that passed, and the only tell was readi
 
 ### Completion Notes List
 
+**Task 4 — the diagram.** A Mermaid flowchart in the README so a reader gets the shape without
+leaving the file, and `docs/as-built.md` for the longer form. Both lead with the fork that governs
+everything: **CSV and Excel are parsed in `core/` at upload time and never reach a provider; PDF,
+PNG and JPG are stored and read later.** That split explains most of the system's behaviour — cost,
+latency, and what can go wrong — and it appears in no planning artifact.
+
+Epic 3 and epic 4 components are drawn dashed and labelled **NOT BUILT**. `docs/as-built.md` filed
+under `docs/` rather than with the planning set, because filing a description of what was built
+alongside the plans is how it comes to be read as one.
+
+**Task 5 — the amendments.** All three artifacts checked; two amended, one deliberately not.
+
+*The walkthrough said "Fifteen" twice; the spine declares sixteen.* AD-15 and AD-16 were added
+2026-07-31. Corrected with a dated note, and the deck gained a banner naming what is built, what is
+not, and what was withdrawn — one banner rather than five scattered edits, since the deck is
+present-tense throughout.
+
+*The security posture's two CI evidence rows are amended in place, not deleted.* The controls are
+unchanged and still hold; their **evidence** was withdrawn on 2026-08-07. The second row carries two
+withdrawals rather than one: the pipeline is gone *and* the published catalogue it would diff does
+not exist yet.
+
+*The board explainer was checked and needed nothing,* which the story asked to be said rather than
+worked around. Its subject is the air-gap — that this system cannot move money — and that claim is
+intact and enforced by `nfr2-guard.test.ts`. Editing it to show work would have been the wrong
+instinct.
+
+*`docs/planning-artifacts.test.ts` guards the clause that most needed it:* withdrawn claims are not
+deleted. Each assertion checks the amendment **and** the original claim beside it — either alone
+would pass for the wrong document. The decision count is derived from the spine rather than
+transcribed, so a seventeenth decision fails the deck.
+
+| Mutation | Result |
+| --- | --- |
+| delete a withdrawn row | 1 of 7 failed |
+| drop an amendment note | 1 of 7 failed |
+| add a 17th decision to the spine | 1 of 7 failed |
+
 **Task 3 — the README, and a guard on it.** Every row of the defect table is corrected. Supabase is
 gone entirely rather than patched: it named a vendor with no presence in this repository.
 
@@ -459,9 +497,15 @@ Added `docs/**/*.ts`. A new source directory is a new hole in the gate unless so
 - `.gitattributes` — added, Task 2.
 - `README.md` — rewritten, Task 3.
 - `docs/readme.test.ts` — added, Task 3.
+- `docs/as-built.md` — added, Task 4.
+- `README.md` — diagram added, Task 4.
+- `_bmad-output/planning-artifacts/architecture/architecture-HOA-Treasurer-Assistant-2026-07-29/architecture-walkthrough.html` — amended, Task 5.
+- `_bmad-output/planning-artifacts/architecture/architecture-HOA-Treasurer-Assistant-2026-07-29/security-posture.html` — amended, Task 5.
+- `docs/planning-artifacts.test.ts` — added, Task 5.
 
 ### Change Log
 
+- 2026-08-09 — All five tasks complete. Status -> review.
 - 2026-08-08 — Story created, to close epic 2 with documentation that matches the code. Ten
   documentation defects verified against the working tree rather than recalled, the largest being a
   README Environment section naming a vendor removed on 2026-07-31 and a CI pipeline withdrawn on

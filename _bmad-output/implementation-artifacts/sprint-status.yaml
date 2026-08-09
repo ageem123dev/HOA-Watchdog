@@ -76,7 +76,7 @@ development_status:
   2-5-deposits-become-payments-on-upload: done
   # Closes the epic. Re-baseline onto 2.5's merge commit before starting; it
   # documents the payment-on-upload path 2.5 builds.
-  2-6-documentation-and-sample-uploads: in-progress
+  2-6-documentation-and-sample-uploads: review
   # Removes the trap 2.6 documents: nothing creates a unit, so every deposit on a
   # real installation is held unknown-unit. Better run BEFORE 2.6, which then
   # documents a working roll instead of warning about a missing one.

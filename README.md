@@ -91,6 +91,54 @@ Upload the deposits first instead and every line is held with `unknown-unit`. Th
 working correctly: it will not invent a unit to make a payment fit. On a fresh install it looks like
 a failure, which is why the order is worth following.
 
+## How a document travels
+
+The fork is the thing to understand: **a spreadsheet is read here, a scan is read by a model.**
+Everything else follows from it — cost, latency, and what can go wrong.
+
+```mermaid
+flowchart TD
+  U[Board member uploads files] --> A{"Acceptance gate<br/>type, signature bytes, size"}
+  A -->|refused| R["Rejected, per file<br/>the rest of the batch still uploads"]
+  A -->|accepted| S[Store bytes in R2<br/>key is the content hash]
+  S --> D[(document row)]
+
+  D --> F{Content type}
+  F -->|"CSV, .xls, .xlsx"| T["Tabular reader, in core/<br/>at upload time"]
+  F -->|"PDF, PNG, JPG"| H["Held, read on a later request"]
+
+  H --> G["Gemini extractor<br/>the only model call"]
+  G --> V
+  T --> V["validate() — one bad row refuses the document"]
+
+  V --> K{Document kind}
+  K -->|assessment_roll| RO["units, holders,<br/>tenures, assessments"]
+  K -->|deposit| P{"Does the reference<br/>name a known unit?"}
+  K -->|"invoice, statement, other"| E[(extraction rows)]
+
+  P -->|yes| PM[(payment)]
+  P -->|no| HP[(held_payment — waits for a human)]
+
+  V --> Q{Vendor known?}
+  Q -->|no| QI[(quarantine_item — waits for a human)]
+
+  RO --> E
+  PM --> E
+  HP --> E
+
+  E -.-> O["Epic 3: the catalogue<br/>NOT BUILT"]
+  E -.-> W["Epic 4: the watchdog<br/>NOT BUILT"]
+
+  classDef unbuilt stroke-dasharray: 5 5,color:#888
+  class O,W unbuilt
+```
+
+**Dashed boxes are not built.** The catalogue and the watchdog are epics 3 and 4; the planning
+artifacts describe them in the present tense, and they do not exist.
+
+A longer walkthrough — what each step refuses, and why the split exists at all — is in
+[docs/as-built.md](docs/as-built.md).
+
 ## The gate
 
 Five commands. **None of them run automatically.**
