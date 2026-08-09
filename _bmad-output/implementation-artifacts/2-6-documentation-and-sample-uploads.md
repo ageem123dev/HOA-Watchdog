@@ -1,14 +1,16 @@
 ---
-baseline_commit: 3281477
+baseline_commit: 7bfcb82
 ---
 
 # Story 2.6: The documentation says what the code does, and ships a sample of every format
 
-Status: ready-for-dev
+Status: in-progress
 
-> **Re-baselined 2026-08-09.** Story 2.5 merged as `3281477`, which is now this story's baseline.
-> The earlier value pointed at 2.5's unmerged branch head; documenting against a `main` that did not
-> yet record payments on upload would have described a system one story behind.
+> **Re-baselined twice.** First onto `3281477`, story 2.5's merge commit. Then onto `7bfcb82`,
+> story 2.7's branch head, because 2.7 is not merged and its absence would repeat the same mistake
+> one story later — 2.7 adds a document kind, so documentation written without it would ship a
+> "sample of every format" that is missing one. **This story is therefore stacked on 2.7 and its
+> merge request must wait for !30.**
 
 ## Why this story exists
 
@@ -279,7 +281,48 @@ This is a documentation story, and its failure modes are its own rather than epi
 
 ### Test Design
 
+**The story's central warning is obsolete, and story 2.7 is why.**
+
+Under *"The thing a reader most needs told"* this story states that `unit`, `unit_holder`,
+`unit_membership` and `assessment` have no ingestion path, that `assessment_roll` "creates no unit
+and no assessment", and that uploading the deposit sample to a fresh install holds every line with
+`unknown-unit`. Verified against this baseline: **all of that is now false.** `core/ingestion/record-roll.ts`
+is documented as "a read assessment roll becomes units, holders, tenures and assessments", and
+`adapters/db/roll-repository-postgres.ts` inserts into all four tables.
+
+The prose is left as written rather than edited, because a story's premise is not mine to rewrite;
+the correction is recorded here and carried into the work:
+
+1. **The `unknown-unit` trap becomes an ordering instruction, not a warning.** Upload the roll
+   sample first, then the deposit sample resolves against real units. That is a better README than
+   the warning it replaces.
+2. **Task 3's open question is answered by the product.** It asks whether a documented
+   `insert into unit` or a seed script is the fix; neither. The roll upload is the fix, and it is
+   the path a real association would use.
+3. **Task 2's kind coverage gains one.** "A deposit bank feed, an invoice batch, and a statement
+   with no `type` column" becomes four — the assessment roll is the kind that makes the others
+   usable, so it is the first sample a reader should use, not the last.
+4. **Task 1's contract table gains the roll's headers.** `ROLL_HEADERS` is `['cycle', 'year']`,
+   alongside `REQUIRED_HEADERS` and `OPTIONAL_HEADERS`. A contract derived from the source before
+   2.7 merged would have been wrong on the day it was written.
+
+**AC2 is unaffected: still six content types.** A roll is a `documentKind`, not a container —
+`acceptance.ts` is untouched by 2.7. Worth stating because "add a format" and "add a kind" look
+alike and only one of them changes AC2.
+
+
 ### Debug Log References
+
+**Worktree baseline, `c:/tmp/hoa-story-2-6` on `7bfcb82`.** Unit suite 97 files / 1580 passed.
+
+**A fresh worktree silently skips the database suite.** `npm run test:db` reads `.env.local`, which
+is gitignored and therefore absent from a new worktree — the first run here reported *green* with
+**17 files and 450 tests skipped**. Copied the file in (still ignored, verified with
+`git check-ignore`), after which the suite is 35 files / 573 passed with nothing skipped.
+
+Worth recording because it is this project's recurring failure shape in a new place: a suite that
+does not run looks exactly like a suite that passed, and the only tell was reading the skip count.
+
 
 ### Review Findings
 
