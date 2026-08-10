@@ -128,24 +128,57 @@ describe('config.matcher', () => {
  * family would have to remember to extend it. This asserts the rule instead, so
  * it holds for tool families nobody has written yet.
  */
+/**
+ * Extracted so it can be run against a directory that *does* contain a page.
+ *
+ * The repository scan below passes on a clean tree whether or not this function
+ * works — remove the regex or the `push` and it still reports nothing, because
+ * there is nothing to report. The fixture is what makes it a guard rather than a
+ * green light. Raised by CodeRabbit on MR !37.
+ */
+async function userFacingFilesUnder(directory: string, found: string[] = []): Promise<string[]> {
+  const { readdir } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name)
+    if (entry.isDirectory()) await userFacingFilesUnder(full, found)
+    // `[jt]sx?`: tsconfig sets allowJs false so a page.js is invisible to tsc,
+    // but Next.js still serves it — the exclusion would not care that it was
+    // never type-checked.
+    else if (/^(page|layout|template|default)\.[jt]sx?$/.test(entry.name)) found.push(entry.name)
+  }
+
+  return found
+}
+
 describe('nothing user-facing sits behind the exclusion', () => {
   it('has no page or layout anywhere under app/tools', async () => {
-    const { readdir } = await import('node:fs/promises')
     const { join } = await import('node:path')
 
-    const walk = async (dir: string, found: string[] = []): Promise<string[]> => {
-      for (const entry of await readdir(dir, { withFileTypes: true })) {
-        const full = join(dir, entry.name)
-        if (entry.isDirectory()) await walk(full, found)
-        // `[jt]sx?`: tsconfig sets allowJs false so a page.js is invisible to tsc,
-        // but Next.js still serves it — the exclusion would not care that it was
-        // never type-checked.
-        else if (/^(page|layout|template|default)\.[jt]sx?$/.test(entry.name)) found.push(full)
-      }
-      return found
-    }
+    await expect(userFacingFilesUnder(join(process.cwd(), 'app', 'tools'))).resolves.toEqual([])
+  })
 
-    await expect(walk(join(process.cwd(), 'app', 'tools'))).resolves.toEqual([])
+  it('detects one when it is there, and leaves route handlers alone', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const { tmpdir } = await import('node:os')
+
+    const root = await mkdtemp(join(tmpdir(), 'tools-fixture-'))
+    try {
+      await mkdir(join(root, 'v1', 'ui'), { recursive: true })
+      await writeFile(join(root, 'v1', 'ui', 'page.tsx'), 'export default () => null')
+      await writeFile(join(root, 'v1', 'ui', 'layout.js'), 'export default () => null')
+      // The control: a route handler is exactly what belongs here.
+      await writeFile(join(root, 'v1', 'route.ts'), 'export const POST = () => null')
+
+      await expect(userFacingFilesUnder(root)).resolves.toEqual(
+        expect.arrayContaining(['page.tsx', 'layout.js']),
+      )
+      await expect(userFacingFilesUnder(root)).resolves.not.toContain('route.ts')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

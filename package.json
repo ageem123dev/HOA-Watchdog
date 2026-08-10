@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:db": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run migrations/ adapters/db/ app/tools/",
+    "test:db": "node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run migrations/ adapters/db/ && node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run app/tools/",
     "migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "smoke": "node scripts/smoke.mjs",
     "verify:extraction": "node --env-file-if-exists=.env.local scripts/verify-extraction.mjs"

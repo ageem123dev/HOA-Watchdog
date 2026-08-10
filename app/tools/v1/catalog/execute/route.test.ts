@@ -133,9 +133,26 @@ describe('POST /tools/v1/catalog/execute', () => {
      * caller presenting nothing. `core/tools/service-token.ts` owns the rule;
      * this proves the route actually consults it rather than short-circuiting.
      */
-    it('refuses every caller when no token is configured', async () => {
+    it('refuses every caller when the token is configured blank', async () => {
       vi.stubEnv('AGENT_SERVICE_TOKEN', '')
 
+      expect((await call()).status).toBe(401)
+      expect((await call({ token: null })).status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+    })
+
+    /**
+     * Absent, not blank — and they are different values reaching
+     * `verifyServiceToken`. The route passes `process.env.AGENT_SERVICE_TOKEN`
+     * through unchanged, which is `undefined` when the variable is unset, and
+     * only the `''` case was covered. `.env.example` and the README both promise
+     * that an unset token refuses everyone, so the promise needed the test.
+     * Raised by CodeRabbit on MR !37.
+     */
+    it('refuses every caller when the token variable is absent entirely', async () => {
+      vi.stubEnv('AGENT_SERVICE_TOKEN', undefined)
+
+      expect(process.env.AGENT_SERVICE_TOKEN).toBeUndefined()
       expect((await call()).status).toBe(401)
       expect((await call({ token: null })).status).toBe(401)
       expect(execute).not.toHaveBeenCalled()

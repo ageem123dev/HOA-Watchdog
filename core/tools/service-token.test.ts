@@ -117,7 +117,11 @@ describe('verifying the agent service token', () => {
     )
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 
-    expect(code).toContain('timingSafeEqual')
+    // The **invocation**, not the identifier. `toContain('timingSafeEqual')` was
+    // satisfied by the import alone, so deleting the call and leaving the import
+    // passed — a guard that holds whether or not the thing it guards is present.
+    // Raised by CodeRabbit on MR !37.
+    expect(code).toMatch(/\btimingSafeEqual\s*\(\s*presentedBytes\s*,\s*configuredBytes\s*\)/)
     expect(code).not.toMatch(/presented\s*===\s*configured/)
   })
 })

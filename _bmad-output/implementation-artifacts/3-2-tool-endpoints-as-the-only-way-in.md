@@ -325,6 +325,83 @@ satisfy. Found before writing the route rather than while debugging it.
 
 ### Review Findings
 
+#### Local round — Argus five times, then one CodeRabbit CLI round
+
+The reordered step 4b was used for the first time here: Argus first, its findings fixed, re-run until
+clean, and only then the CLI round. It paid. Argus reported the whole story clean at `97b2e96`, and
+the CLI round found **four more** on exactly that code.
+
+**Argus, rounds 1–4 (nine findings):**
+
+- **The gate could fail open.** `request.auth !== null` is *true* for `undefined`, so an auth layer
+  yielding nothing would have been read as an authenticated member. Now `!= null`, with a test that
+  sets the session to undefined. The mock's type had to widen to admit `undefined`, and it says why:
+  narrowing it to `| null` is what made the case unwritable.
+- **The gate could fall through.** `if (redirect) … else next()` is correct for a two-member union
+  and means a third `RouteDecision` kind would silently *allow*. Now an exhaustive switch with a
+  `never` assignment, so a new kind is a compile error rather than an open door.
+- **The exclusion was the whole `tools/` prefix**, which would unguard a future page under
+  `app/tools/`. Narrowed to `tools/v\d+/`. Argus proposed narrowing further to
+  `tools/v\d+/catalog/`; that decays, because every new tool family would have to remember to extend
+  it. A test asserting no page/layout/template/default under `app/tools/` holds instead.
+- **The end-to-end test leaked, then aborted, then failed silently** — three rounds on one
+  `afterAll`. It nested every delete under `if (owner)`; then guaranteed `end()` but not that the
+  next block ran; then kept going but swallowed the failures. Each step is independently guarded now
+  and the collected failures are thrown once every step has had its turn.
+- **A backtick would have walked through** the sole-data-path detector: `import(\`…\`)` matched
+  neither `'` nor `"`. Found on the integration pass over the merge-request head.
+
+**CodeRabbit CLI (four findings):**
+
+- **The sole-data-path guard was narrower than the rule it enforces**, scanning `app/` alone. It now
+  sweeps `app/`, `core/`, `scripts/` and root-level modules. Widening it immediately exposed a second
+  defect: `scripts/` is written in `.mjs`, so scanning for `.tsx?` found no files there at all — a
+  sweep one root away from silently covering nothing.
+- **Its detector false-positived on a commented-out import**, verified rather than assumed. It masks
+  comments first now, reusing `neutralise()` from `core/ports/declared-members.ts` rather than
+  growing a third copy. String contents are deliberately kept, and the residual limit is stated in
+  the file; the assertion claiming otherwise was **removed** rather than left as a claim the code
+  does not back.
+- The route test stubbed `AGENT_SERVICE_TOKEN` and never unstubbed it.
+- The as-built known-gap paragraph had been dropped between two table rows, splitting the table.
+
+#### Merge request !37, round 1 — four findings, all applied
+
+Reviewed `6b5d06a..aa904e0`.
+
+- **Fail-closed was proven for `''` and never for absent.** The route passes
+  `process.env.AGENT_SERVICE_TOKEN` straight through, which is `undefined` when unset — and only the
+  empty-string case was stubbed. `.env.example` and the README both promise that an unset token
+  refuses everyone, so the promise needed the test. Added, for both a presented token and no header.
+- **`expect(code).toContain('timingSafeEqual')` was satisfied by the import alone.** Deleting the
+  call and keeping the import passed it — a guard that holds whether or not the thing it guards is
+  present, which is the exact shape this project keeps finding. Now matches the invocation with its
+  two arguments; verified by replacing the call with `Buffer.equals` and watching it fail.
+- **The no-page scan passed on a clean tree whether or not it worked.** Planting a page by hand
+  proved the *sweep*, but nothing proved the *walker* — remove its regex and the repository scan
+  still reports nothing, because there is nothing to report. The walker is extracted and run against
+  a temporary directory containing `page.tsx` and `layout.js`, with `route.ts` as the control.
+  Verified by mutation: the fixture fails, the repository scan does not.
+- **The database test needed `DATABASE_URL` after all, and this reverses an earlier decision.**
+  `query_log.actor_id` references `board_member(id)` with no `ON DELETE CASCADE`, and migration 020
+  revokes DELETE on `query_log` from the writer — so without the owner, the final
+  `delete from board_member` fails with a foreign-key violation. The earlier reasoning ("only log
+  rows remain") was true while cleanup failures were swallowed; once they were made to surface, the
+  same run fails outright. Skipping loudly beats failing for a reason unrelated to the code.
+
+#### The gate itself went flaky, and it was this story's doing
+
+Widening `test:db` to `app/tools/` put two more module-scoped pools in parallel with the other
+thirty-nine files, and `adapters/db/roll-ingestion.test.ts` — story 2.7's, untouched here — began
+timing out at 5s on roughly one run in three.
+
+Established rather than assumed: the pre-change scope passed **3/3**, the widened scope failed
+**1 in 3**. So it was caused here, not inherited. `app/tools/` now runs as a second sequential
+vitest invocation, which is stable **3/3** at 623 + 25 tests.
+
+That is a workaround, and the real fix is the open ledger entry about nine module-scoped pools at
+`max: 5` — updated to record that story 3.2 turned it from latent into a failing gate.
+
 ### Completion Notes List
 
 **What was built.** `core/tools/service-token.ts` (pure, fail-closed, constant-time),
@@ -394,3 +471,5 @@ grepped, never piped through `head` — story 3.1 lost a run to `| head -N` SIGP
 | --- | --- |
 | 2026-08-10 | Story created |
 | 2026-08-10 | Tasks 1-5 implemented test-first; gate green; test:db widened to app/tools/ |
+| 2026-08-10 | Local round: 5 Argus runs + 1 CodeRabbit CLI round, 13 findings, all applied |
+| 2026-08-10 | MR !37 round 1: 4 findings applied; test:db split after this story made it flaky |

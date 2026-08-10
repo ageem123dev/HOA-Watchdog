@@ -22,14 +22,32 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
-const configured = Boolean(writerUrl && readerUrl)
+/**
+ * `DATABASE_URL` is required here, unlike the sibling database suites, and the
+ * reason is a foreign key.
+ *
+ * `query_log.actor_id` references `board_member(id)` with no `ON DELETE
+ * CASCADE`, and migration 020 revokes DELETE on `query_log` from
+ * `watchdog_writer` — deliberately, since that table is the audit trail. So the
+ * writer cannot remove this run's provenance rows, and its final
+ * `delete from board_member` then fails with a foreign-key violation.
+ *
+ * An earlier draft ran without the owner and argued that only log rows would
+ * remain. That was true while cleanup failures were being swallowed; once they
+ * were made to surface, the same run fails outright. Skipping loudly beats
+ * failing for a reason that has nothing to do with the code under test. Raised
+ * by CodeRabbit on MR !37.
+ */
+const configured = Boolean(writerUrl && readerUrl && adminUrl)
 
 const describeWithDatabase = configured ? describe : describe.skip
 
 if (!configured) {
   console.warn(
-    '\n  tool endpoint database tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL and ' +
-      'WATCHDOG_READER_DATABASE_URL must both be set.\n',
+    '\n  tool endpoint database tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL, ' +
+      'WATCHDOG_READER_DATABASE_URL and DATABASE_URL must all be set.\n' +
+      '  DATABASE_URL is needed because only the owner may delete query_log rows,\n' +
+      '  and board_member cannot be removed while they reference it.\n',
   )
 }
 
