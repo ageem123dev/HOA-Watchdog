@@ -39,9 +39,10 @@ describe('binding a parameter set to a query', () => {
   })
 
   /**
-   * `pg` throws on `undefined` rather than treating it as SQL NULL, so an
-   * omitted optional parameter would crash the query instead of filtering on
-   * nothing.
+   * This function's contract, not a driver workaround. pg 8.22.0 maps both
+   * `null` and `undefined` to SQL NULL — verified, after an earlier version of
+   * this comment claimed it throws — so what the assertion protects is the value
+   * every *other* caller sees: a fake in a test, a logger, a future driver.
    */
   it('binds an omitted optional parameter as null, never as undefined', () => {
     const values = bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B' })

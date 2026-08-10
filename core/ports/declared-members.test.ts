@@ -112,6 +112,87 @@ describe('reading an interface body', () => {
   })
 
   /**
+   * The declaration lookup reads the masked copy, not the raw text. Searching
+   * the raw text finds a commented-out or quoted `interface Foo {` first, and
+   * the body scan then runs from there — so a port test would inspect a fake
+   * body and keep passing after the real contract regressed. This survived the
+   * fix that made the *body* scan comment-aware, because the lookup positioning
+   * it was left naive.
+   */
+  describe('declarations that are not declarations', () => {
+    it('skips a commented-out declaration and finds the real one', () => {
+      const source = [
+        '// export interface Example {',
+        '//   forged(): void',
+        '// }',
+        'export interface Example {',
+        '  real(): void',
+        '}',
+      ].join('\n')
+
+      expect(declaredMembers(source, 'Example')).toEqual(['real(): void'])
+    })
+
+    it('skips a declaration inside a block comment', () => {
+      const source = [
+        '/**',
+        ' * export interface Example {',
+        ' *   forged(): void',
+        ' * }',
+        ' */',
+        'export interface Example {',
+        '  real(): void',
+        '}',
+      ].join('\n')
+
+      expect(declaredMembers(source, 'Example')).toEqual(['real(): void'])
+    })
+
+    it('skips a declaration quoted inside a string literal', () => {
+      const source = [
+        'const sample = "export interface Example { forged(): void }"',
+        'export interface Example {',
+        '  real(): void',
+        '}',
+      ].join('\n')
+
+      expect(declaredMembers(source, 'Example')).toEqual(['real(): void'])
+    })
+
+    /**
+     * The case that actually discriminates, and the three above do not.
+     *
+     * With the declaration searched in the **raw** text, `start` lands on the
+     * fake — but the following `indexOf('{')` reads the *masked* copy, where the
+     * fake's brace is blanked, so it skips forward and recovers the real body by
+     * accident. Every commented-out case still passes. Put an unrelated brace
+     * between the fake and the real declaration and the recovery stops: the scan
+     * locks onto `{ a: string }` and reports its contents as the port's members.
+     *
+     * Found by mutating `masked.search` to `text.search` and watching the other
+     * three cases stay green — a test that cannot fail for the reason it exists
+     * is the thing this file is otherwise built to catch.
+     */
+    it('is not fooled by a fake declaration with an unrelated brace after it', () => {
+      const source = [
+        '// export interface Example {',
+        'type Other = { a: string }',
+        'export interface Example {',
+        '  real(): void',
+        '}',
+      ].join('\n')
+
+      expect(declaredMembers(source, 'Example')).toEqual(['real(): void'])
+    })
+
+    it('throws when the only declaration is a fake one', () => {
+      const source = ['// export interface Example {', '//   forged(): void', '// }'].join('\n')
+
+      expect(() => declaredMembers(source, 'Example')).toThrow(InterfaceNotFoundError)
+    })
+  })
+
+  /**
    * A missing interface used to return `[]`, which is also what an empty one
    * returns — so `toEqual([])`, the assertion these tests exist to make, passed
    * for a typo.

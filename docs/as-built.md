@@ -1,6 +1,6 @@
 # The system as built
 
-What exists, as of story 2.7. This describes the code; the planning artifacts in
+What exists, as of story 3.1. This describes the code; the planning artifacts in
 [`_bmad-output/planning-artifacts/`](../_bmad-output/planning-artifacts/) describe the intent, and
 where the two differ **this page is the one that was checked against the source**.
 

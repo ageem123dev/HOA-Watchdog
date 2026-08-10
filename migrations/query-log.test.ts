@@ -188,12 +188,54 @@ describeWithDatabase('the provenance record', () => {
       expect(rows[0]!.parameters).toEqual({ unitNumber: '4B', assessmentYear: 2026 })
     })
 
-    it('stamps its own id and time so a caller cannot forge either', async () => {
+    /**
+     * Bounded both ways, and it did not used to be.
+     *
+     * The first version asserted only `>= before - 5s` and was named "so a
+     * caller cannot forge either" — a claim it could not support. It inserts
+     * without `executed_at`, so it passes identically whether or not the column
+     * is caller-settable, and with no upper bound a value years in the future
+     * passed too. Raised on the merge request; it is the vacuous-guard shape,
+     * where the test holds whether or not the property it names is present.
+     *
+     * What the database can promise is the *default*. Forgery is prevented one
+     * layer up, by `QueryLogEntry` declaring no `executedAt` and no id at all —
+     * asserted in `core/ports/query-log.test.ts` — and by the adapter's column
+     * list, asserted directly below.
+     */
+    it('stamps its own id and time when they are not supplied', async () => {
       const before = new Date()
       const { rows } = await record()
+      const after = new Date()
 
       expect(rows[0]!.id).toMatch(/^[0-9a-f-]{36}$/)
-      expect(rows[0]!.executed_at.getTime()).toBeGreaterThanOrEqual(before.getTime() - 5_000)
+
+      const stamped = rows[0]!.executed_at.getTime()
+      expect(stamped).toBeGreaterThanOrEqual(before.getTime() - 5_000)
+      expect(stamped).toBeLessThanOrEqual(after.getTime() + 5_000)
+    })
+
+    /**
+     * The forgery guard itself: the adapter never names either column, so
+     * nothing reaching this table through the port can set them. A source
+     * assertion rather than a behavioural one because the database *would*
+     * accept both — `watchdog_writer` holds INSERT on every column — so the only
+     * thing standing between a caller and a chosen timestamp is this statement.
+     */
+    it('is written by an adapter whose INSERT names neither id nor executed_at', () => {
+      const adapter = readFileSync(
+        join(__dirname, '..', 'adapters', 'db', 'query-log-postgres.ts'),
+        'utf8',
+      )
+      // Tolerant of a schema prefix and of quoting, so reformatting the adapter
+      // does not turn this into a test that silently matches nothing — the
+      // failure mode where `insert` is null and only the first assertion fires.
+      const insert = /insert\s+into\s+(?:"?public"?\.)?"?query_log"?\s*\(([^)]*)\)/i.exec(adapter)
+
+      expect(insert, 'no INSERT into query_log found in the adapter').not.toBeNull()
+      expect(insert![1]).not.toMatch(/\bid\b/)
+      expect(insert![1]).not.toMatch(/executed_at/)
+      expect(insert![1]).toMatch(/actor_id/)
     })
   })
 

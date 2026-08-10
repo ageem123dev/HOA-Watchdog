@@ -27,7 +27,7 @@ export class UnknownCatalogEntryError extends Error {
 const reference = (id: string, version: number) => `${id}@${version}`
 
 /**
- * Built once, at module load, and it throws on a duplicate rather than letting
+ * Indexes entries by `id@version`, throwing on a duplicate rather than letting
  * the last registration win.
  *
  * Two entries sharing `(id, version)` is the one thing that would make AD-14
@@ -35,14 +35,20 @@ const reference = (id: string, version: number) => `${id}@${version}`
  * to two SQL texts, and which one ran would depend on array order. Failing at
  * load makes that a startup crash in front of whoever caused it, rather than an
  * audit trail that quietly stops meaning anything.
+ *
+ * **Exported so the guard itself can be tested.** A sweep asserting that
+ * `ALL_ENTRIES` currently holds no duplicate passes just as happily with this
+ * check deleted — it tests the catalog's contents, not the rule. Raised on the
+ * merge request, and it is the vacuous-guard shape `_bmad/custom/review-gate.md`
+ * exists to catch: a guard needs a test that fails when the guard is removed.
  */
-const BY_REFERENCE: ReadonlyMap<string, CatalogEntry> = (() => {
+export function indexEntries(entries: readonly CatalogEntry[]): ReadonlyMap<string, CatalogEntry> {
   const map = new Map<string, CatalogEntry>()
 
-  for (const entry of ALL_ENTRIES) {
+  for (const entry of entries) {
     const key = reference(entry.id, entry.version)
     if (map.has(key)) {
-      throw new Error(
+      throw new DuplicateCatalogEntryError(
         `the catalog holds two entries named ${key}; an entry version identifies exactly one SQL text (AD-14)`,
       )
     }
@@ -50,7 +56,16 @@ const BY_REFERENCE: ReadonlyMap<string, CatalogEntry> = (() => {
   }
 
   return map
-})()
+}
+
+export class DuplicateCatalogEntryError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DuplicateCatalogEntryError'
+  }
+}
+
+const BY_REFERENCE = indexEntries(ALL_ENTRIES)
 
 /**
  * The entry a caller names, or a refusal that says which half was wrong.

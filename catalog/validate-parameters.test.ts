@@ -131,8 +131,13 @@ describe('validateParameters', () => {
       ['null', null],
       ['undefined', undefined],
     ])('rejects %s as a declared value rather than reading it as absent', (_shape, value) => {
+      // The message has to be the *type* one. `/assessmentYear/` alone also
+      // matches "is required and was not supplied", so an implementation that
+      // read an explicit null as an absence would satisfy a test whose name says
+      // it does not. `Object.hasOwn` is true for a key set to undefined, which
+      // is the distinction being asserted.
       expect(() => validateParameters(SCHEMA, { unitNumber: '4B', assessmentYear: value })).toThrow(
-        /assessmentYear/,
+        /assessmentYear.*integer/i,
       )
     })
 

@@ -151,8 +151,17 @@ describe('executing a catalog entry', () => {
       expect(state.queries).toEqual([])
     })
 
-    it('lets the failure escape rather than answering from an unlogged query', async () => {
-      const { executor } = harness({ logFails: new Error('query_log is unreachable') })
+    /**
+     * The log's own error, not a rewrapped one. `rejects.toThrow(Error)` used to
+     * stand here and proved nothing — every failure in this file satisfies it,
+     * including one from a typo'd entry id. What is worth asserting is identity:
+     * an executor that caught the log failure and threw its own would lose the
+     * reason the provenance write failed, which is the only thing that tells an
+     * operator whether the audit trail is down or the request was bad.
+     */
+    it('lets the log\'s own failure escape rather than rewrapping it', async () => {
+      const failure = new Error('query_log is unreachable')
+      const { executor } = harness({ logFails: failure })
 
       await expect(
         executor.execute({
@@ -161,7 +170,7 @@ describe('executing a catalog entry', () => {
           parameters: VALID,
           actorId: ACTOR,
         }),
-      ).rejects.toThrow(Error)
+      ).rejects.toBe(failure)
     })
   })
 
@@ -201,16 +210,23 @@ describe('executing a catalog entry', () => {
      * leaves no row behind. The audit trail records executions, and a request
      * that never became one is not an execution — it is a caller being told no.
      */
+    // Each case carries the message it expects. A bare `rejects.toThrow()` is
+    // satisfied by any failure at all — including a typo in the entry id, which
+    // would make all three cases pass while testing nothing about parameters.
     it.each([
-      ['a missing parameter', { unitNumber: '4B' }],
-      ['an undeclared parameter', { ...VALID, limit: 1000 }],
-      ['a wrongly typed parameter', { unitNumber: '4B', assessmentYear: '2026' }],
-    ])('logs nothing and runs nothing for %s', async (_label, parameters) => {
+      ['a missing parameter', { unitNumber: '4B' }, /assessmentYear.*required/i],
+      ['an undeclared parameter', { ...VALID, limit: 1000 }, /limit.*not declared/i],
+      [
+        'a wrongly typed parameter',
+        { unitNumber: '4B', assessmentYear: '2026' },
+        /assessmentYear.*integer/i,
+      ],
+    ] as const)('logs nothing and runs nothing for %s', async (_label, parameters, expected) => {
       const { state, executor } = harness()
 
       await expect(
         executor.execute({ entryId: 'dues_status', version: 1, parameters, actorId: ACTOR }),
-      ).rejects.toThrow()
+      ).rejects.toThrow(expected)
 
       expect(state.calls).toEqual([])
     })

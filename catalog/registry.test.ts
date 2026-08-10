@@ -10,7 +10,15 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { ALL_ENTRIES, UnknownCatalogEntryError, currentVersionOf, entryFor } from './registry'
+import type { CatalogEntry } from './entry'
+import {
+  ALL_ENTRIES,
+  DuplicateCatalogEntryError,
+  UnknownCatalogEntryError,
+  currentVersionOf,
+  entryFor,
+  indexEntries,
+} from './registry'
 
 describe('resolving an entry', () => {
   it('resolves the entry a caller names', () => {
@@ -137,9 +145,44 @@ describe('every entry in the catalog', () => {
 })
 
 describe('the catalog itself', () => {
+  /**
+   * A content check: what the catalog happens to hold today. It passes with the
+   * duplicate guard deleted, which is why the rule is tested separately below.
+   */
   it('holds no two entries with the same id and version', () => {
     const references = ALL_ENTRIES.map((entry) => `${entry.id}@${entry.version}`)
 
     expect(new Set(references).size).toBe(references.length)
+  })
+
+  /**
+   * The rule, tested against a catalog that breaks it.
+   *
+   * Two entries sharing `(id, version)` would make AD-14 unenforceable from
+   * inside the process: `query_log`'s pair would resolve to two SQL texts, and
+   * which one ran would depend on array order. Silent last-wins is the outcome
+   * without this guard, and the sweep above cannot see the difference.
+   */
+  describe('rejecting a duplicate registration', () => {
+    const anEntry = (version: number, sql: string): CatalogEntry => ({
+      id: 'twice_over',
+      version,
+      sql,
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      bind: [],
+    })
+
+    it('throws when two entries share an id and a version', () => {
+      expect(() => indexEntries([anEntry(1, 'select 1'), anEntry(1, 'select 2')])).toThrow(
+        DuplicateCatalogEntryError,
+      )
+      expect(() => indexEntries([anEntry(1, 'select 1'), anEntry(1, 'select 2')])).toThrow(
+        /twice_over@1/,
+      )
+    })
+
+    it('accepts two versions of the same entry, which is how a change is made', () => {
+      expect(() => indexEntries([anEntry(1, 'select 1'), anEntry(2, 'select 2')])).not.toThrow()
+    })
   })
 })

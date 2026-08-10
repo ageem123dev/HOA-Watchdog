@@ -14,13 +14,20 @@ import type { CatalogEntry } from './entry'
 /**
  * The values for `$1 … $n`, in the entry's declared order.
  *
- * **An absent optional parameter binds as `null`, never as `undefined`.** `pg`
- * refuses `undefined` outright — it throws rather than treating it as SQL NULL —
- * so a bound optional parameter that a caller omitted would crash the query
- * instead of filtering on nothing. No entry in the catalog declares an optional
- * bound parameter today, which is exactly why this is written now: the first one
- * that does would otherwise find this out in production, and `dues_status@1`'s
- * own tests could never have caught it.
+ * **An absent optional parameter binds as `null`, never as `undefined`** — as
+ * this function's own contract, not as a workaround for the driver. An earlier
+ * version of this comment claimed `pg` throws on `undefined`; it does not.
+ * Checked against pg 8.22.0 rather than argued: both `null` and `undefined`
+ * serialize to SQL NULL. Raised on the merge request, and the correction is
+ * recorded here because a comment stating a false reason is worse than no
+ * comment — the next reader would "simplify" against a fact that was never true.
+ *
+ * The coalesce stays because the contract should not be the driver's to define.
+ * A pure function that returns `undefined` in a values array is describing an
+ * absence it has no way to express downstream, and any caller that is not `pg` —
+ * a fake in a test, a future driver, a logger — would have to rediscover what it
+ * meant. No entry declares an optional bound parameter yet, so this is settled
+ * before the first one arrives rather than after.
  *
  * `??` and not `||`, so a legitimately empty string or a zero is bound as
  * itself. A unit number of `'0'` is a unit number.

@@ -180,3 +180,7 @@ action_items:
     action: "The declaredMembers helper is copied into five core/ports/*.test.ts files (unit-directory, assessment-directory, quarantine-queue, roll-repository, vendor-resolution). Story 3.1 extracted a shared core/ports/declared-members.ts and used it for the new port test only. All five copies carry a bug the shared one now fixes: the interface is found with indexOf, so a lookup for `Foo` matches `FooEntry` and the test silently reads a neighbouring interface's body. Migrate the five to the shared helper in one sweep."
     owner: "Dev"
     status: open
+  - epic: 3
+    action: "AD-14's freeze is anchored in-repo: catalog/published-versions.json is read from the same checkout as the entry it pins, so one commit can change both and the tests still pass. Raised by CodeRabbit on MR !35, which proposed protected GitLab releases or a signed external manifest consumed by CI. Declined for story 3.1 - the mechanism needs CI, removed 2026-08-07 for cost, and externalising the anchor is a new AD rather than a story fix. The pilot's threat model is an honest team plus review, and the committed digest is what puts a change in the diff. Revisit with the CI action item."
+    owner: "Matt"
+    status: open
