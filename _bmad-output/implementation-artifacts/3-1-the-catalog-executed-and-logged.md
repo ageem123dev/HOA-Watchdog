@@ -370,10 +370,20 @@ one genuine test defect: `lastPaidOn` was asserted against `new Date('2026-07-11
 which passes only in UTC. `pg` parses a `date` to **local** midnight, so it failed by five hours here
 and would fail by a different amount elsewhere. Replaced with a calendar-date comparison.
 
-**A silent under-run, caught by counting.** One full-suite run reported `90 passed | 18 skipped
-(108)` — green, with two files uncollected — after `npm run test:db` and `npm test` were chained in
-one shell. Re-run alone it collected `111`, matching the 111 `*.test.{ts,tsx}` files on disk. Story
-2.7's sixth learning, met in the wild: read the file count, not the word "passed".
+**A silent under-run, caught by counting — and the cause was the command, not the suite.** One
+full-suite run reported `90 passed | 18 skipped (108)`: green, with two files uncollected. Re-run it
+collected `111`, matching the 111 `*.test.{ts,tsx}` files on disk. Story 2.7's sixth learning met in
+the wild — read the file count, not the word "passed".
+
+The first diagnosis here blamed chaining `npm run test:db` and `npm test` in one shell, and that was
+wrong. It is **`| head -N`**. `head` closes the pipe once it has its lines, which SIGPIPEs `grep`
+and then the test runner, killing a run part-way through — so the output reads as a completed suite
+that happened to collect fewer files. The same thing produced three phantom `unit.test.ts` failures
+during close-out that four consecutive clean runs could not reproduce.
+
+**So the gate is run to a file and the file is grepped**, never `npm test | grep | head`. Exit codes
+recorded too: both suites exit 0. A truncated pipeline cannot tell a green suite from a killed one,
+which on the only gate this project has is the difference between evidence and a guess.
 
 ### Review Findings
 
@@ -722,3 +732,4 @@ remains story 3.3's obligation.
 | 2026-08-09 | MR round 1: 8 findings, 7 applied, 1 declined and ledgered; all threads resolved |
 | 2026-08-09 | MR round 2: 1 outside-diff finding, applied |
 | 2026-08-09 | MR round 3 clean after a rate-limit back-off; status done, ready to merge |
+| 2026-08-10 | Final gate re-run on the close-out head; `| head -N` identified as the under-run cause |
