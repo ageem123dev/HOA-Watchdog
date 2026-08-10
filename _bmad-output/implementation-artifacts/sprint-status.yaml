@@ -84,6 +84,21 @@ development_status:
   epic-2-retrospective: optional
 
   epic-3: backlog
+  # AD-12 and AD-14. Provenance lands with the first execution path or becomes a
+  # retrofit that logs only some paths.
+  3-1-the-catalog-executed-and-logged: backlog
+  3-2-tool-endpoints-as-the-only-way-in: backlog
+  # Introduces Python. MUST add pytest to the local gate in this story -- a
+  # package.json script AND the "Tested =" line in bmad-ship-story. There is no
+  # CI, so forgetting it ships a second language with no automated check at all.
+  3-3-the-python-service-exists: backlog
+  3-4-the-model-picks-an-entry: backlog
+  # AD-7. Must exist BEFORE the first answer renders (3.6), or that story ships
+  # precisely the failure this product exists to prevent.
+  3-5-the-numeric-validator: backlog
+  3-6-ask-and-answer: backlog
+  3-7-when-it-cannot-answer: backlog
+  3-8-the-access-log: backlog
   epic-3-retrospective: optional
 
   epic-4: backlog
