@@ -84,11 +84,13 @@ leave the document unsettled, re-read on the next poll, and healed. Replacement 
 
 ## What is not built
 
-The planning artifacts describe these in the present tense. None of them exist.
+The planning artifacts describe these in the present tense. With one partial exception, noted first,
+none of them exist.
 
 | Component | Where it is described | Status |
 | --- | --- | --- |
-| The catalogue / Oracle | `architecture-walkthrough.html` | **Not built** — epic 3 |
+| The query catalogue | `architecture-walkthrough.html` | **Partly built** — story 3.1. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze. Nothing selects an entry and nothing renders an answer |
+| The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Not built** — epic 3, stories 3.2–3.8 |
 | The watchdog and anomaly detection | `architecture-walkthrough.html`, `board-explainer.html` | **Not built** — epic 4 |
 | The CrewAI agent service | `architecture-walkthrough.html` | **Not built** |
 | Duplicate-invoice and arrears findings | the PRD | **Not built** — epic 4 |

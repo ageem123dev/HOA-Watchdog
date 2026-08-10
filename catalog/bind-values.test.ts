@@ -76,6 +76,21 @@ describe('binding a parameter set to a query', () => {
     )
   })
 
+  /**
+   * The hole this closes exists only where `bindValues` and `validateParameters`
+   * disagree. `validateParameters` skips the type check for a declared parameter
+   * that is absent as an *own* property, so an inherited optional one is never
+   * checked — and a plain read here would bind that unchecked value straight
+   * into the query. Both sides use `Object.hasOwn`; this is the assertion that
+   * says so.
+   */
+  it('does not bind an optional parameter inherited from a prototype', () => {
+    const inherited = Object.create({ since: 'never validated' }) as Record<string, unknown>
+    inherited.unitNumber = '4B'
+
+    expect(bindValues(WITH_AN_OPTIONAL, inherited)).toEqual(['4B', null])
+  })
+
   it('binds nothing for an entry with no placeholders', () => {
     const noParameters: CatalogEntry = {
       id: 'unit_count',

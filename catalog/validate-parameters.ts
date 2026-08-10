@@ -16,6 +16,16 @@
  * plain read: `in` walks the prototype chain, so an object inheriting
  * `assessmentYear` would satisfy a `required` check while supplying nothing —
  * and a payload carrying a `__proto__` key is exactly what produces one.
+ * `catalog/bind-values.ts` reads own properties for the same reason, and the two
+ * have to agree or the gap between them is where an unchecked value gets bound.
+ *
+ * **An undeclared property is always rejected, and `additionalProperties` is
+ * never consulted to decide it.** That is not an oversight. The architecture's
+ * Consistency Conventions say "Every agent-facing tool declares `strict: true`
+ * and `additionalProperties: false`. A tool without both is not registered", and
+ * `ParameterSchema` types the field as the literal `false` so an open schema does
+ * not compile. Branching on a field that cannot hold another value would add a
+ * path no test could reach and imply an openness the catalog does not have.
  */
 
 import type { ParameterSchema } from './entry'

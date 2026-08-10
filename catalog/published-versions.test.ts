@@ -76,6 +76,18 @@ describe('the published versions file', () => {
 describe('the digest', () => {
   const entry = ALL_ENTRIES[0]!
 
+  /**
+   * Without this, several assertions below go quiet rather than failing. On an
+   * entry with one property, reversing the property order is a no-op and "does
+   * not depend on the order the properties happen to be written in" passes
+   * against a digest that has no ordering behaviour at all; on an entry with
+   * none, the property-flip cases index into nothing.
+   */
+  it('is exercised against an entry with enough parameters to discriminate', () => {
+    expect(Object.keys(entry.parameters.properties).length).toBeGreaterThanOrEqual(2)
+    expect(entry.bind.length).toBeGreaterThanOrEqual(2)
+  })
+
   it('changes when the SQL changes', () => {
     expect(digestOf({ ...entry, sql: `${entry.sql} order by 1` })).not.toBe(digestOf(entry))
   })

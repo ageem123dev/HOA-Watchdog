@@ -49,10 +49,14 @@ create table query_log (
   -- future reader joins the catalog on, and `Dues Status` and `dues_status`
   -- would be two entries that are one entry.
   --
-  -- Two measurements answering two questions, the shape migration 009 reached
-  -- after getting it wrong twice -- `char_length(btrim(...)) <= 64` lets 'x'
-  -- plus three hundred spaces through, because btrim removes the padding before
-  -- anything counts it.
+  -- The constraint is a length cap and a pattern, and needs no btrim measurement
+  -- of the kind migrations 009, 010 and 011 use. Those columns hold text a human
+  -- typed, where the question is whether anything is actually there once padding
+  -- is removed. This one holds an identifier, and `^[a-z][a-z0-9_]*$` admits no
+  -- whitespace at any position -- so a padded or blank value fails on the
+  -- pattern before length is ever the question. `catalog/registry.test.ts`
+  -- asserts the same shape over every entry the catalog holds, which is what
+  -- keeps the two statements of it from drifting.
   entry_id      text        not null,
 
   -- Versions start at 1 and only ever go up. AD-14 freezes a version's SQL once

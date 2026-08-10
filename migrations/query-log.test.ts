@@ -319,8 +319,12 @@ describeWithDatabase('the provenance record', () => {
      * would pass against a table that had picked up UPDATE.
      */
     it('holds no privilege beyond INSERT and SELECT, at table or column level', async () => {
+      // `distinct` on both, matching each other: a privilege granted by more
+      // than one grantor appears once per grantor, and the exact-array
+      // assertions below would then fail for a reason that has nothing to do
+      // with what the writer can actually do.
       const { rows: table } = await writer.query<{ privilege_type: string }>(
-        `select privilege_type
+        `select distinct privilege_type
            from information_schema.table_privileges
           where grantee = 'watchdog_writer'
             and table_schema = 'public'

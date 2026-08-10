@@ -25,7 +25,16 @@ import type { CatalogEntry } from './entry'
  * `??` and not `||`, so a legitimately empty string or a zero is bound as
  * itself. A unit number of `'0'` is a unit number.
  *
- * The parameters are assumed to have passed `validateParameters` already: this
+ * **Own properties only**, matching `validateParameters` exactly. That symmetry
+ * is load-bearing rather than tidy. `validateParameters` skips the type check for
+ * a declared parameter that is absent, and absence there means *own* absence —
+ * so a caller whose object *inherits* an optional parameter passes validation
+ * without that value ever being checked. A plain read here would then bind it
+ * into the query anyway. `Object.hasOwn` on both sides closes a hole that only
+ * exists when the two disagree, which is why the guard is here and not left to
+ * the validator alone.
+ *
+ * The parameters are otherwise assumed to have passed `validateParameters`: this
  * orders values, it does not police them. Anything undeclared has been rejected
  * before it gets here, so `bind` — which the registry tests hold to the entry's
  * own property list — cannot name something that is not in the schema.
@@ -34,5 +43,7 @@ export function bindValues(
   entry: CatalogEntry,
   parameters: Readonly<Record<string, unknown>>,
 ): readonly unknown[] {
-  return entry.bind.map((name) => parameters[name] ?? null)
+  return entry.bind.map((name) =>
+    Object.hasOwn(parameters, name) ? (parameters[name] ?? null) : null,
+  )
 }

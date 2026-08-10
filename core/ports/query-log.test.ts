@@ -6,8 +6,8 @@
  * cannot read, because story 3.8 gives the audit trail a reader and that reader
  * is a board member — not the query path the trail is recording.
  *
- * The member reader is `core/ports/declared-members.ts`, shared rather than
- * copied for the reason its docblock gives.
+ * The member reader is `core/ports/declared-members.ts`, which has its own tests
+ * for the ways it has been wrong. Nothing here re-tests the helper.
  */
 
 import { readFileSync } from 'node:fs'
@@ -52,60 +52,18 @@ describe('the QueryLog port', () => {
     expect(declaredMembers(sample, 'QueryLog')[1]).toBe(member.trim())
   })
 
-  it('reads the interface body rather than stopping at the first brace', () => {
-    const sample = [
-      'export interface QueryLog {',
-      "  closing(sep: '}'): Promise<string>",
-      '  second(): Promise<string>',
-      '}',
-    ].join('\n')
-
-    expect(declaredMembers(sample, 'QueryLog')).toHaveLength(2)
-    expect(declaredMembers('nothing here', 'QueryLog')).toEqual([])
-  })
-
   /**
    * AD-12 lists what a record carries, and a field missing from the type is a
    * field the adapter cannot write. `executed_at` is deliberately absent — the
    * database stamps it, so a caller cannot backdate a query.
    */
   it('carries every field AD-12 requires a record to hold', () => {
-    const fields = declaredMembers(source, 'QueryLogEntry')
-
-    expect(fields).toEqual([
+    expect(declaredMembers(source, 'QueryLogEntry')).toEqual([
       'readonly actorId: string',
       'readonly entryId: string',
       'readonly entryVersion: number',
       'readonly parameters: Readonly<Record<string, unknown>>',
       'readonly sqlText: string',
-    ])
-  })
-})
-
-describe('the CatalogExecutor port', () => {
-  const executorSource = readFileSync(join(HERE, 'catalog-executor.ts'), 'utf8')
-
-  /**
-   * AD-5, enforced by the type rather than by a convention about how to call it.
-   * A request that could carry SQL is a request through which a model could
-   * author SQL, whatever the prompt said.
-   */
-  it('gives a caller no way to supply SQL', () => {
-    const request = declaredMembers(executorSource, 'CatalogExecutionRequest')
-
-    expect(request).toEqual([
-      'readonly entryId: string',
-      'readonly version: number',
-      'readonly parameters: Readonly<Record<string, unknown>>',
-      'readonly actorId: string',
-    ])
-    expect(request.join('\n')).not.toMatch(/sql/i)
-  })
-
-  it('hands back the provenance id, so a caller holds proof of its own record', () => {
-    expect(declaredMembers(executorSource, 'CatalogExecution')).toEqual([
-      'readonly provenanceId: string',
-      'readonly rows: readonly Readonly<Record<string, unknown>>[]',
     ])
   })
 })

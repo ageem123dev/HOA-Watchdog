@@ -106,6 +106,15 @@ describe('every entry in the catalog', () => {
       for (const name of entry.parameters.required) {
         expect(entry.bind).toContain(name)
       }
+
+      // And the reverse direction, which is the one an entry can fail silently.
+      // A parameter declared but never bound is accepted by validation, reaches
+      // no placeholder, and is discarded — so a caller supplying
+      // `assessmentYear` gets an answer computed without it, and nothing
+      // anywhere says the value was ignored.
+      for (const name of Object.keys(entry.parameters.properties)) {
+        expect(entry.bind).toContain(name)
+      }
     },
   )
 

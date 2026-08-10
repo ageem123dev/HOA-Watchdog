@@ -64,6 +64,15 @@ import type { CatalogEntry } from '../entry'
  * `count(payment.id)` and not `count(*)`: on a left join with no matching
  * payment, `count(*)` returns 1 — one row, produced by the join — and the answer
  * would report a unit that has never paid as having made one payment.
+ *
+ * The year filter is a **half-open range on `paid_on`**, not
+ * `extract(year from payment.paid_on) = …`. The two select the same rows; only
+ * one of them can use an index on `paid_on`. Wrapping the column in a function
+ * makes the predicate unsargable, so every dues question would scan `payment` in
+ * full — on the table that grows fastest, and from the path a board member waits
+ * on. There is no such index today, which is exactly why this is worth settling
+ * now: an entry version is frozen once it runs in production (AD-14), and the
+ * fix afterwards is a new version rather than an edit.
  */
 export const duesStatusV1: CatalogEntry = {
   id: 'dues_status',
@@ -81,7 +90,8 @@ export const duesStatusV1: CatalogEntry = {
   join unit on unit.id = assessment.unit_id
   left join payment
     on payment.unit_id = unit.id
-   and extract(year from payment.paid_on) = assessment.assessment_year
+   and payment.paid_on >= make_date(assessment.assessment_year, 1, 1)
+   and payment.paid_on <  make_date(assessment.assessment_year + 1, 1, 1)
  where unit.normalised_number = unit_normalised_number($1)
    and assessment.assessment_year = $2
  group by unit.unit_number, assessment.assessment_year, assessment.annual_amount`,
