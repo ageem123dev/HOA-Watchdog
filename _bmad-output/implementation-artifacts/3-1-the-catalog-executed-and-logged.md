@@ -1,5 +1,6 @@
 ---
 baseline_commit: 4739f79
+merge_request: 35
 ---
 
 # Story 3.1: The catalog, executed and logged
@@ -515,6 +516,36 @@ Declined:
 Argus was then re-run on the fix commit. Its single finding was `__dirname`
 again, at `[high]`, and it is answered above.
 
+#### Integration pass over `4739f79..HEAD`
+
+The whole-story look, which per-task reviews structurally cannot be. `argus_review` covered the
+accumulated range at `c37cfec` and again over the fix commit; recorded above. What follows is the
+acceptance audit against the eight criteria, verified against the files rather than against the
+tests' names.
+
+| AC | Verified by | Result |
+| --- | --- | --- |
+| 1 — frozen, versioned, typed entry | `catalog/registry.ts`, `entry.ts`; sweep in `registry.test.ts` | holds |
+| 2 — parameters validated before anything executes | executor order; tests assert **no** log call and **no** query for each rejection | holds |
+| 3 — provenance before the query | the query-runner seam; `state.calls` asserted as `['record','query']`, and `['record']` alone when the log throws | holds |
+| 4 — append-only by grant | migration 020's revokes; statement tests plus exact privilege sets, table and column | holds |
+| 5 — a published version cannot be edited | `published-versions.json`; mutation fired the "mint a new version" message | holds |
+| 6 — reader role, bound parameters, no SQL in | `readReaderDatabaseUrl` in the executor, `readWriterDatabaseUrl` only in the log adapter; `CatalogExecutionRequest` has no `sql` member and a test asserts the absence | holds |
+| 7 — every number the answer needs, derived included | all seven fields asserted end to end; the balance mutated `-` to `+` and two assertions fired | holds |
+| 8 — money as a decimal string | `typeof` asserted per amount; a sweep for `parseFloat`, `Number(`, `::float8` across the whole path returns only the comment warning against them | holds |
+
+Three things only a whole-diff read surfaces, each checked:
+
+- **`core/` does not import `catalog/`.** The dependency direction the architecture draws is intact
+  and `core/ports/boundary.test.ts` stays green at 47 tests.
+- **The two statements of the catalog-id shape agree.** `^[a-z][a-z0-9_]*$` in migration 020's check
+  constraint and in `registry.test.ts`'s sweep. An entry the catalog accepted and the log rejected
+  would fail at the moment of logging — which is to say on the query path, in production.
+- **Nothing in production calls the executor**, which in epic 2 was the defect that produced three
+  extra stories. Here it is the declared scope boundary: story 3.2 is the caller, and unlike those
+  epic-2 stories the path is not merely unit-tested — `catalog-execution.test.ts` runs it whole
+  against the real database, under both roles, and reads the provenance row back.
+
 ### Completion Notes List
 
 **What was built.** Migration 020 (`query_log`, append-only by grant), a pure `catalog/` holding
@@ -612,3 +643,4 @@ remains story 3.3's obligation.
 | 2026-08-09 | Story created |
 | 2026-08-09 | Tasks 1-4 implemented test-first; three per-task Argus reviews; gate green |
 | 2026-08-09 | Local round: whole-story Argus + one CodeRabbit CLI review, 13 findings, 10 applied |
+| 2026-08-09 | Integration pass and acceptance audit; merge request !35 opened |
