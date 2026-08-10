@@ -1,6 +1,6 @@
 # The system as built
 
-What exists, as of story 2.7. This describes the code; the planning artifacts in
+What exists, as of story 3.1. This describes the code; the planning artifacts in
 [`_bmad-output/planning-artifacts/`](../_bmad-output/planning-artifacts/) describe the intent, and
 where the two differ **this page is the one that was checked against the source**.
 
@@ -84,11 +84,13 @@ leave the document unsettled, re-read on the next poll, and healed. Replacement 
 
 ## What is not built
 
-The planning artifacts describe these in the present tense. None of them exist.
+The planning artifacts describe these in the present tense. With one partial exception, noted first,
+none of them exist.
 
 | Component | Where it is described | Status |
 | --- | --- | --- |
-| The catalogue / Oracle | `architecture-walkthrough.html` | **Not built** — epic 3 |
+| The query catalogue | `architecture-walkthrough.html` | **Partly built** — story 3.1. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze. A caller names the entry and version and the catalogue resolves it; what does not exist is anything that decides *which* entry answers a question — no intent routing, no model selection — and nothing renders an answer |
+| The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Not built** — epic 3, stories 3.2–3.8 |
 | The watchdog and anomaly detection | `architecture-walkthrough.html`, `board-explainer.html` | **Not built** — epic 4 |
 | The CrewAI agent service | `architecture-walkthrough.html` | **Not built** |
 | Duplicate-invoice and arrears findings | the PRD | **Not built** — epic 4 |
@@ -109,5 +111,8 @@ review.
 | The reader database role is `SELECT`-only (AD-4) | `npm run test:db` |
 | Re-ingesting a document replaces rather than appends (AD-13) | Database constraints and the repository suites |
 | The two model providers stay separate (AD-10) | `core/security/dual-llm-boundary.test.ts` |
+| A catalog query cannot run without first writing provenance (AD-12) | `adapters/db/catalog-executor-postgres.test.ts` |
+| The provenance log is append-only, by grant (AD-12) | `migrations/query-log.test.ts` |
+| A published catalog entry version cannot be edited (AD-14) | `catalog/published-versions.test.ts` |
 | The written upload contract matches the code | `docs/upload-contract.test.ts` |
 | The README matches this tree | `docs/readme.test.ts` |
