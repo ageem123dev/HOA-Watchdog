@@ -98,11 +98,15 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     // skips every cleanup after it — and an owner failure used to abort the
     // writer's cleanup entirely, leaking both the rows and the connection.
     // Raised by Argus on story 3.2.
+    const failures: string[] = []
     const attempt = async (what: string, run: () => Promise<unknown>) => {
       try {
         await run()
       } catch (error) {
-        console.warn(`cleanup step failed (${what}); continuing`, error)
+        // Collected, not swallowed. Logging alone lets a broken cleanup pass
+        // silently and leak rows on every run afterwards — the failure would
+        // only ever be noticed as unexplained data. Raised by Argus.
+        failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
 
@@ -131,6 +135,12 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
       writer.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`]),
     )
     await attempt('writer.end', () => writer.end())
+
+    // Reported after every step has had its turn, so one failure neither hides
+    // the others nor stops them running.
+    if (failures.length > 0) {
+      throw new Error(`cleanup failed and rows may remain: ${failures.join('; ')}`)
+    }
   })
 
   it('answers with the catalog rows the entry produces', async () => {
