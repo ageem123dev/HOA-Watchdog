@@ -74,12 +74,13 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 The first review finds the most. Story 1.6b took 8 rounds and ~11 pushes; moving the first round here took 1.6c and 1.6d to one each.
 
-**One base for the whole step: local `main`, fast-forwarded at item 2.** Argus, the CLI and the diff checks all use it; mixing in `origin/main` means they score different diffs the moment anyone merges upstream mid-round.
+**One base for the whole step: local `main`, fast-forwarded at step 2.** Argus, the CLI and the diff checks all use it; mixing in `origin/main` means they score different diffs the moment anyone merges upstream mid-round.
 
 The CLI is Linux/macOS only, so it runs in WSL against the Windows checkout.
 
-1. **`argus_review` first** (`git_range: main...HEAD`). `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on that commit, so reviewing second teaches nothing.
-2. **Record the SHA, then review.** The stream carries no commit, so the join key is whatever is captured here — nothing may commit between these two lines:
+1. **`argus_review` first** (`git_range: main...HEAD`). Fix what it finds test-first, run 8e's *gate* on the fix diff — sensitivity check and test-value pass, not its push — and commit. The CLI round is the scarce one; spending it on defects Argus already named wastes it.
+2. **`argus_review` again on that commit**, unless item 1 found nothing and nothing was committed. `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on it, so the CLI round must see a SHA an Argus run saw.
+3. **Record the SHA, then review.** The stream carries no commit, so the join key is whatever is captured here — nothing may commit between these two lines:
 
    ```bash
    COMMIT=$(git rev-parse HEAD)
@@ -87,11 +88,11 @@ The CLI is Linux/macOS only, so it runs in WSL against the Windows checkout.
    ```
 
    No user action, and it does not re-trigger on a push. Minutes, not seconds; `/mnt/c` is the slow part. Capture stderr — an error otherwise leaves an empty file and no reason.
-3. **Accept only `status: "review_completed"` on the `complete` event.** `review_skipped` is not a clean review, and neither is an empty or unparseable file: the adapter returns *zero reviews* for those, which is not the same as one review with zero findings. Treating them alike is the false-clean 8c exists to refuse.
-4. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Otherwise every path in `A` must appear in the `complete` event's `reviewedFiles`; a path in neither is unreviewed. `reviewedFiles` also names the files reviewed and *clean* — 25 against 10 findings in the first capture — which a finding list cannot express.
-5. **`argus_ingest` with both `from` and `commit`.** `from: .argus/cr.jsonl`, `commit: $COMMIT`. **Without `commit` it silently learns nothing**, because the stream has no SHA to join on and an unjoinable review is skipped. Severities come from committed `argus.config.json` (critical + major). **Default `dry_run: false`** — that is the call that writes. Ingest before fixing; a later round reviews different code and cannot score this one.
-6. Fix test-first, run 8e's *gate* on the fix diff — sensitivity check and test-value pass — but not 8e's push, which belongs at step 7. Commit, then run `argus_review` on the **fix commit** so the MR round has a SHA to join on. **Do not run a second CLI round.**
-7. **Push before Section 5** (*Merge request to main*). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
+4. **Accept only `status: "review_completed"` on the `complete` event.** `review_skipped` is not a clean review, and neither is an empty or unparseable file: the adapter returns *zero reviews* for those, which is not the same as one review with zero findings. Treating them alike is the false-clean 8c exists to refuse.
+5. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Otherwise every path in `A` must appear in the `complete` event's `reviewedFiles`; a path in neither is unreviewed. `reviewedFiles` also names the files reviewed and *clean* — 25 against 10 findings in the first capture — which a finding list cannot express.
+6. **`argus_ingest` with both `from` and `commit`.** `from: .argus/cr.jsonl`, `commit: $COMMIT`. **Without `commit` it silently learns nothing**, because the stream has no SHA to join on and an unjoinable review is skipped. Severities come from committed `argus.config.json` (critical + major). **Default `dry_run: false`** — that is the call that writes. Ingest before fixing; a later round reviews different code and cannot score this one.
+7. Fix test-first, run the same gate, commit. **Do not run a second CLI round.** Then `argus_review` on that fix commit, so the MR round has a SHA to join on.
+8. **Push before Section 5** (*Merge request to main*). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
 
 CLI reviews are **3/hr per developer** on Free and OSS (Pro 5, Pro+ 10) — a rolling window, not a daily quota, so capacity returns as earlier reviews age out. That is three times the extension's 1/hr, and it is a *separate* pool from the MR reviews Section 8 spends. The single round above therefore stands on its own merits — the first review finds the most, and a second costs minutes for little — not on scarcity.
 
