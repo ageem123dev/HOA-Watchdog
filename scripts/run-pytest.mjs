@@ -38,12 +38,15 @@ if (!interpreter) {
       'No virtual environment for the agent service.',
       '',
       'Create it with the pinned interpreter — not `python3`, which is 3.14 here',
-      'and outside the range AD-15 pins (CrewAI requires <3.14,>=3.10):',
+      "and outside the range AD-15 pins (CrewAI requires <3.14,>=3.10).",
       '',
-      '    py -3.13 -m venv agent/.venv          # Windows',
-      '    python3.13 -m venv agent/.venv        # Linux/macOS',
-      '    agent/.venv/Scripts/python.exe -m pip install -e "agent[dev]"   # Windows',
-      '    agent/.venv/bin/python -m pip install -e "agent[dev]"           # Linux/macOS',
+      '  PowerShell:',
+      '    py -3.13 -m venv agent/.venv',
+      '    agent/.venv/Scripts/python.exe -m pip install -e "agent[dev]"',
+      '',
+      '  bash:',
+      '    python3.13 -m venv agent/.venv',
+      '    agent/.venv/bin/python -m pip install -e "agent[dev]"',
       '',
       'Then re-run `npm run test:py`.',
     ].join('\n'),
@@ -61,6 +64,29 @@ if (!interpreter) {
 // AD-15 forbids. A launcher that can be argued out of its own check is not a
 // gate. Raised by CodeRabbit on MR !39.
 const pinned = readFileSync(join(AGENT, '.python-version'), 'utf8').trim()
+
+// **The pin is checked too, not only agreement with it.** Comparing the venv
+// against `.python-version` alone means a `.python-version` reading `3.14` and a
+// matching 3.14 venv sail through — the two agree, and both are outside the
+// range AD-15 quotes from CrewAI. Raised by CodeRabbit on MR !39.
+const SUPPORTED = { min: [3, 10], belowExclusive: [3, 14] }
+const pinnedParts = pinned.split('.').map(Number)
+
+const inRange = (parts) =>
+  parts.length === 2 &&
+  parts.every(Number.isInteger) &&
+  (parts[0] > SUPPORTED.min[0] || (parts[0] === SUPPORTED.min[0] && parts[1] >= SUPPORTED.min[1])) &&
+  (parts[0] < SUPPORTED.belowExclusive[0] ||
+    (parts[0] === SUPPORTED.belowExclusive[0] && parts[1] < SUPPORTED.belowExclusive[1]))
+
+if (!inRange(pinnedParts)) {
+  console.error(
+    `agent/.python-version pins ${pinned}, which is outside >=3.10,<3.14 — the range ` +
+      "AD-15 quotes from CrewAI's requires_python. Change the pin or the architecture, not this check.",
+  )
+  process.exit(1)
+}
+
 const probe = spawnSync(interpreter, ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])'], {
   encoding: 'utf8',
 })
@@ -72,19 +98,26 @@ if (probe.status !== 0 || actual === '') {
 }
 
 if (actual !== pinned) {
+  // The message describes *this* mismatch. It used to assert the venv was 3.14
+  // and outside CrewAI's range, which is simply false when it is 3.12 — a
+  // diagnostic that misdescribes the problem sends the reader somewhere else.
   console.error(
     [
       `The agent venv is Python ${actual}; agent/.python-version pins ${pinned}.`,
       '',
-      "CrewAI's requires_python is <3.14,>=3.10 (AD-15), and the ambient interpreter",
-      'here is 3.14 — so a venv built with `python3 -m venv` runs the suite on a',
-      'version the service is not allowed to use. Rebuild it:',
+      'Rebuild it with the pinned interpreter. Note that a bare `python3` is 3.14 on',
+      "this machine, which is outside CrewAI's <3.14,>=3.10 (AD-15), so name the",
+      'version explicitly:',
       '',
+      '  PowerShell:',
+      '    Remove-Item -Recurse -Force agent/.venv',
+      `    py -${pinned} -m venv agent/.venv`,
+      '    agent/.venv/Scripts/python.exe -m pip install -e "agent[dev]"',
+      '',
+      '  bash:',
       '    rm -rf agent/.venv',
-      `    py -3.${pinned.split('.')[1]} -m venv agent/.venv        # Windows`,
-      `    python${pinned} -m venv agent/.venv                      # Linux/macOS`,
-      '    agent/.venv/Scripts/python.exe -m pip install -e "agent[dev]"   # Windows',
-      '    agent/.venv/bin/python -m pip install -e "agent[dev]"           # Linux/macOS',
+      `    python${pinned} -m venv agent/.venv`,
+      '    agent/.venv/bin/python -m pip install -e "agent[dev]"',
     ].join('\n'),
   )
   process.exit(1)

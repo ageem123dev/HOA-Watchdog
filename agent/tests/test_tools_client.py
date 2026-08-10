@@ -312,7 +312,14 @@ class TestTheGatewayIsUnreachable:
         def explode(*args: object, **kwargs: object) -> None:
             raise urllib.error.URLError("name or service not known")
 
-        monkeypatch.setattr(urllib.request, "urlopen", explode)
+        # `OpenerDirector.open`, not `urllib.request.urlopen`. The transport
+        # builds its own opener (for the empty ProxyHandler and the redirect
+        # refusal), so `urlopen` is no longer on the path — patching it left this
+        # test making a **real DNS lookup** to `nowhere.invalid` and passing
+        # because that failed, which is not what it claims to prove. It also took
+        # 11 of the suite's 11.25 seconds, a signal that was visible in every run
+        # and that I did not act on. Raised by CodeRabbit on MR !39.
+        monkeypatch.setattr(urllib.request.OpenerDirector, "open", explode)
 
         with pytest.raises(GatewayError) as raised:
             tools_client._urllib_transport("POST", "https://nowhere.invalid", {}, "{}")
