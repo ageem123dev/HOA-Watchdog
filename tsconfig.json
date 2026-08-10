@@ -38,6 +38,7 @@
     "core/**/*.ts",
     "core/**/*.tsx",
     "adapters/**/*.ts",
+    "catalog/**/*.ts",
     "migrations/**/*.ts",
     "scripts/**/*.ts",
     "docs/**/*.ts",

@@ -83,10 +83,10 @@ development_status:
   2-7-the-roll-becomes-units-and-assessments: done
   epic-2-retrospective: optional
 
-  epic-3: backlog
+  epic-3: in-progress
   # AD-12 and AD-14. Provenance lands with the first execution path or becomes a
   # retrofit that logs only some paths.
-  3-1-the-catalog-executed-and-logged: backlog
+  3-1-the-catalog-executed-and-logged: review
   3-2-tool-endpoints-as-the-only-way-in: backlog
   # Introduces Python. MUST add pytest to the local gate in this story -- a
   # package.json script AND the "Tested =" line in bmad-ship-story. There is no
@@ -172,3 +172,11 @@ action_items:
     action: "DECIDED 2026-08-07: no tsc --noEmit CI gate; kept a local habit. Revisit if type errors reach main"
     owner: "Matt"
     status: decided
+  - epic: 3
+    action: "migrations/roles.test.ts runs unbounded destructive statements to prove the reader cannot write - `update board_member set display_name = 'changed'` and `delete from board_member` with no WHERE. On the run where the grant has regressed, the test that exists to catch it is the thing that rewrites or wipes the table. Story 3.1 hit the identical shape in migrations/query-log.test.ts and scoped both statements by RUN_PREFIX; Postgres checks the privilege before matching rows, so the assertion is unchanged. TRUNCATE has no scoped form and was replaced there by an exact-set assertion over information_schema. Same fix applies here."
+    owner: "Dev"
+    status: open
+  - epic: 3
+    action: "The declaredMembers helper is copied into five core/ports/*.test.ts files (unit-directory, assessment-directory, quarantine-queue, roll-repository, vendor-resolution). Story 3.1 extracted a shared core/ports/declared-members.ts and used it for the new port test only. All five copies carry a bug the shared one now fixes: the interface is found with indexOf, so a lookup for `Foo` matches `FooEntry` and the test silently reads a neighbouring interface's body. Migrate the five to the shared helper in one sweep."
+    owner: "Dev"
+    status: open

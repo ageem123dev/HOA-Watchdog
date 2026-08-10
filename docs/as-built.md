@@ -109,5 +109,8 @@ review.
 | The reader database role is `SELECT`-only (AD-4) | `npm run test:db` |
 | Re-ingesting a document replaces rather than appends (AD-13) | Database constraints and the repository suites |
 | The two model providers stay separate (AD-10) | `core/security/dual-llm-boundary.test.ts` |
+| A catalog query cannot run without first writing provenance (AD-12) | `adapters/db/catalog-executor-postgres.test.ts` |
+| The provenance log is append-only, by grant (AD-12) | `migrations/query-log.test.ts` |
+| A published catalog entry version cannot be edited (AD-14) | `catalog/published-versions.test.ts` |
 | The written upload contract matches the code | `docs/upload-contract.test.ts` |
 | The README matches this tree | `docs/readme.test.ts` |
