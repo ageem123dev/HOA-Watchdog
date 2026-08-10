@@ -19,7 +19,12 @@ export const proxy = auth((request) => {
     pathname: request.nextUrl.pathname,
     // A token that fails verification arrives as null, so an unreadable or
     // tampered session falls through to unauthenticated rather than opening the gate.
-    isAuthenticated: request.auth !== null,
+    //
+    // `!= null`, loosely, and deliberately: `!== null` is **true** for
+    // `undefined`, so an auth layer yielding nothing would open the gate rather
+    // than close it. Fail-open is the one direction this file must never fail
+    // in. Raised by Argus on story 3.2; `proxy.test.ts` pins it.
+    isAuthenticated: request.auth != null,
   })
 
   if (decision.kind === 'redirect') {

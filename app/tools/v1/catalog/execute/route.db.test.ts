@@ -95,8 +95,11 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     // `DATABASE_URL` is absent those rows remain, and that is what append-only
     // means — but it must not take the rest of the cleanup down with it.
     if (owner) {
-      await owner.query('delete from query_log where actor_id = $1', [actorId])
-      await owner.end()
+      try {
+        await owner.query('delete from query_log where actor_id = $1', [actorId])
+      } finally {
+        await owner.end()
+      }
     }
 
     // Everything else is the writer's to remove, so it happens whether or not an
@@ -104,13 +107,18 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     // (owner)` and leaked units, assessments and board members on every run
     // without an admin URL — raised by Argus, and the same shape sits in
     // `adapters/db/catalog-execution.test.ts` from story 3.1.
-    await writer.query(
-      'delete from assessment where unit_id in (select id from unit where unit_number like $1)',
-      [`${RUN_PREFIX}%`],
-    )
-    await writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}%`])
-    await writer.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`])
-    await writer.end()
+    try {
+      await writer.query(
+        'delete from assessment where unit_id in (select id from unit where unit_number like $1)',
+        [`${RUN_PREFIX}%`],
+      )
+      await writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}%`])
+      await writer.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`])
+    } finally {
+      // `end()` in `finally`, both here and above: a cleanup query that throws
+      // would otherwise skip it and leak the connection for the rest of the run.
+      await writer.end()
+    }
   })
 
   it('answers with the catalog rows the entry produces', async () => {

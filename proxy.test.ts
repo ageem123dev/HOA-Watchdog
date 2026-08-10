@@ -7,7 +7,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * proves the rule; only these tests prove the rule is enforced.
  */
 
-const sessionState: { session: { user: { id: string } } | null } = { session: null }
+// `undefined` is in the type on purpose. Auth.js declares `req.auth` as
+// `Session | null`, but the gate's job is to be right when the declaration is
+// wrong — a version change or a callback returning nothing. Narrowing this to
+// `| null` would make the fail-open case below unwritable, which is how the
+// hole stayed open.
+const sessionState: { session: { user: { id: string } } | null | undefined } = { session: null }
 
 /**
  * Stands in for Auth.js's `auth` wrapper, which in production verifies the
@@ -114,6 +119,33 @@ describe('config.matcher', () => {
   )
 })
 
+/**
+ * Nothing user-facing may live behind the middleware exclusion.
+ *
+ * `tools/v\d+/` is outside the session gate, so a `page.tsx` placed under it
+ * would be served to anyone. Narrowing the matcher further — to
+ * `tools/v\d+/catalog/` — was the other option and it decays: every new tool
+ * family would have to remember to extend it. This asserts the rule instead, so
+ * it holds for tool families nobody has written yet.
+ */
+describe('nothing user-facing sits behind the exclusion', () => {
+  it('has no page or layout anywhere under app/tools', async () => {
+    const { readdir } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+
+    const walk = async (dir: string, found: string[] = []): Promise<string[]> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) await walk(full, found)
+        else if (/^(page|layout|template|default)\.tsx?$/.test(entry.name)) found.push(full)
+      }
+      return found
+    }
+
+    await expect(walk(join(process.cwd(), 'app', 'tools'))).resolves.toEqual([])
+  })
+})
+
 describe('proxy', () => {
   beforeEach(() => {
     sessionState.session = null
@@ -135,6 +167,22 @@ describe('proxy', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('location')).toBeNull()
+  })
+
+  /**
+   * `request.auth` is typed `Session | null`, and the check used to be
+   * `!== null`. If the auth layer ever yields `undefined` — a version change, a
+   * callback returning nothing — that comparison is **true** and the gate opens.
+   * Fail-open is the one direction this file must never fail in. Raised by
+   * Argus on story 3.2.
+   */
+  it('treats an undefined session as unauthenticated, not as a member', async () => {
+    sessionState.session = undefined
+
+    const response = (await proxy(makeRequest('/dashboard'), undefined as never)) as NextResponse
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toContain('/sign-in')
   })
 
   it('lets an unauthenticated visitor reach sign-in', async () => {
