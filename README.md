@@ -37,7 +37,7 @@ Then sign in and go to **Upload**. Start with `samples/assessment-roll.csv`; see
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env.local`. It names **ten** variables in four groups:
+Copy [`.env.example`](.env.example) to `.env.local`. It names **eleven** variables in five groups:
 
 | Group | Variables | Why |
 | --- | --- | --- |
@@ -45,6 +45,7 @@ Copy [`.env.example`](.env.example) to `.env.local`. It names **ten** variables 
 | Sessions | `AUTH_SECRET` | Signs the session cookie |
 | Object storage | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, and optionally `R2_OUT_OF_SCOPE_BUCKET` | Document bytes live here; the database holds identity only (AD-16) |
 | Extraction | `GEMINI_API_KEY`, `GEMINI_OCR_MODEL` | Reading scans and photographs |
+| Agent service | `AGENT_SERVICE_TOKEN` | The bearer token `/tools/v1/*` accepts (AD-15). Unset means the endpoint refuses everyone — and until the private network exists, this token is the only thing in front of it |
 
 The application **builds and tests without them** — `npm run build` must never require credentials,
 or the build gate stops being runnable by anyone who lacks a populated environment. What it cannot

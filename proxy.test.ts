@@ -75,6 +75,34 @@ describe('config.matcher', () => {
       expect(matches(pathname)).toBe(false)
     },
   )
+
+  /**
+   * AD-15's tool endpoints authenticate with a service token, not a session, so
+   * the session gate can only turn the agent away — a 307 to /sign-in it has no
+   * way to satisfy. Excluded for structurally the same reason as /api/auth.
+   *
+   * The cost is that the route's own token check becomes the whole of the
+   * protection for anything under this prefix, which is why the exclusion is
+   * asserted to be exactly a prefix and nothing wider.
+   */
+  it.each(['/tools/v1/catalog/execute', '/tools/v1/anything/else'])(
+    'does not guard the tool endpoint %s',
+    (pathname) => {
+      expect(matches(pathname)).toBe(false)
+    },
+  )
+
+  /**
+   * The anchoring. A route is not a tool endpoint because its path contains the
+   * word — the matcher's own comment records an earlier version that anchored to
+   * a suffix and left whole routes unguarded.
+   */
+  it.each(['/tools', '/toolsmith', '/tools-of-the-trade', '/x/tools/y', '/atools/v1'])(
+    'still guards %s',
+    (pathname) => {
+      expect(matches(pathname)).toBe(true)
+    },
+  )
 })
 
 describe('proxy', () => {

@@ -1,6 +1,6 @@
 # The system as built
 
-What exists, as of story 3.1. This describes the code; the planning artifacts in
+What exists, as of story 3.2. This describes the code; the planning artifacts in
 [`_bmad-output/planning-artifacts/`](../_bmad-output/planning-artifacts/) describe the intent, and
 where the two differ **this page is the one that was checked against the source**.
 
@@ -89,8 +89,8 @@ none of them exist.
 
 | Component | Where it is described | Status |
 | --- | --- | --- |
-| The query catalogue | `architecture-walkthrough.html` | **Partly built** — story 3.1. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze. A caller names the entry and version and the catalogue resolves it; what does not exist is anything that decides *which* entry answers a question — no intent routing, no model selection — and nothing renders an answer |
-| The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Not built** — epic 3, stories 3.2–3.8 |
+| The query catalogue and its one door | `architecture-walkthrough.html` | **Partly built** — stories 3.1 and 3.2. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze. A caller names the entry and version and the catalogue resolves it; what does not exist is anything that decides *which* entry answers a question — no intent routing, no model selection — and nothing renders an answer. Story 3.2 added `POST /tools/v1/catalog/execute`, the agent service's only way in |
+| The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Not built** — epic 3, stories 3.4–3.8 |
 | The watchdog and anomaly detection | `architecture-walkthrough.html`, `board-explainer.html` | **Not built** — epic 4 |
 | The CrewAI agent service | `architecture-walkthrough.html` | **Not built** |
 | Duplicate-invoice and arrears findings | the PRD | **Not built** — epic 4 |
@@ -114,5 +114,14 @@ review.
 | A catalog query cannot run without first writing provenance (AD-12) | `adapters/db/catalog-executor-postgres.test.ts` |
 | The provenance log is append-only, by grant (AD-12) | `migrations/query-log.test.ts` |
 | A published catalog entry version cannot be edited (AD-14) | `catalog/published-versions.test.ts` |
+| The tool endpoint rejects any caller that is not the agent service (AD-15) | `core/tools/service-token.test.ts`, `app/tools/v1/catalog/execute/route.test.ts` |
+| The tool endpoint is the catalog's only door (AD-15) | `core/tools/sole-data-path.test.ts` |
+
+**One known gap, and it is a deployment one.** AD-15 protects `/tools/v1/*` two ways: the endpoints
+are bound to a private network, and the caller presents a shared token. Only the token exists. The
+Railway private network was deferred on 2026-08-07 and is a deployment task, not a story — so until
+it is done, `AGENT_SERVICE_TOKEN` is the only thing between the public internet and the catalog. The
+endpoint fails closed when that variable is unset, which is the one mitigation available from inside
+the code.
 | The written upload contract matches the code | `docs/upload-contract.test.ts` |
 | The README matches this tree | `docs/readme.test.ts` |

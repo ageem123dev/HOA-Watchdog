@@ -40,8 +40,13 @@ export const config = {
   //
   // `api/auth/` is excluded because Auth.js must serve its own sign-in and
   // callback endpoints to unauthenticated visitors — guarding them would make
-  // signing in impossible.
+  // signing in impossible. `tools/` is excluded for the same shape of reason:
+  // AD-15's endpoints authenticate the agent service by bearer token and it has
+  // no session, so this gate could only answer it with a redirect it cannot
+  // follow. The consequence is that the route's own token check is the whole of
+  // the protection there, and `proxy.test.ts` pins the exclusion to the prefix
+  // so it cannot quietly widen.
   matcher: [
-    '/((?!_next/|api/auth/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
+    '/((?!_next/|api/auth/|tools/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
   ],
 }
