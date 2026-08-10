@@ -389,6 +389,27 @@ Reviewed `6b5d06a..aa904e0`.
   rows remain") was true while cleanup failures were swallowed; once they were made to surface, the
   same run fails outright. Skipping loudly beats failing for a reason unrelated to the code.
 
+#### Merge request !37, rounds 2 and 3 — one finding each, both the same shape
+
+**Round 2** (`aa904e0..7a79035`): the sole-data-path detector could be bypassed by an interpolated
+specifier. `import(`@/catalog/${entry}`)` captures the literal `${entry}`, so the tail comparison
+answers "not the catalog" for a path that resolves to it. The previous round is what made it
+reachable — widening the pattern to accept backticks brought template literals into scope without
+teaching the comparison what interpolation means. An interpolated specifier is now **reported**
+rather than skipped: a scanner that cannot tell must not answer "fine". Checked first that nothing in
+the scanned roots writes one, so it costs nothing until someone does.
+
+**Round 3** (`7a79035..fa3fb45`): the page-scanner fixture exercised `page.tsx` and `layout.js` only,
+so dropping `template` or `default` from the regex left it green — the same hole one alternative
+deeper than the finding that created the fixture. All four basenames and both extension classes are
+now written into the temporary directory, and the mutation that removes two of them fails it.
+
+**One transient failure, recorded without a claim.** A single `npm test` run timed out in
+`samples/samples.test.ts` — story 2.6's, untouched here — at the 5s default, during a stretch of
+back-to-back gate runs. Three subsequent runs were clean, 0 timeouts. Unlike the `roll-ingestion`
+timeout above, **no cause was established**: it was not reproduced and it is not attributed to this
+story. It is written down because a one-off that nobody records is a one-off that gets rediscovered.
+
 #### The gate itself went flaky, and it was this story's doing
 
 Widening `test:db` to `app/tools/` put two more module-scoped pools in parallel with the other

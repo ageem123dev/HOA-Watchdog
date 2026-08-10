@@ -167,13 +167,19 @@ describe('nothing user-facing sits behind the exclusion', () => {
     const root = await mkdtemp(join(tmpdir(), 'tools-fixture-'))
     try {
       await mkdir(join(root, 'v1', 'ui'), { recursive: true })
+      // Every forbidden basename, and both extension classes. The first draft
+      // used page.tsx and layout.js only, so dropping `template` or `default`
+      // from the scanner left this green — the same hole one alternative deeper.
+      // Raised by CodeRabbit on MR !37.
       await writeFile(join(root, 'v1', 'ui', 'page.tsx'), 'export default () => null')
       await writeFile(join(root, 'v1', 'ui', 'layout.js'), 'export default () => null')
+      await writeFile(join(root, 'v1', 'ui', 'template.jsx'), 'export default () => null')
+      await writeFile(join(root, 'v1', 'ui', 'default.ts'), 'export default () => null')
       // The control: a route handler is exactly what belongs here.
       await writeFile(join(root, 'v1', 'route.ts'), 'export const POST = () => null')
 
       await expect(userFacingFilesUnder(root)).resolves.toEqual(
-        expect.arrayContaining(['page.tsx', 'layout.js']),
+        expect.arrayContaining(['page.tsx', 'layout.js', 'template.jsx', 'default.ts']),
       )
       await expect(userFacingFilesUnder(root)).resolves.not.toContain('route.ts')
     } finally {
