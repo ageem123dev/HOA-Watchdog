@@ -255,21 +255,25 @@ class TestTheGatewayIsUnreachable:
     exceptions are known where urllib is used, and that is where they are caught.
     """
 
-    def test_the_real_transport_wraps_a_url_error(self) -> None:
-        """Against the shipped transport, not a stub — the wrapping is there."""
+    def test_the_real_transport_wraps_a_url_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Against the shipped transport, not a stub — the wrapping is there.
+
+        `monkeypatch` rather than a manual save-and-restore: it undoes the patch
+        even if the assertion raises, so a failure here cannot leave `urlopen`
+        replaced for every test that runs afterwards. Raised by Argus.
+        """
         import urllib.error
 
         from watchdog_agent import tools_client
 
-        original = urllib.request.urlopen
-
         def explode(*args: object, **kwargs: object) -> None:
             raise urllib.error.URLError("name or service not known")
 
-        urllib.request.urlopen = explode  # type: ignore[assignment]
-        try:
-            with pytest.raises(GatewayError) as raised:
-                tools_client._urllib_transport("POST", "https://nowhere.invalid", {}, "{}")
-            assert raised.value.status == 0
-        finally:
-            urllib.request.urlopen = original  # type: ignore[assignment]
+        monkeypatch.setattr(urllib.request, "urlopen", explode)
+
+        with pytest.raises(GatewayError) as raised:
+            tools_client._urllib_transport("POST", "https://nowhere.invalid", {}, "{}")
+
+        assert raised.value.status == 0
