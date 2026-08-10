@@ -27,11 +27,20 @@ export const proxy = auth((request) => {
     isAuthenticated: request.auth != null,
   })
 
-  if (decision.kind === 'redirect') {
-    return NextResponse.redirect(new URL(decision.to, request.url))
+  switch (decision.kind) {
+    case 'redirect':
+      return NextResponse.redirect(new URL(decision.to, request.url))
+    case 'allow':
+      return NextResponse.next()
   }
 
-  return NextResponse.next()
+  // Unreachable while `RouteDecision` has two members, and that is the point:
+  // the previous shape was `if (redirect) … else next()`, so **adding a third
+  // kind would have fallen through to allow** and opened the gate silently. The
+  // `never` assignment makes that a compile error instead, and the throw makes
+  // the runtime answer a 500 rather than a pass. Raised by Argus on story 3.2.
+  const unhandled: never = decision
+  throw new Error(`unhandled route decision: ${JSON.stringify(unhandled)}`)
 })
 
 export const config = {

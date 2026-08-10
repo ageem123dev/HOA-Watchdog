@@ -94,12 +94,23 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     // DELETE from `watchdog_writer`, which is the whole point of that table. If
     // `DATABASE_URL` is absent those rows remain, and that is what append-only
     // means — but it must not take the rest of the cleanup down with it.
-    if (owner) {
+    // Each step is independently guarded. Grouping them means the first failure
+    // skips every cleanup after it — and an owner failure used to abort the
+    // writer's cleanup entirely, leaking both the rows and the connection.
+    // Raised by Argus on story 3.2.
+    const attempt = async (what: string, run: () => Promise<unknown>) => {
       try {
-        await owner.query('delete from query_log where actor_id = $1', [actorId])
-      } finally {
-        await owner.end()
+        await run()
+      } catch (error) {
+        console.warn(`cleanup step failed (${what}); continuing`, error)
       }
+    }
+
+    if (owner) {
+      await attempt('query_log', () =>
+        owner!.query('delete from query_log where actor_id = $1', [actorId]),
+      )
+      await attempt('owner.end', () => owner!.end())
     }
 
     // Everything else is the writer's to remove, so it happens whether or not an
@@ -107,18 +118,19 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     // (owner)` and leaked units, assessments and board members on every run
     // without an admin URL — raised by Argus, and the same shape sits in
     // `adapters/db/catalog-execution.test.ts` from story 3.1.
-    try {
-      await writer.query(
+    await attempt('assessment', () =>
+      writer.query(
         'delete from assessment where unit_id in (select id from unit where unit_number like $1)',
         [`${RUN_PREFIX}%`],
-      )
-      await writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}%`])
-      await writer.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`])
-    } finally {
-      // `end()` in `finally`, both here and above: a cleanup query that throws
-      // would otherwise skip it and leak the connection for the rest of the run.
-      await writer.end()
-    }
+      ),
+    )
+    await attempt('unit', () =>
+      writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}%`]),
+    )
+    await attempt('board_member', () =>
+      writer.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`]),
+    )
+    await attempt('writer.end', () => writer.end())
   })
 
   it('answers with the catalog rows the entry produces', async () => {

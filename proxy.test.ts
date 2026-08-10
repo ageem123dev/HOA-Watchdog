@@ -137,7 +137,10 @@ describe('nothing user-facing sits behind the exclusion', () => {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name)
         if (entry.isDirectory()) await walk(full, found)
-        else if (/^(page|layout|template|default)\.tsx?$/.test(entry.name)) found.push(full)
+        // `[jt]sx?`: tsconfig sets allowJs false so a page.js is invisible to tsc,
+        // but Next.js still serves it — the exclusion would not care that it was
+        // never type-checked.
+        else if (/^(page|layout|template|default)\.[jt]sx?$/.test(entry.name)) found.push(full)
       }
       return found
     }
