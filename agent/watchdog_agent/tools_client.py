@@ -94,10 +94,33 @@ def _required(variable: str) -> str:
     return value
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """A tool endpoint does not redirect, and following one would leak the token.
+
+    Python's `HTTPRedirectHandler` **does not strip `Authorization` when it
+    follows a redirect**, so a gateway URL that redirected — a misconfiguration,
+    a hijacked DNS entry, an http→https upgrade to the wrong host — would send
+    the bearer credential to wherever it pointed. That token is the entire
+    boundary between the internet and the catalog until the private network
+    exists, so it must not travel anywhere it was not addressed.
+
+    Refusing is correct rather than merely safe: `/tools/v1/*` answers with a
+    status and an envelope. A redirect from it is not a response this client
+    should try to follow. Raised by CodeRabbit on MR !39.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        raise GatewayError(
+            f"the gateway redirected to {newurl!r}; refusing to resend the service token",
+            status=code,
+        )
+
+
 def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
     request = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method=method)
+    opener = urllib.request.build_opener(_RefuseRedirects)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with opener.open(request, timeout=30) as response:
             return response.status, response.read().decode("utf-8")
     except urllib.error.HTTPError as error:
         # An HTTP error is an answer, not a transport failure - the body carries

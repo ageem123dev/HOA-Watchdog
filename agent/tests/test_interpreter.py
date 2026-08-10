@@ -19,8 +19,12 @@ when something fails on disagreement.
 from __future__ import annotations
 
 import sys
-import tomllib
 from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the pinned interpreter is 3.13
+    import tomli as tomllib
 
 AGENT_ROOT = Path(__file__).resolve().parent.parent
 

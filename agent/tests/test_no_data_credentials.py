@@ -30,8 +30,14 @@ from __future__ import annotations
 
 import ast
 import re
-import tomllib
 from pathlib import Path
+
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the pinned interpreter is 3.13
+    import tomli as tomllib
 
 AGENT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -46,10 +52,34 @@ FORBIDDEN_DEPENDENCY_PREFIXES = (
     "aiopg",
     "databases",
     "boto3",
+    "aioboto3",
     "botocore",
     "minio",
     "s3fs",
     "supabase",
+    "pymysql",
+    "mysqlclient",
+    "pymongo",
+    "motor",
+    "redis",
+    "google-cloud-storage",
+    "azure-storage",
+)
+
+#: Every dependency the agent service is allowed to declare.
+#:
+#: **The allowlist is the real check; the denylist above only makes the message
+#: better.** A denylist of driver names is a list of the ones somebody thought
+#: of — `pymysql`, `pymongo`, `aioboto3` and `google-cloud-storage` were all
+#: missing from the first version, and the next gap is whichever client is
+#: fashionable next year. AD-3 says what this runtime may hold, so the check that
+#: matches AD-3 is "nothing but these", not "none of those". Raised by CodeRabbit
+#: on MR !39.
+#:
+#: `crewai` is here in advance: story 3.4 installs it, and it is the one heavy
+#: dependency the architecture has already approved by name.
+APPROVED_DEPENDENCIES = frozenset(
+    {"crewai", "pytest", "tomli", "httpx", "pydantic", "typing-extensions"}
 )
 
 # Values that look like a way in, whatever the variable is called. Renaming a
@@ -79,7 +109,11 @@ FORBIDDEN_NAME = re.compile(
     r"(?<![A-Za-z0-9])(?:"
     r"WATCHDOG_(?:WRITER|READER)_DATABASE_URL|"
     r"DATABASE_URL|"
-    r"(?:PG|POSTGRES)_(?:PASSWORD|USER|HOST|DSN)|"
+    # `PG_PASSWORD` **and** `PGPASSWORD`. The underscore was mandatory, and
+    # libpq's real variables have none — `PGPASSWORD`, `PGUSER`, `PGHOST` are
+    # what a Postgres client actually reads, so the check was missing the exact
+    # names it most needed. Raised by CodeRabbit on MR !39.
+    r"(?:PG|POSTGRES)_?(?:PASSWORD|PASSFILE|USER|HOST|PORT|DATABASE|DSN)|"
     r"R2_(?:ACCOUNT_ID|ACCESS_KEY_ID|SECRET_ACCESS_KEY|BUCKET)|"
     r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)"
     r")",
@@ -126,15 +160,27 @@ def committed_config_files() -> list[Path]:
 
 
 def credential_findings(text: str) -> list[str]:
+    """The *category* and the line number - never the line.
+
+    The first version put 60 characters of the matching line into the finding,
+    and the assertion prints findings on failure. So a test written to prove no
+    credential is present would have copied a live DSN, password and all, into
+    the terminal and any log capturing it - the one place a secret is most likely
+    to be pasted onward. A security test that leaks on failure is worse than no
+    test. Raised by CodeRabbit on MR !39.
+
+    The line number is enough to find it, and the file path comes from the
+    caller.
+    """
     findings = []
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if DSN_SHAPED.search(stripped):
-            findings.append(f"connection-string shape: {stripped[:60]}")
+            findings.append(f"line {number}: connection-string shape")
         elif FORBIDDEN_NAME.search(stripped):
-            findings.append(f"credential name: {stripped[:60]}")
+            findings.append(f"line {number}: credential name")
     return findings
 
 
@@ -145,6 +191,27 @@ def test_declares_no_database_or_storage_dependency() -> None:
     assert offending == [], (
         "AD-3: the agent service must not declare a database driver or an "
         f"object-storage client. Found: {offending}"
+    )
+
+
+def test_declares_nothing_outside_the_approved_set() -> None:
+    """The allowlist, which is the check that matches AD-3.
+
+    "Not one of these drivers" is a list of the ones somebody thought of. "Nothing
+    but these" is the rule the architecture actually states.
+    """
+    unapproved = sorted(
+        name
+        for name in (
+            re.split(r"[<>=!~\[\s;]", raw.strip(), maxsplit=1)[0].lower()
+            for raw in declared_dependencies()
+        )
+        if name and name not in APPROVED_DEPENDENCIES
+    )
+
+    assert unapproved == [], (
+        "AD-3: the agent service declares dependencies nobody approved: "
+        f"{unapproved}. Add it to APPROVED_DEPENDENCIES with a reason, or remove it."
     )
 
 
@@ -160,6 +227,11 @@ def test_the_dependency_check_sees_a_planted_violation() -> None:
     assert forbidden_dependencies(["boto3"]) == ["boto3"]
     # And does not fire on what the service legitimately needs.
     assert forbidden_dependencies(["httpx>=0.27", "pytest>=8", "crewai==1.15.8"]) == []
+    # The families the first version missed entirely.
+    assert forbidden_dependencies(["pymongo"]) == ["pymongo"]
+    assert forbidden_dependencies(["PyMySQL==1.1.0"]) == ["PyMySQL==1.1.0"]
+    assert forbidden_dependencies(["aioboto3"]) == ["aioboto3"]
+    assert forbidden_dependencies(["google-cloud-storage"]) == ["google-cloud-storage"]
 
 
 def test_committed_configuration_holds_no_credential() -> None:
@@ -199,6 +271,10 @@ def test_the_credential_detector_sees_planted_violations() -> None:
     assert credential_findings("XAWS_SECRET_ACCESS_KEY=y") == []
     # An underscore before it is still a hit: AGENT_DATABASE_URL is a database URL.
     assert credential_findings("AGENT_DATABASE_URL=x")
+    # libpq's real variables, which have no underscore and were all missed.
+    assert credential_findings("PGPASSWORD=secret")
+    assert credential_findings("PGUSER=watchdog")
+    assert credential_findings("PGHOST=db.internal")
 
     # And leaves alone what this service is allowed to hold.
     assert credential_findings("AGENT_SERVICE_TOKEN=abc") == []
