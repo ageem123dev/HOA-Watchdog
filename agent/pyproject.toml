@@ -35,6 +35,11 @@ requires-python = ">=3.10,<3.14"
 dependencies = []
 
 [project.optional-dependencies]
+# The test suite reads this file with `tomllib`, which is 3.11+. That is a
+# floor on running the *tests*, not on the service, and it is not a live
+# constraint: `.python-version` pins 3.13 and `scripts/run-pytest.mjs` runs
+# the venv built from it. `requires-python` above stays as AD-15 quotes
+# CrewAI's range, because that is what it describes. Raised by Argus.
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]

@@ -60,17 +60,29 @@ DSN_SHAPED = re.compile(
 
 # Names that carry a credential even when the value is absent from this process -
 # their presence in committed config is the violation.
-#: `(?<![A-Za-z0-9])` and not `(?:^|_)` for the PG branch. The first version
-#: anchored to the start of the *string* or an underscore, so it matched
-#: `PG_PASSWORD=x` and `AGENT_PG_PASSWORD=x` but missed `"PG_PASSWORD": "x"` and
-#: `export POSTGRES_HOST=...` — the two shapes a credential most often actually
-#: appears in. Verified as real misses before the change, not reasoned about.
-#: The lookbehind still refuses a mid-word match, so `MYPG_PASSWORD` is not a hit.
+#: One negative lookbehind, applied to every branch. It took two review rounds to
+#: arrive there, and both mistakes are worth keeping because they were opposite.
+#:
+#: The first version anchored the PG branch with `(?:^|_)`, which matched
+#: `PG_PASSWORD=x` and missed `"PG_PASSWORD": "x"` and `export POSTGRES_HOST=...`
+#: - a JSON key and a shell export, the two shapes a credential actually appears
+#: in. **Too narrow**, and a guard that misses is the dangerous direction.
+#:
+#: The second version fixed that branch and left the others bare, so
+#: `MYDATABASE_URL` and `XAWS_SECRET_ACCESS_KEY` were reported while
+#: `MYPG_PASSWORD` was not - **too wide, inconsistently**, with the regex
+#: contradicting its own comment. A guard that cries wolf on one prefix and not
+#: another is untrusted in both directions.
+#:
+#: Both were verified by running the scanner rather than reading it.
 FORBIDDEN_NAME = re.compile(
-    r"(?:DATABASE_URL|WATCHDOG_(?:WRITER|READER)_DATABASE_URL|"
-    r"(?<![A-Za-z0-9])(?:PG|POSTGRES)_(?:PASSWORD|USER|HOST|DSN)|"
+    r"(?<![A-Za-z0-9])(?:"
+    r"WATCHDOG_(?:WRITER|READER)_DATABASE_URL|"
+    r"DATABASE_URL|"
+    r"(?:PG|POSTGRES)_(?:PASSWORD|USER|HOST|DSN)|"
     r"R2_(?:ACCOUNT_ID|ACCESS_KEY_ID|SECRET_ACCESS_KEY|BUCKET)|"
-    r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN))",
+    r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)"
+    r")",
     re.IGNORECASE,
 )
 
@@ -181,8 +193,12 @@ def test_the_credential_detector_sees_planted_violations() -> None:
     assert credential_findings('"PG_PASSWORD": "secret"')
     assert credential_findings("export POSTGRES_HOST=db.internal")
     assert credential_findings("  PG_DSN = postgres://u:p@h/db")
-    # Still not a mid-word match.
+    # Still not a mid-word match - and now on every branch, not just the PG one.
     assert credential_findings("MYPG_PASSWORD=x") == []
+    assert credential_findings("MYDATABASE_URL=x") == []
+    assert credential_findings("XAWS_SECRET_ACCESS_KEY=y") == []
+    # An underscore before it is still a hit: AGENT_DATABASE_URL is a database URL.
+    assert credential_findings("AGENT_DATABASE_URL=x")
 
     # And leaves alone what this service is allowed to hold.
     assert credential_findings("AGENT_SERVICE_TOKEN=abc") == []

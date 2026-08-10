@@ -1,5 +1,6 @@
 ---
 baseline_commit: 99d0d31
+merge_request: 39
 ---
 
 # Story 3.3: The Python service exists
