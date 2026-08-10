@@ -59,9 +59,15 @@ DSN_SHAPED = re.compile(
 
 # Names that carry a credential even when the value is absent from this process -
 # their presence in committed config is the violation.
+#: `(?<![A-Za-z0-9])` and not `(?:^|_)` for the PG branch. The first version
+#: anchored to the start of the *string* or an underscore, so it matched
+#: `PG_PASSWORD=x` and `AGENT_PG_PASSWORD=x` but missed `"PG_PASSWORD": "x"` and
+#: `export POSTGRES_HOST=...` — the two shapes a credential most often actually
+#: appears in. Verified as real misses before the change, not reasoned about.
+#: The lookbehind still refuses a mid-word match, so `MYPG_PASSWORD` is not a hit.
 FORBIDDEN_NAME = re.compile(
     r"(?:DATABASE_URL|WATCHDOG_(?:WRITER|READER)_DATABASE_URL|"
-    r"(?:^|_)(?:PG|POSTGRES)_(?:PASSWORD|USER|HOST|DSN)|"
+    r"(?<![A-Za-z0-9])(?:PG|POSTGRES)_(?:PASSWORD|USER|HOST|DSN)|"
     r"R2_(?:ACCOUNT_ID|ACCESS_KEY_ID|SECRET_ACCESS_KEY|BUCKET)|"
     r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN))",
     re.IGNORECASE,
@@ -167,6 +173,15 @@ def test_the_credential_detector_sees_planted_violations() -> None:
     assert credential_findings("some_other_name = postgresql+psycopg://u:p@h/db")
     assert credential_findings("R2_SECRET_ACCESS_KEY=abc123")
     assert credential_findings("WATCHDOG_READER_DATABASE_URL=")
+
+    # The two shapes a credential actually appears in, and the two the first
+    # version of this regex missed — a JSON key and a shell export. Raised by
+    # Argus, and confirmed as real misses before the fix.
+    assert credential_findings('"PG_PASSWORD": "secret"')
+    assert credential_findings("export POSTGRES_HOST=db.internal")
+    assert credential_findings("  PG_DSN = postgres://u:p@h/db")
+    # Still not a mid-word match.
+    assert credential_findings("MYPG_PASSWORD=x") == []
 
     # And leaves alone what this service is allowed to hold.
     assert credential_findings("AGENT_SERVICE_TOKEN=abc") == []
