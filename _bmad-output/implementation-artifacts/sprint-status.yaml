@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: '2026-08-09'
+last_updated: '2026-08-10'
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -86,7 +86,7 @@ development_status:
   epic-3: in-progress
   # AD-12 and AD-14. Provenance lands with the first execution path or becomes a
   # retrofit that logs only some paths.
-  3-1-the-catalog-executed-and-logged: review
+  3-1-the-catalog-executed-and-logged: done
   3-2-tool-endpoints-as-the-only-way-in: backlog
   # Introduces Python. MUST add pytest to the local gate in this story -- a
   # package.json script AND the "Tested =" line in bmad-ship-story. There is no

@@ -5,7 +5,7 @@ merge_request: 35
 
 # Story 3.1: The catalog, executed and logged
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -546,6 +546,80 @@ Three things only a whole-diff read surfaces, each checked:
   epic-2 stories the path is not merely unit-tested — `catalog-execution.test.ts` runs it whole
   against the real database, under both roles, and reads the provenance row back.
 
+#### Merge request !35, round 1 — eight findings
+
+Reviewed `4739f79..37b9df7`. Seven applied, one declined. Two more came from the Argus pass over
+this round's own fix diff, and both were applied.
+
+- **I stated a false fact about `pg`, in two files.** `bind-values.ts` and its test both said `pg`
+  throws on an `undefined` parameter rather than treating it as SQL NULL. It does not. Checked
+  against 8.22.0 rather than argued — binding both values and reading back `is null` returns true
+  for each. The coalesce stays, but its reason is now the honest one: it is this function's
+  contract, so a fake, a logger or a future driver does not have to rediscover what an absent
+  optional parameter meant. A comment giving a false reason is worse than none, because the next
+  reader simplifies against it.
+- **The declaration lookup was still searching raw text** — *the best finding of the round.* The
+  previous round made the *body* scan comment-and-string aware and left the search that positions it
+  naive, so a commented-out `interface Foo {` before the real one could aim the scan at a fake body.
+  Both now read one masked copy, built in a single pass and held offset-aligned with the source.
+  **And the three cases the reviewer asked for would not have caught it**: mutating `masked.search`
+  back to `text.search` left all three commented-out cases green, because the following brace lookup
+  reads the mask and recovers the real body by accident. It only breaks when an unrelated brace sits
+  between the fake and the real declaration — `type Other = { a: string }` — and the scan locks onto
+  that instead. That case is now the test.
+- **The duplicate-registration guard had no test that failed when it was removed** — *confirmed,
+  fixed.* The sweep asserted that `ALL_ENTRIES` currently holds no duplicate, which is a statement
+  about the catalog's contents rather than about the rule. `indexEntries` is exported now and tested
+  against a catalog that breaks it, plus a case proving two *versions* of one entry are still
+  accepted. Verified by mutation: removing the throw fails the new test and leaves the old sweep
+  green.
+- **Three assertions named no failure** — *confirmed, fixed.* A bare `toThrow(Error)` satisfied by
+  anything, a bare `toThrow()` across three parameter cases, and `/assessmentYear/` which matches
+  "is required" as readily as "must be an integer", so a validator reporting an explicit `null` as
+  an absence passed a test whose name says it does not. This is a lesson the story file already
+  recorded and the implementation then violated.
+- **The "cannot forge the timestamp" test could not support its name** — *confirmed, fixed.* It
+  inserts without `executed_at`, so it passed whether or not the column was caller-settable, and had
+  no upper bound. The database can only promise the *default*; forgery is prevented a layer up, and
+  that layer is now asserted too — `QueryLogEntry` declares neither field, and the adapter's INSERT
+  names neither column.
+- **`docs/as-built.md` still carried a stale baseline** — *confirmed, fixed.*
+- **A signed, externally immutable anchor for `published-versions.json`** — *declined, ledgered.* A
+  fair observation about how strong the AD-14 freeze really is, but the mechanism proposed is
+  "consumed by CI" and this project has no CI — removed 2026-08-07 for cost, per AD-2's amendment.
+  Externalising the anchor changes what AD-14 guarantees, which makes it a new AD rather than a
+  story fix. `catalog/digest.ts` already states the limitation in the same terms. Added to the
+  deferred-work ledger against the open CI item so the two are revisited together.
+
+From Argus on the fix diff: the regex-literal limitation of the masking pass is now documented as an
+explicit non-goal, and the adapter-source regex was loosened to tolerate a schema prefix and quoting
+so reformatting cannot turn it into a test that silently matches nothing.
+
+#### Round 2 — one finding, and it was a true one
+
+Reviewed `37b9df7..36b3c84`, posted as an outside-diff comment.
+
+`docs/as-built.md` claimed *"nothing selects an entry"*. `entryFor(id, version)` resolves one, so
+resolution exists; what does not is anything deciding **which** entry answers a question — no intent
+routing, no model selection, both story 3.4's. Fixed. It matters because that page's entire stated
+purpose is telling a reader which half of the planning artifacts exists, and it is the second
+self-contradiction it grew in this story.
+
+#### Round 3 — clean
+
+The round-2 fix was a single line of prose, and no automatic review followed it. That is the state
+`bmad-ship-story` §8e warns is indistinguishable from a clean review from the outside, so it was not
+read as one: a review was requested explicitly. The first request came back **"Review rate
+limited"**; after the prescribed back-off the second returned **"✅ Action performed — Review
+finished"**, with no new findings, no new threads, and all eight inline threads resolved by
+CodeRabbit — including the one that was declined, which it acknowledged.
+
+**A judgement recorded rather than glossed.** §8c's letter asks for a review of the current head in
+one of four shapes, and what arrived was a completion statement instead. It is treated as
+convergence because it is *affirmative evidence that a review ran* — the failure that clause exists
+to prevent is concluding "clean" from silence, and this is the opposite of silence. Nothing was
+pushed during the back-off, so the two substantive rounds remain valid for the commits they cover.
+
 ### Completion Notes List
 
 **What was built.** Migration 020 (`query_log`, append-only by grant), a pure `catalog/` holding
@@ -595,8 +669,8 @@ count and the missing `catalog/` entry; README updated. Three rows added to `doc
 invariant table.
 
 **Gate on this head** — `npm run lint` 0 errors / 1 pre-existing warning; `npm run build` succeeded;
-`npm test` **95 passed | 18 skipped (113 files), 1759 passed | 482 skipped**, file count matching the
-113 test files on disk; `npm run test:db` **38 files, 622 passed**; `npx --no-install tsc --noEmit`
+`npm test` **95 passed | 18 skipped (113 files), 1766 passed | 483 skipped**, file count matching the
+113 test files on disk; `npm run test:db` **38 files, 623 passed**; `npx --no-install tsc --noEmit`
 **8 errors, exactly the baseline**. No Python in this story, so no pytest and no gate change — that
 remains story 3.3's obligation.
 
@@ -613,6 +687,7 @@ remains story 3.3's obligation.
 - `catalog/validate-parameters.test.ts`
 - `catalog/bind-values.ts`
 - `catalog/bind-values.test.ts`
+- `catalog/registry.test.ts` (duplicate-guard regression)
 - `catalog/digest.ts`
 - `catalog/published-versions.json`
 - `catalog/published-versions.test.ts`
@@ -644,3 +719,6 @@ remains story 3.3's obligation.
 | 2026-08-09 | Tasks 1-4 implemented test-first; three per-task Argus reviews; gate green |
 | 2026-08-09 | Local round: whole-story Argus + one CodeRabbit CLI review, 13 findings, 10 applied |
 | 2026-08-09 | Integration pass and acceptance audit; merge request !35 opened |
+| 2026-08-09 | MR round 1: 8 findings, 7 applied, 1 declined and ledgered; all threads resolved |
+| 2026-08-09 | MR round 2: 1 outside-diff finding, applied |
+| 2026-08-09 | MR round 3 clean after a rate-limit back-off; status done, ready to merge |
