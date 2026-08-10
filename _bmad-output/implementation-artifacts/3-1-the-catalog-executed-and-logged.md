@@ -433,6 +433,88 @@ confirm the backend was healthy rather than assuming it.
   in depth. A third check inside the adapter is the redundant interior validation the TDD workflow's
   hardening order explicitly warns against.
 
+
+#### The whole-story Argus pass and the one local CodeRabbit round
+
+Run on `c37cfec` — `argus_review` over `main...HEAD` first, then one
+`coderabbit review --base main --committed --agent` round, whose stream reported
+`status: "review_completed"` with **26 reviewedFiles**. Reconciled against
+`git diff --name-only main...HEAD`: 26 paths, all 26 reviewed, nothing extra —
+confirming the CLI ignores `.coderabbit.yaml`'s `path_filters`, since two of them
+are `_bmad-output/` files the merge request will not see. Ingested with the
+commit SHA before any fix: 1 review compared, 3 missed, 3 lessons written.
+
+Thirteen findings. Ten applied, three declined.
+
+- **`bindValues` read properties plainly while `validateParameters` used
+  `Object.hasOwn`** — *confirmed, fixed, with a test.* The two disagree exactly
+  on a **declared but optional** parameter: validation skips the type check when
+  the value is not an own property, so an inherited one is never checked, and the
+  plain read would then bind that unchecked value into the query. The prototype
+  hole the validator closes, reopened one function later. No entry declares an
+  optional parameter today, so nothing could have hit it — which is why it is
+  closed now rather than after the first one does.
+- **`declared-members.ts` stripped `//` with a global regex before its
+  string-aware brace scan** — *confirmed, fixed.* A member holding
+  `'https://example.com'` lost its closing quote, and the scanner then read the
+  rest of the file as one string, returning `[]` from an interface that declares
+  something. `migrations/executable-sql.ts` is this project's SQL-side fix for
+  the identical mistake. Comments and braces are now one pass, and the helper has
+  its own test file covering every way it has actually been wrong.
+- **`declared-members.ts` returned `[]` on a parse failure** — *confirmed, fixed.*
+  A missing or misspelled interface returned the same value as an empty one, so
+  `toEqual([])` — the assertion these port tests exist to make — passed for a
+  typo. It throws now, and the port test that relied on the old behaviour was
+  rewritten.
+- **`docs/as-built.md` contradicted itself** — *confirmed, fixed.* Three rows
+  were added saying the catalog is enforced by tests while the "What is not
+  built" table still called the catalogue not built. Telling a reader which half
+  exists is that document's stated purpose.
+- **`extract(year from paid_on)` is not sargable** — *confirmed, fixed.* Replaced
+  with a half-open range on `paid_on`. Same rows; only one form can ever use an
+  index, on the table that grows fastest and from the path a board member waits
+  on. Re-pinning the digest was legitimate **because this version has never run
+  in production** — AD-14 freezes a version once it has, and the fix after that
+  is `dues_status@2` rather than an edit.
+- **`registry.test.ts` asserted `bind ⊆ properties` but not the reverse** —
+  *confirmed, fixed.* A parameter declared and never bound validates fine,
+  reaches no placeholder and is silently discarded, so a caller gets an answer
+  computed without the value they supplied.
+- **Migration 020's `entry_id` comment described a `btrim` measurement the
+  constraint does not use** — *confirmed, fixed.* The pattern admits no
+  whitespace at any position, so the padding argument the other migrations make
+  does not apply here. A comment describing a different constraint than the one
+  present is worse than none.
+- **`published-versions.test.ts` reused `ALL_ENTRIES[0]` without requiring two
+  properties** — *confirmed, fixed.* On a one-property entry the property-order
+  assertion is a no-op and passes against a digest with no ordering behaviour.
+- **`table_privileges` query not `distinct` while the column one was** —
+  *confirmed, fixed.*
+- **The `CatalogExecutor` assertions lived in `query-log.test.ts`** — *confirmed,
+  fixed.* Moved to `core/ports/catalog-executor.test.ts`.
+
+Declined:
+
+- **`__dirname` "will throw a ReferenceError and crash the test"** — *not
+  reproduced, and raised three times.* The file collects and runs 27 tests;
+  `npm run test:db` is green at 622 including them. Vitest provides it, and six
+  sibling `migrations/*.test.ts` files do the same. The repo-wide choice between
+  `__dirname` and `import.meta.url` is already on the deferred-work ledger as one
+  sweep, and its wording is explicit that per-file changes are what it is asking
+  not to do.
+- **The query-log adapter should validate the `parameters` shape itself** —
+  *disagree.* Validated once at the edge by `validateParameters` and once by the
+  check constraint. A third check inside the adapter is exactly the redundant
+  interior validation the TDD workflow's hardening order warns against.
+- **Export `closePool` from the two new adapters and call it in `afterAll`** —
+  *declined, ledgered.* There are now nine module-scoped pools with this shape
+  and one open action item asking for a single sweep across all of them; adding
+  disposal to two would leave seven divergent. The ledger entry was updated to
+  name the two new ones. The suite does not hang — the pools idle out.
+
+Argus was then re-run on the fix commit. Its single finding was `__dirname`
+again, at `[high]`, and it is answered above.
+
 ### Completion Notes List
 
 **What was built.** Migration 020 (`query_log`, append-only by grant), a pure `catalog/` holding
@@ -482,8 +564,8 @@ count and the missing `catalog/` entry; README updated. Three rows added to `doc
 invariant table.
 
 **Gate on this head** — `npm run lint` 0 errors / 1 pre-existing warning; `npm run build` succeeded;
-`npm test` **93 passed | 18 skipped (111 files), 1748 passed | 482 skipped**, file count matching the
-111 test files on disk; `npm run test:db` **38 files, 622 passed**; `npx --no-install tsc --noEmit`
+`npm test` **95 passed | 18 skipped (113 files), 1759 passed | 482 skipped**, file count matching the
+113 test files on disk; `npm run test:db` **38 files, 622 passed**; `npx --no-install tsc --noEmit`
 **8 errors, exactly the baseline**. No Python in this story, so no pytest and no gate change — that
 remains story 3.3's obligation.
 
@@ -508,6 +590,8 @@ remains story 3.3's obligation.
 - `core/ports/query-log.test.ts`
 - `core/ports/catalog-executor.ts`
 - `core/ports/declared-members.ts`
+- `core/ports/declared-members.test.ts`
+- `core/ports/catalog-executor.test.ts`
 - `adapters/db/query-log-postgres.ts`
 - `adapters/db/catalog-executor-postgres.ts`
 - `adapters/db/catalog-executor-postgres.test.ts`
@@ -527,3 +611,4 @@ remains story 3.3's obligation.
 | --- | --- |
 | 2026-08-09 | Story created |
 | 2026-08-09 | Tasks 1-4 implemented test-first; three per-task Argus reviews; gate green |
+| 2026-08-09 | Local round: whole-story Argus + one CodeRabbit CLI review, 13 findings, 10 applied |
