@@ -5,7 +5,7 @@ merge_request: 37
 
 # Story 3.2: Tool endpoints as the only way in
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -410,6 +410,24 @@ back-to-back gate runs. Three subsequent runs were clean, 0 timeouts. Unlike the
 timeout above, **no cause was established**: it was not reproduced and it is not attributed to this
 story. It is written down because a one-off that nobody records is a one-off that gets rediscovered.
 
+#### Round 4 — clean, and the watcher is why it looked otherwise
+
+`fa3fb45..e3b512c` came back **"No actionable comments were generated"** — 8b's clean shape, and the
+convergence signal. All six inline threads were resolved by CodeRabbit. The merge request was merged
+by the project lead on that basis.
+
+**The automation reported it as missing, and the reason is worth keeping.** CodeRabbit **edits an
+existing note in place** rather than posting a new one: the note carrying this review was created at
+18:58:49 and updated at 20:34:34, keeping its original id. The watcher used note id as a proxy for
+recency — "only consider notes newer than the last one I handled" — so the newest review, wearing an
+old id, was skipped every poll. Two rate-limit back-offs were spent waiting for something already
+present.
+
+That is the third variant of one mistake in this pipeline's tooling: first re-matching the previous
+round's note, then comparing a short SHA against a full one, now treating id as recency. **The
+recency key for a CodeRabbit review is `updated_at`, not `id` and not `created_at`.** Recorded as
+deferred work.
+
 #### The gate itself went flaky, and it was this story's doing
 
 Widening `test:db` to `app/tools/` put two more module-scoped pools in parallel with the other
@@ -494,3 +512,5 @@ grepped, never piped through `head` — story 3.1 lost a run to `| head -N` SIGP
 | 2026-08-10 | Tasks 1-5 implemented test-first; gate green; test:db widened to app/tools/ |
 | 2026-08-10 | Local round: 5 Argus runs + 1 CodeRabbit CLI round, 13 findings, all applied |
 | 2026-08-10 | MR !37 round 1: 4 findings applied; test:db split after this story made it flaky |
+| 2026-08-10 | MR !37 rounds 2-3: 1 finding each, both applied |
+| 2026-08-10 | MR !37 round 4 clean; merged by the project lead; status done |
