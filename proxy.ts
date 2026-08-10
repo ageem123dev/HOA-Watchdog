@@ -19,14 +19,28 @@ export const proxy = auth((request) => {
     pathname: request.nextUrl.pathname,
     // A token that fails verification arrives as null, so an unreadable or
     // tampered session falls through to unauthenticated rather than opening the gate.
-    isAuthenticated: request.auth !== null,
+    //
+    // `!= null`, loosely, and deliberately: `!== null` is **true** for
+    // `undefined`, so an auth layer yielding nothing would open the gate rather
+    // than close it. Fail-open is the one direction this file must never fail
+    // in. Raised by Argus on story 3.2; `proxy.test.ts` pins it.
+    isAuthenticated: request.auth != null,
   })
 
-  if (decision.kind === 'redirect') {
-    return NextResponse.redirect(new URL(decision.to, request.url))
+  switch (decision.kind) {
+    case 'redirect':
+      return NextResponse.redirect(new URL(decision.to, request.url))
+    case 'allow':
+      return NextResponse.next()
   }
 
-  return NextResponse.next()
+  // Unreachable while `RouteDecision` has two members, and that is the point:
+  // the previous shape was `if (redirect) … else next()`, so **adding a third
+  // kind would have fallen through to allow** and opened the gate silently. The
+  // `never` assignment makes that a compile error instead, and the throw makes
+  // the runtime answer a 500 rather than a pass. Raised by Argus on story 3.2.
+  const unhandled: never = decision
+  throw new Error(`unhandled route decision: ${JSON.stringify(unhandled)}`)
 })
 
 export const config = {
@@ -40,8 +54,14 @@ export const config = {
   //
   // `api/auth/` is excluded because Auth.js must serve its own sign-in and
   // callback endpoints to unauthenticated visitors — guarding them would make
-  // signing in impossible.
+  // signing in impossible. `tools/` is excluded for the same shape of reason:
+  // AD-15's endpoints authenticate the agent service by bearer token and it has
+  // no session, so this gate could only answer it with a redirect it cannot
+  // follow. The consequence is that the route's own token check is the whole of
+  // the protection there. It is narrowed to a **versioned** path — `tools/v1/`,
+  // `tools/v2/` — so a future page under app/tools/ is still guarded; excluding
+  // all of `tools/` would unguard it silently. Raised by Argus.
   matcher: [
-    '/((?!_next/|api/auth/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
+    '/((?!_next/|api/auth/|tools/v\\d+/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
   ],
 }

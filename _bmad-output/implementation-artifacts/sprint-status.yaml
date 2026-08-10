@@ -87,7 +87,7 @@ development_status:
   # AD-12 and AD-14. Provenance lands with the first execution path or becomes a
   # retrofit that logs only some paths.
   3-1-the-catalog-executed-and-logged: done
-  3-2-tool-endpoints-as-the-only-way-in: backlog
+  3-2-tool-endpoints-as-the-only-way-in: review
   # Introduces Python. MUST add pytest to the local gate in this story -- a
   # package.json script AND the "Tested =" line in bmad-ship-story. There is no
   # CI, so forgetting it ships a second language with no automated check at all.
@@ -133,7 +133,7 @@ action_items:
     owner: "Dev"
     status: deferred
   - epic: 1
-    action: "Shared connection pool - seven module-scoped pools at max 5 against max_connections 100. Story 3.1 added the eighth and ninth (catalog-executor, query-log), and CodeRabbit raised the disposal half again there. Story 2.1 added the seventh (unit-directory) and a review raised the second half of the same defect: a module-scoped pool is orphaned on every Next.js HMR reload in dev, so connections leak until the limit is hit. Both halves want one change across all seven adapters, not one file at a time."
+    action: "Shared connection pool - seven module-scoped pools at max 5 against max_connections 100. Story 3.1 added the eighth and ninth (catalog-executor, query-log), and CodeRabbit raised the disposal half again there. Story 3.2 turned it from latent into real: widening test:db to app/tools/ put those two pools in parallel with the other 39 files and roll-ingestion.test.ts began timing out at 5s on roughly one run in three. Verified as caused by the widening - the pre-change scope passed 3/3, the widened one failed 1/3 - and mitigated by running app/tools/ as a second sequential vitest invocation. That is a workaround; the fix is this entry. Story 2.1 added the seventh (unit-directory) and a review raised the second half of the same defect: a module-scoped pool is orphaned on every Next.js HMR reload in dev, so connections leak until the limit is hit. Both halves want one change across all seven adapters, not one file at a time."
     owner: "Dev"
     status: open
   - epic: 2

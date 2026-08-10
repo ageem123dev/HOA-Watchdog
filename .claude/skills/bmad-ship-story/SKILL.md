@@ -123,7 +123,7 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 
 **There is no pipeline.** It was removed on 2026-08-07 — GitLab bills per minute on this account and the budget is not there. Do not wait for one, do not report its status, and do not treat its absence as a failure.
 
-What replaced it is the gate you already ran before pushing: `npm run lint`, `npm run build`, `npm test`, plus `npm run test:db` for schema or adapter work and `npx --no-install tsc --noEmit` against its baseline. **Re-run them on the exact head the MR points at**, because that is now the only evidence that head is green, and there is no second opinion.
+What replaced it is the gate you already ran before pushing: `npm run lint`, `npm run build`, `npm test`, plus `npm run test:db` for schema, adapter or `app/tools/` work and `npx --no-install tsc --noEmit` against its baseline. **Re-run them on the exact head the MR points at**, because that is now the only evidence that head is green, and there is no second opinion.
 
 Say so honestly when reporting: "gates green locally on `<sha>`" is true; "pipeline green" is not, and there is nothing to link to.
 
@@ -195,7 +195,7 @@ Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a
 
 ## Project facts
 
-- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema/adapter work, plus `pytest` once the Python service exists. **Neither ESLint nor Vitest type-checks**, and `npm run build` does not check test files — so also run **`npx --no-install tsc --noEmit`** and compare against its baseline of 8 pre-existing errors. It caught real errors in three consecutive stories that lint and build both passed.
+- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema, adapter or `app/tools/` work, plus `pytest` once the Python service exists. **Neither ESLint nor Vitest type-checks**, and `npm run build` does not check test files — so also run **`npx --no-install tsc --noEmit`** and compare against its baseline of 8 pre-existing errors. It caught real errors in three consecutive stories that lint and build both passed.
 - **This list is the only gate there is.** With CI removed there is no second chance and no external record: an unrun check is simply an unmade claim. `npm run test:db` in particular now runs *nowhere* unless someone runs it, which makes AD-4's SELECT-only proof and AD-13's idempotency constraints locally-verified only.
 - **Python is in scope** — `python3` is installed and the PRD puts a CrewAI service in the architecture.
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.

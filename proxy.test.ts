@@ -7,7 +7,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * proves the rule; only these tests prove the rule is enforced.
  */
 
-const sessionState: { session: { user: { id: string } } | null } = { session: null }
+// `undefined` is in the type on purpose. Auth.js declares `req.auth` as
+// `Session | null`, but the gate's job is to be right when the declaration is
+// wrong — a version change or a callback returning nothing. Narrowing this to
+// `| null` would make the fail-open case below unwritable, which is how the
+// hole stayed open.
+const sessionState: { session: { user: { id: string } } | null | undefined } = { session: null }
 
 /**
  * Stands in for Auth.js's `auth` wrapper, which in production verifies the
@@ -75,6 +80,112 @@ describe('config.matcher', () => {
       expect(matches(pathname)).toBe(false)
     },
   )
+
+  /**
+   * AD-15's tool endpoints authenticate with a service token, not a session, so
+   * the session gate can only turn the agent away — a 307 to /sign-in it has no
+   * way to satisfy. Excluded for structurally the same reason as /api/auth.
+   *
+   * The cost is that the route's own token check becomes the whole of the
+   * protection for anything under this prefix, which is why the exclusion is
+   * asserted to be exactly a prefix and nothing wider.
+   */
+  it.each(['/tools/v1/catalog/execute', '/tools/v1/anything/else', '/tools/v2/later'])(
+    'does not guard the tool endpoint %s',
+    (pathname) => {
+      expect(matches(pathname)).toBe(false)
+    },
+  )
+
+  /**
+   * The anchoring. A route is not a tool endpoint because its path contains the
+   * word — the matcher's own comment records an earlier version that anchored to
+   * a suffix and left whole routes unguarded.
+   */
+  it.each([
+    '/tools',
+    '/toolsmith',
+    '/tools-of-the-trade',
+    '/x/tools/y',
+    '/atools/v1',
+    '/tools/ui',
+    '/tools/v/thing',
+    '/tools/version/one',
+  ])(
+    'still guards %s',
+    (pathname) => {
+      expect(matches(pathname)).toBe(true)
+    },
+  )
+})
+
+/**
+ * Nothing user-facing may live behind the middleware exclusion.
+ *
+ * `tools/v\d+/` is outside the session gate, so a `page.tsx` placed under it
+ * would be served to anyone. Narrowing the matcher further — to
+ * `tools/v\d+/catalog/` — was the other option and it decays: every new tool
+ * family would have to remember to extend it. This asserts the rule instead, so
+ * it holds for tool families nobody has written yet.
+ */
+/**
+ * Extracted so it can be run against a directory that *does* contain a page.
+ *
+ * The repository scan below passes on a clean tree whether or not this function
+ * works — remove the regex or the `push` and it still reports nothing, because
+ * there is nothing to report. The fixture is what makes it a guard rather than a
+ * green light. Raised by CodeRabbit on MR !37.
+ */
+async function userFacingFilesUnder(directory: string, found: string[] = []): Promise<string[]> {
+  const { readdir } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name)
+    if (entry.isDirectory()) await userFacingFilesUnder(full, found)
+    // `[jt]sx?`: tsconfig sets allowJs false so a page.js is invisible to tsc,
+    // but Next.js still serves it — the exclusion would not care that it was
+    // never type-checked.
+    else if (/^(page|layout|template|default)\.[jt]sx?$/.test(entry.name)) found.push(entry.name)
+  }
+
+  return found
+}
+
+describe('nothing user-facing sits behind the exclusion', () => {
+  it('has no page or layout anywhere under app/tools', async () => {
+    const { join } = await import('node:path')
+
+    await expect(userFacingFilesUnder(join(process.cwd(), 'app', 'tools'))).resolves.toEqual([])
+  })
+
+  it('detects one when it is there, and leaves route handlers alone', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const { tmpdir } = await import('node:os')
+
+    const root = await mkdtemp(join(tmpdir(), 'tools-fixture-'))
+    try {
+      await mkdir(join(root, 'v1', 'ui'), { recursive: true })
+      // Every forbidden basename, and both extension classes. The first draft
+      // used page.tsx and layout.js only, so dropping `template` or `default`
+      // from the scanner left this green — the same hole one alternative deeper.
+      // Raised by CodeRabbit on MR !37.
+      await writeFile(join(root, 'v1', 'ui', 'page.tsx'), 'export default () => null')
+      await writeFile(join(root, 'v1', 'ui', 'layout.js'), 'export default () => null')
+      await writeFile(join(root, 'v1', 'ui', 'template.jsx'), 'export default () => null')
+      await writeFile(join(root, 'v1', 'ui', 'default.ts'), 'export default () => null')
+      // The control: a route handler is exactly what belongs here.
+      await writeFile(join(root, 'v1', 'route.ts'), 'export const POST = () => null')
+
+      await expect(userFacingFilesUnder(root)).resolves.toEqual(
+        expect.arrayContaining(['page.tsx', 'layout.js', 'template.jsx', 'default.ts']),
+      )
+      await expect(userFacingFilesUnder(root)).resolves.not.toContain('route.ts')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('proxy', () => {
@@ -98,6 +209,22 @@ describe('proxy', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('location')).toBeNull()
+  })
+
+  /**
+   * `request.auth` is typed `Session | null`, and the check used to be
+   * `!== null`. If the auth layer ever yields `undefined` — a version change, a
+   * callback returning nothing — that comparison is **true** and the gate opens.
+   * Fail-open is the one direction this file must never fail in. Raised by
+   * Argus on story 3.2.
+   */
+  it('treats an undefined session as unauthenticated, not as a member', async () => {
+    sessionState.session = undefined
+
+    const response = (await proxy(makeRequest('/dashboard'), undefined as never)) as NextResponse
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toContain('/sign-in')
   })
 
   it('lets an unauthenticated visitor reach sign-in', async () => {
