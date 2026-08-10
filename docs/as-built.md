@@ -116,6 +116,8 @@ review.
 | A published catalog entry version cannot be edited (AD-14) | `catalog/published-versions.test.ts` |
 | The tool endpoint rejects any caller that is not the agent service (AD-15) | `core/tools/service-token.test.ts`, `app/tools/v1/catalog/execute/route.test.ts` |
 | The tool endpoint is the catalog's only door (AD-15) | `core/tools/sole-data-path.test.ts` |
+| The written upload contract matches the code | `docs/upload-contract.test.ts` |
+| The README matches this tree | `docs/readme.test.ts` |
 
 **One known gap, and it is a deployment one.** AD-15 protects `/tools/v1/*` two ways: the endpoints
 are bound to a private network, and the caller presents a shared token. Only the token exists. The
@@ -123,5 +125,3 @@ Railway private network was deferred on 2026-08-07 and is a deployment task, not
 it is done, `AGENT_SERVICE_TOKEN` is the only thing between the public internet and the catalog. The
 endpoint fails closed when that variable is unset, which is the one mitigation available from inside
 the code.
-| The written upload contract matches the code | `docs/upload-contract.test.ts` |
-| The README matches this tree | `docs/readme.test.ts` |

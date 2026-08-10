@@ -24,11 +24,26 @@ import { readdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import { neutralise } from '../ports/declared-members'
+
 const REPO_ROOT = process.cwd()
-const APP = join(REPO_ROOT, 'app')
 
 /** The one file allowed to reach the executor, relative to the repo root. */
 const THE_DOOR = 'app/tools/v1/catalog/execute/route.ts'
+
+/**
+ * Every root where reaching the catalog would be a violation.
+ *
+ * The first draft scanned `app/` alone, which is narrower than the rule: a
+ * server action, a script or a root-level module reaching the executor breaks
+ * "sole data path in the system" just as thoroughly, and nothing would have
+ * said so. Raised by CodeRabbit.
+ *
+ * `adapters/` and `catalog/` are deliberately absent — that is where the catalog
+ * machinery lives, and `catalog-executor-postgres.ts` importing the registry is
+ * the mechanism, not a violation of it.
+ */
+const SCANNED_ROOTS = ['app', 'core', 'scripts'] as const
 
 /** What a caller would import to get at the catalog. */
 const EXECUTOR_MODULES = ['adapters/db/catalog-executor-postgres', 'catalog/registry'] as const
@@ -39,12 +54,37 @@ const EXECUTOR_MODULES = ['adapters/db/catalog-executor-postgres', 'catalog/regi
  * import, a dynamic `import()` and a `require()` each slipped past a narrower
  * one.
  */
+/**
+ * `.mjs` counts. `scripts/` is written in it, and a script reaching the catalog
+ * breaks "sole data path in the system" exactly as a route would — scanning only
+ * `.ts` there would have found no files at all and passed.
+ */
+const SOURCE = /\.(?:m?[jt]sx?)$/
+const IS_TEST = /\.test\.(?:m?[jt]sx?)$/
+
 const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
 
+/**
+ * Comments are removed first, and string *contents* are kept.
+ *
+ * Without that, a commented-out import fails the build for a line nobody
+ * executes — verified, not assumed: the regex matches
+ * `// import x from '@/adapters/db/catalog-executor-postgres'` exactly as
+ * happily as the real thing. `neutralise` is `core/ports/declared-members.ts`'s,
+ * shared rather than copied.
+ *
+ * **Comments only — string contents are kept, and must be.** The specifiers this
+ * looks for live inside strings, so masking those would blank the very thing it
+ * reads. The cost is stated rather than papered over: a string literal
+ * *containing* an import statement is indistinguishable from a real one without
+ * a parser, and would be reported. No production file in this repo does that,
+ * and the test files that do are excluded from the sweep.
+ */
 export function reachesTheCatalog(source: string): readonly string[] {
+  const { commentsBlanked } = neutralise(source)
   const found: string[] = []
 
-  for (const match of source.matchAll(MODULE_SPECIFIER)) {
+  for (const match of commentsBlanked.matchAll(MODULE_SPECIFIER)) {
     const specifier = match[1]
     if (specifier === undefined) continue
 
@@ -58,12 +98,12 @@ export function reachesTheCatalog(source: string): readonly string[] {
   return found
 }
 
-async function routeFiles(directory: string, found: string[] = []): Promise<string[]> {
+async function productionFiles(directory: string, found: string[] = []): Promise<string[]> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const full = join(directory, entry.name)
     if (entry.isDirectory()) {
-      await routeFiles(full, found)
-    } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+      await productionFiles(full, found)
+    } else if (SOURCE.test(entry.name) && !IS_TEST.test(entry.name)) {
       found.push(relative(REPO_ROOT, full).split(sep).join('/'))
     }
   }
@@ -71,9 +111,20 @@ async function routeFiles(directory: string, found: string[] = []): Promise<stri
   return found
 }
 
+async function everyScannedFile(): Promise<string[]> {
+  const perRoot = await Promise.all(
+    SCANNED_ROOTS.map((root) => productionFiles(join(REPO_ROOT, root))),
+  )
+  const rootLevel = (await readdir(REPO_ROOT, { withFileTypes: true }))
+    .filter((e) => e.isFile() && SOURCE.test(e.name) && !IS_TEST.test(e.name))
+    .map((e) => e.name)
+
+  return [...perRoot.flat(), ...rootLevel]
+}
+
 describe('the catalog has one door', () => {
-  it('is reached from the tool endpoint and from nowhere else under app/', async () => {
-    const files = await routeFiles(APP)
+  it('is reached from the tool endpoint and from nowhere else in the system', async () => {
+    const files = await everyScannedFile()
     const reaching = files.filter(
       (file) => reachesTheCatalog(readFileSync(resolve(REPO_ROOT, file), 'utf8')).length > 0,
     )
@@ -81,13 +132,17 @@ describe('the catalog has one door', () => {
     expect(reaching).toEqual([THE_DOOR])
   })
 
-  it('finds files to scan, so an empty sweep cannot pass', async () => {
+  it('finds files to scan in every root, so an empty sweep cannot pass', async () => {
     // The assertion above is also satisfied by a walk that returns nothing and a
-    // `THE_DOOR` that no longer exists. Both halves are pinned.
-    const files = await routeFiles(APP)
+    // `THE_DOOR` that no longer exists. Both halves are pinned, per root, so a
+    // root silently dropping out of `SCANNED_ROOTS` fails here.
+    for (const root of SCANNED_ROOTS) {
+      const files = await productionFiles(join(REPO_ROOT, root))
+      expect(files.length, `${root}/ contributed no files to the sweep`).toBeGreaterThan(0)
+    }
 
-    expect(files.length).toBeGreaterThan(5)
-    expect(files).toContain(THE_DOOR)
+    expect(await everyScannedFile()).toContain(THE_DOOR)
+    expect(await everyScannedFile()).toContain('proxy.ts')
   })
 
   /**
@@ -112,8 +167,16 @@ describe('the catalog has one door', () => {
   it.each([
     ['an unrelated import', "import { auth } from '@/adapters/auth/auth'"],
     ['a similarly named module', "import x from '@/adapters/db/catalog-executor-postgres-notes'"],
-    ['the word in a comment', '// the catalog/registry is reached only from the tool endpoint'],
-    ['the word in a string', "const note = 'adapters/db/catalog-executor-postgres'"],
+    ['the module named in prose', '// the catalog/registry is reached only from the tool endpoint'],
+    ['the module named in a string', "const note = 'adapters/db/catalog-executor-postgres'"],
+    [
+      'a commented-out import',
+      "// import { createCatalogExecutor } from '@/adapters/db/catalog-executor-postgres'",
+    ],
+    [
+      'an import inside a block comment',
+      "/*\n import x from '@/adapters/db/catalog-executor-postgres'\n*/",
+    ],
   ])('does not report %s', (_label, source) => {
     expect(reachesTheCatalog(source)).toHaveLength(0)
   })

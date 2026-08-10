@@ -120,6 +120,10 @@ export function declaredMembers(text: string, interfaceName: string): readonly s
  * Both preserve length and newlines, so an index into either is an index into
  * the original.
  *
+ * Exported because `core/tools/sole-data-path.test.ts` needs the same thing: a
+ * commented-out import is not an import, and a regex that cannot tell them apart
+ * fails a build for a line nobody executes.
+ *
  * **It does not mask regex literals, and that is a bounded decision.** Telling
  * `/interface Example {/` from a division is not possible without parsing the
  * program, so a regex literal containing braces or an interface name could
@@ -129,7 +133,7 @@ export function declaredMembers(text: string, interfaceName: string): readonly s
  * own scope the same way and for the same reason: this is a test helper, not a
  * parser, and it should not grow into one.
  */
-function neutralise(text: string): { masked: string; commentsBlanked: string } {
+export function neutralise(text: string): { masked: string; commentsBlanked: string } {
   const masked: string[] = []
   const commentsBlanked: string[] = []
 

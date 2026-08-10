@@ -14,7 +14,7 @@
  * this file.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const execute = vi.fn()
 
@@ -52,6 +52,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('AGENT_SERVICE_TOKEN', TOKEN)
   execute.mockResolvedValue({ provenanceId: 'prov-1', rows: [{ unitNumber: '4B' }] })
+})
+
+// `unstubEnvs` is not set in vitest.config.ts, so without this the stubbed token
+// outlives the file and any later suite reading AGENT_SERVICE_TOKEN sees this
+// one. Raised by CodeRabbit.
+afterAll(() => {
+  vi.unstubAllEnvs()
 })
 
 describe('POST /tools/v1/catalog/execute', () => {
