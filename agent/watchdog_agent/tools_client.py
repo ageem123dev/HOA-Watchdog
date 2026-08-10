@@ -102,7 +102,16 @@ def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str)
     except urllib.error.HTTPError as error:
         # An HTTP error is an answer, not a transport failure - the body carries
         # the gateway's envelope and the status is what the mapping below needs.
+        # Caught before URLError, which it subclasses.
         return error.code, error.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        # A connection that never became an answer: DNS failure, refused
+        # connection, timeout. Wrapped so a caller handling `GatewayError` sees
+        # every way this call can fail rather than only the ones with a status
+        # code - the raw exception would otherwise escape a correct `except`
+        # clause and take the agent down. Status 0: there was no response.
+        # Raised by CodeRabbit on the local round.
+        raise GatewayError(f"could not reach the gateway: {error}", status=0) from error
 
 
 _STATUS_ERRORS: dict[int, Callable[..., GatewayError]] = {
@@ -170,7 +179,18 @@ def execute_catalog_entry(
     if not isinstance(rows, list):
         raise GatewayError("the gateway returned rows that were not a list", status=status)
 
-    return CatalogExecution(provenance_id=str(payload["provenanceId"]), rows=rows)
+    # Checked rather than coerced. `str(None)` is `'None'` - a provenance id that
+    # looks like one, satisfies every downstream type, and identifies nothing.
+    # AD-12 makes this id part of what an answer means, so a null or blank one is
+    # not a cosmetic problem. Raised by CodeRabbit on the local round.
+    provenance_id = payload["provenanceId"]
+    if not isinstance(provenance_id, str) or provenance_id.strip() == "":
+        raise GatewayError(
+            "the gateway returned a success whose provenanceId was not a non-empty string",
+            status=status,
+        )
+
+    return CatalogExecution(provenance_id=provenance_id, rows=rows)
 
 
 def _decode(raw: str) -> Any:

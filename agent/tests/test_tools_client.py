@@ -16,6 +16,7 @@ No network anywhere in this suite: the transport is a parameter.
 from __future__ import annotations
 
 import json
+import urllib.request
 
 import pytest
 
@@ -215,3 +216,60 @@ class TestAMalformedSuccess:
 
         with pytest.raises(GatewayError):
             _call(transport)
+
+    def test_rows_that_are_not_a_list_is_an_error(self) -> None:
+        """The guard existed and nothing exercised it. Raised by CodeRabbit."""
+        transport = RecordingTransport(200, {"provenanceId": "p", "rows": {"unitNumber": "4B"}})
+
+        with pytest.raises(GatewayError, match="list"):
+            _call(transport)
+
+    @pytest.mark.parametrize("provenance", [None, "", "   ", 42])
+    def test_a_provenance_id_that_identifies_nothing_is_an_error(self, provenance: object) -> None:
+        """`str(None)` is `'None'` — an id that looks like one and is not.
+
+        AD-12 makes the provenance id part of what an answer means, so coercing
+        whatever arrived into a string would hand the caller a receipt for a
+        query nobody can find.
+        """
+        transport = RecordingTransport(200, {"provenanceId": provenance, "rows": []})
+
+        with pytest.raises(GatewayError, match="provenanceId"):
+            _call(transport)
+
+
+class TestTheGatewayIsUnreachable:
+    """A connection that never became an answer is still this client's problem.
+
+    `urllib` raises `URLError` for DNS failure and refused connections and
+    `TimeoutError` on timeout, and neither carries a status. Letting them escape
+    means a caller that correctly handles `GatewayError` still dies on a network
+    blip. Raised by CodeRabbit on the local round.
+
+    **The wrapping lives in the shipped transport, not in `execute_catalog_entry`.**
+    A first draft asserted that *any* transport raising anything became a
+    `GatewayError`, and that was the wrong design to test into existence:
+    `Transport`'s contract is to return `(status, body)`, so catching everything
+    a substituted transport throws would turn a `TypeError` in a bad stub into a
+    plausible-looking network error and hide the bug. The specific urllib
+    exceptions are known where urllib is used, and that is where they are caught.
+    """
+
+    def test_the_real_transport_wraps_a_url_error(self) -> None:
+        """Against the shipped transport, not a stub — the wrapping is there."""
+        import urllib.error
+
+        from watchdog_agent import tools_client
+
+        original = urllib.request.urlopen
+
+        def explode(*args: object, **kwargs: object) -> None:
+            raise urllib.error.URLError("name or service not known")
+
+        urllib.request.urlopen = explode  # type: ignore[assignment]
+        try:
+            with pytest.raises(GatewayError) as raised:
+                tools_client._urllib_transport("POST", "https://nowhere.invalid", {}, "{}")
+            assert raised.value.status == 0
+        finally:
+            urllib.request.urlopen = original  # type: ignore[assignment]

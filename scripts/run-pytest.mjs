@@ -53,7 +53,11 @@ if (!interpreter) {
 
 // `agent` as the working directory so pyproject.toml's `testpaths` and
 // `pythonpath` apply — running from the repo root finds neither.
-const result = spawnSync(interpreter, ['-m', 'pytest'], {
+//
+// Extra arguments are forwarded, so `npm run test:py -- -k token` and
+// `-- -x --ff` work. Without it the wrapper is strictly worse than the command
+// it replaces, and the first person who needs one test will go around it.
+const result = spawnSync(interpreter, ['-m', 'pytest', ...process.argv.slice(2)], {
   cwd: AGENT,
   stdio: 'inherit',
 })

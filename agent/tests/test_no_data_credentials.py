@@ -28,6 +28,7 @@ somebody needs one number in a hurry it is already there.
 
 from __future__ import annotations
 
+import ast
 import re
 import tomllib
 from pathlib import Path
@@ -193,8 +194,6 @@ def test_the_credential_detector_sees_planted_violations() -> None:
 #: `POST`, `Authorization` and `/tools/v1/...` are not; `AGENT_SERVICE_TOKEN` is.
 ENV_VAR_SHAPED = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
 
-#: Any string literal in the source, single or double quoted.
-STRING_LITERAL = re.compile(r"['\"]([^'\"\n]{2,80})['\"]")
 
 
 def environment_variables_read_by(source: str) -> set[str]:
@@ -213,14 +212,22 @@ def environment_variables_read_by(source: str) -> set[str]:
     exhaustive assertion below - "reads exactly these two" - and not by the
     absence one, which is the argument for writing both.
 
-    Matching every upper-snake string literal is coarser and strictly safer: it
+    Matching every upper-snake string constant is coarser and strictly safer: it
     cannot miss the indirection, and a false positive is a name somebody has to
     justify rather than a hole nobody sees.
+
+    Parsed with `ast` rather than scanned with a regex. A regex reads comments
+    too, so `# never read DATABASE_URL here` would be reported as a violation -
+    a false positive on a guard whose whole value is being trusted. `ast` sees
+    only real string constants. Raised by CodeRabbit on the local round; `ast`
+    is in the standard library, so this costs no dependency.
     """
     return {
-        literal
-        for literal in STRING_LITERAL.findall(source)
-        if ENV_VAR_SHAPED.match(literal)
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and ENV_VAR_SHAPED.match(node.value)
     }
 
 
@@ -303,6 +310,12 @@ def test_the_environment_reader_detector_works() -> None:
     assert environment_variables_read_by('method = "POST"') == set()
     assert environment_variables_read_by('path = "/tools/v1/catalog/execute"') == set()
     assert environment_variables_read_by('header = "Content-Type"') == set()
+
+    # What `ast` buys over a regex: a comment is not code. A scanner that read
+    # this line would report a violation for a line that runs nothing, on a
+    # guard whose entire value is being trusted. Raised by CodeRabbit.
+    assert environment_variables_read_by("# never read DATABASE_URL here") == set()
+    assert environment_variables_read_by('x = 1  # DATABASE_URL is absent (AD-3)') == set()
 
     # And the classification on top of it.
     assert FORBIDDEN_NAME.search("DATABASE_URL")
