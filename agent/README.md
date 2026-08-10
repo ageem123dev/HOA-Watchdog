@@ -14,9 +14,13 @@ moment; it fails much later, in story 3.4, at `pip install crewai`.
 py -3.13 -m venv agent/.venv                              # Windows
 python3.13 -m venv agent/.venv                            # Linux/macOS
 
-agent/.venv/Scripts/python.exe -m pip install pytest      # Windows
-agent/.venv/bin/python -m pip install pytest              # Linux/macOS
+agent/.venv/Scripts/python.exe -m pip install -e ".[dev]"   # Windows
+agent/.venv/bin/python -m pip install -e ".[dev]"           # Linux/macOS
 ```
+
+Install the **dev extra**, not `pytest` alone: it also declares `tomli` for Python 3.10, which the
+test suite needs to read `pyproject.toml` there. Installing only `pytest` makes collection fail on
+the oldest interpreter the project claims to support.
 
 `agent/.python-version` records the pin and `agent/pyproject.toml` records the
 range; `tests/test_interpreter.py` asserts both against the interpreter actually

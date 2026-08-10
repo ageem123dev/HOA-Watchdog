@@ -135,6 +135,34 @@ class TestFailsClosedOnMisconfiguration:
 
         assert transport.calls == []
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://gateway.internal",
+            "ftp://gateway.internal",
+            "file:///etc/passwd",
+            "https:///no-host",
+            "gateway.internal",
+        ],
+    )
+    def test_refuses_a_gateway_url_that_is_not_absolute_https(
+        self, monkeypatch: pytest.MonkeyPatch, url: str
+    ) -> None:
+        """The token only travels over TLS, to a host that was named.
+
+        `urllib` opens `http:`, `ftp:` and `file:` quite happily. An `http://`
+        gateway would send `AGENT_SERVICE_TOKEN` in clear - and that token is the
+        whole boundary between the internet and the catalog until the private
+        network exists. Raised by CodeRabbit on MR !39.
+        """
+        monkeypatch.setenv("GATEWAY_BASE_URL", url)
+        transport = RecordingTransport(200, {"provenanceId": "p", "rows": []})
+
+        with pytest.raises(MisconfiguredAgent):
+            _call(transport)
+
+        assert transport.calls == []
+
 
 class TestSurfacesTheGatewaysRefusal:
     """AC5. A non-2xx is never an empty result set."""
@@ -254,6 +282,19 @@ class TestTheGatewayIsUnreachable:
     plausible-looking network error and hide the bug. The specific urllib
     exceptions are known where urllib is used, and that is where they are caught.
     """
+
+    def test_the_opener_carries_no_proxy_handler(self) -> None:
+        """`build_opener` adds a ProxyHandler that reads HTTPS_PROXY.
+
+        An ambient proxy variable would route this authenticated request - bearer
+        token included - through whatever it names. The gateway's address is
+        configuration; nothing else gets to redirect it. Raised by CodeRabbit.
+        """
+        from watchdog_agent import tools_client
+
+        source = __import__("inspect").getsource(tools_client._urllib_transport)
+
+        assert "ProxyHandler({})" in source
 
     def test_the_real_transport_wraps_a_url_error(
         self, monkeypatch: pytest.MonkeyPatch

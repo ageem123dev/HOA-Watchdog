@@ -115,7 +115,14 @@ FORBIDDEN_NAME = re.compile(
     # names it most needed. Raised by CodeRabbit on MR !39.
     r"(?:PG|POSTGRES)_?(?:PASSWORD|PASSFILE|USER|HOST|PORT|DATABASE|DSN)|"
     r"R2_(?:ACCOUNT_ID|ACCESS_KEY_ID|SECRET_ACCESS_KEY|BUCKET)|"
-    r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)"
+    r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)|"
+    # Azure and Google. The dependency denylist already named their SDKs, and
+    # the *name* list did not - so a committed AZURE_STORAGE_CONNECTION_STRING
+    # or GOOGLE_APPLICATION_CREDENTIALS walked straight through the surface
+    # meant to catch exactly that. Raised by CodeRabbit on MR !39.
+    r"AZURE_STORAGE_(?:CONNECTION_STRING|KEY|ACCOUNT_KEY|SAS_TOKEN)|"
+    r"GOOGLE_APPLICATION_CREDENTIALS|"
+    r"GCP_(?:SERVICE_ACCOUNT|CREDENTIALS)"
     r")",
     re.IGNORECASE,
 )
@@ -275,6 +282,10 @@ def test_the_credential_detector_sees_planted_violations() -> None:
     assert credential_findings("PGPASSWORD=secret")
     assert credential_findings("PGUSER=watchdog")
     assert credential_findings("PGHOST=db.internal")
+    # Azure and Google, beside the AWS and R2 cases above.
+    assert credential_findings("AZURE_STORAGE_CONNECTION_STRING=DefaultEndpoints...")
+    assert credential_findings("GOOGLE_APPLICATION_CREDENTIALS=/etc/gcp.json")
+    assert credential_findings("AZURE_STORAGE_ACCOUNT_KEY=abc")
 
     # And leaves alone what this service is allowed to hold.
     assert credential_findings("AGENT_SERVICE_TOKEN=abc") == []

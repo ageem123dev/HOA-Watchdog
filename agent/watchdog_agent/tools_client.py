@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
@@ -116,9 +117,32 @@ class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
         )
 
 
+def _require_https(url: str) -> None:
+    """The token only ever travels over TLS, to a host that was named.
+
+    `urllib` will happily open `http:`, `ftp:` and `file:`, and a hostless
+    `https:///x` besides. `GATEWAY_BASE_URL` is configuration, so a typo or a
+    stale value is the realistic case rather than an attack - and an `http://`
+    gateway sends `AGENT_SERVICE_TOKEN` in clear, which is the whole boundary
+    until the private network exists. Raised by CodeRabbit on MR !39.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise MisconfiguredAgent(
+            f"{GATEWAY_VARIABLE} must be an https URL; got scheme {parsed.scheme or 'none'!r}"
+        )
+    if not parsed.hostname:
+        raise MisconfiguredAgent(f"{GATEWAY_VARIABLE} names no host: {url!r}")
+
+
 def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
     request = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method=method)
-    opener = urllib.request.build_opener(_RefuseRedirects)
+    # An **empty** ProxyHandler, which is not the default. `build_opener` adds one
+    # that reads `HTTPS_PROXY` and friends from the environment, so an ambient
+    # proxy variable would route this authenticated request - bearer token and
+    # all - through whatever it names. The gateway's address is configuration;
+    # nothing else gets to redirect it. Raised by CodeRabbit on MR !39.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _RefuseRedirects)
     try:
         with opener.open(request, timeout=30) as response:
             return response.status, response.read().decode("utf-8")
@@ -160,6 +184,7 @@ def execute_catalog_entry(
     """
     token = _required(TOKEN_VARIABLE)
     base_url = _required(GATEWAY_VARIABLE)
+    _require_https(base_url)
 
     send = transport or _urllib_transport
     status, raw = send(
