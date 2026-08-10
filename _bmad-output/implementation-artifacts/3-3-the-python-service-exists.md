@@ -4,7 +4,7 @@ baseline_commit: 99d0d31
 
 # Story 3.3: The Python service exists
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -110,42 +110,42 @@ being well behaved.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The service skeleton and its interpreter pin (AC: 1)**
-  - [ ] `agent/` with `pyproject.toml` (`requires-python = ">=3.10,<3.14"`, matching AD-15's quoted
+- [x] **Task 1 — The service skeleton and its interpreter pin (AC: 1)**
+  - [x] `agent/` with `pyproject.toml` (`requires-python = ">=3.10,<3.14"`, matching AD-15's quoted
         CrewAI range verbatim) and `.python-version` holding `3.13`.
-  - [ ] `agent/tests/test_interpreter.py` — asserts `sys.version_info` is inside the declared range,
+  - [x] `agent/tests/test_interpreter.py` — asserts `sys.version_info` is inside the declared range,
         and that the range in `pyproject.toml` is the one AD-15 states. **Two statements of one rule,
         with something failing on disagreement**, which is migration 007's standard.
-  - [ ] A venv created with **`py -3.13 -m venv`**, never `python3 -m venv`. Record the command where
+  - [x] A venv created with **`py -3.13 -m venv`**, never `python3 -m venv`. Record the command where
         a reader will hit it — `agent/README.md` — because the ambient interpreter is 3.14.6 and the
         obvious command silently produces an environment CrewAI cannot be installed into.
 
-- [ ] **Task 2 — The tool client (AC: 2, 4, 5)**
-  - [ ] `agent/watchdog_agent/tools_client.py` — `execute_catalog_entry(entry_id, version, parameters, actor_id)`.
-  - [ ] Reads `AGENT_SERVICE_TOKEN` and the gateway base URL from the environment. **Absent token
+- [x] **Task 2 — The tool client (AC: 2, 4, 5)**
+  - [x] `agent/watchdog_agent/tools_client.py` — `execute_catalog_entry(entry_id, version, parameters, actor_id)`.
+  - [x] Reads `AGENT_SERVICE_TOKEN` and the gateway base URL from the environment. **Absent token
         raises before any request is made** (AC4); an absent base URL likewise.
-  - [ ] Maps the gateway's envelope: `401` → a named auth error, `404` → unknown entry, `400` →
+  - [x] Maps the gateway's envelope: `401` → a named auth error, `404` → unknown entry, `400` →
         invalid request/parameters, other non-2xx → a transport/server error. Each carries the
         envelope's `code` where one was returned, and none is silently converted to "no rows".
-  - [ ] Tests with a stubbed transport — no network in the suite. Cover each status, a non-JSON body,
+  - [x] Tests with a stubbed transport — no network in the suite. Cover each status, a non-JSON body,
         and a 2xx whose body is missing `rows`.
 
-- [ ] **Task 3 — AD-3, asserted (AC: 3)**
-  - [ ] `agent/tests/test_no_data_credentials.py` — the AD-3 guard, modelled on
+- [x] **Task 3 — AD-3, asserted (AC: 3)**
+  - [x] `agent/tests/test_no_data_credentials.py` — the AD-3 guard, modelled on
         `core/security/nfr2-guard.test.ts`. Three surfaces: the process environment, every committed
         config file under `agent/`, and the declared dependencies.
-  - [ ] Name the forbidden things explicitly: any variable matching a database URL or DSN shape, any
+  - [x] Name the forbidden things explicitly: any variable matching a database URL or DSN shape, any
         S3/R2 key, and any dependency in the driver families (`psycopg*`, `asyncpg`, `sqlalchemy`,
         `pg8000`, `boto3`, `botocore`, `minio`).
-  - [ ] **Test the detector against planted violations** — a fake env var and a fake dependency line.
+  - [x] **Test the detector against planted violations** — a fake env var and a fake dependency line.
         `core/ports/boundary.test.ts` records five review rounds learning that a scanner which
         reports green on its own subject matter is worse than none.
 
-- [ ] **Task 4 — The gate (AC: 6)**
-  - [ ] `package.json`: `"test:py": "py -3.13 -m pytest agent"` (or the venv's pytest, if Task 1
+- [x] **Task 4 — The gate (AC: 6)**
+  - [x] `package.json`: `"test:py": "py -3.13 -m pytest agent"` (or the venv's pytest, if Task 1
         settles on one — whichever it is, the script must not resolve to the ambient 3.14).
-  - [ ] `bmad-ship-story`'s **"Tested =" line**, both places it appears, naming `npm run test:py`.
-  - [ ] `README.md` and `docs/as-built.md`: the new runtime, the 3.13 pin and the reason. Both have
+  - [x] `bmad-ship-story`'s **"Tested =" line**, both places it appears, naming `npm run test:py`.
+  - [x] `README.md` and `docs/as-built.md`: the new runtime, the 3.13 pin and the reason. Both have
         tests that fail when the tree changes.
 
 ## Dev Notes
@@ -235,18 +235,137 @@ name.
 
 ### Agent Model Used
 
-### Debug Log References
+claude-opus-5[1m]
 
 ### Test Design
+
+Three behaviours. Failure modes classified before any test.
+
+#### B1 — the interpreter pin (Task 1)
+
+| Failure mode | Class | Forced by |
+| --- | --- | --- |
+| **The venv is built from the ambient 3.14** | GUARD | asserted against `sys.version_info`, not a declaration |
+| `pyproject.toml`'s range drifts from AD-15's | GUARD | both asserted, so disagreement fails |
+| `.python-version` allows any in-range version | GUARD | pinned to `3.13` exactly |
+
+#### B2 — the tool client (Task 2)
+
+| Failure mode | Class | Forced by |
+| --- | --- | --- |
+| **A non-2xx becomes an empty result set** | GUARD | seven statuses, each asserted to raise |
+| Missing token → an unauthenticated request the gateway rejects | GUARD | transport asserted never called |
+| Blank token or missing gateway URL | GUARD | separate cases |
+| 401 / 404 / 400 indistinguishable from each other | GUARD | distinct classes, `code` asserted |
+| A non-JSON error body crashes instead of reporting the status | GUARD | HTML body case |
+| A 2xx missing `rows` or `provenanceId` read as an answer | GUARD | both cases |
+
+#### B3 — AD-3 (Task 3)
+
+| Failure mode | Class | Forced by |
+| --- | --- | --- |
+| A driver in the dependency list | GUARD | family prefixes, planted violation |
+| A credential in committed config | GUARD | DSN shape and name shape, planted |
+| **The service reads a data credential from the environment** | GUARD | source sweep, planted |
+| The sweep passes over nothing | GUARD | non-empty assertions per surface |
+| A new variable appears unclassified | GUARD | exhaustive: reads *exactly* two |
+
+### Debug Log References
+
+**Task 1 red:** 2 of 3 failed — `pyproject.toml` and `.python-version` absent. The interpreter
+assertion passed, which is the point: the venv really is 3.13.14.
+
+**Task 2 red:** 16 failures against a stub raising `NotImplementedError`.
+
+**Two vacuous guards, both caught here rather than in review.**
+
+The first: `test_the_service_reads_no_data_credential_from_its_environment` passed while
+`watchdog_agent/` was empty — there were no source files to sweep. Pinned with a non-empty assertion
+once the client landed.
+
+The second is the more interesting one. The detector matched call sites —
+`os.environ["X"]`, `os.getenv("X")` — and `tools_client.py` reads through a module constant:
+
+```python
+TOKEN_VARIABLE = "AGENT_SERVICE_TOKEN"
+...
+os.environ.get(variable)
+```
+
+so it found **nothing**, and passed by seeing no variables at all. It was caught by the *exhaustive*
+assertion ("reads exactly these two"), not by the absence one — which is the argument for writing
+both. The detector now matches every upper-snake string literal: coarser, and it cannot miss the
+indirection.
+
+**`pytest` wrote `.pytest_cache/` to the repository root**, which `docs/readme.test.ts` caught as an
+undocumented top-level directory. Pointed at `.venv/.pytest_cache` instead — inside something already
+ignored — rather than adding a `.gitignore` rule, because `.gitignore` carries an unrelated
+uncommitted change and a build artefact is not a good reason to entangle it.
 
 ### Review Findings
 
 ### Completion Notes List
 
+**What was built.** `agent/` with the 3.13 pin enforced against the running interpreter, a tool
+client that is the service's only way to obtain a fact, the AD-3 guard across three surfaces, and
+`npm run test:py` wired into the local gate.
+
+**The trap this story exists to avoid, verified on the machine:** ambient `python3` is **3.14.6**;
+CrewAI's `requires_python` is `<3.14,>=3.10`; `py -3.13` is **3.13.14**. So `python3 -m venv` builds
+an environment CrewAI can never be installed into and nothing says so until story 3.4. The pin is
+asserted against `sys.version_info` rather than declared, so a wrong venv fails the suite.
+
+**The gate was registered, which is the item the epic file names by name.** `npm run test:py` in
+`package.json`, and the "Tested =" line in `bmad-ship-story` in **both** places it appears, plus the
+Project-facts note about the ambient interpreter. `scripts/run-pytest.mjs` **refuses** when the venv
+is missing rather than falling back to whatever `python` means — a gate that runs on the wrong
+runtime reports green from an environment the service cannot use. It handles both venv layouts, since
+development is Windows and the deploy target is Linux.
+
+**Every non-2xx raises.** A client returning `[]` on a `401` would turn "you are not authorised" into
+"this unit owes nothing" — a wrong financial answer delivered confidently, which is what this product
+exists to prevent. A `2xx` without `provenanceId` is also an error: AD-12 makes that id part of what
+an answer means, so a result without one came from a path that did not log.
+
+**Sensitivity checks (each restored and re-verified):**
+
+1. `dependencies = ["psycopg[binary]>=3.1"]` and a `WATCHDOG_READER_DATABASE_URL` constant planted in
+   the client → **three** AD-3 assertions failed.
+2. The client stubbed to `NotImplementedError` → 16 failures.
+3. `pyproject.toml` / `.python-version` absent → the two declaration tests failed while the
+   interpreter test passed.
+
+**Deliberately not here:** CrewAI and any model call — story 3.4's. A heavy dependency whose only
+consumer does not exist yet. What this story owes it is an interpreter it can use.
+
+**Left alone:** `.gitignore` carries an uncommitted `.argus/` change that is not mine. I added a venv
+rule there, then reverted it — the venv is already ignored by the file Python writes inside it, and
+keeping an unrelated working change uncontaminated is worth more than belt-and-braces.
+
+**Gate** — `npm run lint` exit 0 (1 pre-existing warning); `npm run build` exit 0; `npm test` exit 0,
+**98 passed | 19 skipped across 117 files**, 1837 tests; `npm run test:db` exit 0, **623 + 25**;
+**`npm run test:py` exit 0, 28 passed**; `npx --no-install tsc --noEmit` **8 errors, the baseline**.
+
 ### File List
+
+**Added**
+
+- `agent/pyproject.toml`, `agent/.python-version`, `agent/README.md`
+- `agent/watchdog_agent/__init__.py`, `agent/watchdog_agent/tools_client.py`
+- `agent/tests/test_interpreter.py`, `agent/tests/test_no_data_credentials.py`,
+  `agent/tests/test_tools_client.py`
+- `scripts/run-pytest.mjs`
+
+**Modified**
+
+- `package.json` — the `test:py` script.
+- `.claude/skills/bmad-ship-story/SKILL.md` — the "Tested =" line in both places, and the Python fact.
+- `README.md` — `agent/` in the Layout block.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
 
 ### Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-10 | Story created |
+| 2026-08-10 | Tasks 1-4 implemented test-first; pytest registered in the local gate |

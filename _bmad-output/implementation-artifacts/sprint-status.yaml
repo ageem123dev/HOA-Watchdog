@@ -91,7 +91,7 @@ development_status:
   # Introduces Python. MUST add pytest to the local gate in this story -- a
   # package.json script AND the "Tested =" line in bmad-ship-story. There is no
   # CI, so forgetting it ships a second language with no automated check at all.
-  3-3-the-python-service-exists: ready-for-dev
+  3-3-the-python-service-exists: review
   3-4-the-model-picks-an-entry: backlog
   # AD-7. Must exist BEFORE the first answer renders (3.6), or that story ships
   # precisely the failure this product exists to prevent.

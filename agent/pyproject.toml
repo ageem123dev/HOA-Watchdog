@@ -1,0 +1,49 @@
+# The agent service: the second runtime, and the one that holds no data.
+#
+# AD-3 - "The Python agent service holds exactly one secret, the model API key,
+# and never a database credential, connection string, or storage key. It obtains
+# every fact by calling Node's tool endpoints."
+#
+# AD-15 - it reaches Node only through the versioned /tools/* endpoints.
+
+[project]
+name = "watchdog-agent"
+version = "0.1.0"
+description = "The reasoning runtime. Holds the model key and no data credential (AD-3)."
+
+# The range AD-15 quotes from CrewAI's own `requires_python`, verbatim.
+#
+# The upper bound is the load-bearing half and it is not theoretical: the ambient
+# interpreter on the development machine is 3.14.6, so `python3 -m venv` builds an
+# environment CrewAI cannot be installed into, and nothing says so until story 3.4
+# runs `pip install crewai`. Build the environment with `py -3.13 -m venv .venv`.
+#
+# `agent/tests/test_interpreter.py` asserts this range against the *running*
+# interpreter as well as against this line, so the declaration and the reality
+# cannot drift apart quietly.
+requires-python = ">=3.10,<3.14"
+
+# Deliberately empty at this story.
+#
+# CrewAI is story 3.4's - a heavy dependency whose only consumer is the model
+# routing that does not exist yet, and installing it here would be speculative.
+# What this story owes it is an interpreter it can actually use.
+#
+# Anything added here is checked by `agent/tests/test_no_data_credentials.py`:
+# a database driver or an object-storage client in this list is an AD-3
+# violation, because it is a way for this runtime to reach data directly.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Inside the venv, which is already ignored, so running the suite adds no
+# untracked directory to the repository root. `.gitignore` carries an
+# unrelated uncommitted change, and a build artefact is not a good reason to
+# entangle it.
+cache_dir = ".venv/.pytest_cache"
+# Import the package from the source tree without an install step. The service is
+# not distributed; it is deployed as a directory.
+pythonpath = ["."]
