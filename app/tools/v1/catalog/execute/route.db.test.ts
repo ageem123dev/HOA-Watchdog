@@ -89,19 +89,28 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
 
   afterAll(async () => {
     vi.unstubAllEnvs()
+
+    // `query_log` first, and only the owner can do it: migration 020 revokes
+    // DELETE from `watchdog_writer`, which is the whole point of that table. If
+    // `DATABASE_URL` is absent those rows remain, and that is what append-only
+    // means — but it must not take the rest of the cleanup down with it.
     if (owner) {
-      // Scoped to this run's actor. `query_log` cannot be cleaned by the writer
-      // at all — migration 020 revokes DELETE, which is the point of it.
       await owner.query('delete from query_log where actor_id = $1', [actorId])
-      await owner.query(
-        'delete from assessment where unit_id in (select id from unit where unit_number like $1)',
-        [`${RUN_PREFIX}%`],
-      )
-      await owner.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}%`])
-      await owner.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`])
       await owner.end()
     }
-    await writer?.end()
+
+    // Everything else is the writer's to remove, so it happens whether or not an
+    // owner connection exists. The first draft nested all of it under `if
+    // (owner)` and leaked units, assessments and board members on every run
+    // without an admin URL — raised by Argus, and the same shape sits in
+    // `adapters/db/catalog-execution.test.ts` from story 3.1.
+    await writer.query(
+      'delete from assessment where unit_id in (select id from unit where unit_number like $1)',
+      [`${RUN_PREFIX}%`],
+    )
+    await writer.query('delete from unit where unit_number like $1', [`${RUN_PREFIX}%`])
+    await writer.query('delete from board_member where email like $1', [`${RUN_PREFIX}%`])
+    await writer.end()
   })
 
   it('answers with the catalog rows the entry produces', async () => {

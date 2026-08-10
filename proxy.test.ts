@@ -85,7 +85,7 @@ describe('config.matcher', () => {
    * protection for anything under this prefix, which is why the exclusion is
    * asserted to be exactly a prefix and nothing wider.
    */
-  it.each(['/tools/v1/catalog/execute', '/tools/v1/anything/else'])(
+  it.each(['/tools/v1/catalog/execute', '/tools/v1/anything/else', '/tools/v2/later'])(
     'does not guard the tool endpoint %s',
     (pathname) => {
       expect(matches(pathname)).toBe(false)
@@ -97,7 +97,16 @@ describe('config.matcher', () => {
    * word — the matcher's own comment records an earlier version that anchored to
    * a suffix and left whole routes unguarded.
    */
-  it.each(['/tools', '/toolsmith', '/tools-of-the-trade', '/x/tools/y', '/atools/v1'])(
+  it.each([
+    '/tools',
+    '/toolsmith',
+    '/tools-of-the-trade',
+    '/x/tools/y',
+    '/atools/v1',
+    '/tools/ui',
+    '/tools/v/thing',
+    '/tools/version/one',
+  ])(
     'still guards %s',
     (pathname) => {
       expect(matches(pathname)).toBe(true)

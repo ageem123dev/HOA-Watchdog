@@ -44,9 +44,10 @@ export const config = {
   // AD-15's endpoints authenticate the agent service by bearer token and it has
   // no session, so this gate could only answer it with a redirect it cannot
   // follow. The consequence is that the route's own token check is the whole of
-  // the protection there, and `proxy.test.ts` pins the exclusion to the prefix
-  // so it cannot quietly widen.
+  // the protection there. It is narrowed to a **versioned** path — `tools/v1/`,
+  // `tools/v2/` — so a future page under app/tools/ is still guarded; excluding
+  // all of `tools/` would unguard it silently. Raised by Argus.
   matcher: [
-    '/((?!_next/|api/auth/|tools/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
+    '/((?!_next/|api/auth/|tools/v\\d+/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
   ],
 }
