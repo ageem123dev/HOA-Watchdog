@@ -90,6 +90,18 @@ export function reachesTheCatalog(source: string): readonly string[] {
     const specifier = match[1]
     if (specifier === undefined) continue
 
+    // An interpolated specifier is **indeterminate, and indeterminate is
+    // reported**. `import(`@/catalog/${entry}`)` captures the literal `${entry}`,
+    // so a tail comparison silently answers "not the catalog" for something that
+    // resolves to it whenever `entry` is `'registry'`. A scanner that cannot
+    // tell must not answer "fine" — the same fail-closed reasoning the endpoint
+    // itself is built on. No file in the scanned roots writes one today, so this
+    // costs nothing until someone does. Raised by CodeRabbit on MR !37.
+    if (specifier.includes('${')) {
+      found.push(specifier)
+      continue
+    }
+
     // `@/adapters/…`, `../../adapters/…` and `adapters/…` all name the same
     // module; compare on the tail rather than resolving, so a path written from
     // a different depth is not invisible.
@@ -163,6 +175,11 @@ describe('the catalog has one door', () => {
     ],
     ['reaching the registry instead', "import { entryFor } from '@/catalog/registry'"],
     ['a dynamic import written with a template literal', 'await import(`@/catalog/registry`)'],
+    // The bypass: the tail comparison sees `@/catalog/${entry}`, which ends with
+    // neither executor module, and would have answered "not the catalog" for a
+    // specifier that resolves to it.
+    ['an interpolated specifier that could resolve to the catalog', 'await import(`@/catalog/${entry}`)'],
+    ['an interpolated specifier that could resolve anywhere', 'await import(`@/${area}/registry`)'],
   ])('sees %s', (_label, source) => {
     expect(reachesTheCatalog(source)).toHaveLength(1)
   })
