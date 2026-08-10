@@ -49,12 +49,6 @@ const SCANNED_ROOTS = ['app', 'core', 'scripts'] as const
 const EXECUTOR_MODULES = ['adapters/db/catalog-executor-postgres', 'catalog/registry'] as const
 
 /**
- * Every module specifier, in every form that loads a module — the same pattern
- * `boundary.test.ts` arrived at after a formatter-wrapped import, a side-effect
- * import, a dynamic `import()` and a `require()` each slipped past a narrower
- * one.
- */
-/**
  * `.mjs` counts. `scripts/` is written in it, and a script reaching the catalog
  * breaks "sole data path in the system" exactly as a route would — scanning only
  * `.ts` there would have found no files at all and passed.
@@ -62,7 +56,15 @@ const EXECUTOR_MODULES = ['adapters/db/catalog-executor-postgres', 'catalog/regi
 const SOURCE = /\.(?:m?[jt]sx?)$/
 const IS_TEST = /\.test\.(?:m?[jt]sx?)$/
 
-const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
+/**
+ * Every module specifier, in every form that loads a module — the pattern
+ * `boundary.test.ts` arrived at after a formatter-wrapped import, a side-effect
+ * import, a dynamic `import()` and a `require()` each slipped past a narrower
+ * one, plus backticks. A template literal is idiomatic at exactly one call site,
+ * `import(...)`, and a quote-only class let it through. Raised by Argus on the
+ * integration pass.
+ */
+const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"`]([^'"`]+)['"`]/g
 
 /**
  * Comments are removed first, and string *contents* are kept.
@@ -160,6 +162,7 @@ describe('the catalog has one door', () => {
       "import {\n  createCatalogExecutor,\n} from '@/adapters/db/catalog-executor-postgres'",
     ],
     ['reaching the registry instead', "import { entryFor } from '@/catalog/registry'"],
+    ['a dynamic import written with a template literal', 'await import(`@/catalog/registry`)'],
   ])('sees %s', (_label, source) => {
     expect(reachesTheCatalog(source)).toHaveLength(1)
   })

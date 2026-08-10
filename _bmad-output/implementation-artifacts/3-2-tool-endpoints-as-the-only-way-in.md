@@ -1,5 +1,6 @@
 ---
 baseline_commit: 6b5d06a
+merge_request: 37
 ---
 
 # Story 3.2: Tool endpoints as the only way in
