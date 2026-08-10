@@ -5,7 +5,7 @@ merge_request: 39
 
 # Story 3.3: The Python service exists
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -303,7 +303,97 @@ undocumented top-level directory. Pointed at `.venv/.pytest_cache` instead — i
 ignored — rather than adding a `.gitignore` rule, because `.gitignore` carries an unrelated
 uncommitted change and a build artefact is not a good reason to entangle it.
 
-### Review Findings
+#### Local round — Argus four times, then one CodeRabbit CLI round
+
+Argus first, its finding fixed, re-run until it called the whole story clean — then the CLI round
+found **five more** on exactly that code. Ingested against `6fcb18c`.
+
+- **The credential regex missed the shapes that matter.** It anchored the PG branch to string-start
+  or underscore, so `"PG_PASSWORD": "x"` and `export POSTGRES_HOST=…` — a JSON key and a shell
+  export — both walked through. Verified as real misses by running the scanner, not by reading it.
+- **A network failure was not this client's problem, and should have been.** Only `HTTPError` was
+  caught, so `URLError` and `TimeoutError` escaped and a caller correctly handling `GatewayError`
+  still died on a network blip.
+- **`provenanceId` was coerced, not checked.** `str(None)` is `'None'` — an id that looks like one
+  and identifies nothing, on a field AD-12 makes part of what an answer means.
+- **Two guards had no test** — rows-not-a-list and the trailing-slash base URL.
+- The env-var detector moved from a regex to `ast`, so a comment mentioning `DATABASE_URL` is no
+  longer reported as a violation.
+
+**Two vacuous guards, caught by my own tests rather than by review.** The AD-3 source sweep passed
+while `watchdog_agent/` was empty; and its detector matched *call sites* while the client reads
+through a module constant, so it found nothing and passed by checking nothing. The **exhaustive**
+assertion ("reads exactly these two") caught that, not the absence one — which is the argument for
+writing both.
+
+One suggestion was declined by building **less**: a draft asserted that any transport raising
+anything became a `GatewayError`. `Transport`'s contract is to return `(status, body)`, so catching
+everything a substituted transport throws would turn a `TypeError` in a bad stub into a plausible
+network error and hide the bug.
+
+#### Merge request !39 — four rounds, and every one found something in the last one's fixes
+
+That is the pattern `_bmad/custom/review-gate.md` predicts about fix diffs, observed four times in a
+row.
+
+**Round 1 — six findings.** The two that mattered were in the security test itself:
+
+- **It would have printed credentials.** The finding carried 60 characters of the matching line, and
+  the assertion prints findings on failure — so the first time it ever fired in earnest, on a real
+  `.env`, it would have pasted the password into the terminal and any log capturing it. A security
+  test that leaks on failure only leaks when somebody is already looking. It reports a category and a
+  line number now.
+- **It missed `PGPASSWORD`.** The regex required an underscore after `PG`, and libpq's real
+  variables have none — `PGPASSWORD`, `PGUSER`, `PGHOST`. It was blind to precisely the names it
+  most needed to catch.
+
+Also: the denylist gained an **allowlist** beside it, because a list of drivers somebody thought of
+was missing `pymysql`, `pymongo`, `aioboto3` and `google-cloud-storage`; and the 3.10 floor was
+honoured with a conditional `tomli` rather than documented away.
+
+**Round 2 — five findings, and one was a hole round 1 opened.** `run-pytest.mjs` picked the first
+venv that existed and ran it, with only `test_interpreter.py` to object if that venv were 3.14 — and
+round 1 had added argument forwarding, so `npm run test:py -- -k token` deselects that test. **The
+gate could be made to report green from the exact interpreter AD-15 forbids.** The launcher now
+refuses a venv that does not match the pin, before pytest starts.
+
+Three security fixes in the transport in the same round: `GATEWAY_BASE_URL` restricted to absolute
+HTTPS (`urllib` opens `http:`, `ftp:` and `file:`, and an `http://` gateway sends the token in
+clear); `build_opener`'s default `ProxyHandler` replaced with an empty one (it reads `HTTPS_PROXY`
+from the environment); and Azure and Google credential names added, which the dependency denylist
+already covered and the name list did not.
+
+**Round 3 — four findings, and the first had been visible in every run since I wrote it.** The
+transport-failure test patched `urllib.request.urlopen` while the transport had been changed to call
+`opener.open`. The patch intercepted nothing, the test made a **real DNS lookup** to
+`nowhere.invalid`, and it passed because that failed — proving DNS behaviour rather than the wrapping
+it claims to test, and breaking the file's stated no-network guarantee.
+
+The tell was in the output the whole time: that one test took **11.10 of the suite's 11.25 seconds**,
+up from 0.2s before it existed, and "41 passed in 11.25s" was read repeatedly without anyone asking
+why a suite with no I/O took eleven seconds. Patching `OpenerDirector.open` puts it at 0.02s and the
+suite back to 0.17s.
+
+Also: the pin check only checked *agreement*, so a `.python-version` of `3.14` and a matching 3.14
+venv agreed with each other and passed — both outside AD-15's range. The pin is validated against the
+range first now, verified at both bounds. And the Windows recovery commands were not runnable in
+`cmd.exe` (`# Windows` is an argument there, `rm -rf` is not a command), while the mismatch message
+asserted the venv was 3.14 even when it was 3.12.
+
+**Round 4 — clean.** `No actionable comments were generated` over `29cfc13..da3fb2f`.
+
+**A watcher note worth keeping.** That clean review arrived as an **edit to an existing note** —
+created 21:29, updated 23:22, same id. Story 3.2's watcher keyed recency off the note id and missed
+exactly this, costing two rate-limit back-offs; the fix was applied before this round and it is why
+the review was seen at all. **The recency key for a CodeRabbit review is `updated_at`.**
+
+**One finding deliberately unresolved: the AD-3 / AD-15 contradiction.** AD-3 says the agent holds
+"exactly one secret — the model API key"; AD-15's mechanism, decided later on 2026-07-31 and marked
+*previously deferred*, requires "a shared service token held only by the agent service and the
+gateway". Both cannot be true as written. This story implements both and enforces the half they
+agree on — no database credential, connection string or storage key. Amending AD-3 is a change to the
+security contract and belongs to the project lead; CodeRabbit agreed, marking its thread unresolved
+by design. Ledgered.
 
 ### Completion Notes List
 
@@ -345,7 +435,7 @@ keeping an unrelated working change uncontaminated is worth more than belt-and-b
 
 **Gate** — `npm run lint` exit 0 (1 pre-existing warning); `npm run build` exit 0; `npm test` exit 0,
 **98 passed | 19 skipped across 117 files**, 1837 tests; `npm run test:db` exit 0, **623 + 25**;
-**`npm run test:py` exit 0, 28 passed**; `npx --no-install tsc --noEmit` **8 errors, the baseline**.
+**`npm run test:py` exit 0, 41 passed in 0.19s**; `npx --no-install tsc --noEmit` **8 errors, the baseline**.
 
 ### File List
 
@@ -370,3 +460,5 @@ keeping an unrelated working change uncontaminated is worth more than belt-and-b
 | --- | --- |
 | 2026-08-10 | Story created |
 | 2026-08-10 | Tasks 1-4 implemented test-first; pytest registered in the local gate |
+| 2026-08-10 | Local round: 4 Argus runs + 1 CodeRabbit CLI round, 6 findings, all applied |
+| 2026-08-10 | MR !39 rounds 1-3: 15 findings applied; round 4 clean; status done |
