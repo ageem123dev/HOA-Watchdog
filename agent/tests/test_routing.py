@@ -257,12 +257,35 @@ class TestAChoiceTheCatalogDoesNotAccept:
         assert gateway.executions == []
 
     def test_parameters_the_entry_rejects_surface_rather_than_being_swallowed(self) -> None:
+        """The *gateway's* refusal, not this module's.
+
+        **This test was vacuous and Argus caught it.** It supplied only
+        `unitNumber`, so `_checked_parameters` raised on the missing required
+        `assessmentYear` and the mocked gateway was never called — it asserted
+        the pre-flight check while claiming to assert error propagation, and it
+        would have passed with the propagation deleted.
+
+        Both required parameters are supplied now, with a wrong *type*. Types are
+        deliberately not checked locally (that would be a second statement of the
+        entry's schema), so this reaches the gateway, which is the point. The
+        call count is asserted, because "it raised" is not evidence of *where*.
+        """
         gateway = ScriptedGateway(
             execute_status=400, execute_body={"code": "invalid_parameters", "message": "no"}
         )
+        wrong_type = {"unitNumber": 4, "assessmentYear": 2026}
 
         with pytest.raises(InvalidRequest):
-            _route(chooser_returning(ToolChoice("dues_status", {"unitNumber": 4})), gateway)
+            _route(chooser_returning(ToolChoice("dues_status", wrong_type)), gateway)
+
+        assert gateway.executions == [
+            {
+                "entryId": "dues_status",
+                "version": 1,
+                "parameters": wrong_type,
+                "actorId": ACTOR,
+            }
+        ]
 
     def test_a_missing_required_parameter_is_refused_before_the_round_trip(self) -> None:
         gateway = ScriptedGateway()
