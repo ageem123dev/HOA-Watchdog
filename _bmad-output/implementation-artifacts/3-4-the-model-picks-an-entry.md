@@ -5,7 +5,7 @@ merge_request: 41
 
 # Story 3.4: The model picks an entry
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -426,7 +426,58 @@ untouched — and the registry's readers are named file by file rather than glob
 
 ## Review Findings
 
-_To be filled by the review._
+**Argus, three rounds before the CLI round.**
+
+- *Round 1, high.* `environment_variables_read_by` filtered candidate names through a regex requiring
+  an underscore. libpq's variables — `PGPASSWORD`, `PGUSER`, `PGHOST` — have none, and
+  `FORBIDDEN_NAME` was widened on MR !39 precisely to catch them, so the guard had been blind to
+  exactly those names since that fix landed. Proved by running the detector: the forbidden regex
+  matches `PGPASSWORD` and the detector returned an empty set for source reading it.
+- *Round 1, medium and low.* A blank `REASONING_MODEL=""` fell through to the default because `""` is
+  falsy — the parametrized blank test covered `"   "` and not `""`. A GET carried `data=b""` rather
+  than `None`, attaching a `Content-Length: 0` some servers refuse.
+- *Round 2, medium.* `test_parameters_the_entry_rejects_surface_rather_than_being_swallowed` omitted a
+  required parameter, so the pre-flight check raised and the mocked gateway was never called. It
+  asserted the pre-flight check while claiming to assert propagation, and would have passed with the
+  propagation deleted.
+- *Round 3 (on the CLI fix diff), high.* The schema deep-copy separated the view from the decoded
+  payload but left `declarations_for` assigning by reference, so the declaration and the view stayed
+  one dict — precisely the pair the copy existed to separate. **The fix did not fix the thing it was
+  written for.**
+
+**CodeRabbit CLI — 8 findings, 30 of 30 changed files reviewed.** Ingested against `1fbe206` before
+any fix; Argus missed both majors. The major that mattered was a consequence of the `call_gateway`
+extraction two commits earlier: sharing it with the catalog request widened `_STATUS_ERRORS`, so a
+404 from an undeployed catalog route would have reported "the catalog holds no such entry". Also: a
+private symbol imported across modules, `Bearer a b` rejoined into a token, the schema shared by
+reference, a misleading test name, and duplicated opener-capture setup.
+
+Two skipped with reasons: caching the LLM per process (a global whose invalidation nothing has
+needed, and no caller until 3.6), and bumping CrewAI to 1.15.12 (the spine's Stack table pins
+1.15.8 — a spine amendment, not a story's call).
+
+**MR !41 round 1 — 6 findings, one major.**
+
+- *Major, and the only finding in the story that could have produced a wrong financial answer.* The
+  entry's description said payments were made "toward" the assessment year; the SQL counts payments
+  whose `paid_on` falls *within* it. The entry's own header documents that limitation and the
+  sentence the model chooses on contradicted it, so a question about which assessment a payment
+  settled would have selected this entry and been answered confidently and wrongly.
+- `required` was never validated, and `_checked_parameters` reads it as a set — a bare string would
+  make every character report as a missing parameter, and a non-iterable would raise `TypeError`.
+- `MalformedCatalog` hardcoded `status=200` while `fetch_catalog` discarded the real one, against
+  `call_gateway`'s own docstring warning about exactly that.
+- `test_nothing_is_executed_by_calling_a_tool` stated a precondition the fixture never established.
+- `route.test.ts` stubbed the token to `''` for "no token configured at all", duplicating the blank
+  case and never exercising `verifyServiceToken(..., undefined)`.
+- A fenced block with no language.
+
+**MR !41 round 2 — clean.** `No actionable comments were generated` over `1c1a3fa..a5997eb`, and
+CodeRabbit resolved all threads.
+
+**A process note.** One `argus_review` returned SUCCESS with neither structured output nor prose. That
+is a provider failure, not a clean review, and it was retried rather than recorded as zero findings —
+the same false-clean the CodeRabbit loop refuses for a skipped review or an empty stream.
 
 ## Change Log
 
@@ -434,3 +485,4 @@ _To be filled by the review._
 | --- | --- |
 | 2026-08-10 | Story created. Baselined on `b873e6f`, the merge of the AD-3/AD-10 amendments this story is the first to depend on. |
 | 2026-08-10 | Implemented test-first across seven tasks. **AC4 amended** — CrewAI 1.15.8's Gemini provider cannot express `mode = ANY`, so forced tool use is enforced in `route_question` instead. Status → review. |
+| 2026-08-11 | Three Argus rounds, one CodeRabbit CLI round (8 findings) and two MR rounds (6 then clean). Status → done, meaning ready-to-merge on an unmerged branch. |
