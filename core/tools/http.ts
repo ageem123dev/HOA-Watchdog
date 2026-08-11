@@ -36,6 +36,13 @@ export function bearerToken(request: Request): string | null {
   const [scheme, ...rest] = header.trim().split(/\s+/)
   if (scheme?.toLowerCase() !== 'bearer') return null
 
-  const value = rest.join(' ')
+  // Exactly one credential field. `rest.join(' ')` accepted `Bearer a b` and
+  // handed `"a b"` on as a token — no bearer credential contains whitespace, so
+  // that is malformed input being repaired rather than refused, and repairing
+  // malformed auth input is how a parser and a validator come to disagree about
+  // what was presented. Raised by CodeRabbit.
+  if (rest.length !== 1) return null
+
+  const value = rest[0] ?? ''
   return value === '' ? null : value
 }

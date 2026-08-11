@@ -24,6 +24,7 @@ next to the code handing declarations to a model.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -137,7 +138,14 @@ def _view_of(raw_entry: object) -> CatalogEntryView:
         id=entry_id,
         version=version,
         description=description,
-        parameters=_schema_of(entry_id, raw_entry["parameters"]),
+        # Deep-copied, so the view, the decoded payload and the declaration handed
+        # to the model are not three names for one dict. The declaration goes to
+        # CrewAI, which is third-party code this module does not control, and the
+        # same object is what `_checked_parameters` later validates the model's
+        # arguments against. A provider that normalised a schema in place would
+        # move the goalposts between the question and the check. Raised by
+        # CodeRabbit.
+        parameters=deepcopy(_schema_of(entry_id, raw_entry["parameters"])),
     )
 
 

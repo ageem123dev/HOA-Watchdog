@@ -64,6 +64,19 @@ describe('who may ask what the catalog holds', () => {
     expect((await call({ token: 'not-the-token' })).status).toBe(401)
   })
 
+  it('refuses a credential carrying whitespace', async () => {
+    // `Bearer a b` used to be rejoined into the token `"a b"`. No bearer
+    // credential contains whitespace, so that was malformed input being repaired
+    // rather than refused. Raised by CodeRabbit.
+    const response = await GET(
+      new Request('https://gateway.example/tools/v1/catalog', {
+        headers: { authorization: `Bearer ${TOKEN} extra` },
+      }),
+    )
+
+    expect(response.status).toBe(401)
+  })
+
   it('refuses a non-Bearer scheme carrying the right token', async () => {
     // Telling "wrong scheme" apart from "wrong token" tells a stranger how to
     // try again.

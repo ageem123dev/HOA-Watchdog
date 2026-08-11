@@ -85,7 +85,7 @@ class CatalogExecution:
     rows: list[dict[str, Any]]
 
 
-def _required(variable: str) -> str:
+def require_environment(variable: str) -> str:
     value = os.environ.get(variable)
     if value is None or value.strip() == "":
         raise MisconfiguredAgent(
@@ -93,6 +93,12 @@ def _required(variable: str) -> str:
             "and deliberately does not try."
         )
     return value
+
+
+#: Kept so this module's own callers read unchanged. `model.py` imports the
+#: public name; a second module reaching for an underscore-prefixed symbol is a
+#: sign the symbol was never really private. Raised by CodeRabbit.
+_required = require_environment
 
 
 class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
@@ -173,8 +179,19 @@ def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str)
 _STATUS_ERRORS: dict[int, Callable[..., GatewayError]] = {
     400: InvalidRequest,
     401: GatewayAuthError,
-    404: CatalogEntryNotFound,
 }
+
+#: The envelope code that means "the catalog holds no such entry or version".
+#:
+#: **Keyed on the code, not on 404.** This map served one endpoint until story
+#: 3.4 shared `call_gateway` with the catalog request, and widening its blast
+#: radius is exactly what that refactor did: a 404 from `GET /tools/v1/catalog`
+#: — an undeployed route, a stale path in `GATEWAY_BASE_URL`, a proxy answering
+#: for something else — would have surfaced as `CatalogEntryNotFound`, telling
+#: the reader the catalog holds no such entry when the truth is that the catalog
+#: endpoint is not there. A diagnostic that misdescribes the problem sends
+#: whoever reads it somewhere else. Raised by CodeRabbit on the local round.
+ENTRY_NOT_FOUND_CODE = "unknown_entry"
 
 
 def call_gateway(
@@ -223,7 +240,12 @@ def call_gateway(
 
     if status < 200 or status >= 300:
         code = payload.get("code") if isinstance(payload, dict) else None
-        raise _STATUS_ERRORS.get(status, GatewayError)(
+        error = (
+            CatalogEntryNotFound
+            if code == ENTRY_NOT_FOUND_CODE
+            else _STATUS_ERRORS.get(status, GatewayError)
+        )
+        raise error(
             f"{refusal} with {status}",
             status=status,
             code=code if isinstance(code, str) else None,

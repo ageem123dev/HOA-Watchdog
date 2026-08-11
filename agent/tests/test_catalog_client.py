@@ -27,7 +27,12 @@ from watchdog_agent.catalog_client import (
     declarations_for,
     fetch_catalog,
 )
-from watchdog_agent.tools_client import GatewayAuthError, GatewayError, MisconfiguredAgent
+from watchdog_agent.tools_client import (
+    CatalogEntryNotFound,
+    GatewayAuthError,
+    GatewayError,
+    MisconfiguredAgent,
+)
 
 TOKEN = "r7Qx-4kP9mVt2LbN8sYw0aZc"
 BASE = "https://gateway.internal"
@@ -129,11 +134,31 @@ class TestARefusalIsNeverAnEmptyCatalog:
             fetch_catalog(transport=transport)
 
     @pytest.mark.parametrize("status", [400, 403, 404, 500, 502, 503])
-    def test_no_error_status_becomes_an_empty_catalog(self, status: int) -> None:
+    def test_every_error_status_raises_rather_than_returning_a_catalog(
+        self, status: int
+    ) -> None:
         transport = RecordingTransport(status, {"code": "x", "message": "y"})
 
         with pytest.raises(GatewayError):
             fetch_catalog(transport=transport)
+
+    def test_a_404_here_is_not_reported_as_a_missing_catalog_entry(self) -> None:
+        """A 404 on *this* path means the endpoint is not there.
+
+        `_STATUS_ERRORS` mapped 404 to `CatalogEntryNotFound`, which was right
+        while `execute` was its only caller. Sharing `call_gateway` with the
+        catalog request widened that: an undeployed route, a stale path in
+        `GATEWAY_BASE_URL` or a proxy answering for something else would have
+        told the reader the catalog holds no such entry, when the truth is the
+        catalog endpoint is missing. Raised by CodeRabbit on the local round.
+        """
+        transport = RecordingTransport(404, {"code": "not_found", "message": "no route"})
+
+        with pytest.raises(GatewayError) as raised:
+            fetch_catalog(transport=transport)
+
+        assert not isinstance(raised.value, CatalogEntryNotFound)
+        assert raised.value.status == 404
 
     def test_a_non_json_body_raises(self) -> None:
         transport = RecordingTransport(200, None, raw="<html>hello</html>")

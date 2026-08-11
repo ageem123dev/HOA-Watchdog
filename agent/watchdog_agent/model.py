@@ -33,10 +33,11 @@ credential.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .routing import ToolChoice
-from .tools_client import MisconfiguredAgent, _required
+from .tools_client import MisconfiguredAgent, require_environment
 
 #: The reasoning credential. Deliberately not `GEMINI_API_KEY`, which belongs to
 #: extraction, and deliberately not `GOOGLE_API_KEY`, which CrewAI would prefer
@@ -57,9 +58,7 @@ PROVIDER = "gemini"
 
 def reasoning_llm(model: str | None = None) -> Any:
     """The configured model client, with its key passed rather than discovered."""
-    api_key = _required(API_KEY_VARIABLE)
-
-    import os
+    api_key = require_environment(API_KEY_VARIABLE)
 
     # `or` chaining would defeat the blank check below: an explicitly empty
     # `REASONING_MODEL=""` is falsy, so it would fall through to the default and
