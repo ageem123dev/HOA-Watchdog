@@ -62,6 +62,36 @@ describe('what is a numeral', () => {
     ])
   })
 
+  /**
+   * A decimal written with a bare leading dot.
+   *
+   * Raised by Argus as a false *acceptance*. It is not one: the old regex
+   * matched `50` inside `$.50`, so a hallucinated figure was still refused, just
+   * reported under the wrong token. What it actually broke is a **true** answer
+   * citing `$.50` for a row carrying `0.50` — read as `50`, and rejected. The
+   * consequence was checked by running the old pattern; the finding was real and
+   * its stated direction was not.
+   */
+  it.each([
+    ['a bare leading dot', 'a fee of .5 percent', ['.5']],
+    ['a currency amount with a leading dot', 'rounded to $.50', ['$.50']],
+  ])('finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  /**
+   * The over-strict cliff again, in shapes the first version missed: a hyphen
+   * with a *letter* on the far side is part of a name, not a minus sign, and a
+   * slash between digits is a date separator.
+   */
+  it.each([
+    ['a hyphenated identifier', 'the entry unit-07-summary'],
+    ['a lettered unit written with a hyphen', 'unit 07-B'],
+    ['a slash date', 'due 2026/07/01'],
+  ])('does not treat %s as a numeral', (_label, text) => {
+    expect(numeralsIn(text)).toEqual([])
+  })
+
   it('reports where each numeral was, so a rejection can name it precisely', () => {
     const [first] = numeralsIn('owes 1240')
 

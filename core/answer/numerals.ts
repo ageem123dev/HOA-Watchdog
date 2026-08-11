@@ -54,8 +54,20 @@ export interface Numeral {
  * where the surrounding characters decide. Splitting it this way keeps "what a
  * number looks like" and "what makes it an identifier" as two rules that can be
  * read and tested separately.
+ *
+ * **The `|\.\d+` alternative, and what missing it actually did.** The first
+ * version required a leading digit. Argus raised it as a false *acceptance* —
+ * a numeral the tokenizer never sees being one the validator never checks — and
+ * that reading is wrong, which was worth establishing before writing it down:
+ * `-?\$?\d[\d,]*…` matches `50` inside `$.50`, so a *hallucinated* `$.50` was
+ * still refused, just reported as `50`.
+ *
+ * The real defect ran the other way. A **true** answer citing `$.50` against a
+ * row carrying `0.50` was read as `50`, valued at 5000 minor units, and rejected
+ * — a false rejection, which is the quiet cliff that gets a guard switched off.
+ * Verified by running the old regex rather than by reading it.
  */
-const CANDIDATE = /-?\$?\d[\d,]*(?:\.\d+)?%?/g
+const CANDIDATE = /-?\$?(?:\d[\d,]*(?:\.\d+)?|\.\d+)%?/g
 
 /** A character that, adjacent to digits, means the run is part of a name. */
 const IDENTIFIER_CHARACTER = /[A-Za-z0-9_@]/
@@ -84,6 +96,15 @@ function isQuantity(text: string, start: number, token: string): boolean {
   if (before !== undefined && IDENTIFIER_CHARACTER.test(before)) return false
   if (after !== undefined && IDENTIFIER_CHARACTER.test(after)) return false
 
+  // `07-B`. A hyphen with a *letter* on the far side is part of a name, not a
+  // minus sign — the separator rule below only looks for digits, so this shape
+  // walked through it. Note that `unit-07-summary` was already excluded, but for
+  // an accidental reason: the leading `-` in `CANDIDATE` is optional, so the
+  // match starts at the hyphen and puts a letter adjacent to it. Relying on that
+  // is relying on a regex detail, so the rule is stated here too.
+  if (after === '-' && /[A-Za-z]/.test(text[start + token.length + 1] ?? '')) return false
+  if (before === '-' && /[A-Za-z]/.test(text[start - 2] ?? '')) return false
+
   // `2026-07-01`, `018f3a2b-0000-…` and the `09:30:00` half of a timestamp.
   //
   // A hyphen is a minus sign between a space and a digit, and a *separator*
@@ -92,7 +113,9 @@ function isQuantity(text: string, start: number, token: string): boolean {
   // missed: the date half of an ISO timestamp was excluded by its hyphens while
   // the time half walked straight through, so `2026-07-01T09:30:00Z` yielded
   // `30` and `00` as quantities.
-  const separators = ['-', ':']
+  // `/` too: `2026/07/01` is a date a person would write, and splitting it into
+  // three quantities rejects an answer that was true. Raised by Argus.
+  const separators = ['-', ':', '/']
   if (separators.includes(before ?? '') && /\d/.test(text[start - 2] ?? '')) return false
   if (separators.includes(after ?? '') && /\d/.test(text[start + token.length + 1] ?? '')) {
     return false
@@ -115,7 +138,10 @@ function isQuantity(text: string, start: number, token: string): boolean {
  * it as one would let a fabricated figure match by rounding.
  */
 export function valueOf(numeral: string): number {
-  const bare = numeral.replace(/[$,%]/g, '')
+  // A bare leading dot is a spelling of the same value, so it is normalized
+  // rather than rejected — `.5` is `0.5`. `toMinorUnits` requires the digit and
+  // is right to: it parses stored amounts, which never arrive that way.
+  const bare = numeral.replace(/[$,%]/g, '').replace(/^(-?)\./, '$10.')
 
   if (!/^-?\d+(?:\.\d+)?$/.test(bare)) {
     throw new TypeError(`not a numeral: ${JSON.stringify(numeral.slice(0, 40))}`)

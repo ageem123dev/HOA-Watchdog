@@ -113,9 +113,34 @@ describe('an answer carrying a number the rows do not', () => {
     expect(rejection?.numeral).toBe('$500.00')
   })
 
+  it('rejects a hallucinated amount written with a leading dot', () => {
+    expect(accept('Unit 4B owes $.50.')).not.toBeNull()
+    expect(accept('A fee of .5 percent applies.')).not.toBeNull()
+  })
+
   it('rejects an answer whose numbers are right but whose rows are empty', () => {
     // The state where a model answers from its own memory of an earlier turn.
     expect(validateAnswer('Unit 4B owes $240.00.', [])).not.toBeNull()
+  })
+})
+
+describe('a leading dot is a spelling, not a different number', () => {
+  /**
+   * The regression that actually existed, asserted where it bites.
+   *
+   * The tokenizer once required a leading digit, so `$.50` was read as `50` —
+   * 5000 minor units — and a **true** answer citing it against a row carrying
+   * `0.50` was rejected. Argus raised the gap as a false acceptance; checking
+   * the old pattern showed the opposite, and a false rejection is the cliff that
+   * gets a guard switched off rather than fixed.
+   *
+   * This test discriminates the fix. The hallucination case above does not: it
+   * passes either way, because the old tokenizer still found `50` and still
+   * refused it.
+   */
+  it('accepts a true answer written with a bare leading dot', () => {
+    expect(validateAnswer('A fee of $.50 applies.', [{ fee: '0.50' }])).toBeNull()
+    expect(validateAnswer('A fee of .5 percent applies.', [{ rate: '0.50' }])).toBeNull()
   })
 })
 
