@@ -67,6 +67,7 @@ NFR-5: Query provenance. Every catalog execution permanently logs user id, times
 - Ingestion idempotent on document content hash; alerts keyed on `(finding_type, subject_id, period)` so reprocessing is a no-op. (AD-13)
 - Catalog entry versions immutable once used in production; changing SQL mints a new version. CI diff check required. (AD-14)
 - Versioned `/tools/*` endpoints are the sole data path and must reject any non-agent caller. Auth mechanism undecided. (AD-15)
+- The Node→agent chat turn goes over versioned `/chat/v*` endpoints carrying a question and an answer only — never rows, never SQL, never a caller-supplied entry id — under a service token distinct from the agent's. (AD-17, decided 2026-08-11)
 - Python service pins 3.13 — CrewAI `requires_python` is `<3.14,>=3.10`, and the ambient interpreter is 3.14.
 - Test harnesses: Vitest (Node/Next) and pytest (Python 3.13). Both run in CI alongside lint and build.
 - Deferred and explicitly out of scope: multi-tenancy, retention/deletion policy, backup and recovery posture.
