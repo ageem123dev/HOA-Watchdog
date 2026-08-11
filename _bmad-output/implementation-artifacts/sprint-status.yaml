@@ -91,7 +91,7 @@ development_status:
   # Introduces Python. MUST add pytest to the local gate in this story -- a
   # package.json script AND the "Tested =" line in bmad-ship-story. There is no
   # CI, so forgetting it ships a second language with no automated check at all.
-  3-3-the-python-service-exists: backlog
+  3-3-the-python-service-exists: done
   3-4-the-model-picks-an-entry: backlog
   # AD-7. Must exist BEFORE the first answer renders (3.6), or that story ships
   # precisely the failure this product exists to prevent.
@@ -184,3 +184,8 @@ action_items:
     action: "AD-14's freeze is anchored in-repo: catalog/published-versions.json is read from the same checkout as the entry it pins, so one commit can change both and the tests still pass. Raised by CodeRabbit on MR !35, which proposed protected GitLab releases or a signed external manifest consumed by CI. Declined for story 3.1 - the mechanism needs CI, removed 2026-08-07 for cost, and externalising the anchor is a new AD rather than a story fix. The pilot's threat model is an honest team plus review, and the committed digest is what puts a change in the diff. Revisit with the CI action item."
     owner: "Matt"
     status: open
+  - epic: 3
+    action: "ARCHITECTURE DECISION for Matt: AD-3 and AD-15 contradict each other on how many secrets the agent service holds. AD-3 says 'exactly one secret - the model API key'; AD-15's mechanism, decided later on 2026-07-31 and marked previously-deferred, requires 'a shared service token held only by the agent service and the gateway'. Story 3.3 implements both - the token is required and no data credential is permitted - but the spine's wording is self-contradictory. Defensible fix: amend AD-3 to 'one model credential and the gateway service token, and never a data credential'. Raised by CodeRabbit on MR !39 and left unresolved because amending an invariant is not a story's to make."
+    owner: "Matt"
+    status: open
+
