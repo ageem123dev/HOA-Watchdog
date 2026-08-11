@@ -1,5 +1,6 @@
 ---
 baseline_commit: b873e6f
+merge_request: 41
 ---
 
 # Story 3.4: The model picks an entry
