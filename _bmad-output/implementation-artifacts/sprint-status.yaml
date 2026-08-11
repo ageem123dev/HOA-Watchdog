@@ -96,7 +96,12 @@ development_status:
   # AD-7. Must exist BEFORE the first answer renders (3.6), or that story ships
   # precisely the failure this product exists to prevent.
   3-5-the-numeric-validator: done
-  3-6-ask-and-answer: backlog
+  # Split 2026-08-11. Story 3.6 as written meant a Python HTTP server, a Node
+  # client for it, and three UX requirements — more than 1.5d, which drew five
+  # review rounds at 27 files. 3.6a proves a question round-trips; 3.6b builds
+  # the surface on it. Blocked until AD-17 (the Node->agent wire) is approved.
+  3-6a-the-chat-turn-crosses-the-wire: backlog
+  3-6b-ask-and-answer: backlog
   3-7-when-it-cannot-answer: backlog
   3-8-the-access-log: backlog
   epic-3-retrospective: optional

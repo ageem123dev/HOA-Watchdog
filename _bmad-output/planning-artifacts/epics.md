@@ -812,9 +812,17 @@ That is a known gap, recorded rather than glossed.
 | 3.3 | The Python service exists | AD-3, **pytest in CI** | A second runtime holding only the model key, obtaining facts by calling Node |
 | 3.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
 | 3.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
-| 3.6 | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
+| 3.6a | The chat turn crosses the wire | AD-17 | A question reaches the agent service and an answer comes back, with nothing rendered yet |
+| 3.6b | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
 | 3.7 | When it cannot answer | UX-DR17, 18 | No-catalog-match and service-unavailable as distinct, honest states |
 | 3.8 | The access log | NFR-5, UX-DR16 | Who asked what, when — the provenance record given a reader |
+
+**Story 3.6 split, 2026-08-11.** As written it meant three things: an HTTP server in the Python
+service, a Node client for it, and the three UX requirements. The agent service is a *library* —
+`agent/watchdog_agent/` has no entrypoint and no server — and no Node→agent call path exists
+anywhere, so the spine's `NEXT -->|chat turn| PY` edge is undrawn. AD-15 governs the other direction
+only. That is a wire and a surface, not one story, and the wire needs an architecture decision
+(**AD-17**) before either can start.
 
 **Why eight and not four.** Epic 1's evidence. Story 1.5 was split into four mid-flight and 1.6 into
 four before implementation; the pre-split epic went materially better. Story 1.5d at 27 files drew
