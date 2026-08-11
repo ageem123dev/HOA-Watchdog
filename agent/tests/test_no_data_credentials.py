@@ -31,6 +31,7 @@ somebody needs one number in a hurry it is already there.
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -157,14 +158,30 @@ def committed_config_files() -> list[Path]:
     it would make this test read the whole of pip's output and find `botocore`
     in some transitive dependency's metadata. Dependencies are checked from the
     declaration instead, which is the thing a reviewer can actually see.
+
+    **The walk prunes rather than filters, and story 3.4 is why.** The first
+    version was `AGENT_ROOT.rglob("*")` with a `.venv in path.parts` check on
+    each result: correct, and it still enumerated every file in the virtualenv
+    before discarding it. Installing CrewAI put roughly thirty thousand files
+    there and took this pair of tests from ~0.01s to **3.6s of the suite's 4.0s**
+    — the same shape of signal story 3.3 spent two review rounds not reading,
+    and a cost that only grows. `os.walk` lets the directories be dropped before
+    they are descended into.
     """
     interesting = {".toml", ".env", ".ini", ".cfg", ".json", ".yaml", ".yml"}
+    pruned = {".venv", "__pycache__"}
     found = []
-    for path in AGENT_ROOT.rglob("*"):
-        if ".venv" in path.parts or "__pycache__" in path.parts:
-            continue
-        if path.is_file() and (path.suffix in interesting or path.name.startswith(".env")):
-            found.append(path)
+
+    for directory, subdirectories, filenames in os.walk(AGENT_ROOT):
+        # In place, because `os.walk` reads this list to decide where to go next.
+        # Rebinding the name would prune nothing.
+        subdirectories[:] = [name for name in subdirectories if name not in pruned]
+
+        for filename in filenames:
+            path = Path(directory) / filename
+            if path.suffix in interesting or path.name.startswith(".env"):
+                found.append(path)
+
     return found
 
 

@@ -168,6 +168,61 @@ _STATUS_ERRORS: dict[int, Callable[..., GatewayError]] = {
 }
 
 
+def call_gateway(
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+    transport: Transport | None = None,
+    refusal: str = "the gateway refused the request",
+) -> tuple[int, Any]:
+    """Present the token, call one `/tools/*` path, and return the decoded body.
+
+    Everything both callers do identically, in one place: require the
+    configuration *before* opening anything, insist on TLS, and turn any non-2xx
+    into the right `GatewayError` subclass rather than into a plausible-looking
+    empty answer.
+
+    Returns the status alongside the decoded body. The status is carried rather
+    than assumed: a caller that hardcoded `200` would misreport a `204` or `201`
+    in the error it raises next, and an error that misdescribes what happened
+    sends the reader somewhere else — the same fault the venv-mismatch message
+    had on MR !39.
+
+    Extracted when story 3.4 added a second caller. Two copies of this is how one
+    of them grows a `try` that swallows a 401 — and "you are not authorised"
+    becoming "there is nothing here" is the failure this client exists to
+    prevent.
+    """
+    token = _required(TOKEN_VARIABLE)
+    base_url = _required(GATEWAY_VARIABLE)
+    _require_https(base_url)
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+
+    send = transport or _urllib_transport
+    status, raw = send(
+        method,
+        f"{base_url.rstrip('/')}{path}",
+        headers,
+        "" if body is None else json.dumps(body),
+    )
+
+    payload = _decode(raw)
+
+    if status < 200 or status >= 300:
+        code = payload.get("code") if isinstance(payload, dict) else None
+        raise _STATUS_ERRORS.get(status, GatewayError)(
+            f"{refusal} with {status}",
+            status=status,
+            code=code if isinstance(code, str) else None,
+        )
+
+    return status, payload
+
+
 def execute_catalog_entry(
     *,
     entry_id: str,
@@ -182,34 +237,17 @@ def execute_catalog_entry(
     configured, and a `GatewayError` subclass for every response that is not a
     well-formed success.
     """
-    token = _required(TOKEN_VARIABLE)
-    base_url = _required(GATEWAY_VARIABLE)
-    _require_https(base_url)
-
-    send = transport or _urllib_transport
-    status, raw = send(
+    status, payload = call_gateway(
         "POST",
-        f"{base_url.rstrip('/')}{TOOL_PATH}",
-        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json.dumps(
-            {
-                "entryId": entry_id,
-                "version": version,
-                "parameters": parameters,
-                "actorId": actor_id,
-            }
-        ),
+        TOOL_PATH,
+        body={
+            "entryId": entry_id,
+            "version": version,
+            "parameters": parameters,
+            "actorId": actor_id,
+        },
+        transport=transport,
     )
-
-    payload = _decode(raw)
-
-    if status < 200 or status >= 300:
-        code = payload.get("code") if isinstance(payload, dict) else None
-        raise _STATUS_ERRORS.get(status, GatewayError)(
-            f"the gateway refused the request with {status}",
-            status=status,
-            code=code if isinstance(code, str) else None,
-        )
 
     if not isinstance(payload, dict):
         raise GatewayError("the gateway returned a success that was not an object", status=status)
