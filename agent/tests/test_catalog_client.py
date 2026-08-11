@@ -166,6 +166,22 @@ class TestARefusalIsNeverAnEmptyCatalog:
         with pytest.raises(GatewayError):
             fetch_catalog(transport=transport)
 
+    def test_a_2xx_that_is_not_200_reports_the_status_it_actually_got(self) -> None:
+        """MalformedCatalog hardcoded 200 and fetch_catalog discarded the real one.
+
+        A 204 with an empty body decodes to None and surfaced as "not an object"
+        carrying a status the gateway never sent. `call_gateway` returns the
+        status for exactly this reason — its own docstring says a caller that
+        assumes 200 misreports a 204, and this module was that caller. Raised by
+        CodeRabbit on MR !41.
+        """
+        transport = RecordingTransport(204, None, raw="")
+
+        with pytest.raises(MalformedCatalog) as raised:
+            fetch_catalog(transport=transport)
+
+        assert raised.value.status == 204
+
     def test_a_success_with_no_entries_key_raises(self) -> None:
         transport = RecordingTransport(200, {"catalog": []})
 
@@ -205,6 +221,34 @@ class TestAMalformedEntry:
     def test_parameters_that_are_not_an_object_schema_raises(self) -> None:
         with pytest.raises(MalformedCatalog, match="parameters"):
             fetch_catalog(transport=_ok({**ENTRY, "parameters": {"type": "array"}}))
+
+    @pytest.mark.parametrize("required", ["unitNumber", 1, {"a": 1}, ["unitNumber", 2]])
+    def test_a_required_list_that_is_not_a_list_of_names_raises(self, required: object) -> None:
+        """`set("unitNumber")` is a set of *letters*.
+
+        `routing._checked_parameters` reads `required` as a set. A bare string is
+        iterable, so every character would report as a missing parameter and
+        every call to the entry would fail with a nonsensical error; a
+        non-iterable raises TypeError from inside a function no caller expects to
+        raise one. Refused at the boundary, where the message can name the entry.
+        Raised by CodeRabbit on MR !41.
+        """
+        schema = {**ENTRY["parameters"], "required": required}
+
+        with pytest.raises(MalformedCatalog, match="required"):
+            fetch_catalog(transport=_ok({**ENTRY, "parameters": schema}))
+
+    def test_requiring_a_parameter_it_does_not_declare_raises(self) -> None:
+        """A required name with no declaration can never be supplied.
+
+        The model is shown `properties` and told which are required; a `required`
+        naming something absent from `properties` makes every call fail the
+        pre-flight check with no way for the model to comply.
+        """
+        schema = {**ENTRY["parameters"], "required": ["unitNumber", "ghostParameter"]}
+
+        with pytest.raises(MalformedCatalog, match="ghostParameter"):
+            fetch_catalog(transport=_ok({**ENTRY, "parameters": schema}))
 
     def test_a_schema_that_permits_undeclared_properties_raises(self) -> None:
         """The Consistency Conventions: "A tool without both is not registered."

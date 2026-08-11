@@ -46,8 +46,13 @@ class MalformedCatalog(GatewayError):
     exception type at the one moment it is trying to fail gracefully.
     """
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, status=200)
+    def __init__(self, message: str, *, status: int = 200) -> None:
+        # The observed status, not an assumption. `call_gateway` returns it for
+        # exactly this reason, and its docstring says a caller that hardcodes 200
+        # would misreport a 204 or 201 — this module was that caller. A 204 with
+        # an empty body decodes to None and surfaced as "not an object" with a
+        # status the gateway never sent. Raised by CodeRabbit on MR !41.
+        super().__init__(message, status=status)
 
 
 @dataclass(frozen=True)
@@ -73,7 +78,7 @@ def fetch_catalog(*, transport: Transport | None = None) -> list[CatalogEntryVie
     configured, and a ``GatewayError`` subclass for anything that is not a
     well-formed catalog.
     """
-    _, payload = call_gateway(
+    status, payload = call_gateway(
         "GET",
         CATALOG_PATH,
         transport=transport,
@@ -81,11 +86,16 @@ def fetch_catalog(*, transport: Transport | None = None) -> list[CatalogEntryVie
     )
 
     if not isinstance(payload, dict):
-        raise MalformedCatalog("the gateway returned a catalog that was not an object")
+        raise MalformedCatalog(
+            f"the gateway returned a catalog that was not an object (status {status})",
+            status=status,
+        )
 
     entries = payload.get("entries")
     if not isinstance(entries, list):
-        raise MalformedCatalog("the gateway returned a catalog with no entries list")
+        raise MalformedCatalog(
+            "the gateway returned a catalog with no entries list", status=status
+        )
 
     # An empty catalog is a broken deployment, not a valid state: there is at
     # least one entry in the repository, so nothing here means the gateway is
@@ -158,6 +168,24 @@ def _schema_of(entry_id: str, parameters: object) -> dict[str, Any]:
 
     if not isinstance(parameters.get("properties"), dict):
         raise MalformedCatalog(f"{entry_id} has parameters with no properties object")
+
+    # `routing._checked_parameters` reads this as `set(...)`. A bare string
+    # `"unitNumber"` is iterable, so `set()` yields its *characters* and every
+    # letter reports as a missing parameter; a non-iterable raises TypeError from
+    # inside a function no caller expects to raise one. This module exists to
+    # refuse a malformed catalog at the boundary, where the diagnostic can still
+    # name the entry. Raised by CodeRabbit on MR !41.
+    required = parameters.get("required", [])
+    if not isinstance(required, list) or not all(isinstance(name, str) for name in required):
+        raise MalformedCatalog(
+            f"{entry_id} has a required list that is not a list of parameter names"
+        )
+
+    undeclared = sorted(set(required) - set(parameters["properties"]))
+    if undeclared:
+        raise MalformedCatalog(
+            f"{entry_id} requires {', '.join(undeclared)}, which it does not declare"
+        )
 
     # The Consistency Conventions: "Every agent-facing tool declares `strict:
     # true` and `additionalProperties: false`. A tool without both is not

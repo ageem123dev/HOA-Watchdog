@@ -48,7 +48,21 @@ DECLARATION = {
 @pytest.fixture(autouse=True)
 def _no_ambient_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test states its own environment. None inherits the developer's."""
-    for variable in (API_KEY_VARIABLE, MODEL_VARIABLE, "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+    for variable in (
+        API_KEY_VARIABLE,
+        MODEL_VARIABLE,
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        # The gateway pair too. `test_nothing_is_executed_by_calling_a_tool`
+        # claims no execution can happen because these are unset — and the
+        # fixture did not unset them, so on a developer machine that exports
+        # them the stated precondition was simply false and the test would have
+        # passed even if a tool call had reached the gateway. A guard that
+        # depends on an ambient environment is not a guard. Raised by CodeRabbit
+        # on MR !41.
+        "AGENT_SERVICE_TOKEN",
+        "GATEWAY_BASE_URL",
+    ):
         monkeypatch.delenv(variable, raising=False)
 
     # AC8 — "no test in agent/tests/ makes a network call" — made true rather

@@ -86,8 +86,16 @@ describe('who may ask what the catalog holds', () => {
   it('fails closed when no token is configured at all', async () => {
     // The state where the endpoint is most exposed and least watched. An absent
     // secret must not read as "nothing to check".
-    vi.stubEnv('AGENT_SERVICE_TOKEN', '')
+    //
+    // `undefined`, not `''`. Stubbing an empty string duplicated the blank-token
+    // case below and never exercised `verifyServiceToken(..., undefined)`, which
+    // is the shape an unset variable actually produces. Raised by CodeRabbit.
+    vi.stubEnv('AGENT_SERVICE_TOKEN', undefined)
 
+    // Asserted, because Vitest 4 has a reported regression where stubbing
+    // `undefined` fails to delete. If that ever regresses here, this test would
+    // quietly go back to testing whatever was already set.
+    expect(process.env.AGENT_SERVICE_TOKEN).toBeUndefined()
     expect((await call()).status).toBe(401)
   })
 

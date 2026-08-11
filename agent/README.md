@@ -62,7 +62,7 @@ when reasoning moved to Gemini, so extraction and reasoning are one vendor and
 CrewAI picks a key up from the environment when it is not handed one, and
 prefers `GOOGLE_API_KEY` over `GEMINI_API_KEY`:
 
-```
+```text
 Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
 ```
 
