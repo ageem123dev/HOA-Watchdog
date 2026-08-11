@@ -82,7 +82,19 @@ FORBIDDEN_DEPENDENCY_PREFIXES = (
 #: `crewai` is here in advance: story 3.4 installs it, and it is the one heavy
 #: dependency the architecture has already approved by name.
 APPROVED_DEPENDENCIES = frozenset(
-    {"crewai", "pytest", "tomli", "httpx", "pydantic", "typing-extensions"}
+    {
+        "crewai",
+        "pytest",
+        "tomli",
+        "httpx",
+        "pydantic",
+        "typing-extensions",
+        # Story 3.6a. The agent becomes a server for the first time (AD-17), and
+        # these are how. Neither reaches data: they answer requests, and the only
+        # route to the association's records is still `/tools/v1/*`.
+        "starlette",
+        "uvicorn",
+    }
 )
 
 # Values that look like a way in, whatever the variable is called. Renaming a
@@ -441,6 +453,13 @@ def test_the_service_asks_only_for_what_ad3_allows() -> None:
         # Not a credential. Which model, by variable, per AD-11's "the specific
         # model id is seed, not invariant".
         "REASONING_MODEL",
+        # Story 3.6a. AD-17: the gateway's identity when it calls *here*,
+        # deliberately not AGENT_SERVICE_TOKEN, which is this service's identity
+        # when it calls Node. "One token reused in both directions means either
+        # runtime's compromise grants the other's identity." Third story running
+        # in which this assertion has made a new variable a decision somebody
+        # writes down rather than a line that slips through.
+        "GATEWAY_SERVICE_TOKEN",
     }, asked
 
 

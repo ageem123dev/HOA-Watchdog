@@ -1,10 +1,11 @@
 ---
-baseline_commit: TBD
+baseline_commit: df9b656
+merge_request: 45
 ---
 
 # Story 3.6a: The chat turn crosses the wire
 
-Status: ready-for-dev
+Status: done
 
 ## Why this story exists
 
@@ -86,41 +87,41 @@ Node→agent caller appearing anywhere fails a test rather than passing review.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The server (AC1, AC2)**
-  - [ ] Choose the framework and **declare it**. `crewai` already pulls `uvicorn`, `starlette` and
+- [x] **Task 1 — The server (AC1, AC2)**
+  - [x] Choose the framework and **declare it**. `crewai` already pulls `uvicorn`, `starlette` and
         `fastapi`-adjacent packages transitively; a transitive dependency is not a declared one, and
         `APPROVED_DEPENDENCIES` is an allowlist, so adding it is a decision in a diff.
-  - [ ] `POST /chat/v1/turn`, request validated by shape.
-  - [ ] Test: a request naming an entry id, a version, SQL or rows is refused with a message that
+  - [x] `POST /chat/v1/turn`, request validated by shape.
+  - [x] Test: a request naming an entry id, a version, SQL or rows is refused with a message that
         says which field and why.
 
-- [ ] **Task 2 — The turn (AC3)**
-  - [ ] Wire `routing.route_question` behind the endpoint. It already returns `entry_id`, `version`,
+- [x] **Task 2 — The turn (AC3)**
+  - [x] Wire `routing.route_question` behind the endpoint. It already returns `entry_id`, `version`,
         `parameters`, `provenance_id` and `rows` — the response shape is mostly a projection of
         `RoutedAnswer`.
-  - [ ] **Decide where the answer prose comes from, and record it.** See the Dev Note below; this is
+  - [x] **Decide where the answer prose comes from, and record it.** See the Dev Note below; this is
         the one genuinely open question in the story.
-  - [ ] Test: all three of answer, provenance id and rows present, or an error.
+  - [x] Test: all three of answer, provenance id and rows present, or an error.
 
-- [ ] **Task 3 — The token (AC4, AC6)**
-  - [ ] A new variable, distinct from `AGENT_SERVICE_TOKEN`. Reuse story 3.2's constant-time
+- [x] **Task 3 — The token (AC4, AC6)**
+  - [x] A new variable, distinct from `AGENT_SERVICE_TOKEN`. Reuse story 3.2's constant-time
         comparison rather than writing a second one — port `verifyServiceToken`'s property, not its
         code, and say in the header that the two are deliberately parallel.
-  - [ ] Fails closed when unset or blank. Test both.
-  - [ ] Update the AD-3 exhaustive read set with the reason, as story 3.4 did.
+  - [x] Fails closed when unset or blank. Test both.
+  - [x] Update the AD-3 exhaustive read set with the reason, as story 3.4 did.
 
-- [ ] **Task 4 — The Node client (AC5, AC8)**
-  - [ ] A client in `adapters/` — this reaches outward, so it is not `core/`.
-  - [ ] Every non-2xx becomes a named error. Never an empty answer.
-  - [ ] A guard asserting `/chat/v*` is the only Node→agent path, in the shape of
+- [x] **Task 4 — The Node client (AC5, AC8)**
+  - [x] A client in `adapters/` — this reaches outward, so it is not `core/`.
+  - [x] Every non-2xx becomes a named error. Never an empty answer.
+  - [x] A guard asserting `/chat/v*` is the only Node→agent path, in the shape of
         `sole-data-path.test.ts`, including its planted-violation half.
 
-- [ ] **Task 5 — Documentation and the gate (AC1, AC7)**
-  - [ ] `agent/README.md`: how to run the service, the new variable, and the two-token reason.
-  - [ ] `.env.example` and the root `README.md` — note `docs/readme.test.ts` asserts every declared
+- [x] **Task 5 — Documentation and the gate (AC1, AC7)**
+  - [x] `agent/README.md`: how to run the service, the new variable, and the two-token reason.
+  - [x] `.env.example` and the root `README.md` — note `docs/readme.test.ts` asserts every declared
         variable appears in the README **and** that the README's stated count is right.
-  - [ ] `deploy-units.json`: the agent unit gains a credential; the `web` unit gains one too.
-  - [ ] Gate: `npm run lint`, `npm run build`, `npm test`, `npm run test:py`, `npx --no-install tsc
+  - [x] `deploy-units.json`: the agent unit gains a credential; the `web` unit gains one too.
+  - [x] Gate: `npm run lint`, `npm run build`, `npm test`, `npm run test:py`, `npx --no-install tsc
         --noEmit` against the 8-error baseline. `test:db` only if this touches `app/tools/`.
 
 ## Dev Notes
@@ -205,30 +206,144 @@ spend money on.
 
 ### Agent Model Used
 
-_To be filled by the dev agent._
+Claude Opus 5 (1M context), via `bmad-dev-tdd` inside `bmad-ship-story`.
 
 ### Test Design
 
-_To be filled by the dev agent._
+**The service** — GUARD: an unauthenticated caller; the *other direction's* token; a blank configured
+token; a request naming the entry, version, SQL, rows or parameters; a malformed or non-JSON body; a
+blank narration. PROPAGATE: `ModelChoseNothing` and `ModelChoseUnknownEntry` as a 422 the caller can
+tell from a fault; `GatewayError` as a 502 whose detail is logged, not returned.
+
+**The client** — GUARD: absent or blank configuration; a base URL that is not absolute https; every
+non-2xx; a network failure; a 200 missing any of the five fields the renderer needs; a blank answer;
+rows that are not a list. OUT-OF-SCOPE: retrying, which `groundedAnswer` owns.
+
+**The sole-path guard** — GUARD: a second file naming `AGENT_BASE_URL` or spelling `/chat/v*`, in
+both directions, including the fail-closed case.
 
 ### Debug Log References
 
-_To be filled by the dev agent._
+**The open question the story recorded resolved itself.** `route_question` returns rows, not prose,
+and only one shape survives AD-3: the agent narrates, because Node holds no model credential. The
+retry crossing the wire is 3.6b's to wire up — `groundedAnswer(rows, produce)` where `produce` asks
+for another turn — and the thing to check there is still whether that re-executes the catalog entry,
+because a second provenance row for one question is something a board member would have to explain.
+**No HALT was needed**; AD-17 and AD-12 are both untouched.
+
+**I broke `main` with the AD-17 merge and did not notice for an hour.**
+`docs/planning-artifacts.test.ts` derives the decision count from the spine and asserts the
+walkthrough states it. I had written on MR !43 that "no code changed, so there is nothing to gate"
+and skipped the Node suite. The spine is an *input* to a test. `_bmad-output/**` being excluded from
+CodeRabbit review does not make it excluded from the tests, and I had conflated the two. Fixed on its
+own branch (MR !44) rather than inside this story.
+
+**And I committed once on a red gate** — ran it, then committed without reading the result. The
+commit was fine; the process slip was not. The gate's exit code is the thing to read, and I did not.
 
 ### Completion Notes List
 
-_To be filled by the dev agent._
+- **Starlette, declared rather than borrowed.** `crewai` pulls it and `uvicorn` transitively, and a
+  transitive dependency is not a declared one. FastAPI would infer a request shape; AD-17 needs
+  fields *refused* rather than ignored, which is a rule about what the schema rejects.
+- **The smuggled fields are a 400 naming the field.** Dropping them silently is easier and worse: a
+  field the caller believes was honoured is indistinguishable at the call site from one that was.
+- **The response carries the entry and version**, which is not a contradiction — AD-17 forbids a
+  *caller-supplied* entry id, and UX-DR6 labels the disclosure with `entry@version`. Learning which
+  entry answered is the opposite of choosing it.
+- **The sole-path guard asks who knows the address, not who calls.** The obvious shape is vacuous
+  until 3.6b exists.
+- The AD-3 exhaustive read set fired for the third story running.
 
 ### File List
 
-_To be filled by the dev agent._
+**New** — `agent/watchdog_agent/chat_service.py`, `agent/watchdog_agent/narrate.py`,
+`agent/tests/test_chat_service.py`, `adapters/agent/chat-client.ts`,
+`adapters/agent/chat-client.test.ts`, `adapters/agent/sole-chat-path.test.ts`,
+`scripts/run-agent.mjs`
+
+**Updated** — `agent/pyproject.toml`, `agent/tests/test_no_data_credentials.py`, `agent/README.md`,
+`deploy-units.json`, `.env.example`, `README.md`, `package.json`
 
 ## Review Findings
 
-_To be filled by the review._
+### CodeRabbit CLI — six findings, 17 of 17 files reviewed
+
+**The denylist was bypassable by spelling.** `FORBIDDEN_FIELDS` named `entryId`, so `entry_id` and
+`catalogEntry` both sailed through with a **200**. Verified by running it. This project had already
+made the argument in `test_no_data_credentials.py` — "the allowlist is the real check; the denylist
+only makes the message better" — and the denylist got written anyway.
+
+**A crash reachable with no credential.** `hmac.compare_digest` raises on a non-ASCII `str`, so an
+unhandled `UnicodeEncodeError` was a 500 anyone could trigger from outside the boundary the token
+exists to be. Writing that test taught the more useful thing: `httpx` refuses to *encode* a non-ASCII
+header, so the obvious test fails in the test client rather than the code. Headers on the wire are
+bytes and Starlette decodes them latin-1, so `_authentic` is what a raw client actually reaches — and
+what the test now calls. Through the endpoint it would have proved only that `httpx` is well behaved.
+
+Also: a body-size limit; `parameters` validated before a cast; `narrate` raising rather than coercing;
+and `agent/README.md` saying "Four variables" when there were five.
+
+### MR !45 — three rounds, twelve findings, four majors
+
+| Round | Findings | Outcome |
+| --- | --- | --- |
+| 1 | 12 | all addressed |
+| 2 | 0 incremental, 2 threads still live | both fixed |
+| 3 | 0 | **clean** |
+
+**The handler blocked the event loop on every turn.** `route_question` makes an HTTP call and the
+narrator calls a model — seconds of blocking work each, awaited directly in an async Starlette
+handler, so one slow turn stalled every other request the process was serving. Both run in a
+threadpool now, and this is the finding with the widest blast radius in the story.
+
+**The body limit was applied after buffering.** `await request.body()` reads everything before the
+limit is measured, so a caller omitting or falsifying `content-length` chose the allocation — the
+header check is a claim, not a bound. **No test discriminates the fix**, and the code says so: both
+shapes end in a 413, and what changed is how much was read first, which neither the client nor an
+assertion can observe. It stands on the reasoning.
+
+**`rows: [null]`, `['row']` and `[[]]` all passed `Array.isArray`** and reached the renderer typed as
+`Record<string, unknown>[]`. An evidence table cannot draw a null.
+
+**No request timeout**, so a hung agent held the gateway request open indefinitely.
+
+**And a test of mine passed with its guard removed.** The blank-configured-token case presented the
+blank value itself, building `"Bearer "` — one part after splitting — so `_presented_token` returned
+`None` and `_authentic` refused before the configured token mattered. Proved by deleting the guard
+and watching the old test pass.
+
+Round 2's lesson was bookkeeping: **three states look identical from outside** — a thread whose line
+merely moved, a thread whose finding is fixed but not re-reviewed, and a genuinely open finding. Seven
+of nine "unresolved" discussions were GitLab noting a moved line. Only the head SHA on each thread
+and the actionable count tell them apart.
+
+### Three process failures, recorded rather than left out
+
+**I broke `main`** by asserting a planning-only change had nothing to gate. The spine is an input to
+`docs/planning-artifacts.test.ts`; `_bmad-output/**` being excluded from *review* does not exclude it
+from the *tests*. Fixed as MR !44.
+
+**I committed once on a red gate** — ran it, then committed without reading the result.
+
+**I destroyed three uncommitted tests** using `git checkout <file>` to undo a sensitivity mutation on
+a file that also held unstaged work. Reapplied from context. Every other mutation used a backup copy,
+which is what `git checkout` should never be mistaken for.
+
+### Two external notes
+
+**`argus_review` failed five times** across this story and 3.5 — four transport errors and one
+SUCCESS returning neither structured output nor prose. None recorded as clean; the ingest skipped
+this SHA.
+
+**The rate limit occupied the review slot twice**, and both times the same note was later edited in
+place into a real review. Keying on note recency rather than the actionable count and each thread's
+head SHA would have read a rate limit as a clean review — twice.
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-11 | Story created when 3.6 was split. Blocked on AD-17, which was approved the same day. |
+| 2026-08-11 | Implemented test-first across five tasks. The recorded HALT was not triggered. Status → review. |
+| 2026-08-11 | One CodeRabbit CLI round (6 findings) and three MR rounds (12, 2, clean). Status → done, meaning ready-to-merge on an unmerged branch. |

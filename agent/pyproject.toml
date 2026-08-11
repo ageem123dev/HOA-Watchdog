@@ -34,7 +34,17 @@ requires-python = ">=3.10,<3.14"
 # `LLM(model="gemini/...")` raises `ImportError: Google Gen AI native provider
 # not available` without this extra. The public integration guidance still
 # describes the litellm path, which is why this comment exists.
-dependencies = ["crewai[google-genai]==1.15.8"]
+#
+# `starlette` and `uvicorn` arrive transitively with crewai, and a transitive
+# dependency is not a declared one — this list is what the allowlist checks, so
+# using one means saying so. Starlette rather than FastAPI: AD-17's request must
+# *refuse* fields rather than ignore them, which is a rule about what the schema
+# rejects and is written by hand either way.
+dependencies = [
+    "crewai[google-genai]==1.15.8",
+    "starlette>=1.6,<2",
+    "uvicorn>=0.52,<1",
+]
 
 [project.optional-dependencies]
 # `tomli` only below 3.11. The test suite reads this file to check the pin and

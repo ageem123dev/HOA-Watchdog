@@ -183,7 +183,19 @@ describe('the tabular samples read into the records the README promises', () => 
 })
 
 describe('the generated samples cannot drift from the rows that produce them', () => {
-  it('matches what scripts/build-samples.mjs produces', () => {
+  /**
+   * Both tests in this pair spawn `node` and run a whole build, which is ~2s of
+   * real work and more under load. Vitest's 5s default left no headroom: this
+   * pair went red three times across stories 3.4 and 3.6a on a busy machine
+   * while the assertions themselves were fine.
+   *
+   * The assertions are unchanged. What changed is that an intermittently red
+   * gate is one people learn to re-run rather than read — and this project has
+   * exactly one gate, so a test that cries wolf costs more than the seconds it
+   * saves. `dual-llm-boundary.test.ts` was given the same headroom for the same
+   * reason.
+   */
+  it('matches what scripts/build-samples.mjs produces', { timeout: 30_000 }, () => {
     // AC3 for the samples. Editing a sample by hand, or editing the rows and
     // forgetting to rebuild, fails here rather than shipping a README that
     // describes a file nobody has.
@@ -195,7 +207,7 @@ describe('the generated samples cannot drift from the rows that produce them', (
     ).not.toThrow()
   })
 
-  it('the check actually fails when a sample is wrong', () => {
+  it('the check actually fails when a sample is wrong', { timeout: 30_000 }, () => {
     // Against a disposable copy, not the tracked tree. The first version
     // corrupted `samples/deposits.csv` and restored it, which loops a watcher,
     // leaves a dirty tree if the run aborts, and races anything else walking the

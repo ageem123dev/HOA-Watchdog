@@ -43,8 +43,11 @@ wrong.
 
 ## Configuration
 
-Four variables, and deliberately only four. AD-3 (amended 2026-08-10) allows this
-runtime two secrets: the gateway service token and the model API key.
+Five variables, and deliberately only five. AD-3 (amended 2026-08-10) allows this
+runtime two secrets of its own — `AGENT_SERVICE_TOKEN`, its identity when it
+calls Node, and `REASONING_API_KEY` — and AD-17 adds a third it *checks* rather
+than presents: `GATEWAY_SERVICE_TOKEN`, the gateway's identity when it calls
+here.
 
 | Variable | Why |
 | --- | --- |
@@ -52,6 +55,29 @@ runtime two secrets: the gateway service token and the model API key.
 | `GATEWAY_BASE_URL` | Where the gateway is. |
 | `REASONING_API_KEY` | The model credential. **Never `GEMINI_API_KEY`** — see below. |
 | `REASONING_MODEL` | Optional. Defaults to the spine's binding, `gemini-3.6-flash`. |
+| `GATEWAY_SERVICE_TOKEN` | What the **gateway** presents when it calls `/chat/v1/*`. Checked here. |
+
+### Running the service
+
+```bash
+npm run agent:serve          # from the repository root
+```
+
+That is `uvicorn` on `watchdog_agent.chat_service:create_app`, using the pinned
+interpreter from `agent/.venv` for the same reason `npm run test:py` does — a
+service started on the ambient 3.14 is one CrewAI cannot be installed into.
+
+`GATEWAY_SERVICE_TOKEN` unset or blank makes `/chat/v1/turn` refuse every caller.
+That is deliberate: an absent secret is when the endpoint is most exposed and
+least watched, and an unauthenticated turn is a model call anyone can pay for.
+
+### Two tokens, and they are not the same token
+
+`AGENT_SERVICE_TOKEN` is this service's identity when it calls Node.
+`GATEWAY_SERVICE_TOKEN` is the gateway's identity when it calls here. AD-17:
+"one token reused in both directions means either runtime's compromise grants
+the other's identity." A test plants the wrong direction's token and asserts it
+is refused, because a shared constant would satisfy every other auth test.
 
 ### Never set `GEMINI_API_KEY` here
 

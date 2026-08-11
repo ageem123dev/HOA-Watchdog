@@ -840,3 +840,79 @@ registered, and makes forgetting it the most likely way Epic 3 ships untested Py
 architecture uses `dues_status@2` as a *naming* example for versioning, not as a statement that the
 data exists. With Epic 2 built, `dues_status` becomes the natural first entry and exercises AD-6's
 derived-values rule.
+
+---
+
+## Epic 4: The Watchdog — be told before you pay
+
+The system flags probable duplicates, unusual vendor billing, and missed dues without being asked,
+and every finding lands in a permanent register the board can hand to an auditor. This is the epic
+that delivers the product's name.
+
+**FRs covered:** FR-6, FR-7, FR-8
+**Also carries:** AD-13 (alert keying and idempotency), AD-6 (the query returns the derived value,
+not the ingredients), AD-8 (extracted strings escaped on output, never interpolated), the finding
+lifecycle (unreviewed to reviewed register, never dismissed), UX-DR2, 3, 4, 8, 10, 13, 14, 22, 23, 24.
+
+**Standalone:** yes, given Epics 1 and 2. Does **not** require Epic 3 — and that independence is a
+property to protect, not an accident. It holds only while detection and alert copy stay
+deterministic: SQL identifies the finding, templated prose describes it, no reasoning model is
+involved anywhere in FR-6, FR-7 or FR-8. The moment model-written alert prose is wanted, this epic
+acquires a hard dependency on Epic 3 and the two stop being swappable (recorded assumption 1).
+
+**Three constraints fix the story order.**
+
+- **AD-13 comes first, or the product undermines itself.** Alerts are keyed on
+  `(finding_type, subject_id, period)` so reprocessing is a no-op. Ship a detector before that key
+  exists and the second ingestion run raises the same finding twice — a *duplicate-detection product
+  manufacturing duplicates*. The key is not a later optimisation; it is story 4.1.
+- **A detector before a surface.** The dashboard has been a placeholder since Story 1.2. It needs
+  real findings to render before its states — especially the empty one — mean anything.
+- **Detail before email.** UX-DR13 requires the already-reviewed state "reached from an old email
+  link", so the alert email deep-links into a finding. The destination has to exist before the
+  message that points at it.
+
+### Story spine
+
+| # | Story | Carries | Proves on its own |
+| --- | --- | --- | --- |
+| 4.1 | A finding, and the life it leads | AD-13, lifecycle | Detection run twice yields one finding; a reviewed finding stays reviewed |
+| 4.2 | The same invoice, twice | FR-6, SM-2 | Exact duplicates (amount + date) and fuzzy ones (near invoice number, identical amount) are flagged |
+| 4.3 | A vendor who charged more than usual | FR-6, AD-6 | The query returns the computed percentage over the trailing average, not the ingredients |
+| 4.4 | The dues that did not arrive | FR-7 | Deposits reconciled against the roll; missed and partial payments identified without manual work |
+| 4.5 | The board sees what needs review | UX-DR2, 3, 4, 10, 24 | The first user-visible findings list: tick plus text label, figure blocks with an "as of" date |
+| 4.6 | One finding, and what to do about it | UX-DR13 | Finding detail, marking reviewed, and the already-reviewed state an old link lands on |
+| 4.7 | The register the board hands an auditor | UX-DR14, 8, 22 | A permanent record with search, board-packet export, and a print treatment |
+| 4.8 | Told before you pay | FR-8, AD-8, UX-DR23 | A structured email to the board, deep-linked to the finding, with no model in the loop |
+
+**Why eight.** The same evidence as Epic 3. Story 1.5d at 27 files drew five review rounds; the four
+1.6 stories averaged closer to one. Detection, surface and delivery are three different kinds of
+work with three different failure modes, and 4.2 through 4.4 are separately falsifiable — each is a
+different query with a different way of being wrong.
+
+**Deterministic detection is a testability property, not only a safety one.** Because no model is
+involved, every one of 4.2 to 4.4 can be proven with fixture rows and an exact expected finding set.
+SM-2 claims *100%* of mathematically exact duplicates are flagged; that is a claim only a
+deterministic detector can be held to.
+
+### Two decisions this epic needs before its stories are written
+
+- **Who receives an alert?** FR-8 says "designated board members (e.g., Treasurer, President)", and
+  nothing designates them today. `board_member` has an email and no role, and there is no
+  notification preference anywhere. Either every member receives every finding — defensible for a
+  pilot of a handful of directors, and it should then be *stated* rather than defaulted into — or
+  4.8 grows a recipient model. This is a product decision, not an implementation detail.
+- **Where do the thresholds live?** FR-6 says "a predefined threshold (e.g., 20%)" over a trailing
+  six-month average. A constant in code is honest and reviewable; a settings table invites a
+  configuration surface nobody asked for. Whichever is chosen, the number must appear in the
+  finding's evidence line — UX-DR24 forbids reassurance without a count of what was checked, and a
+  spike finding that will not say what it compared against is exactly that.
+
+### Two places the voice will fight the code
+
+- **UX-DR23 forbids implying certainty the system lacks.** The finding is a *possible* duplicate.
+  The detector is exact, but "these two rows match on amount and date" is not the same claim as
+  "you paid twice" — an association can legitimately pay one vendor the same amount on the same day.
+  Copy says what was compared; the board decides.
+- **UX-DR24 forbids reassurance without a count.** An empty findings list may not say "all clear".
+  It says what was checked and over what period, or it says nothing at all.

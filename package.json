@@ -16,7 +16,8 @@
     "test:py": "node scripts/run-pytest.mjs",
     "migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "verify:extraction": "node --env-file-if-exists=.env.local scripts/verify-extraction.mjs"
+    "verify:extraction": "node --env-file-if-exists=.env.local scripts/verify-extraction.mjs",
+    "agent:serve": "node --env-file-if-exists=.env.local scripts/run-agent.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1100.0",
