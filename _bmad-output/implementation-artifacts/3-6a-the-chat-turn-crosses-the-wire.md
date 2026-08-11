@@ -5,7 +5,7 @@ merge_request: 45
 
 # Story 3.6a: The chat turn crosses the wire
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -267,7 +267,78 @@ commit was fine; the process slip was not. The gate's exit code is the thing to 
 
 ## Review Findings
 
-_To be filled by the review._
+### CodeRabbit CLI — six findings, 17 of 17 files reviewed
+
+**The denylist was bypassable by spelling.** `FORBIDDEN_FIELDS` named `entryId`, so `entry_id` and
+`catalogEntry` both sailed through with a **200**. Verified by running it. This project had already
+made the argument in `test_no_data_credentials.py` — "the allowlist is the real check; the denylist
+only makes the message better" — and the denylist got written anyway.
+
+**A crash reachable with no credential.** `hmac.compare_digest` raises on a non-ASCII `str`, so an
+unhandled `UnicodeEncodeError` was a 500 anyone could trigger from outside the boundary the token
+exists to be. Writing that test taught the more useful thing: `httpx` refuses to *encode* a non-ASCII
+header, so the obvious test fails in the test client rather than the code. Headers on the wire are
+bytes and Starlette decodes them latin-1, so `_authentic` is what a raw client actually reaches — and
+what the test now calls. Through the endpoint it would have proved only that `httpx` is well behaved.
+
+Also: a body-size limit; `parameters` validated before a cast; `narrate` raising rather than coercing;
+and `agent/README.md` saying "Four variables" when there were five.
+
+### MR !45 — three rounds, twelve findings, four majors
+
+| Round | Findings | Outcome |
+| --- | --- | --- |
+| 1 | 12 | all addressed |
+| 2 | 0 incremental, 2 threads still live | both fixed |
+| 3 | 0 | **clean** |
+
+**The handler blocked the event loop on every turn.** `route_question` makes an HTTP call and the
+narrator calls a model — seconds of blocking work each, awaited directly in an async Starlette
+handler, so one slow turn stalled every other request the process was serving. Both run in a
+threadpool now, and this is the finding with the widest blast radius in the story.
+
+**The body limit was applied after buffering.** `await request.body()` reads everything before the
+limit is measured, so a caller omitting or falsifying `content-length` chose the allocation — the
+header check is a claim, not a bound. **No test discriminates the fix**, and the code says so: both
+shapes end in a 413, and what changed is how much was read first, which neither the client nor an
+assertion can observe. It stands on the reasoning.
+
+**`rows: [null]`, `['row']` and `[[]]` all passed `Array.isArray`** and reached the renderer typed as
+`Record<string, unknown>[]`. An evidence table cannot draw a null.
+
+**No request timeout**, so a hung agent held the gateway request open indefinitely.
+
+**And a test of mine passed with its guard removed.** The blank-configured-token case presented the
+blank value itself, building `"Bearer "` — one part after splitting — so `_presented_token` returned
+`None` and `_authentic` refused before the configured token mattered. Proved by deleting the guard
+and watching the old test pass.
+
+Round 2's lesson was bookkeeping: **three states look identical from outside** — a thread whose line
+merely moved, a thread whose finding is fixed but not re-reviewed, and a genuinely open finding. Seven
+of nine "unresolved" discussions were GitLab noting a moved line. Only the head SHA on each thread
+and the actionable count tell them apart.
+
+### Three process failures, recorded rather than left out
+
+**I broke `main`** by asserting a planning-only change had nothing to gate. The spine is an input to
+`docs/planning-artifacts.test.ts`; `_bmad-output/**` being excluded from *review* does not exclude it
+from the *tests*. Fixed as MR !44.
+
+**I committed once on a red gate** — ran it, then committed without reading the result.
+
+**I destroyed three uncommitted tests** using `git checkout <file>` to undo a sensitivity mutation on
+a file that also held unstaged work. Reapplied from context. Every other mutation used a backup copy,
+which is what `git checkout` should never be mistaken for.
+
+### Two external notes
+
+**`argus_review` failed five times** across this story and 3.5 — four transport errors and one
+SUCCESS returning neither structured output nor prose. None recorded as clean; the ingest skipped
+this SHA.
+
+**The rate limit occupied the review slot twice**, and both times the same note was later edited in
+place into a real review. Keying on note recency rather than the actionable count and each thread's
+head SHA would have read a rate limit as a clean review — twice.
 
 ## Change Log
 
@@ -275,3 +346,4 @@ _To be filled by the review._
 | --- | --- |
 | 2026-08-11 | Story created when 3.6 was split. Blocked on AD-17, which was approved the same day. |
 | 2026-08-11 | Implemented test-first across five tasks. The recorded HALT was not triggered. Status → review. |
+| 2026-08-11 | One CodeRabbit CLI round (6 findings) and three MR rounds (12, 2, clean). Status → done, meaning ready-to-merge on an unmerged branch. |

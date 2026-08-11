@@ -100,7 +100,7 @@ development_status:
   # client for it, and three UX requirements — more than 1.5d, which drew five
   # review rounds at 27 files. 3.6a proves a question round-trips; 3.6b builds
   # the surface on it. Blocked until AD-17 (the Node->agent wire) is approved.
-  3-6a-the-chat-turn-crosses-the-wire: review
+  3-6a-the-chat-turn-crosses-the-wire: done
   3-6b-ask-and-answer: backlog
   3-7-when-it-cannot-answer: backlog
   3-8-the-access-log: backlog
