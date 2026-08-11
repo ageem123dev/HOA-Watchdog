@@ -1,10 +1,10 @@
 ---
-baseline_commit: TBD
+baseline_commit: df9b656
 ---
 
 # Story 3.6a: The chat turn crosses the wire
 
-Status: ready-for-dev
+Status: in-progress
 
 ## Why this story exists
 

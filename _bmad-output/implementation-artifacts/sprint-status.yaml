@@ -100,13 +100,21 @@ development_status:
   # client for it, and three UX requirements — more than 1.5d, which drew five
   # review rounds at 27 files. 3.6a proves a question round-trips; 3.6b builds
   # the surface on it. Blocked until AD-17 (the Node->agent wire) is approved.
-  3-6a-the-chat-turn-crosses-the-wire: ready-for-dev
+  3-6a-the-chat-turn-crosses-the-wire: in-progress
   3-6b-ask-and-answer: backlog
   3-7-when-it-cannot-answer: backlog
   3-8-the-access-log: backlog
   epic-3-retrospective: optional
 
   epic-4: backlog
+  4-1-a-finding-and-the-life-it-leads: backlog
+  4-2-the-same-invoice-twice: backlog
+  4-3-a-vendor-who-charged-more-than-usual: backlog
+  4-4-the-dues-that-did-not-arrive: backlog
+  4-5-the-board-sees-what-needs-review: backlog
+  4-6-one-finding-and-what-to-do-about-it: backlog
+  4-7-the-register-the-board-hands-an-auditor: backlog
+  4-8-told-before-you-pay: backlog
   epic-4-retrospective: optional
 
   epic-5: backlog
