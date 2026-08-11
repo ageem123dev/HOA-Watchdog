@@ -156,6 +156,22 @@ describe('the digest', () => {
     expect(digestOf(reworded)).toBe(digestOf(entry))
   })
 
+  /**
+   * The entry-level description is story 3.4's, and it is outside the frozen
+   * contract for the same reason a parameter description is: it changes how well
+   * a model picks, never what the entry accepts or what it runs.
+   *
+   * Pinned rather than trusted. `digestOf` builds an explicit contract object
+   * today, so this holds by construction — but "holds by construction" is a
+   * property of the code as written, and the next person to touch `digest.ts`
+   * should meet a red test rather than a comment. Without this, widening the
+   * digest to a whole-entry hash would silently re-freeze every description and
+   * turn a reword into an AD-14 violation.
+   */
+  it('does not change when the entry description is reworded', () => {
+    expect(digestOf({ ...entry, description: 'Reworded entirely.' })).toBe(digestOf(entry))
+  })
+
   it('does not depend on the order the properties happen to be written in', () => {
     const reversed = Object.fromEntries(Object.entries(entry.parameters.properties).reverse())
 
