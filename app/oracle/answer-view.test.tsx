@@ -92,6 +92,28 @@ describe('layer two: the evidence table, which is never collapsed', () => {
     expect(screen.getAllByRole('row')).toHaveLength(3)
   })
 
+  it('shows a column that only a later row carries', () => {
+    // Taking the first row's keys drops it silently, and a value missing from
+    // the table is a figure in the prose a reader cannot find. Raised by
+    // CodeRabbit.
+    const rows = [{ unitNumber: '4B' }, { unitNumber: '9C', lateFee: '25.00' }]
+
+    render(<AnswerView {...TURN} rows={rows} />)
+
+    expect(screen.getByRole('columnheader', { name: /lateFee/i })).toBeTruthy()
+    expect(screen.getByText('25.00')).toBeTruthy()
+  })
+
+  it('serializes a nested value rather than showing [object Object]', () => {
+    // In a dispute this is the cell somebody reads aloud.
+    const rows = [{ unitNumber: '4B', totals: { paid: '15.00' } }]
+
+    render(<AnswerView {...TURN} rows={rows} />)
+
+    expect(screen.queryByText('[object Object]')).toBeNull()
+    expect(screen.getByText(/"paid":"15.00"/)).toBeTruthy()
+  })
+
   it('says so plainly when a question has no matching rows', () => {
     // An empty table with headings and nothing under them reads as a loading
     // state. "No records matched" is an answer.

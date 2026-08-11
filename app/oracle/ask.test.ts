@@ -67,12 +67,14 @@ const TURN = {
 
 const ask = (question = 'What does 4B owe for 2026?') => askOracle({ question, actorId: ACTOR })
 
-// Without this the call counts below accumulate across the whole file, and
-// `toHaveBeenCalledTimes(1)` becomes a statement about how many tests ran. A
-// call-count assertion on a shared mock is only an assertion if the mock is
-// reset.
+// `resetAllMocks`, not `clearAllMocks`. The latter clears recorded calls and
+// **keeps implementations**, so a `mockResolvedValue` set in one test survives
+// into the next and the next test passes against a stub it never configured.
+// Verified rather than assumed. Without any reset at all the call counts also
+// accumulate, and `toHaveBeenCalledTimes(1)` becomes a statement about how many
+// tests have run. Raised by CodeRabbit.
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
 describe('a grounded answer', () => {
@@ -143,6 +145,9 @@ describe('an answer that is not grounded in the rows', () => {
     expect(askAgent).toHaveBeenCalledTimes(1)
   })
 
+})
+
+describe('how the validator is configured', () => {
   it('configures a single attempt, which is the decision of 2026-08-11', async () => {
     // **The assertion above does not pin this**, and finding that out was the
     // point of running the sensitivity check: with a constant producer,

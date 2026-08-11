@@ -16,8 +16,19 @@
  * loading at all — the failure story 1.6c's `QueueList` records in its own
  * header. A pure function has no business living behind that import.
  */
-export function questionFrom(q: string | string[] | undefined): string {
-  if (Array.isArray(q)) return q[0]?.trim() ?? ''
+/**
+ * The longest a question may be.
+ *
+ * A question is a sentence. The agent already refuses a body past 64 KB, but
+ * that is a round trip and a model prompt away — bounding here means an absurd
+ * URL costs nothing. Truncated rather than rejected: a question clipped at 500
+ * characters still asks something, and story 3.6c's field will keep anyone
+ * honest from reaching this at all. Raised by CodeRabbit.
+ */
+export const MAX_QUESTION_LENGTH = 500
 
-  return q?.trim() ?? ''
+export function questionFrom(q: string | string[] | undefined): string {
+  const raw = Array.isArray(q) ? q[0] : q
+
+  return (raw?.trim() ?? '').slice(0, MAX_QUESTION_LENGTH)
 }

@@ -47,7 +47,12 @@ export default async function OraclePage({
   searchParams: Promise<{ q?: string | string[] }>
 }) {
   const session = await auth()
-  if (!session?.user) redirect(SIGN_IN_ROUTE)
+  // The id, not merely the user. AD-12 logs *who asked*, and without an id there
+  // is nobody to log — `askOracle` would refuse, the refusal would be caught
+  // below, and a board member would be told "the records could not be reached".
+  // That is a lie about which thing is broken: the records are fine and the
+  // session is not. Raised by CodeRabbit.
+  if (!session?.user?.id) redirect(SIGN_IN_ROUTE)
 
   const { q } = await searchParams
   const question = questionFrom(q)
@@ -64,7 +69,7 @@ export default async function OraclePage({
     )
   }
 
-  const actorId = session.user.id ?? ''
+  const actorId = session.user.id
 
   // The turn is awaited inside the `try`; **the JSX is built outside it**.
   // React does not render a component when its element is constructed, so a
@@ -90,6 +95,14 @@ export default async function OraclePage({
   }
 
   if (turn === null) {
+    // Logged before `explain` flattens it. The two named failures are expected
+    // and say so for themselves; anything else is a fault whose only record
+    // would otherwise be a generic sentence shown to a board member, with
+    // nothing left on the server to diagnose from. Raised by CodeRabbit.
+    if (!(failure instanceof NoCatalogMatchError) && !(failure instanceof AnswerNotGrounded)) {
+      console.error('oracle turn failed', failure)
+    }
+
     // **Story 3.7 owns these surfaces**, and the epic keeps them apart on
     // purpose: "no-catalog-match and service-unavailable as distinct, honest
     // states". What matters here is that they are already distinct in the code,

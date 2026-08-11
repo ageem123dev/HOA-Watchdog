@@ -53,10 +53,34 @@ export interface AnswerViewProps {
   readonly sql: string
 }
 
+/**
+ * One value, as the records carry it.
+ *
+ * Scalars pass through untouched — these are the values AD-7 compared the prose
+ * against, and re-spelling one would break "every figure in the answer must be
+ * locatable in the table".
+ *
+ * Objects and arrays are serialized rather than coerced. A `jsonb` column
+ * reaching `String()` renders `[object Object]`, which tells a reader nothing
+ * and, in a dispute, is the cell somebody is trying to read aloud. Raised by
+ * CodeRabbit.
+ */
+function cell(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value)
+
+  return String(value)
+}
+
 export function AnswerView({ question, answer, rows, entryId, version, sql }: AnswerViewProps) {
   const [queryOpen, setQueryOpen] = useState(false)
 
-  const columns = rows.length > 0 ? Object.keys(rows[0]!) : []
+  // The union of every row's keys, not the first row's. A catalog entry may
+  // return rows of differing shape, and taking the first row's keys silently
+  // drops a column that only later rows carry — a value missing from the table
+  // is a figure in the prose a reader cannot find, which the spec calls a defect
+  // rather than a display choice. Raised by CodeRabbit.
+  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))]
 
   return (
     <article>
@@ -97,7 +121,7 @@ export function AnswerView({ question, answer, rows, entryId, version, sql }: An
                     // second statement of money formatting that AC6 exists to
                     // forbid. In a dispute this table is what gets read aloud,
                     // so it shows what the records hold.
-                    <td key={column}>{String(row[column] ?? '')}</td>
+                    <td key={column}>{cell(row[column])}</td>
                   ))}
                 </tr>
               ))}
