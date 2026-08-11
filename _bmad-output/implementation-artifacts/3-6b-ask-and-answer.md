@@ -4,7 +4,7 @@ baseline_commit: 51b942a
 
 # Story 3.6b: Ask and answer
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -42,10 +42,10 @@ Node→agent direction, and the gateway client. This story renders what that ret
 
 ## Acceptance Criteria
 
-**AC1 — The persistent ask field (UX-DR7).**
-An ask field on the dashboard. Submitting navigates to the Oracle **with the question already sent** —
-no intermediate empty state where the surface is present and the question is not. It must not overlay
-focusable content, and reserves scroll padding if sticky.
+**AC1 — ~~The persistent ask field (UX-DR7).~~ Moved to story 3.6c, 2026-08-11.**
+The dashboard entry point is its own story. This one ends at an Oracle reachable by URL with the
+question as a search parameter, which is what the three layers need in order to be proven. 3.6c adds
+the field that puts the question there, and owns UX-DR7 entirely.
 
 **AC2 — The question stays visible while the answer resolves (UX-DR11).**
 From submission to answer, the question a board member typed remains on screen. They must never be

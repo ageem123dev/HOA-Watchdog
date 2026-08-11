@@ -47,7 +47,17 @@ const THE_DOOR = 'app/tools/v1/catalog/execute/route.ts'
  * as a glob over `app/tools/`, so a third route reading the catalog fails here
  * until somebody adds it on purpose.
  */
-const DECLARATION_READERS = [THE_DOOR, 'app/tools/v1/catalog/route.ts'] as const
+const DECLARATION_READERS = [
+  THE_DOOR,
+  'app/tools/v1/catalog/route.ts',
+  // Story 3.6b. The Oracle reads `entryFor(...).sql` to fill UX-DR6's query
+  // disclosure. It runs nothing: the entry has already been executed by the
+  // time this page has an answer to show, and the SQL is being displayed to the
+  // board member who just asked for it. AD-14 is what makes the catalog a
+  // truthful source here — a published version's SQL is frozen, so what this
+  // shows is what ran.
+  'app/oracle/page.tsx',
+] as const
 
 /**
  * Every root where reaching the catalog would be a violation.

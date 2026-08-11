@@ -70,7 +70,7 @@ NFR-5: Query provenance. Every catalog execution permanently logs user id, times
 - The Node→agent chat turn goes over versioned `/chat/v*` endpoints. The request carries a question and nothing else — no SQL, no rows, no caller-supplied entry id. The response carries the answer, the provenance id and the rows it was drawn from, which AD-7's validator and UX-DR11's evidence table both need. Service token distinct from the agent's. (AD-17, decided 2026-08-11)
 - Python service pins 3.13 — CrewAI `requires_python` is `<3.14,>=3.10`, and the ambient interpreter is 3.14.
 - Test harnesses: Vitest (Node/Next) and pytest (Python 3.13). Both run in CI alongside lint and build.
-- Deferred and explicitly out of scope: multi-tenancy, retention/deletion policy, backup and recovery posture.
+- Deferred and explicitly out of scope: multi-tenancy, retention/deletion policy, backup and recovery posture, and **user-defined detection thresholds** (Epic 4 hard-codes them; decided 2026-08-12).
 
 **Cloud storage ingestion — later epic, sequenced after the core pilot.** Direct upload remains the
 primary path and is not replaced. Built as a provider-agnostic port with Dropbox and Google Drive
@@ -895,18 +895,24 @@ involved, every one of 4.2 to 4.4 can be proven with fixture rows and an exact e
 SM-2 claims *100%* of mathematically exact duplicates are flagged; that is a claim only a
 deterministic detector can be held to.
 
-### Two decisions this epic needs before its stories are written
+### Two decisions, made 2026-08-12
 
-- **Who receives an alert?** FR-8 says "designated board members (e.g., Treasurer, President)", and
-  nothing designates them today. `board_member` has an email and no role, and there is no
-  notification preference anywhere. Either every member receives every finding — defensible for a
-  pilot of a handful of directors, and it should then be *stated* rather than defaulted into — or
-  4.8 grows a recipient model. This is a product decision, not an implementation detail.
-- **Where do the thresholds live?** FR-6 says "a predefined threshold (e.g., 20%)" over a trailing
-  six-month average. A constant in code is honest and reviewable; a settings table invites a
-  configuration surface nobody asked for. Whichever is chosen, the number must appear in the
-  finding's evidence line — UX-DR24 forbids reassurance without a count of what was checked, and a
-  spike finding that will not say what it compared against is exactly that.
+- **Every board member receives every finding.** No recipient model, no per-member preferences, no
+  severity routing. For a pilot serving a handful of directors this is the right amount of machinery,
+  and it is chosen rather than defaulted into. Two consequences to carry into 4.8: the recipient list
+  is every `board_member` row that is **not disabled** — a director who has left the board keeps
+  their audit trail and stops receiving mail, the same rule sign-in already applies — and there is no
+  unsubscribe, so the volume of findings *is* the volume of email. If that becomes unwelcome, the
+  answer is a recipient model, not a quieter detector.
+
+- **Thresholds are hard-coded, and user-defined options are a later epic.** The 20% figure and the
+  six-month window live as named constants in `core/`, not in a settings table. Three things follow.
+  Changing one is a code change with a review and a diff, which on a fiduciary product is closer to a
+  feature than a limitation — a board can be told exactly what the system compared against on any
+  given date, and prove it. The constants must still surface in the finding's evidence line, because
+  UX-DR24 forbids reassurance without a count of what was checked. And 4.3 should read its threshold
+  through a single named export rather than inlining the number at the query, so the later epic
+  changes where the value comes from and not what reads it.
 
 ### Two places the voice will fight the code
 

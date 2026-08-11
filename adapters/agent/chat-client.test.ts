@@ -221,7 +221,10 @@ describe('a malformed success', () => {
   it.each(['answer', 'provenanceId', 'rows', 'entryId', 'version'])(
     'refuses a 200 with no %s',
     async (field) => {
-      const { [field as keyof typeof TURN]: _dropped, ...rest } = TURN
+      // Built by filtering rather than by destructuring-to-discard: the latter
+      // leaves an unused binding, and a lint warning in the gate is one more
+      // line nobody reads.
+      const rest = Object.fromEntries(Object.entries(TURN).filter(([key]) => key !== field))
 
       await expect(ask({ fetch: respondWith(200, rest) })).rejects.toThrow(new RegExp(field))
     },
@@ -248,7 +251,9 @@ describe('a malformed success', () => {
   )
 
   it('still accepts a turn with no parameters at all', async () => {
-    const { parameters: _dropped, ...rest } = TURN
+    const rest = Object.fromEntries(
+      Object.entries(TURN).filter(([key]) => key !== 'parameters'),
+    )
 
     await expect(ask({ fetch: respondWith(200, rest) })).resolves.toMatchObject({ parameters: {} })
   })
