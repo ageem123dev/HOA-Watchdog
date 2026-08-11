@@ -37,7 +37,7 @@ Then sign in and go to **Upload**. Start with `samples/assessment-roll.csv`; see
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env.local`. It names **thirteen** variables in six groups:
+Copy [`.env.example`](.env.example) to `.env.local`. It names **fifteen** variables in seven groups:
 
 | Group | Variables | Why |
 | --- | --- | --- |
@@ -46,6 +46,7 @@ Copy [`.env.example`](.env.example) to `.env.local`. It names **thirteen** varia
 | Object storage | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, and optionally `R2_OUT_OF_SCOPE_BUCKET` | Document bytes live here; the database holds identity only (AD-16) |
 | Extraction | `GEMINI_API_KEY`, `GEMINI_OCR_MODEL` | Reading scans and photographs |
 | Agent service | `AGENT_SERVICE_TOKEN` | The bearer token `/tools/v1/*` accepts (AD-15). Unset means the endpoint refuses everyone — and until the private network exists, this token is the only thing in front of it |
+| Chat turn | `GATEWAY_SERVICE_TOKEN`, `AGENT_BASE_URL` | How the gateway reaches the agent service (AD-17). A **different** token from `AGENT_SERVICE_TOKEN`, which is the agent's identity in the other direction — one token used both ways means either runtime's compromise grants the other's identity |
 | Reasoning model | `REASONING_API_KEY`, `REASONING_MODEL` | The agent service's own model credential (AD-11). Since AD-10's vendor clause was withdrawn on 2026-08-10, extraction and reasoning are one vendor and this separate name is the whole of the boundary — never set `GEMINI_API_KEY` in the agent's environment, or CrewAI hands the reasoning model the extraction key and everything keeps working. `REASONING_MODEL` is optional |
 
 The application **builds and tests without them** — `npm run build` must never require credentials,

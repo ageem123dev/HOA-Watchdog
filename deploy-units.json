@@ -34,7 +34,9 @@
         "R2_SECRET_ACCESS_KEY",
         "R2_BUCKET",
         "GEMINI_API_KEY",
-        "GEMINI_OCR_MODEL"
+        "GEMINI_OCR_MODEL",
+        "AGENT_SERVICE_TOKEN",
+        "GATEWAY_SERVICE_TOKEN"
       ]
     },
     {
@@ -43,7 +45,7 @@
       "description": "The CrewAI reasoning service. Story 3.3 built its client; story 3.4 gives it a model.",
       "deployed": false,
       "responsibilities": ["reasoning"],
-      "credentials": ["REASONING_API_KEY", "AGENT_SERVICE_TOKEN"]
+      "credentials": ["REASONING_API_KEY", "AGENT_SERVICE_TOKEN", "GATEWAY_SERVICE_TOKEN"]
     }
   ],
   "sides": {
