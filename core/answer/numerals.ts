@@ -129,7 +129,7 @@ const SLASH_DATE = /\d{4}\/\d{1,2}\/\d{1,2}|\d{1,2}\/\d{1,2}\/\d{4}/
 const EXCLUDED_SHAPES = [
   // Timestamp before date: the union of spans makes order irrelevant, but the
   // longer shape is listed first so a reader meets the specific case first.
-  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[-+]\d{2}:\d{2})?/,
+  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[-+]\d{2}:\d{2})?/,
   /\d{4}-\d{2}-\d{2}/,
   /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/,
   SLASH_DATE,
@@ -213,7 +213,34 @@ function isQuantity(text: string, start: number, token: string): boolean {
  * a stored amount; it is a number this system cannot have produced, so treating
  * it as one would let a fabricated figure match by rounding.
  */
+/**
+ * Well-formed thousands grouping: either no separators at all, or groups of
+ * exactly three after the first.
+ *
+ * Checked **before** the separators are stripped, which is the whole point.
+ * `valueOf` removed commas and handed the rest on, so `1,2` normalized to `12`
+ * and `1,,240` to `1240` — a model writing either was validated against a
+ * *different* number and accepted whenever that number happened to be in the
+ * rows. Narrowing `CANDIDATE` alone would not do it: a parseable prefix can
+ * still hide a malformed suffix. Raised by CodeRabbit on MR !42.
+ */
+const WELL_GROUPED = /^-?\$?(?:\d+|\d{1,3}(?:,\d{3})+|\.\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?%?$/
+
 export function valueOf(numeral: string): number {
+  // Two failures, in the order that makes each message true of its own input.
+  // Grouping checked first would report `4B` as malformed grouping, which sends
+  // the reader looking for a comma that was never there — the same fault the
+  // venv-mismatch message had on MR !39.
+  if (/[^-$,.\d%eE+]/.test(numeral)) {
+    throw new TypeError(`not a numeral: ${JSON.stringify(numeral.slice(0, 40))}`)
+  }
+
+  if (!WELL_GROUPED.test(numeral)) {
+    throw new TypeError(
+      `malformed thousands grouping: ${JSON.stringify(numeral.slice(0, 40))}`,
+    )
+  }
+
   // A bare leading dot is a spelling of the same value, so it is normalized
   // rather than rejected — `.5` is `0.5`. `toMinorUnits` requires the digit and
   // is right to: it parses stored amounts, which never arrive that way.

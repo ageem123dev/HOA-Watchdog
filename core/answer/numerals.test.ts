@@ -161,6 +161,13 @@ describe('what is a numeral', () => {
     expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
   })
 
+  it('excludes a timestamp written without seconds', () => {
+    // `2026-07-01T09:30`. The shape required seconds, so the date span covered
+    // the date, `T` excluded `09` by adjacency, and `30` survived as a quantity
+    // — rejecting an answer that merely quoted a time. Raised by CodeRabbit.
+    expect(numeralsIn('logged at 2026-07-01T09:30')).toEqual([])
+  })
+
   it('reports where each numeral was, so a rejection can name it precisely', () => {
     const [first] = numeralsIn('owes 1240')
 
@@ -213,6 +220,25 @@ describe('what a numeral is worth', () => {
     // one. Raised by CodeRabbit.
     expect(() => valueOf('1240.555')).toThrow(/decimal places/)
   })
+
+  it.each(['1,2', '1,,240', '1,2400', '12,34,567', ',240', '1,240,'])(
+    'refuses malformed thousands grouping: %s',
+    (malformed) => {
+      // `valueOf` strips separators, so `1,2` normalized to `12` and `1,,240` to
+      // `1240`. A model writing either would have been validated against a
+      // *different* number, and accepted whenever that number happened to be in
+      // the rows. Grouping is checked before the separators are removed. Raised
+      // by CodeRabbit.
+      expect(() => valueOf(malformed)).toThrow(/grouping|not a numeral/)
+    },
+  )
+
+  it.each(['1,240', '12,345', '1,234,567', '1,240.55'])(
+    'still reads well-formed grouping: %s',
+    (grouped) => {
+      expect(() => valueOf(grouped)).not.toThrow()
+    },
+  )
 
   it('refuses something that is not a numeral at all', () => {
     expect(() => valueOf('4B')).toThrow(/not a numeral/)
