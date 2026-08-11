@@ -72,12 +72,33 @@ const CANDIDATE = /-?\$?(?:\d[\d,]*(?:\.\d+)?|\.\d+)%?/g
 /** A character that, adjacent to digits, means the run is part of a name. */
 const IDENTIFIER_CHARACTER = /[A-Za-z0-9_@]/
 
+/**
+ * A slash date, matched **whole** rather than by adjacency.
+ *
+ * Adjacency was the first attempt and it was a worse bug than the one it fixed:
+ * treating `/` as a generic separator blinded the tokenizer to *any* two numbers
+ * with a slash between them, so `$999.00/2026` yielded nothing and the validator
+ * accepted a hallucinated amount. A false rejection traded for a false
+ * acceptance.
+ *
+ * A date has a shape, so the shape is what is matched. Everything else with a
+ * slash in it — `1/2`, `12/40` — stays a pair of numerals, which may cost a
+ * false rejection on prose the model should not have written with digits. That
+ * is the right way round: under-strict fails silently and over-strict does not.
+ * Raised by Argus on the fix diff.
+ */
+const SLASH_DATE = /\d{1,4}\/\d{1,2}\/\d{1,4}/g
+
 export function numeralsIn(text: string): readonly Numeral[] {
   const found: Numeral[] = []
+  const dateSpans = [...text.matchAll(SLASH_DATE)].map((m) => [m.index, m.index + m[0].length])
 
   for (const match of text.matchAll(CANDIDATE)) {
     const start = match.index
     const token = match[0]
+
+    const insideADate = dateSpans.some(([from, to]) => start >= from! && start < to!)
+    if (insideADate) continue
 
     if (isQuantity(text, start, token)) {
       found.push({ text: token, index: start })
@@ -113,9 +134,9 @@ function isQuantity(text: string, start: number, token: string): boolean {
   // missed: the date half of an ISO timestamp was excluded by its hyphens while
   // the time half walked straight through, so `2026-07-01T09:30:00Z` yielded
   // `30` and `00` as quantities.
-  // `/` too: `2026/07/01` is a date a person would write, and splitting it into
-  // three quantities rejects an answer that was true. Raised by Argus.
-  const separators = ['-', ':', '/']
+  // Hyphen and colon only. `/` is handled by `SLASH_DATE` above, as a whole
+  // shape — adding it here blinded the tokenizer to `$999.00/2026` entirely.
+  const separators = ['-', ':']
   if (separators.includes(before ?? '') && /\d/.test(text[start - 2] ?? '')) return false
   if (separators.includes(after ?? '') && /\d/.test(text[start + token.length + 1] ?? '')) {
     return false
@@ -141,7 +162,11 @@ export function valueOf(numeral: string): number {
   // A bare leading dot is a spelling of the same value, so it is normalized
   // rather than rejected — `.5` is `0.5`. `toMinorUnits` requires the digit and
   // is right to: it parses stored amounts, which never arrive that way.
-  const bare = numeral.replace(/[$,%]/g, '').replace(/^(-?)\./, '$10.')
+  // A replacer function, not `'$10.'`. That string is *correct* — with fewer
+  // than ten capture groups JavaScript reads it as group 1 followed by `0.` —
+  // and it reads like a reference to group 10, which is a trap for whoever adds
+  // a second group. Raised by Argus.
+  const bare = numeral.replace(/[$,%]/g, '').replace(/^(-?)\./, (_match, sign: string) => `${sign}0.`)
 
   if (!/^-?\d+(?:\.\d+)?$/.test(bare)) {
     throw new TypeError(`not a numeral: ${JSON.stringify(numeral.slice(0, 40))}`)

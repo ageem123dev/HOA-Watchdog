@@ -92,6 +92,24 @@ describe('what is a numeral', () => {
     expect(numeralsIn(text)).toEqual([])
   })
 
+  /**
+   * The regression the slash fix introduced, and the reason it was worse than
+   * the bug it fixed.
+   *
+   * Treating `/` as a generic separator blinded the tokenizer to *any* two
+   * numbers with a slash between them, so `$999.00/2026` yielded nothing at all
+   * and the validator accepted a hallucinated amount. A false rejection traded
+   * for a false acceptance. Only a recognised **date shape** is excluded now.
+   * Raised by Argus on the fix diff.
+   */
+  it.each([
+    ['an amount and a year', 'Unit 4B owes $999.00/2026', ['$999.00', '2026']],
+    ['a fraction', 'about 1/2 of the total', ['1', '2']],
+    ['a rate', '12/40 units are current', ['12', '40']],
+  ])('still finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
   it('reports where each numeral was, so a rejection can name it precisely', () => {
     const [first] = numeralsIn('owes 1240')
 
