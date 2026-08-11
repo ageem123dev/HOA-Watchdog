@@ -66,8 +66,15 @@ export interface Numeral {
  * row carrying `0.50` was read as `50`, valued at 5000 minor units, and rejected
  * — a false rejection, which is the quiet cliff that gets a guard switched off.
  * Verified by running the old regex rather than by reading it.
+ *
+ * **The exponent group is here to make `1e6` refusable, not readable.** Without
+ * it the token fell between the rules — `e` is an identifier character, so `1`
+ * was excluded by what followed and `6` by what preceded, and the whole thing
+ * vanished. `valueOf` refuses exponent notation, which is correct: no row in
+ * this system carries it. The point is that it is refused out loud rather than
+ * not seen. Raised by CodeRabbit.
  */
-const CANDIDATE = /-?\$?(?:\d[\d,]*(?:\.\d+)?|\.\d+)%?/g
+const CANDIDATE = /-?\$?(?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?%?/g
 
 /** A character that, adjacent to digits, means the run is part of a name. */
 const IDENTIFIER_CHARACTER = /[A-Za-z0-9_@]/
@@ -86,8 +93,15 @@ const IDENTIFIER_CHARACTER = /[A-Za-z0-9_@]/
  * false rejection on prose the model should not have written with digits. That
  * is the right way round: under-strict fails silently and over-strict does not.
  * Raised by Argus on the fix diff.
+ *
+ * **The four-digit year is load-bearing.** The first version asked only for
+ * digit-slash-digit-slash-digit, which swallowed `1/2/3` and every numeral in
+ * it. Dates in this system are ISO-8601 per the Consistency Conventions, so a
+ * date a model spells with slashes still carries a four-digit year — and
+ * requiring one is what keeps this pattern from eating arbitrary triples.
+ * Raised by CodeRabbit.
  */
-const SLASH_DATE = /\d{1,4}\/\d{1,2}\/\d{1,4}/g
+const SLASH_DATE = /\d{4}\/\d{1,2}\/\d{1,2}|\d{1,2}\/\d{1,2}\/\d{4}/g
 
 export function numeralsIn(text: string): readonly Numeral[] {
   const found: Numeral[] = []

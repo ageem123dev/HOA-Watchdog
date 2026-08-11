@@ -118,6 +118,18 @@ describe('an answer carrying a number the rows do not', () => {
     expect(accept('A fee of .5 percent applies.')).not.toBeNull()
   })
 
+  it.each([
+    ['exponent notation', 'Unit 4B owes 1e6.'],
+    ['a negative exponent', 'A rate of 1e-6 applies.'],
+    ['a three-part fraction', 'Unit 4B owes 1/2/3.'],
+  ])('rejects %s, which the tokenizer used to swallow', (_label, answer) => {
+    // Each yielded no numerals at all, so the validator had nothing to refuse
+    // and accepted a hallucinated answer. Asserted here as well as in the
+    // tokenizer, because "is it a candidate" and "is it grounded" are different
+    // questions and only the second one ships. Raised by CodeRabbit.
+    expect(accept(answer)).not.toBeNull()
+  })
+
   it('rejects an answer whose numbers are right but whose rows are empty', () => {
     // The state where a model answers from its own memory of an earlier turn.
     expect(validateAnswer('Unit 4B owes $240.00.', [])).not.toBeNull()

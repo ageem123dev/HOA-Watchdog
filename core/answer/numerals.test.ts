@@ -110,6 +110,35 @@ describe('what is a numeral', () => {
     expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
   })
 
+  /**
+   * Two more shapes that were swallowed silently, both found by CodeRabbit and
+   * both the same class as the slash regression: a numeral the tokenizer does
+   * not see is one the validator cannot refuse.
+   *
+   * `1/2/3` was matched by `SLASH_DATE`, which asked only for digit-slash-digit
+   * -slash-digit. A date in this system carries a four-digit year — the
+   * Consistency Conventions make dates ISO-8601 — so that is what the pattern
+   * asks for now, and `1/2/3` is three numerals again.
+   *
+   * `1e6` fell between the rules: the `e` is an identifier character, so `1` was
+   * excluded by what followed it and `6` by what preceded it, and the whole
+   * thing vanished. It is now one candidate, which `valueOf` refuses — exponent
+   * notation is not a form this system's rows can carry, so the answer is a
+   * rejection rather than silence.
+   */
+  it.each([
+    ['a three-part fraction', 'about 1/2/3 of it', ['1', '2', '3']],
+    ['exponent notation', 'owes 1e6 dollars', ['1e6']],
+    ['a negative exponent', 'a rate of 1e-6', ['1e-6']],
+  ])('still finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  it('still excludes a real slash date, which carries a four-digit year', () => {
+    expect(numeralsIn('due 2026/07/01')).toEqual([])
+    expect(numeralsIn('due 01/07/2026')).toEqual([])
+  })
+
   it('reports where each numeral was, so a rejection can name it precisely', () => {
     const [first] = numeralsIn('owes 1240')
 
