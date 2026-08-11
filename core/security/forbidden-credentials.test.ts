@@ -56,6 +56,11 @@ const PERMITTED_NAMES = [
   // so credential separation is what is left of the boundary.
   'GEMINI_API_KEY',
   'REASONING_API_KEY',
+  // The agent service's identity (AD-15). Pinned here because the forbidden list
+  // carries four `_TOKEN` patterns already, and a fifth written a little wider
+  // would take this name with it — which breaks the gateway's only caller check
+  // at deploy time rather than here.
+  'AGENT_SERVICE_TOKEN',
   'DATABASE_URL',
   'WATCHDOG_WRITER_DATABASE_URL',
   'WATCHDOG_READER_DATABASE_URL',
