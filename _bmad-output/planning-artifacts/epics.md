@@ -814,7 +814,8 @@ That is a known gap, recorded rather than glossed.
 | 3.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
 | 3.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
 | 3.6a | The chat turn crosses the wire | AD-17 | A question reaches the agent service and an answer comes back, with nothing rendered yet |
-| 3.6b | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
+| 3.6b | Ask and answer | UX-DR6, 11 | The first user-visible Oracle, evidence table beside the answer |
+| 3.6c | The dashboard ask field | UX-DR7 | A question typed on the dashboard arrives at the Oracle already asked |
 | 3.7 | When it cannot answer | UX-DR17, 18 | No-catalog-match and service-unavailable as distinct, honest states |
 | 3.8 | The access log | NFR-5, UX-DR16 | Who asked what, when — the provenance record given a reader |
 
