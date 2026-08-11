@@ -4,7 +4,7 @@ baseline_commit: b873e6f
 
 # Story 3.4: The model picks an entry
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -71,9 +71,25 @@ Every tool declaration the agent builds carries `additionalProperties: false` an
 and declares only the parameters its catalog entry declares. A test asserts that the declarations
 generated from the real catalog admit no free-form field the executor would forward.
 
-**AC4 — The model must call a tool.**
-The model is configured for forced tool use — it cannot answer a catalog question with free text
-instead of a call. A test asserts the configuration that makes this true, not the model's behaviour.
+**AC4 — The model must call a tool.** *(Amended during implementation — see below.)*
+A model that answers a catalog question with free text instead of a tool call does not produce an
+answer. A test asserts the mechanism that makes this true, not the model's behaviour.
+
+> **Amended 2026-08-10, against the installed package.** As written this AC assumed Gemini's
+> `tool_config.function_calling_config.mode = ANY` would be reachable through CrewAI. **It is not.**
+> `crewai==1.15.8`'s native Gemini provider assembles `GenerateContentConfig` from a fixed list of
+> fields — `temperature`, `top_p`, `top_k`, `max_output_tokens`, `stop_sequences`,
+> `system_instruction`, `tools` — with no `tool_config` and no `additional_params` passthrough.
+>
+> So the guarantee is enforced in `routing.route_question` instead: a chooser that returns no tool
+> call raises `ModelChoseNothing`, and it is never an empty result set. **That is the stronger of
+> the two.** `mode = ANY` is a request to the model; this is a property of the code, and it still
+> holds on the documented ANY-mode failures where Gemini rejects the whole request with
+> `INVALID_ARGUMENT` once the combined tool declarations pass an undocumented size budget.
+>
+> What is genuinely lost: nothing stops the *API* returning prose, so a wasted model call is
+> possible where `mode = ANY` would have prevented one. That is a cost in tokens, not in
+> correctness.
 
 **AC5 — A chosen entry is executed through the existing client.**
 Given a question, the agent produces `(entry_id, version, parameters)` and executes it via
@@ -97,75 +113,75 @@ call is injectable the way the transport is.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — An entry can describe itself (AC1, AC2)**
-  - [ ] Add a `description` field to `CatalogEntry` — one sentence, in the words a model reads.
+- [x] **Task 1 — An entry can describe itself (AC1, AC2)**
+  - [x] Add a `description` field to `CatalogEntry` — one sentence, in the words a model reads.
         `ParameterDeclaration.description` already exists and says why: "Story 3.4 hands these
         schemas to the reasoning model as tool definitions".
-  - [ ] Write `dues_status@1`'s description.
-  - [ ] Confirm the AD-14 digest does **not** move. `digest.ts` builds an explicit contract object
+  - [x] Write `dues_status@1`'s description.
+  - [x] Confirm the AD-14 digest does **not** move. `digest.ts` builds an explicit contract object
         and descriptions are deliberately outside it; add the assertion to
         `published-versions.test.ts` rather than assuming, so a future digest change that swallows
         descriptions fails here.
-  - [ ] A function that projects a `CatalogEntry` to its agent-facing shape — id, version,
+  - [x] A function that projects a `CatalogEntry` to its agent-facing shape — id, version,
         description, parameters — and **cannot** carry `sql` or `bind`. Type it so an entry field
         added later is not forwarded by default.
 
-- [ ] **Task 2 — The describe endpoint (AC1, AC2)**
-  - [ ] `GET /tools/v1/catalog` returning the projection from Task 1 for every registered entry.
-  - [ ] Same bearer-token check as `execute`, same error envelope. Reuse
+- [x] **Task 2 — The describe endpoint (AC1, AC2)**
+  - [x] `GET /tools/v1/catalog` returning the projection from Task 1 for every registered entry.
+  - [x] Same bearer-token check as `execute`, same error envelope. Reuse
         `core/tools/service-token.ts`'s `verifyServiceToken(presented, configured)` — verified
         present and exported; do not write a second comparison.
-  - [ ] Test: the response body, serialized, contains no substring of any entry's SQL.
-  - [ ] Test: an unauthenticated caller is refused, and a blank/absent configured token fails closed
+  - [x] Test: the response body, serialized, contains no substring of any entry's SQL.
+  - [x] Test: an unauthenticated caller is refused, and a blank/absent configured token fails closed
         exactly as `execute` does.
-  - [ ] `proxy.ts`'s matcher excludes `tools/v\d+/` (verified at story-creation time, line 65),
+  - [x] `proxy.ts`'s matcher excludes `tools/v\d+/` (verified at story-creation time, line 65),
         so a `v1` path needs no matcher change. Confirm it is still true rather than assuming.
 
-- [ ] **Task 3 — The agent fetches and declares (AC1, AC3)**
-  - [ ] Python: fetch the catalog through the same transport seam `tools_client.py` uses.
-  - [ ] Build tool declarations from what came back. Every declaration carries the entry's parameter
+- [x] **Task 3 — The agent fetches and declares (AC1, AC3)**
+  - [x] Python: fetch the catalog through the same transport seam `tools_client.py` uses.
+  - [x] Build tool declarations from what came back. Every declaration carries the entry's parameter
         schema verbatim, including `additionalProperties: false` and `required`.
-  - [ ] Test against the **real** catalog shape, not a hand-written fixture: a fixture is a second
+  - [x] Test against the **real** catalog shape, not a hand-written fixture: a fixture is a second
         statement of the schema and would pass while the endpoint drifted.
-  - [ ] Test: no declaration admits a field the entry does not declare.
+  - [x] Test: no declaration admits a field the entry does not declare.
 
-- [ ] **Task 4 — The model chooses (AC4, AC5)**
-  - [ ] Wire CrewAI `1.15.8` with `gemini-3.6-flash`, forced tool use (Gemini's
+- [x] **Task 4 — The model chooses (AC4, AC5)**
+  - [x] Wire CrewAI `1.15.8` with `gemini-3.6-flash`, forced tool use (Gemini's
         `function_calling_config.mode = ANY`). **The dependency is `crewai[google-genai]==1.15.8`,
         not bare `crewai`** — verified: the bare install has no litellm and the Gemini provider
         raises `ImportError` on construction.
-  - [ ] The model call is a parameter with a default, exactly as `Transport` is — so every test
+  - [x] The model call is a parameter with a default, exactly as `Transport` is — so every test
         substitutes it.
-  - [ ] Route: question in → `(entry_id, version, parameters)` → `execute_catalog_entry` → rows +
+  - [x] Route: question in → `(entry_id, version, parameters)` → `execute_catalog_entry` → rows +
         provenance id.
-  - [ ] Test: a stub model that names `dues_status`/1 with valid parameters produces one call to the
+  - [x] Test: a stub model that names `dues_status`/1 with valid parameters produces one call to the
         client with exactly those values.
 
-- [ ] **Task 5 — Wrong choices fail loudly (AC6)**
-  - [ ] Unknown entry id → raises. Not a retry loop, not an empty list.
-  - [ ] Parameters the schema rejects → the gateway's `invalid_parameters` surfaces as
+- [x] **Task 5 — Wrong choices fail loudly (AC6)**
+  - [x] Unknown entry id → raises. Not a retry loop, not an empty list.
+  - [x] Parameters the schema rejects → the gateway's `invalid_parameters` surfaces as
         `InvalidRequest`, which `tools_client.py` already raises. Prove the agent does not catch it.
-  - [ ] Test: a model that returns no tool call at all is an error, not an empty answer.
+  - [x] Test: a model that returns no tool call at all is an error, not an empty answer.
 
-- [ ] **Task 6 — The credential, and the trap (AC7, AC8)**
-  - [ ] Read `REASONING_API_KEY`; pass it explicitly to the model client.
-  - [ ] Update `test_no_data_credentials.py`'s exhaustive read set. **Add `GEMINI_API_KEY` to that
+- [x] **Task 6 — The credential, and the trap (AC7, AC8)**
+  - [x] Read `REASONING_API_KEY`; pass it explicitly to the model client.
+  - [x] Update `test_no_data_credentials.py`'s exhaustive read set. **Add `GEMINI_API_KEY` to that
         file's forbidden names** so reading it is a failure with a message, not merely an
         unrecognised name.
-  - [ ] Add the new declared dependencies to `APPROVED_DEPENDENCIES` — deliberately, one by one, with
+  - [x] Add the new declared dependencies to `APPROVED_DEPENDENCIES` — deliberately, one by one, with
         the reason. That list is an allowlist so this is a decision, which is the design.
-  - [ ] `.env.example`: add `REASONING_API_KEY` and `REASONING_MODEL` with the vendor-boundary note.
+  - [x] `.env.example`: add `REASONING_API_KEY` and `REASONING_MODEL` with the vendor-boundary note.
         **`docs/readme.test.ts` will go red on both counts if you stop here**: it asserts that every
         variable `.env.example` declares also appears in `README.md`, *and* that the README's stated
         count of variables is correct. Two new variables means two README edits, one of which is a
         number.
-  - [ ] `agent/README.md`: the configuration table is now four variables, and "What is not here yet"
+  - [x] `agent/README.md`: the configuration table is now four variables, and "What is not here yet"
         is no longer true.
 
-- [ ] **Task 7 — The gate (all)**
-  - [ ] `npm run test:py` covers `agent/`. `npm run test:db` covers `app/tools/` — Task 2 lands
+- [x] **Task 7 — The gate (all)**
+  - [x] `npm run test:py` covers `agent/`. `npm run test:db` covers `app/tools/` — Task 2 lands
         there, so it applies.
-  - [ ] Update `deploy-units.json` if the agent unit's credential set changes.
+  - [x] Update `deploy-units.json` if the agent unit's credential set changes.
 
 ## Dev Notes
 
@@ -311,23 +327,101 @@ collapses the only remaining half of AD-10.
 
 ### Agent Model Used
 
-_To be filled by the dev agent._
+Claude Opus 5 (1M context), via `bmad-dev-tdd` inside `bmad-ship-story`.
 
 ### Test Design
 
-_To be filled by the dev agent._
+Failure modes, by behaviour, classified GUARD / PROPAGATE / OUT-OF-SCOPE.
+
+**The catalog projection (`agent-view.ts`)** — GUARD: a field added to `CatalogEntry` later reaching
+the model by default; an entry with no description. OUT-OF-SCOPE: parameter *type* checking, which
+`validate-parameters.ts` owns.
+
+**The describe endpoint** — GUARD: an unauthenticated caller; a blank configured token; SQL in the
+body; the catalog described *in the 401*. PROPAGATE: nothing — this route has no failure the caller
+should distinguish.
+
+**The catalog client** — GUARD: a refusal becoming an empty catalog; an entry missing a field; a
+schema without `additionalProperties: false`; two versions of one id. PROPAGATE: `GatewayError`
+subclasses, unchanged from story 3.3.
+
+**Routing** — GUARD: a model that chose nothing; an entry the catalog does not hold; an undeclared
+or missing parameter; a model choosing the version. OUT-OF-SCOPE: answer rendering (3.6) and the
+numeric validator (3.5).
+
+**The model client** — GUARD: an absent, blank, or environment-discovered credential; a blank model
+id. OUT-OF-SCOPE: whether Gemini honours the prompt, which no local test can assert.
 
 ### Debug Log References
 
-_To be filled by the dev agent._
+**Three findings that came from reading output rather than results.**
+
+1. **A vacuous test I had just written.** `agent-view.test.ts` asserted no entry's SQL appears in the
+   serialized view by comparing against `entry.sql` directly. The SQL is a multi-line template
+   literal and `JSON.stringify` escapes its newlines, so the raw form is never a substring *whether
+   the SQL is present or not*. It passed while the projection leaked `sql`; only the keyword sweep
+   fired. Now compared against the escaped form — breaking `agentViewOf` fails 5 assertions, not 4.
+
+2. **A 12x pytest slowdown, from 0.21s to 3.98s.** Installing CrewAI put ~30,000 files under
+   `agent/.venv`, and `committed_config_files()` was `rglob("*")` over `agent/` with a `.venv in
+   path.parts` filter applied to each *result* — correct, and it enumerated the whole virtualenv
+   before discarding it. Two AD-3 tests were 3.6s of the 4.0s. `os.walk` with in-place pruning:
+   **3.98s → 0.34s**.
+
+3. **A 16s suite, measured before it was accepted.** `test_model.py` constructs real CrewAI objects:
+   ~5.5s to import `crewai`, ~1.3s per `LLM`. Local work, no socket — checked, because story 3.3
+   shipped a test that passed by making a real DNS lookup and took 11 of that suite's 11.25 seconds
+   while looking healthy. The file now disables CrewAI telemetry and the OTel exporters, so AC8 is
+   enforced rather than hoped for.
+
+**Two gate faults, both pre-existing and both surfaced by this story's diff.**
+
+- `docs/readme.test.ts` asserted `` `**${words[n]}** variables` `` from a list ending at `twelve`.
+  The thirteenth variable made it assert `**undefined** variables` — the exact fault its own comment
+  warns about, one level up. Extended, and the lookup now fails with a message when it runs off
+  the end.
+- `dual-llm-boundary.test.ts`'s C6 scan timed out at vitest's 5s default under the loaded full-suite
+  run. 192 files, ~770ms isolated. Assertion unchanged; headroom raised, because an intermittently
+  red gate is one people re-run rather than read.
+
+**The AD-3 exhaustive guard fired, three stories after it was written.**
+`test_the_service_asks_only_for_what_ad3_allows` asserts the read set *exactly*, and adding
+`REASONING_API_KEY` broke it — which is what "a new variable is a decision somebody makes rather than
+a line that slips through" meant. Recorded there with the reason, plus a separate test naming
+`GEMINI_API_KEY` and `GOOGLE_API_KEY` against AD-10, so whoever trips that one reads the right rule.
+
+**A security guard was split, not relaxed.** `sole-data-path.test.ts` asserted exactly one file may
+import *either* the executor *or* the registry, and the describe endpoint imports the registry.
+Reaching the executor is the ability to run a query; reaching the registry is knowing which entries
+exist. `THE_DOOR` remains the only file permitted the former — the assertion carrying AD-15 is
+untouched — and the registry's readers are named file by file rather than globbed.
 
 ### Completion Notes List
 
-_To be filled by the dev agent._
+- **AC4 could not be met as written and is amended above**, with what was verified and what it costs.
+- **The credential mechanism was not what the documentation says.** `crewai==1.15.8` installs no
+  litellm; the native google-genai provider picks a key from the environment when not handed one and
+  *prefers* `GOOGLE_API_KEY` over `GEMINI_API_KEY`. Both names are planted in tests that assert the
+  client never picks them up.
+- **`crewai[google-genai]`, not bare `crewai`.** The bare install raises `ImportError` on
+  `LLM(model="gemini/…")`.
+- Forced tool use is enforced by `ModelChoseNothing`; the version is read from the catalog, never
+  from the model; one declaration per entry *id*, never per version.
+- Nothing user-visible ships here. Stories 3.5 (validator) and 3.6 (surface) follow, in that order.
 
 ### File List
 
-_To be filled by the dev agent._
+**New** — `catalog/agent-view.ts`, `catalog/agent-view.test.ts`, `app/tools/v1/catalog/route.ts`,
+`app/tools/v1/catalog/route.test.ts`, `core/tools/http.ts`, `agent/watchdog_agent/catalog_client.py`,
+`agent/watchdog_agent/routing.py`, `agent/watchdog_agent/model.py`,
+`agent/tests/test_catalog_client.py`, `agent/tests/test_routing.py`, `agent/tests/test_model.py`
+
+**Updated** — `catalog/entry.ts`, `catalog/entries/dues-status-v1.ts`,
+`catalog/published-versions.test.ts`, `catalog/bind-values.test.ts`, `catalog/registry.test.ts`,
+`app/tools/v1/catalog/execute/route.ts`, `core/tools/sole-data-path.test.ts`,
+`core/security/dual-llm-boundary.test.ts`, `docs/readme.test.ts`, `agent/pyproject.toml`,
+`agent/tests/test_no_data_credentials.py`, `agent/watchdog_agent/tools_client.py`, `agent/README.md`,
+`README.md`, `.env.example`, `eslint.config.mjs`
 
 ## Review Findings
 
@@ -338,3 +432,4 @@ _To be filled by the review._
 | Date | Change |
 | --- | --- |
 | 2026-08-10 | Story created. Baselined on `b873e6f`, the merge of the AD-3/AD-10 amendments this story is the first to depend on. |
+| 2026-08-10 | Implemented test-first across seven tasks. **AC4 amended** — CrewAI 1.15.8's Gemini provider cannot express `mode = ANY`, so forced tool use is enforced in `route_question` instead. Status → review. |
