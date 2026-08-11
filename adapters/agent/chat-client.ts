@@ -186,6 +186,15 @@ function asTurn(payload: Record<string, unknown> | null, status: number): ChatTu
   if (typeof entryId !== 'string' || entryId.trim() === '') refuse('entryId was missing')
   if (!Number.isInteger(version)) refuse('version was missing or not an integer')
 
+  // `parameters` defaults when absent, but a *present* one must be an object.
+  // A string or an array would satisfy the cast below and reach the query
+  // disclosure as something it cannot render. Raised by CodeRabbit.
+  if (parameters !== undefined && parameters !== null) {
+    if (typeof parameters !== 'object' || Array.isArray(parameters)) {
+      refuse('parameters was present but not an object')
+    }
+  }
+
   return {
     answer: answer as string,
     provenanceId: provenanceId as string,

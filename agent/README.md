@@ -43,8 +43,11 @@ wrong.
 
 ## Configuration
 
-Four variables, and deliberately only four. AD-3 (amended 2026-08-10) allows this
-runtime two secrets: the gateway service token and the model API key.
+Five variables, and deliberately only five. AD-3 (amended 2026-08-10) allows this
+runtime two secrets of its own — `AGENT_SERVICE_TOKEN`, its identity when it
+calls Node, and `REASONING_API_KEY` — and AD-17 adds a third it *checks* rather
+than presents: `GATEWAY_SERVICE_TOKEN`, the gateway's identity when it calls
+here.
 
 | Variable | Why |
 | --- | --- |

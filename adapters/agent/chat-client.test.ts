@@ -198,6 +198,23 @@ describe('a malformed success', () => {
     await expect(ask({ fetch: respondWith(200, { ...TURN, answer: '   ' }) })).rejects.toThrow()
   })
 
+  it.each([['a string', 'unitNumber=4B'], ['an array', [1, 2]], ['a number', 7]])(
+    'refuses parameters that are %s',
+    async (_label, parameters) => {
+      // Absent is fine and defaults; present-but-not-an-object would reach the
+      // query disclosure as something it cannot render. Raised by CodeRabbit.
+      await expect(ask({ fetch: respondWith(200, { ...TURN, parameters }) })).rejects.toThrow(
+        /parameters/,
+      )
+    },
+  )
+
+  it('still accepts a turn with no parameters at all', async () => {
+    const { parameters: _dropped, ...rest } = TURN
+
+    await expect(ask({ fetch: respondWith(200, rest) })).resolves.toMatchObject({ parameters: {} })
+  })
+
   it('refuses rows that are not a list', async () => {
     await expect(
       ask({ fetch: respondWith(200, { ...TURN, rows: { unitNumber: '4B' } }) }),

@@ -69,9 +69,24 @@ CHAT_PATH = "/chat/v1/turn"
 #: which is this service's identity when it calls Node.
 TOKEN_VARIABLE = "GATEWAY_SERVICE_TOKEN"
 
-#: Fields that would make this a request for a *particular query* rather than a
-#: question. Refused by name so the caller learns which one, and why.
+#: Everything a chat turn's request may carry. **An allowlist**, because the
+#: denylist this replaced was bypassable by spelling: it named `entryId`, so
+#: `entry_id` and `catalogEntry` sailed through with a 200. Verified rather than
+#: reasoned about, and raised by CodeRabbit.
+#:
+#: This project already made the argument once, in `test_no_data_credentials.py`:
+#: "the allowlist is the real check; the denylist below only makes the message
+#: better", because a denylist is a list of the things somebody thought of.
+PERMITTED_FIELDS = ("question", "actorId")
+
+#: Kept for the message only. A request naming one of these gets an explanation
+#: rather than a bare "unknown field", because these are the ones somebody tries
+#: on purpose.
 FORBIDDEN_FIELDS = ("entryId", "version", "sql", "rows", "parameters")
+
+#: A question is a sentence. The limit is enforced before `json.loads`, so an
+#: oversized body is refused at the boundary rather than parsed first.
+MAX_BODY_BYTES = 64 * 1024
 
 _log = logging.getLogger(__name__)
 
@@ -139,21 +154,33 @@ def _authentic(presented: str | None) -> bool:
 
     import hmac
 
-    return hmac.compare_digest(presented, configured)
+    # Compared as bytes. `hmac.compare_digest` raises on a non-ASCII `str`, and
+    # this is *unauthenticated* input — an unhandled UnicodeEncodeError here is a
+    # 500 anyone can trigger with no credential at all, which is a crash reachable
+    # from outside the boundary the token exists to be. Raised by CodeRabbit.
+    return hmac.compare_digest(presented.encode("utf-8"), configured.encode("utf-8"))
 
 
 def _read_question(payload: object) -> tuple[str, str] | JSONResponse:
     if not isinstance(payload, dict):
         return _failure(400, "invalid_request", "the request body must be a JSON object")
 
-    named = [field for field in FORBIDDEN_FIELDS if field in payload]
-    if named:
+    unknown = [field for field in payload if field not in PERMITTED_FIELDS]
+    if unknown:
+        # The named ones get the reason; the rest get the rule. Both are refused,
+        # which is the part a denylist could not promise.
+        deliberate = [field for field in unknown if field in FORBIDDEN_FIELDS]
+        why = (
+            " Choosing the catalog entry is the model's, and naming it here would move intent "
+            "routing out of it (AD-17)."
+            if deliberate
+            else ""
+        )
         return _failure(
             400,
             "invalid_request",
-            f"a chat turn carries a question only; remove {', '.join(named)}. Choosing the "
-            "catalog entry is the model's, and naming it here would move intent routing out "
-            "of it (AD-17).",
+            f"a chat turn carries {' and '.join(PERMITTED_FIELDS)} only; "
+            f"remove {', '.join(sorted(unknown))}.{why}",
         )
 
     question = payload.get("question")
@@ -179,8 +206,18 @@ def create_app(*, route: Router | None = None, narrate: Narrator | None = None) 
         if not _authentic(_presented_token(request)):
             return _failure(401, "unauthenticated", "this endpoint serves the gateway only")
 
+        # Length first, so an oversized body is refused before it is parsed.
+        # `content-length` is a claim, so the read below is bounded too.
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+            return _failure(413, "request_too_large", "a question is a sentence, not a payload")
+
+        body = await request.body()
+        if len(body) > MAX_BODY_BYTES:
+            return _failure(413, "request_too_large", "a question is a sentence, not a payload")
+
         try:
-            payload = json.loads(await request.body())
+            payload = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
             return _failure(400, "invalid_request", "the request body is not valid JSON")
 

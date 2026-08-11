@@ -48,4 +48,11 @@ def narrate_answer(*, question: str, routed: RoutedAnswer, llm: Any | None = Non
         _PROMPT.format(question=question, rows=json.dumps(routed.rows, default=str))
     )
 
-    return answer if isinstance(answer, str) else ""
+    # Raised, not coerced. Returning `""` for a non-string would reach
+    # `chat_service` as "the narrator produced nothing", which is a true
+    # statement about a different problem — the model client returned something
+    # unexpected, and the message should say so. Raised by CodeRabbit.
+    if not isinstance(answer, str):
+        raise TypeError(f"the model returned {type(answer).__name__}, not text")
+
+    return answer

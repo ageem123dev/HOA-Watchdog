@@ -82,6 +82,30 @@ class TestWhoMayAsk:
     def test_refuses_a_wrong_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         assert ask(a_client(monkeypatch=monkeypatch), bearer="not-the-token").status_code == 401
 
+    @pytest.mark.parametrize("presented", ["tökén", "ÿþ", "tokén"])
+    def test_refuses_a_non_ascii_token_without_crashing(
+        self, monkeypatch: pytest.MonkeyPatch, presented: str
+    ) -> None:
+        """`hmac.compare_digest` raises on a non-ASCII `str`, and this is unauthenticated input.
+
+        An unhandled `UnicodeEncodeError` is a 500 anyone can trigger with no
+        credential at all — a crash reachable from outside the boundary the token
+        exists to be. Raised by CodeRabbit.
+
+        **Asserted against `_authentic` rather than through the client**, and the
+        reason is worth stating: `httpx` refuses to *encode* a non-ASCII header,
+        so a request carrying one cannot be sent by a conformant client and the
+        obvious test fails in the test client instead of in the code. Headers on
+        the wire are bytes, though, and Starlette decodes them as latin-1 — so a
+        raw client can hand exactly this string to the function below. Testing
+        the endpoint would have proved only that `httpx` is well behaved.
+        """
+        from watchdog_agent.chat_service import _authentic
+
+        monkeypatch.setenv(TOKEN_VARIABLE, TOKEN)
+
+        assert _authentic(presented) is False
+
     @pytest.mark.parametrize("configured", ["", "   "])
     def test_fails_closed_when_no_token_is_configured(
         self, monkeypatch: pytest.MonkeyPatch, configured: str
@@ -142,6 +166,53 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
         assert response.json()["code"] == "invalid_request"
         # Names the offending field, so the caller can fix it.
         assert next(iter(smuggled)) in response.json()["message"]
+
+    @pytest.mark.parametrize(
+        "unknown",
+        [
+            {"entry_id": "dues_status"},
+            {"catalogEntry": "dues_status"},
+            {"catalog_entry_id": "dues_status"},
+            {"anythingAtAll": 1},
+        ],
+    )
+    def test_refuses_a_field_it_does_not_recognise(
+        self, monkeypatch: pytest.MonkeyPatch, unknown: dict
+    ) -> None:
+        """An allowlist, because the denylist was bypassable by spelling.
+
+        `FORBIDDEN_FIELDS` named `entryId`, so `entry_id` and `catalogEntry`
+        sailed through with a 200 — verified, not reasoned about. This project
+        already made this argument once, in `test_no_data_credentials.py`: "the
+        allowlist is the real check; the denylist above only makes the message
+        better." Raised by CodeRabbit.
+        """
+        client = a_client(monkeypatch=monkeypatch)
+        body = {"question": "What does 4B owe?", "actorId": ACTOR, **unknown}
+
+        response = ask(client, body)
+
+        assert response.status_code == 400
+        assert next(iter(unknown)) in response.json()["message"]
+
+    def test_still_accepts_exactly_the_two_fields_it_declares(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The other direction, so a rule that refuses everything cannot pass.
+        assert ask(a_client(monkeypatch=monkeypatch)).status_code == 200
+
+    def test_refuses_a_body_larger_than_a_question_could_be(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A question is a sentence. Anything near a megabyte is not one.
+
+        The limit is at the boundary rather than after parsing, so an oversized
+        body never reaches `json.loads`. Raised by CodeRabbit.
+        """
+        client = a_client(monkeypatch=monkeypatch)
+        huge = {"question": "x" * (128 * 1024), "actorId": ACTOR}
+
+        assert ask(client, huge).status_code == 413
 
     def test_never_routes_a_request_it_refused(
         self, monkeypatch: pytest.MonkeyPatch
