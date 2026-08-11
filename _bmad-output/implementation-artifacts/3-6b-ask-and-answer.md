@@ -1,5 +1,6 @@
 ---
 baseline_commit: 51b942a
+merge_request: 46
 ---
 
 # Story 3.6b: Ask and answer
@@ -169,7 +170,37 @@ _To be filled by the dev agent._
 
 ## Review Findings
 
-_To be filled by the review._
+### Argus, whole-story diff (`51b942a..HEAD`)
+
+| # | Finding | Outcome |
+| --- | --- | --- |
+| 1 | `entryFor` outside the `try` crashed the page on a version skew instead of rendering the honest failure | Fixed — moved inside |
+| 2 | `aria-controls` pointed at an id absent from the document while collapsed | Fixed — set only while the target exists |
+| 3 | `attempts: 1` was pinned by nothing; changing it to 3 failed no test | Fixed — spy assertion added |
+| 4 | "Use `valueOf` in the table cells" | **Rejected.** `valueOf('1240.00')` is `124000` (minor units, not formatting) and `valueOf('4B')` throws, so the unit column would crash the table. AC6's wording was the real defect and was reworded. Pinned by a test so the suggestion cannot be applied later without a failure. |
+
+### CodeRabbit CLI — 13 of 13 files reviewed, none unreviewed
+
+| # | Severity | Finding | Outcome |
+| --- | --- | --- | --- |
+| 1 | **major** | `page.tsx` guarded on `!session?.user` and read `session.user.id ?? ''`; a session with no id was refused by `askOracle` and the refusal surfaced as *"The records could not be reached just now."* | Fixed — guard requires the id. Verified `page.tsx:67 → ask.ts:72` before acting. |
+| 2 | trivial | `vi.clearAllMocks()` keeps implementations, so a stub leaks between tests | Fixed — `resetAllMocks`. **Not pinned by any test, and cannot be** (see below). |
+| 3 | trivial | `questionFrom` unbounded | Fixed — truncates at `MAX_QUESTION_LENGTH` (500) |
+| 4 | trivial | Unrecognised failures swallowed before `explain()` | Fixed — logged first; the two named failures still are not |
+| 5 | trivial | The attempts test sat in an unrelated describe block | Fixed |
+| 6 | trivial | Columns from `rows[0]`, and `jsonb` values rendering `[object Object]` | Fixed — union of all keys, and objects serialized |
+
+**Sensitivity check on all six**: five fail when the fix is reverted. #2 does not and cannot — it
+prevents a *future* test from passing against a stub it never configured, and reverting it leaves all
+53 oracle tests green. That is the hazard, not evidence against the fix.
+
+**The correction this round produced.** `page.tsx` was believed untestable because importing it pulls
+`auth → next-auth → next/server` — the reason `questionFrom` was extracted. That was wrong:
+`app/quarantine/page.test.tsx` has mocked that chain since story 1.5, and `vi.mock` hoists above the
+fatal import. `app/oracle/page.test.tsx` now carries six tests. Its `redirect` mock throws the way
+the real one does; a mock that returned would let the page carry on and ask the question anyway.
+
+Argus re-run on the final head: no findings.
 
 ## Change Log
 
@@ -177,3 +208,4 @@ _To be filled by the review._
 | --- | --- |
 | 2026-08-11 | Story created when 3.6 was split. Stays `backlog` until 3.6a lands — the surface has nothing to render before the wire exists. |
 | 2026-08-11 | 3.6a merged. Baselined on `51b942a`. Two decisions taken before any code: **one attempt, then fail** (AD-7's retry clause deliberately unimplemented — see AC5), and the whole surface ships as one story, since the three layers are meaningless apart. Status → in-progress. |
+| 2026-08-11 | Argus round: 3 fixed, 1 rejected with a pinning test. CodeRabbit CLI round: 6 findings, all fixed, 5 pinned. `app/oracle/page.test.tsx` added after the "untestable page" belief turned out to be wrong. MR !46 opened; gate green on `d384e44` — 2073 tests, 109 files. |
