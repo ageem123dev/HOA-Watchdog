@@ -167,6 +167,7 @@ describe('the catalog itself', () => {
     const anEntry = (version: number, sql: string): CatalogEntry => ({
       id: 'twice_over',
       version,
+      description: 'A fixture registered twice, to prove the registry refuses it.',
       sql,
       parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       bind: [],

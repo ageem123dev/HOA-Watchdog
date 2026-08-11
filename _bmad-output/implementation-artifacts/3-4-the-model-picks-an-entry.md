@@ -131,7 +131,9 @@ call is injectable the way the transport is.
 
 - [ ] **Task 4 — The model chooses (AC4, AC5)**
   - [ ] Wire CrewAI `1.15.8` with `gemini-3.6-flash`, forced tool use (Gemini's
-        `function_calling_config.mode = ANY`).
+        `function_calling_config.mode = ANY`). **The dependency is `crewai[google-genai]==1.15.8`,
+        not bare `crewai`** — verified: the bare install has no litellm and the Gemini provider
+        raises `ImportError` on construction.
   - [ ] The model call is a parameter with a default, exactly as `Transport` is — so every test
         substitutes it.
   - [ ] Route: question in → `(entry_id, version, parameters)` → `execute_catalog_entry` → rows +
@@ -169,10 +171,24 @@ call is injectable the way the transport is.
 
 ### The credential trap, and it is one line wide
 
-**CrewAI routes through LiteLLM, and LiteLLM reads `GEMINI_API_KEY` and `GOOGLE_API_KEY` from the
-environment by default.** The common recipe on every integration page is `export
-GEMINI_API_KEY=…` — and `GEMINI_API_KEY` is the *extraction* credential, held by the `web` deploy
-unit.
+**Corrected 2026-08-10, against the installed package rather than the documentation.** The public
+integration guidance says CrewAI routes through LiteLLM, which reads `GEMINI_API_KEY` from the
+environment. That is not what 1.15.8 does: `pip install crewai==1.15.8` pulls **no litellm at all**,
+and `LLM(model="gemini/…")` raises `ImportError: Google Gen AI native provider not available, to
+install: uv add "crewai[google-genai]"`. The path is CrewAI's **native google-genai provider**
+(`provider='gemini'`, `is_litellm=False`).
+
+**The trap survives the correction, and it is worse than described.** Constructed without an explicit
+`api_key`, the native provider reads the environment and **prefers `GOOGLE_API_KEY` over
+`GEMINI_API_KEY`**, announcing it on stdout:
+
+```
+Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+api_key after construction with NO explicit key: 'also-not-ours'
+api_key when passed explicitly: 'ours'
+```
+
+`GEMINI_API_KEY` is the *extraction* credential, held by the `web` deploy unit.
 
 Following that recipe would put both sides of the dual-LLM boundary on one credential name. Since
 AD-10's vendor clause was withdrawn on 2026-08-10, credential separation is *all* that is left of

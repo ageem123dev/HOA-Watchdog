@@ -32,6 +32,24 @@ const REPO_ROOT = process.cwd()
 const THE_DOOR = 'app/tools/v1/catalog/execute/route.ts'
 
 /**
+ * The files allowed to reach the catalog **registry**, which is a different and
+ * weaker permission than reaching the executor.
+ *
+ * Story 3.4 added `GET /tools/v1/catalog`, which reads the registry to tell the
+ * agent which entries exist. That is not a second data path: it resolves no
+ * entry, opens no connection and returns no row of the association's records —
+ * it answers with `catalog/agent-view.ts`'s projection, which carries neither
+ * the SQL nor the bind order.
+ *
+ * So the rule is split rather than relaxed. **`THE_DOOR` is still the only file
+ * that may reach the executor**, and that is the assertion carrying AD-15's
+ * "sole data path". This second list is named file by file rather than written
+ * as a glob over `app/tools/`, so a third route reading the catalog fails here
+ * until somebody adds it on purpose.
+ */
+const DECLARATION_READERS = [THE_DOOR, 'app/tools/v1/catalog/route.ts'] as const
+
+/**
  * Every root where reaching the catalog would be a violation.
  *
  * The first draft scanned `app/` alone, which is narrower than the rule: a
@@ -45,8 +63,13 @@ const THE_DOOR = 'app/tools/v1/catalog/execute/route.ts'
  */
 const SCANNED_ROOTS = ['app', 'core', 'scripts'] as const
 
-/** What a caller would import to get at the catalog. */
-const EXECUTOR_MODULES = ['adapters/db/catalog-executor-postgres', 'catalog/registry'] as const
+/**
+ * The module that *is* the data path: importing it is the ability to run a query.
+ */
+const EXECUTOR_MODULE = 'adapters/db/catalog-executor-postgres'
+
+/** What a caller would import to get at the catalog, in either sense. */
+const EXECUTOR_MODULES = [EXECUTOR_MODULE, 'catalog/registry'] as const
 
 /**
  * `.mjs` counts. `scripts/` is written in it, and a script reaching the catalog
@@ -83,6 +106,21 @@ const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"`]([^'"`]+)['"`]/
  * and the test files that do are excluded from the sweep.
  */
 export function reachesTheCatalog(source: string): readonly string[] {
+  return specifiersReaching(source, EXECUTOR_MODULES)
+}
+
+/**
+ * The narrower question: does this file import the ability to *run* a query?
+ *
+ * The same scanner, over one module. An interpolated specifier is still reported
+ * here, for the same fail-closed reason — `@/adapters/db/${x}` could resolve to
+ * the executor, and a scanner that cannot tell must not answer "fine".
+ */
+export function reachesTheExecutor(source: string): readonly string[] {
+  return specifiersReaching(source, [EXECUTOR_MODULE])
+}
+
+function specifiersReaching(source: string, modules: readonly string[]): readonly string[] {
   const { commentsBlanked } = neutralise(source)
   const found: string[] = []
 
@@ -106,7 +144,7 @@ export function reachesTheCatalog(source: string): readonly string[] {
     // module; compare on the tail rather than resolving, so a path written from
     // a different depth is not invisible.
     const normalised = specifier.replace(/\\/g, '/')
-    if (EXECUTOR_MODULES.some((m) => normalised.endsWith(m))) found.push(specifier)
+    if (modules.some((m) => normalised.endsWith(m))) found.push(specifier)
   }
 
   return found
@@ -137,13 +175,32 @@ async function everyScannedFile(): Promise<string[]> {
 }
 
 describe('the catalog has one door', () => {
-  it('is reached from the tool endpoint and from nowhere else in the system', async () => {
+  /**
+   * The assertion that carries AD-15. Reaching the executor is the ability to
+   * run a query against the association's records, and exactly one file in the
+   * system has it.
+   */
+  it('the executor is reached from the tool endpoint and from nowhere else', async () => {
+    const files = await everyScannedFile()
+    const reaching = files.filter(
+      (file) => reachesTheExecutor(readFileSync(resolve(REPO_ROOT, file), 'utf8')).length > 0,
+    )
+
+    expect(reaching).toEqual([THE_DOOR])
+  })
+
+  /**
+   * The weaker permission, still pinned. Reading the registry is knowing which
+   * entries exist; it returns no data. Named file by file so a third reader is a
+   * decision somebody makes rather than a line that slips through.
+   */
+  it('the registry is read only by the tool endpoints that are allowed to', async () => {
     const files = await everyScannedFile()
     const reaching = files.filter(
       (file) => reachesTheCatalog(readFileSync(resolve(REPO_ROOT, file), 'utf8')).length > 0,
     )
 
-    expect(reaching).toEqual([THE_DOOR])
+    expect(reaching.sort()).toEqual([...DECLARATION_READERS].sort())
   })
 
   it('finds files to scan in every root, so an empty sweep cannot pass', async () => {
