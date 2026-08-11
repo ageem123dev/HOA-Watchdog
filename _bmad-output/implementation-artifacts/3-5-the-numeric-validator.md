@@ -4,7 +4,7 @@ baseline_commit: a9802c3
 
 # Story 3.5: The numeric validator
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -93,40 +93,40 @@ answers passes by checking nothing.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — What counts as a numeric token (AC1, AC6)**
-  - [ ] A tokenizer with an explicit, documented rule. Decide and test: currency, plain integers,
+- [x] **Task 1 — What counts as a numeric token (AC1, AC6)**
+  - [x] A tokenizer with an explicit, documented rule. Decide and test: currency, plain integers,
         decimals, percentages, thousands separators.
-  - [ ] Test that `4B`, `dues_status@1`, `2026-07-01` and `v1` are not treated as numerals — each is
+  - [x] Test that `4B`, `dues_status@1`, `2026-07-01` and `v1` are not treated as numerals — each is
         a real shape this system already produces.
-  - [ ] State in the header what is deliberately *not* validated, and why.
+  - [x] State in the header what is deliberately *not* validated, and why.
 
-- [ ] **Task 2 — Normalization (AC2, AC7)**
-  - [ ] One function, built on `toMinorUnits`/`fromMinorUnits`. Do not re-parse decimals.
-  - [ ] Edge tests: `0` vs `0.00`, trailing zeros, a leading `$`, embedded commas, negatives.
-  - [ ] Export it as the single statement of the rule, so 3.6's renderer consumes rather than
+- [x] **Task 2 — Normalization (AC2, AC7)**
+  - [x] One function, built on `toMinorUnits`/`fromMinorUnits`. Do not re-parse decimals.
+  - [x] Edge tests: `0` vs `0.00`, trailing zeros, a leading `$`, embedded commas, negatives.
+  - [x] Export it as the single statement of the rule, so 3.6's renderer consumes rather than
         restates it.
 
-- [ ] **Task 3 — The values a turn makes available (AC1, AC3)**
-  - [ ] Walk the tool result rows and collect every value a numeral could legitimately match,
+- [x] **Task 3 — The values a turn makes available (AC1, AC3)**
+  - [x] Walk the tool result rows and collect every value a numeral could legitimately match,
         including integers such as counts and years.
-  - [ ] Nested values count if the rows carry them; a value the rows do not carry does not.
-  - [ ] Test that a number from a *different* turn's rows is rejected — the set is per-turn.
+  - [x] Nested values count if the rows carry them; a value the rows do not carry does not.
+  - [x] Test that a number from a *different* turn's rows is rejected — the set is per-turn.
 
-- [ ] **Task 4 — The validator (AC1, AC3, AC8)**
-  - [ ] `validate(answer, rows)` → accepted, or a rejection naming the offending token.
-  - [ ] The rejection reason must not quote the whole answer into a log; name the token.
-  - [ ] Plant the four hallucination shapes from AC8 and assert each is caught.
-  - [ ] Sensitivity check: break the comparison, confirm the planted cases fail.
+- [x] **Task 4 — The validator (AC1, AC3, AC8)**
+  - [x] `validate(answer, rows)` → accepted, or a rejection naming the offending token.
+  - [x] The rejection reason must not quote the whole answer into a log; name the token.
+  - [x] Plant the four hallucination shapes from AC8 and assert each is caught.
+  - [x] Sensitivity check: break the comparison, confirm the planted cases fail.
 
-- [ ] **Task 5 — The bounded retry (AC4, AC5)**
-  - [ ] A wrapper that re-attempts on rejection, with an explicit attempt cap.
-  - [ ] Exhaustion raises a named error. Never the last rejected answer, never an empty one.
-  - [ ] Test that a success on attempt 2 returns exactly the accepted answer and nothing else.
-  - [ ] Test the cap is honoured — a producer that always fails is called exactly N times, not
+- [x] **Task 5 — The bounded retry (AC4, AC5)**
+  - [x] A wrapper that re-attempts on rejection, with an explicit attempt cap.
+  - [x] Exhaustion raises a named error. Never the last rejected answer, never an empty one.
+  - [x] Test that a success on attempt 2 returns exactly the accepted answer and nothing else.
+  - [x] Test the cap is honoured — a producer that always fails is called exactly N times, not
         forever.
 
-- [ ] **Task 6 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npx --no-install tsc --noEmit` against the
+- [x] **Task 6 — The gate**
+  - [x] `npm run lint`, `npm run build`, `npm test`, `npx --no-install tsc --noEmit` against the
         8-error baseline. `test:db` only if this touches `app/tools/`; `test:py` only if it touches
         `agent/`.
 
@@ -211,23 +211,67 @@ validator nobody should trust.
 
 ### Agent Model Used
 
-_To be filled by the dev agent._
+Claude Opus 5 (1M context), via `bmad-dev-tdd` inside `bmad-ship-story`.
 
 ### Test Design
 
-_To be filled by the dev agent._
+**The tokenizer** — GUARD: digits inside identifiers (`4B`, `dues_status@1`, `v1`, `unit_2_summary`),
+dates and timestamps, uuids. GUARD: multiple numerals in one sentence; an identifier and a real
+figure together. OUT-OF-SCOPE: words spelled as numbers ("two hundred"), which no catalog entry
+returns and which AD-6 would make a derived value anyway.
+
+**Normalization** — GUARD: every spelling of one amount collapsing to one value; exactness without a
+float; more precision than `numeric(14,2)` can hold. PROPAGATE: `toMinorUnits`'s own errors, unchanged.
+
+**The available values** — GUARD: a non-amount string contributing nothing; a value the rows did not
+carry; a value from another turn; nested values; the empty-rows case being empty rather than
+permissive.
+
+**The validator** — GUARD: four planted hallucination shapes (invented, rounded, transposed,
+borrowed from another turn); an unparsable numeral; a rejection carrying a name or the sentence.
+
+**The retry** — GUARD: the cap being honoured; a cap below one; exhaustion raising rather than
+returning the last rejected or an empty answer; a success carrying no trace of the rejected attempt.
 
 ### Debug Log References
 
-_To be filled by the dev agent._
+**The colon.** The tokenizer excluded an ISO timestamp's date half via its hyphens, and `09:30:00`
+walked straight through as `30` and `00`. A separator is a hyphen *or a colon* with digits on the far
+side. Caught by the over-strict/under-strict test pair, which is why both directions exist.
+
+**tsc caught a design question, not a typo.** The compiler could not prove a rejection existed at the
+throw below the loop. The available outs were an `as` assertion or an unreachable branch — a claim
+nothing checks, or a guard no test can reach. Restructured so the throw sits inside the loop and the
+non-null is provable. `npm run build` does not read this file; the baseline `tsc` check is what
+surfaced it, for the fourth story running.
+
+**Sensitivity check, which is the point of this story.** Defanging the comparison fails 7 tests
+including all four planted hallucinations; treating an unparsable numeral as absent fails the
+precision test.
 
 ### Completion Notes List
 
-_To be filled by the dev agent._
+- **The validator never computes.** AD-6 puts derived values in the entry, so a number the rows lack
+  is a new catalog entry, not arithmetic here — a deriving validator would accept exactly the figures
+  a model is likeliest to get wrong.
+- **Normalization has one home.** `valueOf` is the single statement of how an amount is spelled;
+  story 3.6's renderer consumes it rather than restating it.
+- **Retry or fail, never repair.** A scrubbed answer is a sentence nobody wrote about a member's
+  money; an answer admitting it was corrected invites the manual re-checking this product removes.
+- **The retry wrapper stayed in `core/`** and the HALT the story recorded in advance was not needed —
+  nothing about the retry required the agent to see the rejection, so the AD-15 wire contract is
+  untouched. Story 3.6 wires `groundedAnswer` to a producer.
+- Nothing user-visible ships here. Story 3.6 renders behind this; 3.7 owns what a board member sees
+  when `AnswerNotGrounded` is raised.
 
 ### File List
 
-_To be filled by the dev agent._
+**New** — `core/answer/numerals.ts`, `core/answer/numerals.test.ts`,
+`core/answer/validate-answer.ts`, `core/answer/validate-answer.test.ts`,
+`core/answer/grounded-answer.ts`, `core/answer/grounded-answer.test.ts`
+
+**Updated** — none. This story adds a module and changes nothing existing, which is why the
+integration risk sits in story 3.6 rather than here.
 
 ## Review Findings
 
@@ -238,3 +282,4 @@ _To be filled by the review._
 | Date | Change |
 | --- | --- |
 | 2026-08-11 | Story created. Baselined on `a9802c3`, the merge of story 3.4. |
+| 2026-08-11 | Implemented test-first across six tasks; 64 new tests. The recorded HALT was not triggered — the retry needed no change to the AD-15 wire contract. Status → review. |
