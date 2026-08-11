@@ -229,16 +229,26 @@ describe('what a numeral is worth', () => {
       // *different* number, and accepted whenever that number happened to be in
       // the rows. Grouping is checked before the separators are removed. Raised
       // by CodeRabbit.
-      expect(() => valueOf(malformed)).toThrow(/grouping|not a numeral/)
+      // The grouping failure specifically. The first version allowed
+      // `/grouping|not a numeral/`, so a token rejected for having a letter in
+      // it satisfied a test about commas — an assertion loose enough to pass for
+      // a failure that is not the one under test. Raised by CodeRabbit.
+      expect(() => valueOf(malformed)).toThrow(/malformed thousands grouping/)
     },
   )
 
-  it.each(['1,240', '12,345', '1,234,567', '1,240.55'])(
-    'still reads well-formed grouping: %s',
-    (grouped) => {
-      expect(() => valueOf(grouped)).not.toThrow()
-    },
-  )
+  it.each([
+    ['1,240', 124000],
+    ['12,345', 1234500],
+    ['1,234,567', 123456700],
+    ['1,240.55', 124055],
+  ])('still reads well-formed grouping: %s', (grouped, expected) => {
+    // The value, not merely that it returned. `not.toThrow()` would hold for a
+    // guard that accepted the token and computed the wrong number, which is
+    // exactly the failure this whole guard exists to prevent. Raised by
+    // CodeRabbit.
+    expect(valueOf(grouped)).toBe(expected)
+  })
 
   it('refuses something that is not a numeral at all', () => {
     expect(() => valueOf('4B')).toThrow(/not a numeral/)
