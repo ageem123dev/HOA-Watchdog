@@ -4,7 +4,7 @@ baseline_commit: df9b656
 
 # Story 3.6a: The chat turn crosses the wire
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -86,41 +86,41 @@ Node→agent caller appearing anywhere fails a test rather than passing review.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The server (AC1, AC2)**
-  - [ ] Choose the framework and **declare it**. `crewai` already pulls `uvicorn`, `starlette` and
+- [x] **Task 1 — The server (AC1, AC2)**
+  - [x] Choose the framework and **declare it**. `crewai` already pulls `uvicorn`, `starlette` and
         `fastapi`-adjacent packages transitively; a transitive dependency is not a declared one, and
         `APPROVED_DEPENDENCIES` is an allowlist, so adding it is a decision in a diff.
-  - [ ] `POST /chat/v1/turn`, request validated by shape.
-  - [ ] Test: a request naming an entry id, a version, SQL or rows is refused with a message that
+  - [x] `POST /chat/v1/turn`, request validated by shape.
+  - [x] Test: a request naming an entry id, a version, SQL or rows is refused with a message that
         says which field and why.
 
-- [ ] **Task 2 — The turn (AC3)**
-  - [ ] Wire `routing.route_question` behind the endpoint. It already returns `entry_id`, `version`,
+- [x] **Task 2 — The turn (AC3)**
+  - [x] Wire `routing.route_question` behind the endpoint. It already returns `entry_id`, `version`,
         `parameters`, `provenance_id` and `rows` — the response shape is mostly a projection of
         `RoutedAnswer`.
-  - [ ] **Decide where the answer prose comes from, and record it.** See the Dev Note below; this is
+  - [x] **Decide where the answer prose comes from, and record it.** See the Dev Note below; this is
         the one genuinely open question in the story.
-  - [ ] Test: all three of answer, provenance id and rows present, or an error.
+  - [x] Test: all three of answer, provenance id and rows present, or an error.
 
-- [ ] **Task 3 — The token (AC4, AC6)**
-  - [ ] A new variable, distinct from `AGENT_SERVICE_TOKEN`. Reuse story 3.2's constant-time
+- [x] **Task 3 — The token (AC4, AC6)**
+  - [x] A new variable, distinct from `AGENT_SERVICE_TOKEN`. Reuse story 3.2's constant-time
         comparison rather than writing a second one — port `verifyServiceToken`'s property, not its
         code, and say in the header that the two are deliberately parallel.
-  - [ ] Fails closed when unset or blank. Test both.
-  - [ ] Update the AD-3 exhaustive read set with the reason, as story 3.4 did.
+  - [x] Fails closed when unset or blank. Test both.
+  - [x] Update the AD-3 exhaustive read set with the reason, as story 3.4 did.
 
-- [ ] **Task 4 — The Node client (AC5, AC8)**
-  - [ ] A client in `adapters/` — this reaches outward, so it is not `core/`.
-  - [ ] Every non-2xx becomes a named error. Never an empty answer.
-  - [ ] A guard asserting `/chat/v*` is the only Node→agent path, in the shape of
+- [x] **Task 4 — The Node client (AC5, AC8)**
+  - [x] A client in `adapters/` — this reaches outward, so it is not `core/`.
+  - [x] Every non-2xx becomes a named error. Never an empty answer.
+  - [x] A guard asserting `/chat/v*` is the only Node→agent path, in the shape of
         `sole-data-path.test.ts`, including its planted-violation half.
 
-- [ ] **Task 5 — Documentation and the gate (AC1, AC7)**
-  - [ ] `agent/README.md`: how to run the service, the new variable, and the two-token reason.
-  - [ ] `.env.example` and the root `README.md` — note `docs/readme.test.ts` asserts every declared
+- [x] **Task 5 — Documentation and the gate (AC1, AC7)**
+  - [x] `agent/README.md`: how to run the service, the new variable, and the two-token reason.
+  - [x] `.env.example` and the root `README.md` — note `docs/readme.test.ts` asserts every declared
         variable appears in the README **and** that the README's stated count is right.
-  - [ ] `deploy-units.json`: the agent unit gains a credential; the `web` unit gains one too.
-  - [ ] Gate: `npm run lint`, `npm run build`, `npm test`, `npm run test:py`, `npx --no-install tsc
+  - [x] `deploy-units.json`: the agent unit gains a credential; the `web` unit gains one too.
+  - [x] Gate: `npm run lint`, `npm run build`, `npm test`, `npm run test:py`, `npx --no-install tsc
         --noEmit` against the 8-error baseline. `test:db` only if this touches `app/tools/`.
 
 ## Dev Notes
@@ -205,23 +205,64 @@ spend money on.
 
 ### Agent Model Used
 
-_To be filled by the dev agent._
+Claude Opus 5 (1M context), via `bmad-dev-tdd` inside `bmad-ship-story`.
 
 ### Test Design
 
-_To be filled by the dev agent._
+**The service** — GUARD: an unauthenticated caller; the *other direction's* token; a blank configured
+token; a request naming the entry, version, SQL, rows or parameters; a malformed or non-JSON body; a
+blank narration. PROPAGATE: `ModelChoseNothing` and `ModelChoseUnknownEntry` as a 422 the caller can
+tell from a fault; `GatewayError` as a 502 whose detail is logged, not returned.
+
+**The client** — GUARD: absent or blank configuration; a base URL that is not absolute https; every
+non-2xx; a network failure; a 200 missing any of the five fields the renderer needs; a blank answer;
+rows that are not a list. OUT-OF-SCOPE: retrying, which `groundedAnswer` owns.
+
+**The sole-path guard** — GUARD: a second file naming `AGENT_BASE_URL` or spelling `/chat/v*`, in
+both directions, including the fail-closed case.
 
 ### Debug Log References
 
-_To be filled by the dev agent._
+**The open question the story recorded resolved itself.** `route_question` returns rows, not prose,
+and only one shape survives AD-3: the agent narrates, because Node holds no model credential. The
+retry crossing the wire is 3.6b's to wire up — `groundedAnswer(rows, produce)` where `produce` asks
+for another turn — and the thing to check there is still whether that re-executes the catalog entry,
+because a second provenance row for one question is something a board member would have to explain.
+**No HALT was needed**; AD-17 and AD-12 are both untouched.
+
+**I broke `main` with the AD-17 merge and did not notice for an hour.**
+`docs/planning-artifacts.test.ts` derives the decision count from the spine and asserts the
+walkthrough states it. I had written on MR !43 that "no code changed, so there is nothing to gate"
+and skipped the Node suite. The spine is an *input* to a test. `_bmad-output/**` being excluded from
+CodeRabbit review does not make it excluded from the tests, and I had conflated the two. Fixed on its
+own branch (MR !44) rather than inside this story.
+
+**And I committed once on a red gate** — ran it, then committed without reading the result. The
+commit was fine; the process slip was not. The gate's exit code is the thing to read, and I did not.
 
 ### Completion Notes List
 
-_To be filled by the dev agent._
+- **Starlette, declared rather than borrowed.** `crewai` pulls it and `uvicorn` transitively, and a
+  transitive dependency is not a declared one. FastAPI would infer a request shape; AD-17 needs
+  fields *refused* rather than ignored, which is a rule about what the schema rejects.
+- **The smuggled fields are a 400 naming the field.** Dropping them silently is easier and worse: a
+  field the caller believes was honoured is indistinguishable at the call site from one that was.
+- **The response carries the entry and version**, which is not a contradiction — AD-17 forbids a
+  *caller-supplied* entry id, and UX-DR6 labels the disclosure with `entry@version`. Learning which
+  entry answered is the opposite of choosing it.
+- **The sole-path guard asks who knows the address, not who calls.** The obvious shape is vacuous
+  until 3.6b exists.
+- The AD-3 exhaustive read set fired for the third story running.
 
 ### File List
 
-_To be filled by the dev agent._
+**New** — `agent/watchdog_agent/chat_service.py`, `agent/watchdog_agent/narrate.py`,
+`agent/tests/test_chat_service.py`, `adapters/agent/chat-client.ts`,
+`adapters/agent/chat-client.test.ts`, `adapters/agent/sole-chat-path.test.ts`,
+`scripts/run-agent.mjs`
+
+**Updated** — `agent/pyproject.toml`, `agent/tests/test_no_data_credentials.py`, `agent/README.md`,
+`deploy-units.json`, `.env.example`, `README.md`, `package.json`
 
 ## Review Findings
 
@@ -232,3 +273,4 @@ _To be filled by the review._
 | Date | Change |
 | --- | --- |
 | 2026-08-11 | Story created when 3.6 was split. Blocked on AD-17, which was approved the same day. |
+| 2026-08-11 | Implemented test-first across five tasks. The recorded HALT was not triggered. Status → review. |
