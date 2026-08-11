@@ -67,6 +67,7 @@ NFR-5: Query provenance. Every catalog execution permanently logs user id, times
 - Ingestion idempotent on document content hash; alerts keyed on `(finding_type, subject_id, period)` so reprocessing is a no-op. (AD-13)
 - Catalog entry versions immutable once used in production; changing SQL mints a new version. CI diff check required. (AD-14)
 - Versioned `/tools/*` endpoints are the sole data path and must reject any non-agent caller. Auth mechanism undecided. (AD-15)
+- The Node→agent chat turn goes over versioned `/chat/v*` endpoints. The request carries a question and nothing else — no SQL, no rows, no caller-supplied entry id. The response carries the answer, the provenance id and the rows it was drawn from, which AD-7's validator and UX-DR11's evidence table both need. Service token distinct from the agent's. (AD-17, decided 2026-08-11)
 - Python service pins 3.13 — CrewAI `requires_python` is `<3.14,>=3.10`, and the ambient interpreter is 3.14.
 - Test harnesses: Vitest (Node/Next) and pytest (Python 3.13). Both run in CI alongside lint and build.
 - Deferred and explicitly out of scope: multi-tenancy, retention/deletion policy, backup and recovery posture.
@@ -812,9 +813,17 @@ That is a known gap, recorded rather than glossed.
 | 3.3 | The Python service exists | AD-3, **pytest in CI** | A second runtime holding only the model key, obtaining facts by calling Node |
 | 3.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
 | 3.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
-| 3.6 | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
+| 3.6a | The chat turn crosses the wire | AD-17 | A question reaches the agent service and an answer comes back, with nothing rendered yet |
+| 3.6b | Ask and answer | UX-DR6, 7, 11 | The first user-visible Oracle, evidence table beside the answer |
 | 3.7 | When it cannot answer | UX-DR17, 18 | No-catalog-match and service-unavailable as distinct, honest states |
 | 3.8 | The access log | NFR-5, UX-DR16 | Who asked what, when — the provenance record given a reader |
+
+**Story 3.6 split, 2026-08-11.** As written it meant three things: an HTTP server in the Python
+service, a Node client for it, and the three UX requirements. The agent service is a *library* —
+`agent/watchdog_agent/` has no entrypoint and no server — and no Node→agent call path exists
+anywhere, so the spine's `NEXT -->|chat turn| PY` edge is undrawn. AD-15 governs the other direction
+only. That is a wire and a surface, not one story, and the wire needs an architecture decision
+(**AD-17**) before either can start.
 
 **Why eight and not four.** Epic 1's evidence. Story 1.5 was split into four mid-flight and 1.6 into
 four before implementation; the pre-split epic went materially better. Story 1.5d at 27 files drew

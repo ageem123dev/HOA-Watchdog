@@ -184,6 +184,19 @@ Layer → namespace mapping:
 - **Rule:** An uploaded document's bytes are written to object storage and nowhere else. The database stores its **identity and metadata only** — content hash, storage key, filename, size, media type, upload time, and the typed rows extraction produced. No table holds document bytes, and no catalog entry may return a storage key to the agent. Exactly one adapter (`adapters/storage`) may construct a storage client; the port it implements is deliberately narrow — put, get, delete by key — so the provider is swappable and no caller can reach for provider-specific behaviour.
 - **Why it is stated now:** Supabase bundled storage and database behind one vendor, which made the boundary implicit. Splitting them (Railway Postgres + S3-compatible object storage) makes it a decision someone could get wrong, so it becomes a rule.
 
+### AD-17 — The chat turn is a wire, not a data path
+
+- **Decided:** 2026-08-11, when story 3.6 was split. The spine's `NEXT → PY` edge had been drawn since 2026-07-29 and never governed.
+- **Binds:** FR-4, FR-5, the `NEXT → PY` edge, stories 3.6a and 3.6b
+- **Prevents:** A second data path opening in the direction AD-15 does not govern; an unauthenticated caller reaching the reasoning runtime; the two runtimes accumulating ad-hoc endpoints between them.
+- **Rule:** The Node gateway reaches the Python agent service through **versioned `/chat/v*` endpoints only**. The **request** carries a question and nothing else — no SQL, no rows, and no catalog entry id: naming the entry would move intent routing out of the model and quietly undo AD-5. The **response** carries the answer, the provenance id, and the rows the answer was drawn from. Caller identity is asserted by a shared service token held only by the gateway and the agent service, **distinct from `AGENT_SERVICE_TOKEN`**: one token reused in both directions means either runtime's compromise grants the other's identity.
+- **Why it is still not a data path.** The constraint that matters is on the *request*. Node already holds every database credential (AD-3) and issued those rows itself, through `/tools/v1/catalog/execute`, moments earlier — so a response returning them grants Node nothing it did not already have. What would make this a data path is a request that could ask for arbitrary data, and a bare question cannot.
+- **Amendment (2026-08-11, before any code).** As first written this rule said the turn carries "a question and an answer — never rows", and that was wrong in a way worth recording. AD-7's validator compares an answer against the rows of that turn, and it lives in `core/` on the Node side; UX-DR11 requires an "always-visible evidence table", which *is* those rows. Under the original wording neither was reachable — the validator would have had nothing to validate against, and the evidence table nothing to show. The clause was written to keep the request from becoming a query channel, and it is now scoped to the request, where it belongs.
+- **Mechanism:** Bound to the Railway private network alongside AD-15's endpoints, and not published on any public domain. Until that network exists the token is the whole boundary, exactly as AD-15 records for its own half.
+- **Why a new AD rather than widening AD-15.** AD-15's rule is worded tightly around "the sole data path in the system", and that tightness is what makes it useful — it is the sentence `core/tools/sole-data-path.test.ts` enforces. Widening it to cover a path that carries no data would blur the claim. Story 3.4 met the same choice and made it the same way, splitting the executor from the registry rather than relaxing one rule to cover both.
+- **What it costs:** a second service token to distribute and rotate, and a second HTTP surface to keep versioned. Both are the price of the two-runtime split AD-3 already chose.
+- **The clause that is load-bearing:** *never a catalog entry id supplied by the caller.* Letting Node name the entry would move intent routing out of the model and quietly undo story 3.4.
+
 Dependency direction — an arrow means "may depend on"; the absence of a reverse arrow is the rule:
 
 ```mermaid
@@ -339,7 +352,7 @@ HOA-Treasurer-Assistant/
 | Board member sign-in | `app/`, `adapters/auth` | AD-4 |
 | FR-2 Extraction isolation | `adapters/extraction` | AD-8, AD-9, AD-10 |
 | FR-3 Schema conformance | `adapters/extraction` | AD-9 |
-| FR-4 Intent routing & tool execution | `agent/`, `tools/` | AD-3, AD-5, AD-11 |
+| FR-4 Intent routing & tool execution | `agent/`, `tools/` | AD-3, AD-5, AD-11, AD-17 |
 | FR-5 Show-your-work transparency | `app/`, `catalog/` | AD-5, AD-6, AD-7, AD-12 |
 | FR-6 Vendor / invoice anomalies | `catalog/`, `core/` | AD-6, AD-8 |
 | FR-7 Dues triangulation | `catalog/`, `core/` | AD-1, AD-6 |
