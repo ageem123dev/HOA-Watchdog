@@ -231,7 +231,9 @@ describe('a malformed success', () => {
     // The same hole story 3.5 closed in `groundedAnswer` and 3.6a closed in the
     // service. Guarded here too, because this is the last place before a
     // renderer.
-    await expect(ask({ fetch: respondWith(200, { ...TURN, answer: '   ' }) })).rejects.toThrow()
+    await expect(ask({ fetch: respondWith(200, { ...TURN, answer: '   ' }) })).rejects.toThrow(
+      /answer was missing or blank/,
+    )
   })
 
   it.each([['a string', 'unitNumber=4B'], ['an array', [1, 2]], ['a number', 7]])(
@@ -278,6 +280,8 @@ describe('a malformed success', () => {
   })
 
   it('refuses a body that is not JSON', async () => {
-    await expect(ask({ fetch: respondWith(200, '<html>hello</html>') })).rejects.toThrow()
+    await expect(ask({ fetch: respondWith(200, '<html>hello</html>') })).rejects.toThrow(
+      /the body was not JSON/,
+    )
   })
 })
