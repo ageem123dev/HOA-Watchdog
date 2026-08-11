@@ -1,10 +1,10 @@
 ---
-baseline_commit: TBD
+baseline_commit: 51b942a
 ---
 
 # Story 3.6b: Ask and answer
 
-Status: backlog
+Status: in-progress
 
 ## Why this story exists
 
@@ -63,6 +63,22 @@ version — `dues_status@1`, the pair AD-14 froze and AD-12 logged. Open state p
 The rendered answer passes `validateAnswer` before it is shown. A turn whose answer cannot be
 grounded renders no answer at all — story 3.7 owns what shows instead, and until it exists an honest
 placeholder rather than an ungrounded sentence.
+
+> **Decided 2026-08-11: one attempt, then fail.** AD-7 says a rejected answer "forces a retry", and
+> that is deliberately not implemented here. Since story 3.6a the model lives across a wire, so a
+> retry means another turn — which re-runs `route_question`, **re-executes the catalog entry**, and
+> returns *different rows*. The validator would then check attempt two against attempt one's
+> evidence, and AD-12 would record a second `query_log` row for one question, which a board member
+> reading the access log would have to have explained to them.
+>
+> The fix that preserves the retry is a narrate-only endpoint taking the rows already returned — and
+> that collides with AD-17's request clause. Rather than amend a second AD to keep a capability
+> nothing yet needs, the surface calls `groundedAnswer(rows, produce, { attempts: 1 })`: the producer
+> runs once, and a rejection raises `AnswerNotGrounded` for story 3.7 to render. **No code is dropped**
+> — the retry stays available for the day that endpoint exists, configured to one attempt today.
+>
+> `attempts: 1` rather than calling `validateAnswer` directly, so the decision is a number somebody
+> can change rather than a code path somebody has to rebuild.
 
 **AC6 — Formatting has one home.**
 Amounts are formatted through `core/answer/numerals.ts`'s `valueOf` contract rather than a second
@@ -153,3 +169,4 @@ _To be filled by the review._
 | Date | Change |
 | --- | --- |
 | 2026-08-11 | Story created when 3.6 was split. Stays `backlog` until 3.6a lands — the surface has nothing to render before the wire exists. |
+| 2026-08-11 | 3.6a merged. Baselined on `51b942a`. Two decisions taken before any code: **one attempt, then fail** (AD-7's retry clause deliberately unimplemented — see AC5), and the whole surface ships as one story, since the three layers are meaningless apart. Status → in-progress. |
