@@ -139,6 +139,28 @@ describe('what is a numeral', () => {
     expect(numeralsIn('due 01/07/2026')).toEqual([])
   })
 
+  /**
+   * The last of the swallowed shapes, and the one that shows why adjacency was
+   * the wrong mechanism all along.
+   *
+   * Excluding a digit run because a hyphen or colon with a digit on the far side
+   * touches it removes ISO dates and timestamps — and it removes ordinary pairs
+   * with them. `240.00-500.00` is a range a model would plausibly write, and
+   * every numeral in it vanished. Nothing in the suite failed, because the
+   * exclusion cases only ever asserted that dates produce *nothing*, which a
+   * rule that produces nothing for everything also satisfies.
+   *
+   * Whole-shape exclusion, the way `SLASH_DATE` already worked. Raised by
+   * CodeRabbit on MR !42.
+   */
+  it.each([
+    ['a hyphen-joined range', 'owes 240.00-500.00', ['240.00', '500.00']],
+    ['a colon-joined pair', 'ratio 240:500', ['240', '500']],
+    ['a subtraction written in prose', 'from 1240.00 - 1000.00', ['1240.00', '1000.00']],
+  ])('still finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
   it('reports where each numeral was, so a rejection can name it precisely', () => {
     const [first] = numeralsIn('owes 1240')
 
@@ -184,10 +206,15 @@ describe('what a numeral is worth', () => {
   it('refuses a value with more precision than the money contract carries', () => {
     // `numeric(14,2)`. Three decimal places is not a formatting variant of a
     // stored amount; it is a number this system cannot have produced.
-    expect(() => valueOf('1240.555')).toThrow()
+    //
+    // The message, not a bare `toThrow()`: `valueOf` throws `TypeError` from its
+    // own guard and `toMinorUnits` throws `TypeError` or `RangeError` for its
+    // own reasons, so a bare assertion passes for a failure that is not this
+    // one. Raised by CodeRabbit.
+    expect(() => valueOf('1240.555')).toThrow(/decimal places/)
   })
 
   it('refuses something that is not a numeral at all', () => {
-    expect(() => valueOf('4B')).toThrow()
+    expect(() => valueOf('4B')).toThrow(/not a numeral/)
   })
 })

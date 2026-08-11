@@ -30,6 +30,28 @@ import { validateAnswer, type Rejection } from './validate-answer'
 /** Enough to clear a one-off slip; few enough that a real gap surfaces fast. */
 const DEFAULT_ATTEMPTS = 3
 
+/**
+ * A blank answer is refused, and finding that out was worth a whole finding.
+ *
+ * `validateAnswer` is about numerals against rows, so an answer with no numerals
+ * has nothing to object to — and an empty string has no numerals. It was
+ * therefore *accepted*, and a caller would have shown a board member nothing at
+ * all, which reads as "there is nothing to report". For a balance that is a
+ * wrong financial answer with a confident face.
+ *
+ * The gap surfaced because CodeRabbit pointed out that a test named "never
+ * returns an empty answer" duplicated the test above it and never produced one.
+ * Writing the case it claimed is what exposed the behaviour.
+ *
+ * `numeral` is empty because nothing in particular was refused — the whole
+ * answer was. The reason carries the meaning.
+ */
+const BLANK_ANSWER: Rejection = {
+  numeral: '',
+  index: 0,
+  reason: 'was blank, and an empty answer reads as "there is nothing to report"',
+}
+
 export class AnswerNotGrounded extends Error {
   override readonly name = 'AnswerNotGrounded'
 
@@ -78,7 +100,7 @@ export async function groundedAnswer(
 
   for (let attempt = 1; ; attempt += 1) {
     const answer = await produce(rejection)
-    const verdict = validateAnswer(answer, rows)
+    const verdict = answer.trim() === '' ? BLANK_ANSWER : validateAnswer(answer, rows)
 
     if (verdict === null) return answer
 

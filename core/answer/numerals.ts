@@ -67,6 +67,12 @@ export interface Numeral {
  * — a false rejection, which is the quiet cliff that gets a guard switched off.
  * Verified by running the old regex rather than by reading it.
  *
+ * **The leading `-` is a sign only when a digit does not precede it.** Without
+ * the lookbehind, `240.00-500.00` read its second figure as `-500.00` — a
+ * negative five hundred that no row carries, so a true range became a false
+ * rejection. A hyphen between two digits is a range or a subtraction; a hyphen
+ * after a space is a sign.
+ *
  * **The exponent group is here to make `1e6` refusable, not readable.** Without
  * it the token fell between the rules — `e` is an identifier character, so `1`
  * was excluded by what followed and `6` by what preceded, and the whole thing
@@ -74,7 +80,7 @@ export interface Numeral {
  * this system carries it. The point is that it is refused out loud rather than
  * not seen. Raised by CodeRabbit.
  */
-const CANDIDATE = /-?\$?(?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?%?/g
+const CANDIDATE = /(?<!\d)-?\$?(?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?%?/g
 
 /** A character that, adjacent to digits, means the run is part of a name. */
 const IDENTIFIER_CHARACTER = /[A-Za-z0-9_@]/
@@ -101,18 +107,50 @@ const IDENTIFIER_CHARACTER = /[A-Za-z0-9_@]/
  * requiring one is what keeps this pattern from eating arbitrary triples.
  * Raised by CodeRabbit.
  */
-const SLASH_DATE = /\d{4}\/\d{1,2}\/\d{1,2}|\d{1,2}\/\d{1,2}\/\d{4}/g
+const SLASH_DATE = /\d{4}\/\d{1,2}\/\d{1,2}|\d{1,2}\/\d{1,2}\/\d{4}/
+
+/**
+ * Every shape whose digits are structure rather than quantity, matched **whole**.
+ *
+ * This replaced an adjacency rule, and the replacement is the point. Excluding a
+ * digit run because a hyphen or colon with a digit on the far side touched it
+ * removed ISO dates and timestamps — and removed ordinary pairs with them.
+ * `240.00-500.00` is a range a model would plausibly write, and every numeral in
+ * it disappeared, so a hallucinated range was accepted in silence.
+ *
+ * Nothing in the suite failed, and that is the instructive part: the exclusion
+ * tests asserted only that a date yields *nothing*, which a rule yielding
+ * nothing for everything satisfies just as well. An assertion that something is
+ * absent cannot tell "correctly excluded" from "never seen".
+ *
+ * A shape has a shape. Listing them costs a line each and cannot over-reach.
+ * Raised by CodeRabbit on MR !42.
+ */
+const EXCLUDED_SHAPES = [
+  // Timestamp before date: the union of spans makes order irrelevant, but the
+  // longer shape is listed first so a reader meets the specific case first.
+  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[-+]\d{2}:\d{2})?/,
+  /\d{4}-\d{2}-\d{2}/,
+  /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/,
+  SLASH_DATE,
+]
 
 export function numeralsIn(text: string): readonly Numeral[] {
   const found: Numeral[] = []
-  const dateSpans = [...text.matchAll(SLASH_DATE)].map((m) => [m.index, m.index + m[0].length])
+  const excluded = excludedSpans(text)
 
   for (const match of text.matchAll(CANDIDATE)) {
     const start = match.index
     const token = match[0]
+    const end = start + token.length
 
-    const insideADate = dateSpans.some(([from, to]) => start >= from! && start < to!)
-    if (insideADate) continue
+    // The **whole** token against the whole span, not just its start. No shape
+    // here can begin mid-candidate today, so a start-only test happens to be
+    // right — and it stops being right the moment the list above grows, which
+    // is the sort of correctness that expires without anything failing. Raised
+    // by CodeRabbit.
+    const overlapsAShape = excluded.some(([from, to]) => start < to && end > from)
+    if (overlapsAShape) continue
 
     if (isQuantity(text, start, token)) {
       found.push({ text: token, index: start })
@@ -120,6 +158,21 @@ export function numeralsIn(text: string): readonly Numeral[] {
   }
 
   return found
+}
+
+function excludedSpans(text: string): readonly (readonly [number, number])[] {
+  const spans: (readonly [number, number])[] = []
+
+  for (const shape of EXCLUDED_SHAPES) {
+    // A fresh global regex per call: the sources are module constants, and
+    // sharing a `lastIndex` across calls is how a scanner starts returning
+    // different answers for the same input.
+    for (const match of text.matchAll(new RegExp(shape.source, 'g'))) {
+      spans.push([match.index, match.index + match[0].length])
+    }
+  }
+
+  return spans
 }
 
 function isQuantity(text: string, start: number, token: string): boolean {
@@ -140,21 +193,9 @@ function isQuantity(text: string, start: number, token: string): boolean {
   if (after === '-' && /[A-Za-z]/.test(text[start + token.length + 1] ?? '')) return false
   if (before === '-' && /[A-Za-z]/.test(text[start - 2] ?? '')) return false
 
-  // `2026-07-01`, `018f3a2b-0000-…` and the `09:30:00` half of a timestamp.
-  //
-  // A hyphen is a minus sign between a space and a digit, and a *separator*
-  // between two digits — the difference is whether there is a digit on the far
-  // side of it. A colon is the same rule, and it is the one the first version
-  // missed: the date half of an ISO timestamp was excluded by its hyphens while
-  // the time half walked straight through, so `2026-07-01T09:30:00Z` yielded
-  // `30` and `00` as quantities.
-  // Hyphen and colon only. `/` is handled by `SLASH_DATE` above, as a whole
-  // shape — adding it here blinded the tokenizer to `$999.00/2026` entirely.
-  const separators = ['-', ':']
-  if (separators.includes(before ?? '') && /\d/.test(text[start - 2] ?? '')) return false
-  if (separators.includes(after ?? '') && /\d/.test(text[start + token.length + 1] ?? '')) {
-    return false
-  }
+  // Dates, timestamps and uuids are handled by `EXCLUDED_SHAPES` above, as whole
+  // shapes. There is deliberately no separator-adjacency rule here any more: it
+  // could not tell `2026-07-01` from `240.00-500.00`, and silently ate both.
 
   return true
 }

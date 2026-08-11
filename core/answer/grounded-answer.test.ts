@@ -89,28 +89,57 @@ describe('when it cannot be grounded', () => {
     await expect(groundedAnswer(ROWS, produce)).rejects.toThrow(AnswerNotGrounded)
   })
 
-  it('never returns an empty answer instead', async () => {
-    // The failure this whole module exists around: an empty answer reads as
-    // "there is nothing to report", which for a balance is a wrong financial
-    // answer with a confident face.
-    const produce = vi.fn(async () => INVENTED)
+  it.each([
+    ['empty', ''],
+    ['whitespace only', '     '],
+  ])(
+    'refuses a %s answer rather than returning it',
+    async (_label, blank) => {
+      // **This test was a duplicate that proved nothing, and CodeRabbit was
+      // right that it passed whether or not the behaviour existed** — no
+      // producer in it ever returned an empty answer. Writing the case it
+      // claimed found that a blank answer *was* accepted: it carries no
+      // numerals, so the validator had nothing to object to.
+      //
+      // A blank answer reads as "there is nothing to report", which for a
+      // balance is a wrong financial answer with a confident face. It is
+      // refused now, and retried like any other rejection.
+      const produce = vi.fn(async () => blank)
 
-    await expect(groundedAnswer(ROWS, produce)).rejects.toThrow()
+      await expect(groundedAnswer(ROWS, produce)).rejects.toThrow(AnswerNotGrounded)
+      expect(produce).toHaveBeenCalledTimes(3)
+    },
+  )
+
+  it('accepts a blank answer only after a real one replaces it', async () => {
+    const produce = vi
+      .fn<(rejection: unknown) => Promise<string>>()
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce(TRUE_ANSWER)
+
+    await expect(groundedAnswer(ROWS, produce)).resolves.toBe(TRUE_ANSWER)
   })
 
   it('stops at the attempt cap rather than trying forever', async () => {
+    // `AnswerNotGrounded`, not a bare `toThrow()`. A `RangeError` from a
+    // mistyped cap satisfies the bare form, so it would pass for a failure that
+    // is not the one under test. Raised by CodeRabbit.
     const produce = vi.fn(async () => INVENTED)
 
-    await expect(groundedAnswer(ROWS, produce, { attempts: 3 })).rejects.toThrow()
+    await expect(groundedAnswer(ROWS, produce, { attempts: 3 })).rejects.toThrow(
+      AnswerNotGrounded,
+    )
     expect(produce).toHaveBeenCalledTimes(3)
   })
 
-  it('has a default cap, so a caller that forgets one still terminates', async () => {
+  it('has a default cap of exactly three, so a caller that forgets one terminates', async () => {
+    // The exact count, not a range. Bounding it between 2 and 5 meant changing
+    // DEFAULT_ATTEMPTS to 5 would fail nothing — a constant nothing pins is a
+    // constant that drifts. Raised by CodeRabbit.
     const produce = vi.fn(async () => INVENTED)
 
-    await expect(groundedAnswer(ROWS, produce)).rejects.toThrow()
-    expect(produce.mock.calls.length).toBeLessThanOrEqual(5)
-    expect(produce.mock.calls.length).toBeGreaterThan(1)
+    await expect(groundedAnswer(ROWS, produce)).rejects.toThrow(AnswerNotGrounded)
+    expect(produce).toHaveBeenCalledTimes(3)
   })
 
   it('refuses an attempt cap below one rather than never calling the producer', async () => {
