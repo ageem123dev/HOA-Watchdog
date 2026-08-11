@@ -1,4 +1,5 @@
 import { createCatalogExecutor } from '@/adapters/db/catalog-executor-postgres'
+import { bearerToken, failure } from '@/core/tools/http'
 import { verifyServiceToken } from '@/core/tools/service-token'
 
 /**
@@ -32,28 +33,10 @@ import { verifyServiceToken } from '@/core/tools/service-token'
  */
 const executor = createCatalogExecutor()
 
-/** `{code, message, detail?}`, the architecture's one envelope. */
-function failure(status: number, code: string, message: string): Response {
-  return Response.json({ code, message }, { status })
-}
-
-/**
- * The bearer value, or `null`.
- *
- * Strict about the scheme: a header that is missing, malformed, or uses any
- * scheme other than `Bearer` is the same refusal as a wrong token, because
- * telling those apart tells a stranger how to try again.
- */
-function bearerToken(request: Request): string | null {
-  const header = request.headers.get('authorization')
-  if (header === null) return null
-
-  const [scheme, ...rest] = header.trim().split(/\s+/)
-  if (scheme?.toLowerCase() !== 'bearer') return null
-
-  const value = rest.join(' ')
-  return value === '' ? null : value
-}
+// `failure` and `bearerToken` moved to `core/tools/http.ts` when story 3.4 added
+// a second `/tools/*` endpoint. Two copies of the front door is how one of them
+// starts distinguishing "no header" from "wrong token" while the other does not
+// — and the pair then tells a stranger which of the two they got wrong.
 
 interface ExecuteRequest {
   readonly entryId: string

@@ -31,6 +31,7 @@ somebody needs one number in a hurry it is already there.
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -157,14 +158,30 @@ def committed_config_files() -> list[Path]:
     it would make this test read the whole of pip's output and find `botocore`
     in some transitive dependency's metadata. Dependencies are checked from the
     declaration instead, which is the thing a reviewer can actually see.
+
+    **The walk prunes rather than filters, and story 3.4 is why.** The first
+    version was `AGENT_ROOT.rglob("*")` with a `.venv in path.parts` check on
+    each result: correct, and it still enumerated every file in the virtualenv
+    before discarding it. Installing CrewAI put roughly thirty thousand files
+    there and took this pair of tests from ~0.01s to **3.6s of the suite's 4.0s**
+    — the same shape of signal story 3.3 spent two review rounds not reading,
+    and a cost that only grows. `os.walk` lets the directories be dropped before
+    they are descended into.
     """
     interesting = {".toml", ".env", ".ini", ".cfg", ".json", ".yaml", ".yml"}
+    pruned = {".venv", "__pycache__"}
     found = []
-    for path in AGENT_ROOT.rglob("*"):
-        if ".venv" in path.parts or "__pycache__" in path.parts:
-            continue
-        if path.is_file() and (path.suffix in interesting or path.name.startswith(".env")):
-            found.append(path)
+
+    for directory, subdirectories, filenames in os.walk(AGENT_ROOT):
+        # In place, because `os.walk` reads this list to decide where to go next.
+        # Rebinding the name would prune nothing.
+        subdirectories[:] = [name for name in subdirectories if name not in pruned]
+
+        for filename in filenames:
+            path = Path(directory) / filename
+            if path.suffix in interesting or path.name.startswith(".env"):
+                found.append(path)
+
     return found
 
 
@@ -300,6 +317,26 @@ def test_the_credential_detector_sees_planted_violations() -> None:
 ENV_VAR_SHAPED = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
 
 
+def looks_like_an_environment_variable(value: str) -> bool:
+    """Upper snake case - **or** a credential name with no underscore at all.
+
+    The underscore requirement keeps `POST`, `Authorization` and `Content-Type`
+    out of the results, and it is worth keeping. It also made MR !39's fix
+    unreachable: libpq's variables are `PGPASSWORD`, `PGUSER`, `PGHOST`, with no
+    underscore anywhere, and `FORBIDDEN_NAME` was widened precisely to catch
+    them. This filter ran first and dropped them before that check ever saw one,
+    so the guard was blind to exactly the names it had been fixed to catch.
+    Verified by running the detector rather than by reading it. Raised by Argus.
+
+    The second branch widens by exactly the forbidden set rather than in general,
+    so `POST` is still not a variable and `PGPASSWORD` now is.
+    """
+    if ENV_VAR_SHAPED.match(value):
+        return True
+
+    return value.isupper() and bool(FORBIDDEN_NAME.search(value))
+
+
 
 def environment_variables_read_by(source: str) -> set[str]:
     """Every environment-variable name the service names, in any form.
@@ -332,7 +369,7 @@ def environment_variables_read_by(source: str) -> set[str]:
         for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
-        and ENV_VAR_SHAPED.match(node.value)
+        and looks_like_an_environment_variable(node.value)
     }
 
 
@@ -392,7 +429,48 @@ def test_the_service_asks_only_for_what_ad3_allows() -> None:
     for path in service_source_files():
         asked |= environment_variables_read_by(path.read_text(encoding="utf-8"))
 
-    assert asked == {"AGENT_SERVICE_TOKEN", "GATEWAY_BASE_URL"}, asked
+    assert asked == {
+        "AGENT_SERVICE_TOKEN",
+        "GATEWAY_BASE_URL",
+        # Story 3.4. AD-3 was amended on 2026-08-10 from "exactly one secret" to
+        # "exactly two secrets - the model API key and AD-15's gateway service
+        # token", and this is the line where that amendment stopped being
+        # editorial. The guard did what it was written to do: adding a variable
+        # was a decision somebody had to make in a diff.
+        "REASONING_API_KEY",
+        # Not a credential. Which model, by variable, per AD-11's "the specific
+        # model id is seed, not invariant".
+        "REASONING_MODEL",
+    }, asked
+
+
+def test_the_service_never_reads_the_extraction_credential() -> None:
+    """AD-10, which is now a credential boundary and nothing else.
+
+    The vendor clause was withdrawn on 2026-08-10 when reasoning moved to
+    Gemini, so extraction and reasoning are one vendor and the *names* are the
+    whole separation. `GEMINI_API_KEY` belongs to the `web` deploy unit.
+
+    This is a separate assertion from the exhaustive one above because it says a
+    different thing. That one fails on any new variable and points at AD-3; this
+    names these two and points at AD-10, so whoever hits it reads the reason
+    rather than working it out. CrewAI prefers `GOOGLE_API_KEY` over
+    `GEMINI_API_KEY` when it discovers a key for itself, which is why both are
+    named.
+    """
+    forbidden = {"GEMINI_API_KEY", "GOOGLE_API_KEY"}
+    reading: dict[str, list[str]] = {}
+
+    for path in service_source_files():
+        names = environment_variables_read_by(path.read_text(encoding="utf-8"))
+        shared = sorted(names & forbidden)
+        if shared:
+            reading[str(path.relative_to(AGENT_ROOT))] = shared
+
+    assert reading == {}, (
+        "AD-10: the reasoning runtime read the extraction credential. Credential separation is "
+        f"the whole of that boundary since the vendor clause was withdrawn. {reading}"
+    )
 
 
 def test_the_environment_reader_detector_works() -> None:
@@ -403,6 +481,13 @@ def test_the_environment_reader_detector_works() -> None:
         "AGENT_SERVICE_TOKEN"
     }
     assert environment_variables_read_by("environ.get('PG_PASSWORD')") == {"PG_PASSWORD"}
+
+    # No underscore anywhere, which is how libpq actually spells them. The shape
+    # filter required one and dropped these before `FORBIDDEN_NAME` could see
+    # them, making MR !39's fix unreachable. Raised by Argus on story 3.4.
+    assert environment_variables_read_by('os.environ["PGPASSWORD"]') == {"PGPASSWORD"}
+    assert environment_variables_read_by("os.getenv('PGUSER')") == {"PGUSER"}
+    assert environment_variables_read_by('os.environ.get("PGHOST")') == {"PGHOST"}
 
     # The form that actually ships: a module constant read indirectly. A
     # call-site matcher returns nothing here, and returning nothing is how the

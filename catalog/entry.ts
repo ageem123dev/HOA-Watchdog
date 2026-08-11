@@ -61,6 +61,24 @@ export interface CatalogEntry {
   readonly version: number
 
   /**
+   * What this entry answers, in one sentence, in the words a model reads.
+   *
+   * The reasoning model chooses between entries on this text and the parameter
+   * descriptions below it, and on nothing else — `agent-view.ts` is what it is
+   * handed, and that carries no SQL. An entry whose description does not
+   * distinguish it from its neighbours is an entry that gets chosen by accident,
+   * which is a wrong financial answer rather than a missing one.
+   *
+   * **Outside the AD-14 digest, deliberately**, exactly as
+   * `ParameterDeclaration.description` is: rewording this changes how well the
+   * model picks and never what the entry accepts or what it runs. A digest that
+   * moved on a reworded sentence would fire on edits that change nothing, and a
+   * check that cries wolf gets silenced. `published-versions.test.ts` pins that
+   * property rather than leaving it to this comment.
+   */
+  readonly description: string
+
+  /**
    * The reviewed SQL, with `$1 … $n` placeholders and nothing interpolated.
    *
    * A single statement, no trailing semicolon: `pg` sends this text as one

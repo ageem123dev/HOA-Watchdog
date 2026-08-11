@@ -85,7 +85,7 @@ class CatalogExecution:
     rows: list[dict[str, Any]]
 
 
-def _required(variable: str) -> str:
+def require_environment(variable: str) -> str:
     value = os.environ.get(variable)
     if value is None or value.strip() == "":
         raise MisconfiguredAgent(
@@ -93,6 +93,12 @@ def _required(variable: str) -> str:
             "and deliberately does not try."
         )
     return value
+
+
+#: Kept so this module's own callers read unchanged. `model.py` imports the
+#: public name; a second module reaching for an underscore-prefixed symbol is a
+#: sign the symbol was never really private. Raised by CodeRabbit.
+_required = require_environment
 
 
 class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
@@ -136,7 +142,16 @@ def _require_https(url: str) -> None:
 
 
 def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
-    request = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method=method)
+    # `data=b""` is not `data=None`: urllib attaches the body and a
+    # `Content-Length: 0` to the request, and a GET carrying a body is refused
+    # outright by some servers and proxies. The catalog request is the first GET
+    # this client makes. Raised by Argus.
+    request = urllib.request.Request(
+        url,
+        data=body.encode("utf-8") if body else None,
+        headers=headers,
+        method=method,
+    )
     # An **empty** ProxyHandler, which is not the default. `build_opener` adds one
     # that reads `HTTPS_PROXY` and friends from the environment, so an ambient
     # proxy variable would route this authenticated request - bearer token and
@@ -164,8 +179,79 @@ def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str)
 _STATUS_ERRORS: dict[int, Callable[..., GatewayError]] = {
     400: InvalidRequest,
     401: GatewayAuthError,
-    404: CatalogEntryNotFound,
 }
+
+#: The envelope code that means "the catalog holds no such entry or version".
+#:
+#: **Keyed on the code, not on 404.** This map served one endpoint until story
+#: 3.4 shared `call_gateway` with the catalog request, and widening its blast
+#: radius is exactly what that refactor did: a 404 from `GET /tools/v1/catalog`
+#: — an undeployed route, a stale path in `GATEWAY_BASE_URL`, a proxy answering
+#: for something else — would have surfaced as `CatalogEntryNotFound`, telling
+#: the reader the catalog holds no such entry when the truth is that the catalog
+#: endpoint is not there. A diagnostic that misdescribes the problem sends
+#: whoever reads it somewhere else. Raised by CodeRabbit on the local round.
+ENTRY_NOT_FOUND_CODE = "unknown_entry"
+
+
+def call_gateway(
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+    transport: Transport | None = None,
+    refusal: str = "the gateway refused the request",
+) -> tuple[int, Any]:
+    """Present the token, call one `/tools/*` path, and return the decoded body.
+
+    Everything both callers do identically, in one place: require the
+    configuration *before* opening anything, insist on TLS, and turn any non-2xx
+    into the right `GatewayError` subclass rather than into a plausible-looking
+    empty answer.
+
+    Returns the status alongside the decoded body. The status is carried rather
+    than assumed: a caller that hardcoded `200` would misreport a `204` or `201`
+    in the error it raises next, and an error that misdescribes what happened
+    sends the reader somewhere else — the same fault the venv-mismatch message
+    had on MR !39.
+
+    Extracted when story 3.4 added a second caller. Two copies of this is how one
+    of them grows a `try` that swallows a 401 — and "you are not authorised"
+    becoming "there is nothing here" is the failure this client exists to
+    prevent.
+    """
+    token = _required(TOKEN_VARIABLE)
+    base_url = _required(GATEWAY_VARIABLE)
+    _require_https(base_url)
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+
+    send = transport or _urllib_transport
+    status, raw = send(
+        method,
+        f"{base_url.rstrip('/')}{path}",
+        headers,
+        "" if body is None else json.dumps(body),
+    )
+
+    payload = _decode(raw)
+
+    if status < 200 or status >= 300:
+        code = payload.get("code") if isinstance(payload, dict) else None
+        error = (
+            CatalogEntryNotFound
+            if code == ENTRY_NOT_FOUND_CODE
+            else _STATUS_ERRORS.get(status, GatewayError)
+        )
+        raise error(
+            f"{refusal} with {status}",
+            status=status,
+            code=code if isinstance(code, str) else None,
+        )
+
+    return status, payload
 
 
 def execute_catalog_entry(
@@ -182,34 +268,17 @@ def execute_catalog_entry(
     configured, and a `GatewayError` subclass for every response that is not a
     well-formed success.
     """
-    token = _required(TOKEN_VARIABLE)
-    base_url = _required(GATEWAY_VARIABLE)
-    _require_https(base_url)
-
-    send = transport or _urllib_transport
-    status, raw = send(
+    status, payload = call_gateway(
         "POST",
-        f"{base_url.rstrip('/')}{TOOL_PATH}",
-        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json.dumps(
-            {
-                "entryId": entry_id,
-                "version": version,
-                "parameters": parameters,
-                "actorId": actor_id,
-            }
-        ),
+        TOOL_PATH,
+        body={
+            "entryId": entry_id,
+            "version": version,
+            "parameters": parameters,
+            "actorId": actor_id,
+        },
+        transport=transport,
     )
-
-    payload = _decode(raw)
-
-    if status < 200 or status >= 300:
-        code = payload.get("code") if isinstance(payload, dict) else None
-        raise _STATUS_ERRORS.get(status, GatewayError)(
-            f"the gateway refused the request with {status}",
-            status=status,
-            code=code if isinstance(code, str) else None,
-        )
 
     if not isinstance(payload, dict):
         raise GatewayError("the gateway returned a success that was not an object", status=status)

@@ -78,6 +78,17 @@ export const duesStatusV1: CatalogEntry = {
   id: 'dues_status',
   version: 1,
 
+  // What the model chooses on. It names the two things that make this entry the
+  // wrong answer to a neighbouring question — it is *one* unit and *one* year,
+  // and it is a year-to-date total rather than an instalment schedule. The
+  // header above records why the schedule is deliberately not here.
+  description:
+    'What one unit owes for one assessment year, the payments received during that year, ' +
+    'and the outstanding balance. Covers a single unit and a single year. Payments are ' +
+    'counted by the year they were received in, not the year they settle, so this cannot ' +
+    'answer which assessment a payment paid off. Does not say what is overdue today, does ' +
+    'not break the year into instalments, and does not say who held the unit.',
+
   sql: `select unit.unit_number                                    as "unitNumber",
        assessment.assessment_year                            as "assessmentYear",
        assessment.annual_amount                              as "annualAmount",

@@ -15,6 +15,7 @@ import type { CatalogEntry } from './entry'
 const WITH_AN_OPTIONAL: CatalogEntry = {
   id: 'unit_payments',
   version: 1,
+  description: 'Payments against one unit, optionally since a date.',
   sql: 'select 1 from payment where unit_id = $1 and ($2::date is null or paid_on >= $2::date)',
   parameters: {
     type: 'object',
@@ -96,6 +97,7 @@ describe('binding a parameter set to a query', () => {
     const noParameters: CatalogEntry = {
       id: 'unit_count',
       version: 1,
+      description: 'How many units the association has.',
       sql: 'select count(*) as "unitCount" from unit',
       parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       bind: [],

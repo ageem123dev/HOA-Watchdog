@@ -246,7 +246,16 @@ describe('AD-10: the dual-LLM boundary', () => {
   })
 
   describe('no module reads both sides (C6)', () => {
-    it('finds none in the repository', () => {
+    /**
+     * A generous timeout, and not to mask anything. This walks 192 files across
+     * `core`, `adapters`, `app` and `scripts` with synchronous reads, which is
+     * ~770ms alone and timed out at vitest's 5s default when story 3.4's full
+     * suite ran it against a loaded machine. The assertion is unchanged; a
+     * whole-repository scan competing with every other worker simply needs more
+     * than five seconds of headroom, and an intermittently red gate is one
+     * people learn to re-run rather than read.
+     */
+    it('finds none in the repository', { timeout: 30_000 }, () => {
       expect(modulesReadingBothSides(sourceFiles(), manifest)).toEqual([])
     })
 

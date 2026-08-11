@@ -43,8 +43,15 @@ describe('the README describes this environment', () => {
   it('states how many there are, and is right', () => {
     // The sentence a reader counts against. Ten was true when written and is
     // exactly the kind of number that stops being true.
-    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
-    expect(readme).toContain(`**${words[declaredVariables().length]}** variables`)
+    //
+    // The list had the same fault one level up: it stopped at `twelve`, so the
+    // thirteenth variable made this assert `**undefined** variables` — a failure
+    // that describes the lookup table rather than the README. Extended, and the
+    // lookup is now guarded so running off the end says so.
+    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']
+    const count = declaredVariables().length
+    expect(words[count], `no word for ${count} — extend the list`).toBeDefined()
+    expect(readme).toContain(`**${words[count]}** variables`)
   })
 
   it('names no variable that .env.example does not declare', () => {
