@@ -1,0 +1,256 @@
+/**
+ * What counts as a number in an answer, and what that number is worth.
+ *
+ * AD-7: "Every numeric token in a rendered answer must match a value present in
+ * the tool result set for that turn." Everything downstream depends on this file
+ * agreeing with a reader about which characters in a sentence are a *quantity*.
+ *
+ * **Both directions are cliffs, and only one of them is obvious.**
+ *
+ * Under-strict is the loud one: miss a numeral and a hallucinated balance ships.
+ * Over-strict is the quiet one, and it is how this guard dies. This system
+ * already emits strings whose digits are not quantities — unit `4B`, catalog
+ * reference `dues_status@1`, ISO date `2026-07-01`, version `v1`. A validator
+ * that rejects true answers is one somebody switches off, and then nothing is
+ * checked at all. `forbidden-credentials.ts` records that failure in its own
+ * header for a different guard: it "gets deleted by the first developer it
+ * inconveniences".
+ *
+ * So the rule is stated, and tested in both directions.
+ */
+
+import { describe, expect, it } from 'vitest'
+
+import { numeralsIn, valueOf } from './numerals'
+
+describe('what is a numeral', () => {
+  it.each([
+    ['a plain integer', 'the unit owes 1240', ['1240']],
+    ['a decimal', 'the balance is 1240.55', ['1240.55']],
+    ['a currency amount', 'the unit owes $1,240.00', ['$1,240.00']],
+    ['thousands separators without a symbol', 'a total of 1,240.00', ['1,240.00']],
+    ['a percentage', 'up 20% on the average', ['20%']],
+    ['several in one sentence', '4 payments totalling 1,240.00', ['4', '1,240.00']],
+    ['a negative amount', 'a balance of -35.00', ['-35.00']],
+  ])('finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  /**
+   * The over-strict cliff. Each of these is a real shape this system emits, and
+   * each would be torn into digits by a naive `\d+` sweep.
+   */
+  it.each([
+    ['a unit number', 'unit 4B owes nothing'],
+    ['a lettered unit at the end', 'the holder of 12C'],
+    ['a catalog reference', 'answered from dues_status@1'],
+    ['a version tag', 'entry version v1'],
+    ['an ISO date', 'due on 2026-07-01'],
+    ['an ISO timestamp', 'logged at 2026-07-01T09:30:00Z'],
+    ['a uuid', 'provenance 018f3a2b-0000-7000-8000-0000000000aa'],
+    ['a snake_case identifier with a digit', 'the entry unit_2_summary'],
+  ])('does not treat %s as a numeral', (_label, text) => {
+    expect(numeralsIn(text)).toEqual([])
+  })
+
+  it('finds the quantity in a sentence that also carries an identifier', () => {
+    // The realistic answer shape: an identifier and a real figure together.
+    // Dropping the identifier must not drop the figure with it.
+    expect(numeralsIn('unit 4B owes $1,240.00 for 2026').map((n) => n.text)).toEqual([
+      '$1,240.00',
+      '2026',
+    ])
+  })
+
+  /**
+   * A decimal written with a bare leading dot.
+   *
+   * Raised by Argus as a false *acceptance*. It is not one: the old regex
+   * matched `50` inside `$.50`, so a hallucinated figure was still refused, just
+   * reported under the wrong token. What it actually broke is a **true** answer
+   * citing `$.50` for a row carrying `0.50` — read as `50`, and rejected. The
+   * consequence was checked by running the old pattern; the finding was real and
+   * its stated direction was not.
+   */
+  it.each([
+    ['a bare leading dot', 'a fee of .5 percent', ['.5']],
+    ['a currency amount with a leading dot', 'rounded to $.50', ['$.50']],
+  ])('finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  /**
+   * The over-strict cliff again, in shapes the first version missed: a hyphen
+   * with a *letter* on the far side is part of a name, not a minus sign, and a
+   * slash between digits is a date separator.
+   */
+  it.each([
+    ['a hyphenated identifier', 'the entry unit-07-summary'],
+    ['a lettered unit written with a hyphen', 'unit 07-B'],
+    ['a slash date', 'due 2026/07/01'],
+  ])('does not treat %s as a numeral', (_label, text) => {
+    expect(numeralsIn(text)).toEqual([])
+  })
+
+  /**
+   * The regression the slash fix introduced, and the reason it was worse than
+   * the bug it fixed.
+   *
+   * Treating `/` as a generic separator blinded the tokenizer to *any* two
+   * numbers with a slash between them, so `$999.00/2026` yielded nothing at all
+   * and the validator accepted a hallucinated amount. A false rejection traded
+   * for a false acceptance. Only a recognised **date shape** is excluded now.
+   * Raised by Argus on the fix diff.
+   */
+  it.each([
+    ['an amount and a year', 'Unit 4B owes $999.00/2026', ['$999.00', '2026']],
+    ['a fraction', 'about 1/2 of the total', ['1', '2']],
+    ['a rate', '12/40 units are current', ['12', '40']],
+  ])('still finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  /**
+   * Two more shapes that were swallowed silently, both found by CodeRabbit and
+   * both the same class as the slash regression: a numeral the tokenizer does
+   * not see is one the validator cannot refuse.
+   *
+   * `1/2/3` was matched by `SLASH_DATE`, which asked only for digit-slash-digit
+   * -slash-digit. A date in this system carries a four-digit year — the
+   * Consistency Conventions make dates ISO-8601 — so that is what the pattern
+   * asks for now, and `1/2/3` is three numerals again.
+   *
+   * `1e6` fell between the rules: the `e` is an identifier character, so `1` was
+   * excluded by what followed it and `6` by what preceded it, and the whole
+   * thing vanished. It is now one candidate, which `valueOf` refuses — exponent
+   * notation is not a form this system's rows can carry, so the answer is a
+   * rejection rather than silence.
+   */
+  it.each([
+    ['a three-part fraction', 'about 1/2/3 of it', ['1', '2', '3']],
+    ['exponent notation', 'owes 1e6 dollars', ['1e6']],
+    ['a negative exponent', 'a rate of 1e-6', ['1e-6']],
+  ])('still finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  it('still excludes a real slash date, which carries a four-digit year', () => {
+    expect(numeralsIn('due 2026/07/01')).toEqual([])
+    expect(numeralsIn('due 01/07/2026')).toEqual([])
+  })
+
+  /**
+   * The last of the swallowed shapes, and the one that shows why adjacency was
+   * the wrong mechanism all along.
+   *
+   * Excluding a digit run because a hyphen or colon with a digit on the far side
+   * touches it removes ISO dates and timestamps — and it removes ordinary pairs
+   * with them. `240.00-500.00` is a range a model would plausibly write, and
+   * every numeral in it vanished. Nothing in the suite failed, because the
+   * exclusion cases only ever asserted that dates produce *nothing*, which a
+   * rule that produces nothing for everything also satisfies.
+   *
+   * Whole-shape exclusion, the way `SLASH_DATE` already worked. Raised by
+   * CodeRabbit on MR !42.
+   */
+  it.each([
+    ['a hyphen-joined range', 'owes 240.00-500.00', ['240.00', '500.00']],
+    ['a colon-joined pair', 'ratio 240:500', ['240', '500']],
+    ['a subtraction written in prose', 'from 1240.00 - 1000.00', ['1240.00', '1000.00']],
+  ])('still finds %s', (_label, text, expected) => {
+    expect(numeralsIn(text).map((n) => n.text)).toEqual(expected)
+  })
+
+  it('excludes a timestamp written without seconds', () => {
+    // `2026-07-01T09:30`. The shape required seconds, so the date span covered
+    // the date, `T` excluded `09` by adjacency, and `30` survived as a quantity
+    // — rejecting an answer that merely quoted a time. Raised by CodeRabbit.
+    expect(numeralsIn('logged at 2026-07-01T09:30')).toEqual([])
+  })
+
+  it('reports where each numeral was, so a rejection can name it precisely', () => {
+    const [first] = numeralsIn('owes 1240')
+
+    expect(first?.index).toBe(5)
+  })
+})
+
+describe('what a numeral is worth', () => {
+  it.each([
+    ['a plain integer', '1240', 124000],
+    ['an explicit two-place decimal', '1240.00', 124000],
+    ['a currency amount', '$1,240.00', 124000],
+    ['thousands separators', '1,240', 124000],
+    ['a one-place decimal', '0.5', 50],
+    ['zero', '0', 0],
+    ['zero with places', '0.00', 0],
+    ['a negative', '-35.00', -3500],
+    ['a percentage, by its number', '20%', 2000],
+  ])('reads %s', (_label, text, expected) => {
+    expect(valueOf(text)).toBe(expected)
+  })
+
+  /**
+   * AD-7's own example, and the reason the rule is called normalization rather
+   * than comparison: these are one value written five ways, and an answer may
+   * use any of them for a row that carries `"1240.00"`.
+   */
+  it('treats every spelling of one amount as the same value', () => {
+    const spellings = ['1240', '1240.00', '1,240', '1,240.00', '$1,240.00']
+    const values = new Set(spellings.map(valueOf))
+
+    expect(values.size).toBe(1)
+  })
+
+  it('is exact, and does not go through a float', () => {
+    // `Number('0.29') * 100` is 28.999999999999996. minor-units.ts exists
+    // because of that, and this must inherit the property rather than
+    // re-introduce the bug one layer up.
+    expect(valueOf('0.29')).toBe(29)
+    expect(valueOf('1234.56')).toBe(123456)
+  })
+
+  it('refuses a value with more precision than the money contract carries', () => {
+    // `numeric(14,2)`. Three decimal places is not a formatting variant of a
+    // stored amount; it is a number this system cannot have produced.
+    //
+    // The message, not a bare `toThrow()`: `valueOf` throws `TypeError` from its
+    // own guard and `toMinorUnits` throws `TypeError` or `RangeError` for its
+    // own reasons, so a bare assertion passes for a failure that is not this
+    // one. Raised by CodeRabbit.
+    expect(() => valueOf('1240.555')).toThrow(/decimal places/)
+  })
+
+  it.each(['1,2', '1,,240', '1,2400', '12,34,567', ',240', '1,240,'])(
+    'refuses malformed thousands grouping: %s',
+    (malformed) => {
+      // `valueOf` strips separators, so `1,2` normalized to `12` and `1,,240` to
+      // `1240`. A model writing either would have been validated against a
+      // *different* number, and accepted whenever that number happened to be in
+      // the rows. Grouping is checked before the separators are removed. Raised
+      // by CodeRabbit.
+      // The grouping failure specifically. The first version allowed
+      // `/grouping|not a numeral/`, so a token rejected for having a letter in
+      // it satisfied a test about commas — an assertion loose enough to pass for
+      // a failure that is not the one under test. Raised by CodeRabbit.
+      expect(() => valueOf(malformed)).toThrow(/malformed thousands grouping/)
+    },
+  )
+
+  it.each([
+    ['1,240', 124000],
+    ['12,345', 1234500],
+    ['1,234,567', 123456700],
+    ['1,240.55', 124055],
+  ])('still reads well-formed grouping: %s', (grouped, expected) => {
+    // The value, not merely that it returned. `not.toThrow()` would hold for a
+    // guard that accepted the token and computed the wrong number, which is
+    // exactly the failure this whole guard exists to prevent. Raised by
+    // CodeRabbit.
+    expect(valueOf(grouped)).toBe(expected)
+  })
+
+  it('refuses something that is not a numeral at all', () => {
+    expect(() => valueOf('4B')).toThrow(/not a numeral/)
+  })
+})

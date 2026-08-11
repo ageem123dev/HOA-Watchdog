@@ -95,7 +95,7 @@ development_status:
   3-4-the-model-picks-an-entry: done
   # AD-7. Must exist BEFORE the first answer renders (3.6), or that story ships
   # precisely the failure this product exists to prevent.
-  3-5-the-numeric-validator: backlog
+  3-5-the-numeric-validator: done
   3-6-ask-and-answer: backlog
   3-7-when-it-cannot-answer: backlog
   3-8-the-access-log: backlog
