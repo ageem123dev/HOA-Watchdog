@@ -142,6 +142,34 @@ describe('layer three: the query disclosure', () => {
     expect(toggle.getAttribute('type')).toBe('button')
   })
 
+  it('points aria-controls at something that exists, or at nothing', () => {
+    // A reference to an id absent from the document is a broken one, and a
+    // screen reader following it lands nowhere. Raised by Argus.
+    render(<AnswerView {...TURN} />)
+    const toggle = screen.getByRole('button', { name: /query/i })
+
+    expect(toggle.getAttribute('aria-controls')).toBeNull()
+
+    fireEvent.click(toggle)
+
+    const target = toggle.getAttribute('aria-controls')
+    expect(target).toBe('oracle-query')
+    expect(document.getElementById(target!)).not.toBeNull()
+  })
+
+  it('shows the rows exactly as the records carry them', () => {
+    // Argus asked for `valueOf` here, and that would be wrong twice over:
+    // `valueOf('1240.00')` is `124000` — it parses to minor units rather than
+    // formatting — and `valueOf('4B')` throws, so the unit column would crash
+    // the table. Pinned so the suggestion cannot be applied later without a
+    // failing test.
+    render(<AnswerView {...TURN} />)
+
+    expect(screen.getAllByText('1240.00').length).toBeGreaterThan(0)
+    expect(screen.queryByText('124000')).toBeNull()
+    expect(screen.getAllByText('4B').length).toBeGreaterThan(0)
+  })
+
   it('announces its state', () => {
     render(<AnswerView {...TURN} />)
     const toggle = screen.getByRole('button', { name: /query/i })

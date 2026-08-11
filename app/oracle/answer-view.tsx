@@ -89,6 +89,14 @@ export function AnswerView({ question, answer, rows, entryId, version, sql }: An
                 // and these rows are never reordered or edited in place.
                 <tr key={index}>
                   {columns.map((column) => (
+                    // Rendered exactly as the rows carry them, and that is the
+                    // decision rather than an omission. These are the values
+                    // AD-7 compared the prose against; showing them altered
+                    // would break "every figure in the answer must be locatable
+                    // in the table", and re-spelling an amount here would be the
+                    // second statement of money formatting that AC6 exists to
+                    // forbid. In a dispute this table is what gets read aloud,
+                    // so it shows what the records hold.
                     <td key={column}>{String(row[column] ?? '')}</td>
                   ))}
                 </tr>
@@ -103,7 +111,12 @@ export function AnswerView({ question, answer, rows, entryId, version, sql }: An
         <button
           type="button"
           aria-expanded={queryOpen}
-          aria-controls="oracle-query"
+          // Only while the target exists. `aria-controls` pointing at an id that
+          // is not in the document is a broken reference, and a screen reader
+          // following it lands nowhere. The alternative — keeping the `<pre>`
+          // mounted and `hidden` — would put the SQL in the accessibility tree's
+          // reach for anything that ignores `hidden`. Raised by Argus.
+          aria-controls={queryOpen ? 'oracle-query' : undefined}
           onClick={() => setQueryOpen((open) => !open)}
         >
           {/* A native button, deliberately. Enter, Space, focus order and the

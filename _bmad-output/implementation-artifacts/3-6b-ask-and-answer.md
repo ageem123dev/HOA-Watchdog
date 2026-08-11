@@ -80,11 +80,18 @@ placeholder rather than an ungrounded sentence.
 > `attempts: 1` rather than calling `validateAnswer` directly, so the decision is a number somebody
 > can change rather than a code path somebody has to rebuild.
 
-**AC6 — Formatting has one home.**
-Amounts are formatted through `core/answer/numerals.ts`'s `valueOf` contract rather than a second
-statement of how money is spelled. Two statements of number formatting with nothing failing on
-disagreement is what turned story 3.4's only wrong-answer-capable defect into prose that contradicted
-its own SQL.
+**AC6 — Formatting has one home, and the evidence table is not it.** *(Clarified 2026-08-11.)*
+No amount is re-spelled for display. The evidence table renders each value exactly as the rows carry
+it, because those are the values AD-7 compared the prose against — re-formatting would break "every
+figure in the answer must be locatable in the table", and would itself be the second statement of
+money formatting this AC exists to forbid.
+
+> **The original wording said amounts are "formatted through `valueOf`", and that is not a thing
+> `valueOf` does.** Argus read it literally and asked for it; applying that would print `124000` for
+> `1240.00`, since `valueOf` parses to minor units, and would *throw* on `unitNumber: '4B'`, taking
+> the table down. The AC meant "do not write a second formatter", and there is no first one — so the
+> correct implementation is to write none. Pinned by a test, so the suggestion cannot be applied
+> later without something going red.
 
 **AC7 — Focus and target rules (UX-DR9).**
 Focus ring is 2px ink with 2px offset on stone grounds, inverse on ink. Never removed, never

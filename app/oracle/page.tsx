@@ -7,6 +7,7 @@ import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { AnswerNotGrounded } from '@/core/answer/grounded-answer'
 import { AnswerView } from './answer-view'
 import { askOracle } from './ask'
+import { questionFrom } from './question'
 
 export const metadata = { title: 'Ask — Fiduciary Watchdog' }
 
@@ -43,13 +44,13 @@ export const metadata = { title: 'Ask — Fiduciary Watchdog' }
 export default async function OraclePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: string | string[] }>
 }) {
   const session = await auth()
   if (!session?.user) redirect(SIGN_IN_ROUTE)
 
   const { q } = await searchParams
-  const question = q?.trim() ?? ''
+  const question = questionFrom(q)
 
   if (question === '') {
     // Not an error, and not an empty answer either. Story 3.6c gives this a
@@ -71,11 +72,20 @@ export default async function OraclePage({
   // rendering — the block would promise a safety it does not have. Raised by
   // eslint, and correct.
   let turn: Awaited<ReturnType<typeof askOracle>> | null = null
+  let sql = ''
   let failure: unknown = null
 
   try {
     turn = await askOracle({ question, actorId })
+    // **Inside the `try`, deliberately.** `entryFor` throws
+    // `UnknownCatalogEntryError` for an id this gateway does not hold, which is
+    // exactly what a version skew between the two runtimes looks like — the
+    // agent answering from a catalog this deploy has not caught up with. Outside
+    // the block it crashed the page instead of rendering the honest failure the
+    // rest of this function exists to produce. Raised by Argus.
+    sql = entryFor(turn.entryId, turn.version).sql
   } catch (error) {
+    turn = null
     failure = error
   }
 
@@ -101,7 +111,7 @@ export default async function OraclePage({
         rows={turn.rows}
         entryId={turn.entryId}
         version={turn.version}
-        sql={entryFor(turn.entryId, turn.version).sql}
+        sql={sql}
       />
     </main>
   )
