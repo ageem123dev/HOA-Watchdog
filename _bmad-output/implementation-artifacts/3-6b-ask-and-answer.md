@@ -5,7 +5,7 @@ merge_request: 46
 
 # Story 3.6b: Ask and answer
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -105,23 +105,31 @@ asserted, not assumed.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The Oracle route and the question's journey (AC1, AC2)**
-  - [ ] The surface, and the dashboard ask field that navigates into it with the question already
-        sent.
-  - [ ] Test the *absence* of the intermediate empty state, which is the part UX-DR7 actually names.
+- [x] **Task 1 — The Oracle route and the question's journey (AC1, AC2)**
+  - [x] The surface. `/oracle?q=…`, with the turn running during that render.
+  - [~] ~~The dashboard ask field~~ — moved to **3.6c** with AC1, 2026-08-11.
+  - [~] ~~The absence of the intermediate empty state~~ — moved to **3.6c**; it is a claim about
+        where submitting *goes*, and there is nothing to submit from until the field exists.
 
-- [ ] **Task 2 — The three layers (AC3, AC4)**
-  - [ ] Prose, evidence table, disclosure — in that order, with the table always visible.
-  - [ ] Disclosure: collapsed by default, keyboard-operable, state announced, labelled
-        `entry@version`, session-persistent.
+- [x] **Task 2 — The three layers (AC3, AC4)**
+  - [x] Prose, evidence table, disclosure — in that order, with the table always visible.
+  - [x] Disclosure: collapsed by default, keyboard-operable, state announced, labelled
+        `entry@version`.
+  - [x] **Session-persistent.** Missed in the story branch and caught at close-out; delivered by the
+        follow-up chore MR below.
 
-- [ ] **Task 3 — Grounding and formatting (AC5, AC6)**
-  - [ ] `validateAnswer` before render. Nothing ungrounded reaches the screen.
-  - [ ] Formatting through the existing contract.
+- [x] **Task 3 — Grounding and formatting (AC5, AC6)**
+  - [x] `validateAnswer` before render, via `groundedAnswer(rows, produce, { attempts: 1 })`.
+  - [x] Formatting through the existing contract — the table re-spells nothing.
 
-- [ ] **Task 4 — Accessibility and the gate (AC7, AC8)**
-  - [ ] Focus rings, target sizes, and the render tests that prove the keyboard path.
-  - [ ] Gate, including `npm run test:db` if this touches `app/tools/`.
+- [x] **Task 4 — Accessibility and the gate (AC7, AC8)**
+  - [x] Focus ring. Global in `BASE_CSS`'s `:focus-visible`; this surface uses a native `<button>`
+        and overrides nothing, which is what a test now asserts.
+  - [x] **Target size.** Missed in the story branch and caught at close-out; delivered by the
+        follow-up chore MR below.
+  - [x] Render tests per story 1.6c's harness.
+  - [x] Gate. `test:db` and `test:py` correctly not run — this touches neither `app/tools/` nor
+        `agent/`.
 
 ## Dev Notes
 
@@ -235,3 +243,27 @@ its `index`. Vitest does not typecheck, so 54 tests passed over both.
 | 2026-08-11 | 3.6a merged. Baselined on `51b942a`. Two decisions taken before any code: **one attempt, then fail** (AD-7's retry clause deliberately unimplemented — see AC5), and the whole surface ships as one story, since the three layers are meaningless apart. Status → in-progress. |
 | 2026-08-11 | Argus round: 3 fixed, 1 rejected with a pinning test. CodeRabbit CLI round: 6 findings, all fixed, 5 pinned. `app/oracle/page.test.tsx` added after the "untestable page" belief turned out to be wrong. MR !46 opened; gate green on `d384e44` — 2073 tests, 109 files. |
 | 2026-08-11 | MR !46 round 1: 2 findings, both in the previous round's fix, both fixed and pinned. Argus on the fix diff: 1 fixed, 2 rejected as false (hoisting), 1 out of scope. Two type errors caught by tsc that the suite ran past. |
+
+### Close-out audit, after MR !46 merged
+
+Checking every AC against the code before marking the story done found **two clauses that were never
+implemented**, both of which the review rounds had passed over:
+
+- **AC4 — "Open state persists for the session."** The disclosure used `useState`, which forgets on
+  every navigation. Four review passes (two Argus, one CodeRabbit CLI, one MR round) read that
+  component and none compared it to this sentence. Reviewers check the code in front of them; only
+  the AC list checks for code that is *absent*.
+- **AC7 — the 24x24 CSS px minimum target.** The disclosure button had no styling at all. The focus
+  ring half of AC7 was satisfied by accident and by good luck: `:focus-visible` is global in
+  `BASE_CSS`, and a native `<button>` inherits it.
+
+Delivered by the follow-up chore branch `chore/oracle-session-disclosure-and-target-size`, with a
+third fix Argus raised against that work: `useSyncExternalStore` reads `sessionStorage` **during
+render**, so a browser that restricts storage — Safari private mode, restricted embedding — threw
+`SecurityError` and took down the whole Oracle. The disclosure now falls back to page-lifetime memory
+and keeps working.
+
+**The lesson is the process one, and it is worth more than the fixes.** The story was one step from
+being marked done on unverified work, and what stopped it was reading the ACs one at a time against
+the code rather than trusting four green reviews.
+| 2026-08-11 | MR !46 merged. Close-out audit found AC4's session persistence and AC7's target size were never implemented; both delivered by a follow-up chore MR, along with a `SecurityError` crash Argus found in the fix. Status → done. |

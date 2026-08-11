@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useSyncExternalStore } from 'react'
 
 /**
  * UX-DR11's three layers — the product's central trust surface.
@@ -72,8 +72,97 @@ function cell(value: unknown): string {
   return String(value)
 }
 
+/**
+ * Where AC4's "open state persists for the session" lives.
+ *
+ * `sessionStorage`, not `localStorage`: the spec says *session*, and a
+ * preference that outlives the browser tab would quietly re-open the SQL on a
+ * shared board laptop weeks later.
+ *
+ * One key for the whole surface rather than one per entry. The reader is not
+ * expressing an opinion about `dues_status@1`; they are expressing that they
+ * are the kind of person who reads the query, and charging them a click on
+ * every question would undo the point.
+ */
+const DISCLOSURE_KEY = 'oracle.query.open'
+
+/**
+ * Subscribers, so every mounted `AnswerView` agrees.
+ *
+ * `sessionStorage` emits no event in the tab that wrote it, so a component that
+ * only read it would keep rendering the old value after another one toggled.
+ */
+const listeners = new Set<() => void>()
+
+function subscribe(notify: () => void): () => void {
+  listeners.add(notify)
+
+  return () => {
+    listeners.delete(notify)
+  }
+}
+
+/**
+ * What the disclosure falls back to when storage is unavailable.
+ *
+ * Not merely a cache. A browser that refuses `sessionStorage` must still get a
+ * disclosure that opens — the preference is a nicety, the control is not — so
+ * this holds the state for the life of the page when the real store cannot.
+ */
+let inMemoryOpen = false
+
+
+function readDisclosure(): boolean {
+  // `sessionStorage` *throws* rather than returning null when a browser
+  // restricts it: Safari's private mode and restricted embedding both raise
+  // `SecurityError` on access. This read happens during render, so an unguarded
+  // call does not degrade the disclosure — it takes down the whole Oracle, the
+  // one surface in this product whose entire purpose is to be trusted. Raised
+  // by Argus.
+  try {
+    return sessionStorage.getItem(DISCLOSURE_KEY) === 'open'
+  } catch {
+    return inMemoryOpen
+  }
+}
+
+/**
+ * Collapsed on the server, always.
+ *
+ * The server cannot see `sessionStorage`, and this is the value React hydrates
+ * against before swapping in the client's. It is also what AC4 asks for —
+ * "collapsed by default" — so the pre-hydration state is honest rather than a
+ * placeholder.
+ */
+function serverDisclosure(): boolean {
+  return false
+}
+
+function writeDisclosure(open: boolean): void {
+  // The fallback is updated first and the listeners are notified last, so a
+  // throwing `setItem` costs the *memory* of the preference and nothing else.
+  // Wrapping the whole body in one `try` instead would skip the notify on
+  // failure, and the button would silently do nothing — a worse outcome than
+  // the bug being fixed, and the reason this is not a two-line change.
+  inMemoryOpen = open
+
+  try {
+    sessionStorage.setItem(DISCLOSURE_KEY, open ? 'open' : 'closed')
+  } catch {
+    // Storage refused. The disclosure still works; it just forgets.
+  }
+
+  for (const notify of listeners) notify()
+}
+
 export function AnswerView({ question, answer, rows, entryId, version, sql }: AnswerViewProps) {
-  const [queryOpen, setQueryOpen] = useState(false)
+  // `useSyncExternalStore` rather than `useState` seeded in an effect. Seeding
+  // in an effect is a setState during the first commit — eslint calls it a
+  // cascading render and is right — and seeding it lazily instead would read
+  // `sessionStorage` on the server, where it does not exist. This is the hook
+  // that exists for state React does not own, and it takes the server snapshot
+  // as its third argument precisely so hydration has something to agree with.
+  const queryOpen = useSyncExternalStore(subscribe, readDisclosure, serverDisclosure)
 
   // The union of every row's keys, not the first row's. A catalog entry may
   // return rows of differing shape, and taking the first row's keys silently
@@ -141,7 +230,8 @@ export function AnswerView({ question, answer, rows, entryId, version, sql }: An
           // mounted and `hidden` — would put the SQL in the accessibility tree's
           // reach for anything that ignores `hidden`. Raised by Argus.
           aria-controls={queryOpen ? 'oracle-query' : undefined}
-          onClick={() => setQueryOpen((open) => !open)}
+          style={styles.disclosure}
+          onClick={() => writeDisclosure(!queryOpen)}
         >
           {/* A native button, deliberately. Enter, Space, focus order and the
               role come with it; a div with an onClick has none of them and looks
@@ -158,3 +248,26 @@ export function AnswerView({ question, answer, rows, entryId, version, sql }: An
     </article>
   )
 }
+
+/**
+ * The same inline-token pattern `app/dashboard/page.tsx` and
+ * `app/quarantine/page.tsx` use — custom properties rather than literals, which
+ * `core/design/no-raw-values.test.ts` enforces across the repo.
+ *
+ * `minHeight` is the exception the scanner already allows, and it is here for
+ * AC7: DESIGN.md sets a 24x24 CSS px minimum target, and 44px is the size the
+ * dashboard's control already uses. Matching it keeps one answer to "how big is
+ * a control" rather than adding a second.
+ */
+const styles = {
+  disclosure: {
+    font: 'inherit',
+    color: 'var(--color-ink)',
+    background: 'transparent',
+    border: 'var(--component-rule-hairline) solid var(--color-rule-strong)',
+    borderRadius: 'var(--radius-none)',
+    padding: 'var(--space-row)',
+    minHeight: '44px',
+    cursor: 'pointer',
+  },
+} as const
