@@ -409,7 +409,48 @@ def test_the_service_asks_only_for_what_ad3_allows() -> None:
     for path in service_source_files():
         asked |= environment_variables_read_by(path.read_text(encoding="utf-8"))
 
-    assert asked == {"AGENT_SERVICE_TOKEN", "GATEWAY_BASE_URL"}, asked
+    assert asked == {
+        "AGENT_SERVICE_TOKEN",
+        "GATEWAY_BASE_URL",
+        # Story 3.4. AD-3 was amended on 2026-08-10 from "exactly one secret" to
+        # "exactly two secrets - the model API key and AD-15's gateway service
+        # token", and this is the line where that amendment stopped being
+        # editorial. The guard did what it was written to do: adding a variable
+        # was a decision somebody had to make in a diff.
+        "REASONING_API_KEY",
+        # Not a credential. Which model, by variable, per AD-11's "the specific
+        # model id is seed, not invariant".
+        "REASONING_MODEL",
+    }, asked
+
+
+def test_the_service_never_reads_the_extraction_credential() -> None:
+    """AD-10, which is now a credential boundary and nothing else.
+
+    The vendor clause was withdrawn on 2026-08-10 when reasoning moved to
+    Gemini, so extraction and reasoning are one vendor and the *names* are the
+    whole separation. `GEMINI_API_KEY` belongs to the `web` deploy unit.
+
+    This is a separate assertion from the exhaustive one above because it says a
+    different thing. That one fails on any new variable and points at AD-3; this
+    names these two and points at AD-10, so whoever hits it reads the reason
+    rather than working it out. CrewAI prefers `GOOGLE_API_KEY` over
+    `GEMINI_API_KEY` when it discovers a key for itself, which is why both are
+    named.
+    """
+    forbidden = {"GEMINI_API_KEY", "GOOGLE_API_KEY"}
+    reading: dict[str, list[str]] = {}
+
+    for path in service_source_files():
+        names = environment_variables_read_by(path.read_text(encoding="utf-8"))
+        shared = sorted(names & forbidden)
+        if shared:
+            reading[str(path.relative_to(AGENT_ROOT))] = shared
+
+    assert reading == {}, (
+        "AD-10: the reasoning runtime read the extraction credential. Credential separation is "
+        f"the whole of that boundary since the vendor clause was withdrawn. {reading}"
+    )
 
 
 def test_the_environment_reader_detector_works() -> None:

@@ -24,16 +24,17 @@ description = "The reasoning runtime. Holds the model key and the gateway token,
 # cannot drift apart quietly.
 requires-python = ">=3.10,<3.14"
 
-# Deliberately empty at this story.
+# Anything added here is checked by `agent/tests/test_no_data_credentials.py`
+# against an **allowlist**: a database driver or an object-storage client in this
+# list is an AD-3 violation, because it is a way for this runtime to reach data
+# directly. Adding a dependency is therefore a decision somebody makes in a diff.
 #
-# CrewAI is story 3.4's - a heavy dependency whose only consumer is the model
-# routing that does not exist yet, and installing it here would be speculative.
-# What this story owes it is an interpreter it can actually use.
-#
-# Anything added here is checked by `agent/tests/test_no_data_credentials.py`:
-# a database driver or an object-storage client in this list is an AD-3
-# violation, because it is a way for this runtime to reach data directly.
-dependencies = []
+# `crewai[google-genai]`, not bare `crewai`. Verified against the installed
+# package rather than the documentation: 1.15.8 ships **no litellm**, and
+# `LLM(model="gemini/...")` raises `ImportError: Google Gen AI native provider
+# not available` without this extra. The public integration guidance still
+# describes the litellm path, which is why this comment exists.
+dependencies = ["crewai[google-genai]==1.15.8"]
 
 [project.optional-dependencies]
 # `tomli` only below 3.11. The test suite reads this file to check the pin and
