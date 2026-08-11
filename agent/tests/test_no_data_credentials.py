@@ -1,10 +1,12 @@
 """AD-3 - the reasoning runtime holds no way to reach data directly.
 
     "The Node gateway holds every database credential and the object-storage key.
-    The Python agent service holds exactly one secret - the model API key - and
-    never a database credential, connection string, or storage key. It obtains
-    every fact by calling Node's tool endpoints. A code path that gives the agent
-    service data access is a violation, not an optimization."
+    The Python agent service holds exactly two secrets - the model API key and
+    AD-15's gateway service token - and never a database credential, connection
+    string, or storage key. It obtains every fact by calling Node's tool
+    endpoints. A code path that gives the agent service data access is a
+    violation, not an optimization." (Amended 2026-08-10: the count was wrong,
+    the invariant was not - AD-15 added the token after AD-3 was written.)
 
 This is the assertion the whole query path rests on. Stories 3.1 and 3.2 built a
 catalog, a provenance log and a token-checked endpoint, and every one of those

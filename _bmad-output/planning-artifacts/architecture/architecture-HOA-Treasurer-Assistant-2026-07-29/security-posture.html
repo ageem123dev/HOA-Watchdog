@@ -305,7 +305,7 @@
           <tr>
             <td class="ctl">AD-3</td>
             <td><span class="kind struct">Structural</span></td>
-            <td class="mech">The LLM-adjacent runtime holds exactly one secret — the model API key — and no database credential, connection string, or storage key.</td>
+            <td class="mech">The LLM-adjacent runtime holds exactly two secrets — the model API key and AD-15's gateway service token — and no database credential, connection string, or storage key.<br><span style="background:#fff3cd;border-left:3px solid #d39e00;padding:2px 6px;display:inline-block;font-size:0.85em;line-height:1.4;margin-top:6px;"><strong>Amended 2026-08-10.</strong> AD-3 was written as &ldquo;exactly one secret&rdquo; before AD-15 added the service token. The count is corrected; the control &mdash; no data credential in this runtime &mdash; is unchanged.</span></td>
             <td class="evid">Environment manifest of the agent service; absence of any DB driver dependency in its lockfile.</td>
           </tr>
           <tr>
@@ -341,8 +341,8 @@
           <tr>
             <td class="ctl">AD-10</td>
             <td><span class="kind struct">Structural</span></td>
-            <td class="mech">Extraction and reasoning are different vendors, different keys, different deploy units. Raw bytes and raw extracted text never enter the reasoning context.</td>
-            <td class="evid">Two provider SDKs, two credentials, no shared client. The trust boundary is a vendor boundary and cannot be collapsed by configuration.</td>
+            <td class="mech">Extraction and reasoning hold different keys and run in different deploy units. Raw bytes and raw extracted text never enter the reasoning context.</td>
+            <td class="evid">Two credentials, two deploy units, no shared client. <code>deploy-units.json</code> is tracked config and <code>core/security/dual-llm-boundary.test.ts</code> fails on a topology that collapses them.<br><span style="background:#fff3cd;border-left:3px solid #d39e00;padding:2px 6px;display:inline-block;font-size:0.85em;line-height:1.4;margin-top:6px;"><strong>Control narrowed 2026-08-10.</strong> Reasoning moved to <code>gemini-3.6-flash</code>, so extraction and reasoning are now one vendor and the <em>different vendor</em> clause is withdrawn. Separate credentials, separate deploy units and the data-path isolation of AD-3 still hold; the vendor layer no longer does. Recorded rather than quietly dropped.</span></td>
           </tr>
           <tr>
             <td class="ctl">AD-12</td>

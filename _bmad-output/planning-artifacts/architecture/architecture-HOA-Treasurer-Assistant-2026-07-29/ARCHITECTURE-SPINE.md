@@ -98,8 +98,9 @@ Layer → namespace mapping:
 
 - **Binds:** NFR-1, NFR-2, FR-4, the agent service
 - **Prevents:** A prompt-injected or misbehaving agent reaching data directly; credential sprawl across two runtimes.
-- **Rule:** The Node gateway holds every database credential and the object-storage key. The Python agent service holds exactly one secret — the model API key — and never a database credential, connection string, or storage key. It obtains every fact by calling Node's tool endpoints. A code path that gives the agent service data access is a violation, not an optimization.
+- **Rule:** The Node gateway holds every database credential and the object-storage key. The Python agent service holds exactly two secrets — the model API key and AD-15's gateway service token — and never a database credential, connection string, or storage key. It obtains every fact by calling Node's tool endpoints. A code path that gives the agent service data access is a violation, not an optimization.
 - **Realization (2026-07-31):** both runtimes and Postgres sit on one Railway private network. The database is not reachable from the public internet at all, so this rule is enforced by network topology as well as by credential distribution — a misconfigured agent service cannot reach the database even if it somehow acquired a connection string.
+- **Amendment (2026-08-10):** the *count* was wrong; the invariant was not. AD-15, decided later on 2026-07-31, requires a shared service token so the gateway can tell its own agent from anyone else — so the runtime holds two secrets, the model API key and `AGENT_SERVICE_TOKEN`. Neither is a data credential, and what this AD exists to prevent is untouched. `agent/tests/test_no_data_credentials.py` asserts the read set *exhaustively*, so a third variable fails the suite and stays a decision somebody makes rather than a line that slips through.
 
 ### AD-4 — Roles separate by pipeline stage, not by service
 
@@ -138,11 +139,12 @@ Layer → namespace mapping:
 - **Prevents:** Malformed data reaching the reasoning side because a downstream validation step was skipped or misimplemented.
 - **Rule:** The extractor is invoked with a machine-enforced output schema (`responseMimeType: application/json` plus `responseSchema`). Output that fails schema validation halts the pipeline and returns a structured "Document Unreadable" error. No partial or best-effort extraction is passed downstream.
 
-### AD-10 — The dual-LLM boundary is a vendor boundary
+### AD-10 — The dual-LLM boundary is a credential and deploy-unit boundary
 
 - **Binds:** FR-2, NFR-2, the compliance narrative
 - **Prevents:** Extraction and reasoning drifting into one context, one key, or one control plane as a convenience.
-- **Rule:** The extractor and the reasoning agent are different vendors, hold different API keys, and run in different deploy units. Neither may be reconfigured to use the other's provider or credential. Raw document bytes and raw extracted text never enter the reasoning agent's context window under any code path.
+- **Rule:** The extractor and the reasoning agent hold **different API keys** and run in **different deploy units**. Neither may be reconfigured to use the other's credential. Raw document bytes and raw extracted text never enter the reasoning agent's context window under any code path.
+- **Amendment (2026-08-10):** the *vendor* clause is withdrawn. Reasoning moves from `claude-sonnet-5` to `gemini-3.6-flash`, so both sides are Google and the boundary cannot be a vendor boundary any more. **What that costs:** a client pointed at the wrong provider is no longer stopped by the host it resolves to, so `shared-credential` in `core/security/dual-llm-boundary.ts` becomes the load-bearing clause — it was previously redundant with the vendor check and is now the only thing between the two sides at the credential layer. **What it does not cost:** separate keys (`GEMINI_API_KEY` for extraction, `REASONING_API_KEY` for reasoning), separate deploy units, and the data-path isolation FR-2 actually rests on — the reasoning runtime holds no storage key and no database credential (AD-3), so it cannot fetch raw bytes even if a prompt asked it to. **Residual gap:** nothing automated inspects the *deployed* agent unit's environment. `deploy-units.json` is a declaration, and AD-3's exhaustive guard reads source and committed config, not the hosting account.
 
 ### AD-11 — The reasoning model is bound by capability, not by name
 
@@ -222,7 +224,7 @@ Verified current 2026-07-29. The code owns these once it exists.
 | **Object storage** | S3-compatible (Cloudflare R2) | Behind `adapters/storage`, per AD-16 |
 | Python (agent service) | 3.13 | CrewAI `requires_python` is `<3.14,>=3.10` |
 | CrewAI | 1.15.8 | |
-| Reasoning model | `claude-sonnet-5` | Bound by capability, not name (AD-11) |
+| Reasoning model | `gemini-3.6-flash` | Bound by capability, not name (AD-11). Own key, separate from extraction's (AD-10, amended 2026-08-10) |
 | Extraction model | `gemini-3.1-flash-lite` | |
 | Vitest | 4.x | |
 | pytest | current | |

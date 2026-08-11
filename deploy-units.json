@@ -4,10 +4,15 @@
     "core/security/dual-llm-boundary.test.ts. It is tracked config, not documentation:",
     "changing it changes what the test suite permits.",
     "",
-    "AD-10 requires the extraction model and the reasoning model to be a vendor boundary —",
-    "different vendor, different credential, different deploy unit. The third clause had",
-    "nothing in this repository to read, which is why this file exists. A guard over an",
+    "AD-10 requires the extraction model and the reasoning model to be a credential and",
+    "deploy-unit boundary — different credential, different deploy unit. The second clause",
+    "had nothing in this repository to read, which is why this file exists. A guard over an",
     "absent file passes for the wrong reason.",
+    "",
+    "Amended 2026-08-10: reasoning moved from claude-sonnet-5 to gemini-3.6-flash, so both",
+    "sides are Google and AD-10's vendor clause was withdrawn. Both origins below now name",
+    "one host, deliberately. What stops the sides merging is the credential separation and",
+    "the deploy-unit separation, which this file declares and the guard enforces.",
     "",
     "The reasoning unit is declared before it is built. That is deliberate: writing the",
     "guard now is what makes epic 2 edit a tracked file, in a commit someone reviews, if it",
@@ -35,10 +40,10 @@
     {
       "name": "agent",
       "runtime": "python",
-      "description": "The CrewAI reasoning service. Does not exist yet — epic 2 builds it.",
+      "description": "The CrewAI reasoning service. Story 3.3 built its client; story 3.4 gives it a model.",
       "deployed": false,
       "responsibilities": ["reasoning"],
-      "credentials": ["ANTHROPIC_API_KEY"]
+      "credentials": ["REASONING_API_KEY", "AGENT_SERVICE_TOKEN"]
     }
   ],
   "sides": {
@@ -49,8 +54,8 @@
     },
     "reasoning": {
       "responsibility": "reasoning",
-      "credentials": ["ANTHROPIC_API_KEY"],
-      "origin": "https://api.anthropic.com"
+      "credentials": ["REASONING_API_KEY"],
+      "origin": "https://generativelanguage.googleapis.com"
     }
   }
 }

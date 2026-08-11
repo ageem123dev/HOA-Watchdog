@@ -1,14 +1,22 @@
 /**
- * AD-10 — the dual-LLM boundary is a **vendor** boundary.
+ * AD-10 — the dual-LLM boundary is a **credential and deploy-unit** boundary.
  *
- * "Different vendor, different credential, different deploy unit. Raw document
- * bytes and raw extracted text never enter the reasoning context."
+ * "Different credential, different deploy unit. Raw document bytes and raw
+ * extracted text never enter the reasoning context."
  *
- * Three clauses, and they are not the same clause said three ways. Two keys
- * pointing at one provider satisfies *different credential* and fails *different
- * vendor*. Two vendors running in one process satisfies both and fails
- * *different deploy unit*, which is the arrangement where a prompt injection in
- * a scanned invoice reaches the extraction credential.
+ * Two clauses, and they are not the same clause twice. Two keys inside one
+ * process satisfies *different credential* and fails *different deploy unit*,
+ * which is the arrangement where a prompt injection in a scanned invoice reaches
+ * the extraction credential.
+ *
+ * **Amended 2026-08-10 — the vendor clause is withdrawn.** There used to be a
+ * third: *different vendor*, which two keys pointing at one provider failed.
+ * Reasoning moved to `gemini-3.6-flash` and extraction is `gemini-3.1-flash-lite`,
+ * so one vendor is now the declared topology and the check would fail on the
+ * intended arrangement. Recorded as the narrowing it is: `shared-credential` was
+ * the clause the vendor check made redundant, and it is now the load-bearing one.
+ * What stopped being detectable here is a side reconfigured to the *other's
+ * endpoint* while keeping its own key — nothing in this module sees that now.
  *
  * This module is the decision procedure. `dual-llm-boundary.test.ts` runs it
  * against the tracked manifest and against planted violations, so the boundary
@@ -28,7 +36,7 @@ export const BOUNDARY_VIOLATIONS = [
   'vacuous',
   'shared-unit',
   'shared-credential',
-  'converged-origin',
+  'undeclared-origin',
   'module-reads-both',
 ] as const
 
@@ -59,9 +67,9 @@ export interface DeployManifest {
   }
 }
 
-function hostOf(origin: string): string | null {
+function parseOrigin(origin: string): URL | null {
   try {
-    return new URL(origin).host.toLowerCase()
+    return new URL(origin)
   } catch {
     return null
   }
@@ -120,21 +128,29 @@ export function boundaryViolations(manifest: DeployManifest): readonly BoundaryV
     }
   }
 
-  // C5 — different vendor. Distinct credential names prove nothing about which
-  // endpoint they authenticate against.
-  const extractionHost = hostOf(extraction.origin)
-  const reasoningHost = hostOf(reasoning.origin)
+  // C5 — each side must declare an origin that could actually be called. This
+  // used to require *different hosts*; the 2026-08-10 amendment withdrew that,
+  // and one shared host is now the intended topology. What is left is not
+  // decoration. Every other clause here is about credentials, so a side whose
+  // origin is unparsable or plaintext is a manifest nothing else would notice —
+  // and a model credential travels to that origin.
+  for (const [label, side] of [
+    ['extraction', extraction],
+    ['reasoning', reasoning],
+  ] as const) {
+    const url = parseOrigin(side.origin)
 
-  if (extractionHost === null || reasoningHost === null) {
-    violations.push({
-      kind: 'converged-origin',
-      detail: 'Both sides must declare a parsable absolute origin.',
-    })
-  } else if (extractionHost === reasoningHost) {
-    violations.push({
-      kind: 'converged-origin',
-      detail: `Both sides point at ${extractionHost}. Different credentials at one vendor is not a vendor boundary.`,
-    })
+    if (url === null) {
+      violations.push({
+        kind: 'undeclared-origin',
+        detail: `The ${label} side must declare a parsable absolute origin; got "${side.origin}".`,
+      })
+    } else if (url.protocol !== 'https:') {
+      violations.push({
+        kind: 'undeclared-origin',
+        detail: `The ${label} side declares ${url.protocol}//${url.host}. Its API key travels to that origin, so it must be TLS.`,
+      })
+    }
   }
 
   // A credential name shared outright between the two sides.

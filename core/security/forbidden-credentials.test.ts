@@ -51,11 +51,16 @@ const FORBIDDEN_NAMES = [
  * developer it inconveniences, and NFR-2 dies with it.
  */
 const PERMITTED_NAMES = [
-  'ANTHROPIC_API_KEY',
+  // Both model credentials. They are separate names on purpose — AD-10's vendor
+  // clause was withdrawn on 2026-08-10 when reasoning moved to `gemini-3.6-flash`,
+  // so credential separation is what is left of the boundary.
   'GEMINI_API_KEY',
-  'SUPABASE_SERVICE_ROLE_KEY',
-  'NEXT_PUBLIC_SUPABASE_URL',
-  'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  'REASONING_API_KEY',
+  // The agent service's identity (AD-15). Pinned here because the forbidden list
+  // carries four `_TOKEN` patterns already, and a fifth written a little wider
+  // would take this name with it — which breaks the gateway's only caller check
+  // at deploy time rather than here.
+  'AGENT_SERVICE_TOKEN',
   'DATABASE_URL',
   'WATCHDOG_WRITER_DATABASE_URL',
   'WATCHDOG_READER_DATABASE_URL',

@@ -40,13 +40,13 @@ FR-8: Detected anomalies notify designated board members through two channels: a
 
 NFR-1: Role separation by pipeline stage. The ingestion pipeline authenticates with a writer role; the LLM-driven query path authenticates with a dedicated SELECT-only role and can never mutate data. Neither role may be granted the other's capability.
 
-NFR-1a: No data credentials in the LLM runtime. The Python agent service holds exactly one secret — the reasoning model API key — and never a database credential, connection string, or storage key.
+NFR-1a: No data credentials in the LLM runtime. The Python agent service holds exactly two secrets — the reasoning model API key and the gateway service token (AD-15) — and never a database credential, connection string, or storage key.
 
 NFR-2: No external write tokens. No API key with write permission for a banking platform, payment processor, or external accounting system may exist in the environment variables, secret store, or CI configuration of any deploy unit.
 
 NFR-3: Zero-LLM token arithmetic, enforced structurally. Every numeric token in a rendered answer must match a value present in that turn's tool result set; a pre-render validator rejects unreferenced numerals and forces a retry.
 
-NFR-4: The reasoning model must support strict tool use and schema-validated structured outputs. Current binding is `claude-sonnet-5`; the capability bar is the invariant, not the model id.
+NFR-4: The reasoning model must support strict tool use and schema-validated structured outputs. Current binding is `gemini-3.6-flash`; the capability bar is the invariant, not the model id.
 
 NFR-5: Query provenance. Every catalog execution permanently logs user id, timestamp, catalog entry id and version, bound parameters, and the exact SQL — written before results return, in an append-only store.
 
@@ -63,7 +63,7 @@ NFR-5: Query provenance. Every catalog execution permanently logs user id, times
 - Pre-render numeric validator with an explicit formatting-normalisation rule. (AD-7)
 - Value-level constraints on extracted fields; vendor identity resolved against a known-vendor table with a human-confirm quarantine queue; extracted strings never interpolated into prompts. (AD-8)
 - Extraction invoked with machine-enforced schema (`responseMimeType` + `responseSchema`). (AD-9)
-- Vendor boundary: extraction on `gemini-3.1-flash-lite`, reasoning on `claude-sonnet-5`. Different keys, different deploy units. (AD-10)
+- Credential and deploy-unit boundary: extraction on `gemini-3.1-flash-lite`, reasoning on `gemini-3.6-flash`. Different keys, different deploy units. The vendor clause was withdrawn 2026-08-10 when reasoning moved to Google. (AD-10)
 - Ingestion idempotent on document content hash; alerts keyed on `(finding_type, subject_id, period)` so reprocessing is a no-op. (AD-13)
 - Catalog entry versions immutable once used in production; changing SQL mints a new version. CI diff check required. (AD-14)
 - Versioned `/tools/*` endpoints are the sole data path and must reject any non-agent caller. Auth mechanism undecided. (AD-15)
