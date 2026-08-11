@@ -1,5 +1,6 @@
 ---
 baseline_commit: df9b656
+merge_request: 45
 ---
 
 # Story 3.6a: The chat turn crosses the wire
