@@ -38,6 +38,16 @@ const BASE_URL_VARIABLE = 'AGENT_BASE_URL'
  */
 const TOKEN_VARIABLE = 'GATEWAY_SERVICE_TOKEN'
 
+/**
+ * How long a turn may take before the gateway gives up.
+ *
+ * Generous, because a turn is a model call and a catalog execution — but
+ * bounded, because without a bound a single unresponsive agent holds the
+ * gateway request open indefinitely and the board member sees a page that never
+ * resolves. Raised by CodeRabbit.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000
+
 export class AgentNotConfiguredError extends Error {
   override readonly name = 'AgentNotConfiguredError'
 
@@ -89,6 +99,7 @@ export interface AskAgentOptions {
   readonly env?: Readonly<Record<string, string | undefined>>
   /** Injected by tests; production uses the platform `fetch`. */
   readonly fetch?: typeof globalThis.fetch
+  readonly timeoutMs?: number
 }
 
 interface Question {
@@ -125,6 +136,7 @@ function readConfig(env: Readonly<Record<string, string | undefined>>) {
 export async function askAgent(question: Question, options: AskAgentOptions = {}): Promise<ChatTurn> {
   const { baseUrl, token } = readConfig(options.env ?? process.env)
   const doFetch = options.fetch ?? globalThis.fetch
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
   let response: Response
   try {
@@ -134,6 +146,7 @@ export async function askAgent(question: Question, options: AskAgentOptions = {}
       // The question and the actor. Never an entry id — AD-17's load-bearing
       // clause, from the sending end.
       body: JSON.stringify({ question: question.question, actorId: question.actorId }),
+      signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (error) {
     // A connection that never became a response is still this caller's problem.
@@ -183,6 +196,15 @@ function asTurn(payload: Record<string, unknown> | null, status: number): ChatTu
   if (typeof answer !== 'string' || answer.trim() === '') refuse('answer was missing or blank')
   if (typeof provenanceId !== 'string' || provenanceId.trim() === '') refuse('provenanceId was missing')
   if (!Array.isArray(rows)) refuse('rows was missing or not a list')
+  // Each member too. `Array.isArray` said yes to `[null]` and `['row']`, and
+  // they reached the renderer typed as `Record<string, unknown>[]` — an evidence
+  // table cannot draw a null. An *empty* list stays valid: "no payments
+  // recorded" is a true thing the rows can say. Raised by CodeRabbit.
+  for (const row of rows as unknown[]) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+      refuse('rows contained something that is not a row')
+    }
+  }
   if (typeof entryId !== 'string' || entryId.trim() === '') refuse('entryId was missing')
   if (!Number.isInteger(version)) refuse('version was missing or not an integer')
 

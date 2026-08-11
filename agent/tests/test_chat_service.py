@@ -114,10 +114,17 @@ class TestWhoMayAsk:
 
         It is also the state that spends money: an unauthenticated turn is a
         model call anyone can pay for.
+
+        **A valid-looking bearer, not the blank one.** The first version presented
+        the blank value itself, which builds the header `"Bearer "` — one part
+        after splitting — so `_presented_token` returned `None` and `_authentic`
+        refused before the *configured* token mattered. It was 401 whether or not
+        the blank-configuration guard existed. Proved by removing the guard and
+        watching the old test still pass. Raised by CodeRabbit.
         """
         client = a_client(monkeypatch=monkeypatch, token=configured)
 
-        assert ask(client, bearer=configured).status_code == 401
+        assert ask(client, bearer="a-plausible-looking-token").status_code == 401
 
     def test_refuses_the_token_from_the_other_direction(
         self, monkeypatch: pytest.MonkeyPatch
@@ -200,6 +207,30 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
     ) -> None:
         # The other direction, so a rule that refuses everything cannot pass.
         assert ask(a_client(monkeypatch=monkeypatch)).status_code == 200
+
+    def test_refuses_an_oversized_body_that_lies_about_its_length(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The branch the header check hides.
+
+        `await request.body()` buffered the whole body *before* the limit was
+        measured, so a caller omitting or falsifying `content-length` chose the
+        allocation. **This test does not discriminate that fix** — both shapes
+        end in a 413, and what changed is how much was read first, which neither
+        the client nor the assertion can observe. It is here because the
+        streaming branch should be exercised at all; the fix stands on the
+        reasoning. Raised by CodeRabbit.
+        """
+        client = a_client(monkeypatch=monkeypatch)
+        huge = b'{"question":"' + b"x" * (128 * 1024) + b'","actorId":"a"}'
+
+        response = client.post(
+            CHAT_PATH,
+            content=huge,
+            headers={"Authorization": f"Bearer {TOKEN}", "content-length": "42"},
+        )
+
+        assert response.status_code == 413
 
     def test_refuses_a_body_larger_than_a_question_could_be(
         self, monkeypatch: pytest.MonkeyPatch
@@ -367,20 +398,32 @@ class TestWhenTheTurnCannotBeCompleted:
         assert response.status_code == 502
         assert "unit_membership" not in response.text
 
-    def test_no_failure_becomes_an_empty_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The failure this whole class exists for, swept."""
+    @pytest.mark.parametrize("boom", ["ModelChoseNothing", "GatewayError", "RuntimeError"])
+    def test_no_failure_becomes_an_empty_answer(
+        self, monkeypatch: pytest.MonkeyPatch, boom: str
+    ) -> None:
+        """The failure this whole class exists for, swept.
+
+        Parametrized rather than looped: a loop stops at the first failing case,
+        so a later regression stays invisible until the earlier one is fixed, and
+        the test name does not say which case broke. Raised by CodeRabbit.
+        """
         from watchdog_agent.routing import ModelChoseNothing
         from watchdog_agent.tools_client import GatewayError
 
-        for boom in (ModelChoseNothing("x"), GatewayError("y", status=500), RuntimeError("z")):
+        raised = {
+            "ModelChoseNothing": ModelChoseNothing("x"),
+            "GatewayError": GatewayError("y", status=500),
+            "RuntimeError": RuntimeError("z"),
+        }[boom]
 
-            def route(question, actor_id, _boom=boom):
-                raise _boom
+        def route(question, actor_id):
+            raise raised
 
-            response = ask(a_client(monkeypatch=monkeypatch, route=route))
+        response = ask(a_client(monkeypatch=monkeypatch, route=route))
 
-            assert response.status_code >= 400
-            assert "answer" not in response.json()
+        assert response.status_code >= 400
+        assert "answer" not in response.json()
 
 
 class TestTheShapeOfTheSurface:

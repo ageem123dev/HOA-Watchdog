@@ -14,7 +14,12 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { AgentUnavailableError, NoCatalogMatchError, askAgent } from './chat-client'
+import {
+  AgentNotConfiguredError,
+  AgentUnavailableError,
+  NoCatalogMatchError,
+  askAgent,
+} from './chat-client'
 
 const ENV = {
   AGENT_BASE_URL: 'https://agent.internal',
@@ -106,7 +111,11 @@ describe('configuration', () => {
       const doFetch = respondWith(200, TURN)
       const env = { ...ENV, [missing]: undefined }
 
-      await expect(ask({ env, fetch: doFetch })).rejects.toThrow(/not configured/)
+      // The type and the missing key, not a bare `toThrow()` — that passes for
+      // an unrelated exception, which is the assertion story 3.5 spent three
+      // rounds tightening. Raised by CodeRabbit.
+      await expect(ask({ env, fetch: doFetch })).rejects.toThrow(AgentNotConfiguredError)
+      await expect(ask({ env, fetch: doFetch })).rejects.toThrow(new RegExp(missing))
       expect(doFetch).not.toHaveBeenCalled()
     },
   )
@@ -116,7 +125,7 @@ describe('configuration', () => {
 
     await expect(
       ask({ env: { ...ENV, GATEWAY_SERVICE_TOKEN: blank }, fetch: doFetch }),
-    ).rejects.toThrow()
+    ).rejects.toThrow(AgentNotConfiguredError)
     expect(doFetch).not.toHaveBeenCalled()
   })
 
@@ -128,7 +137,9 @@ describe('configuration', () => {
       // `GATEWAY_BASE_URL` in the other direction.
       const doFetch = respondWith(200, TURN)
 
-      await expect(ask({ env: { ...ENV, AGENT_BASE_URL: url }, fetch: doFetch })).rejects.toThrow()
+      await expect(ask({ env: { ...ENV, AGENT_BASE_URL: url }, fetch: doFetch })).rejects.toThrow(
+        AgentNotConfiguredError,
+      )
       expect(doFetch).not.toHaveBeenCalled()
     },
   )
@@ -157,7 +168,32 @@ describe('a refusal is never an empty answer', () => {
   })
 
   it.each([400, 403, 404, 500, 502, 503])('turns %i into an error', async (status) => {
-    await expect(ask({ fetch: respondWith(status, { code: 'x', message: 'y' }) })).rejects.toThrow()
+    await expect(ask({ fetch: respondWith(status, { code: 'x', message: 'y' }) })).rejects.toThrow(
+      AgentUnavailableError,
+    )
+  })
+
+  it('gives up rather than waiting on a hung agent', async () => {
+    // Without a timeout a single unresponsive turn holds the gateway request
+    // open indefinitely, and the board member sees a page that never resolves.
+    // Raised by CodeRabbit.
+    const doFetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      await new Promise((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
+      })
+      return new Response('{}')
+    }) as unknown as typeof globalThis.fetch
+
+    await expect(ask({ fetch: doFetch, timeoutMs: 10 })).rejects.toThrow(AgentUnavailableError)
+  })
+
+  it('passes a signal the platform fetch can honour', async () => {
+    const doFetch = respondWith(200, TURN)
+
+    await ask({ fetch: doFetch })
+
+    const [, init] = vi.mocked(doFetch).mock.calls[0]!
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('turns a network failure into an error, not an empty turn', async () => {
@@ -213,6 +249,26 @@ describe('a malformed success', () => {
     const { parameters: _dropped, ...rest } = TURN
 
     await expect(ask({ fetch: respondWith(200, rest) })).resolves.toMatchObject({ parameters: {} })
+  })
+
+  it.each([
+    ['a null member', [null]],
+    ['a string member', ['row']],
+    ['an array member', [[]]],
+    ['a number member', [7]],
+  ])('refuses rows containing %s', async (_label, rows) => {
+    // `Array.isArray` said yes and these reached the renderer typed as
+    // `Record<string, unknown>[]`. An evidence table cannot draw a null.
+    // Raised by CodeRabbit.
+    await expect(ask({ fetch: respondWith(200, { ...TURN, rows }) })).rejects.toThrow(/rows/)
+  })
+
+  it('still accepts an empty result set, which is a real answer', async () => {
+    // "No payments recorded" is a true thing the rows can say, and it must not
+    // be confused with a malformed one.
+    await expect(ask({ fetch: respondWith(200, { ...TURN, rows: [] }) })).resolves.toMatchObject({
+      rows: [],
+    })
   })
 
   it('refuses rows that are not a list', async () => {

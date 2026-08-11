@@ -76,8 +76,8 @@ const EXECUTOR_MODULES = [EXECUTOR_MODULE, 'catalog/registry'] as const
  * breaks "sole data path in the system" exactly as a route would — scanning only
  * `.ts` there would have found no files at all and passed.
  */
-const SOURCE = /\.(?:m?[jt]sx?)$/
-const IS_TEST = /\.test\.(?:m?[jt]sx?)$/
+const SOURCE = /\.(?:[cm]?[jt]sx?)$/
+const IS_TEST = /\.test\.(?:[cm]?[jt]sx?)$/
 
 /**
  * Every module specifier, in every form that loads a module — the pattern

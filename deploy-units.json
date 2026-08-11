@@ -14,6 +14,11 @@
     "one host, deliberately. What stops the sides merging is the credential separation and",
     "the deploy-unit separation, which this file declares and the guard enforces.",
     "",
+    "GEMINI_OCR_MODEL was removed from the web unit's credentials on 2026-08-11: it is a",
+    "model identifier, not a secret. The boundary guard reads this array as the set of",
+    "secrets a unit holds, so a configuration value listed here weakens what the array",
+    "means and distorts any check reasoning about which unit holds which credential.",
+    "",
     "The reasoning unit is declared before it is built. That is deliberate: writing the",
     "guard now is what makes epic 2 edit a tracked file, in a commit someone reviews, if it",
     "ever wants to put both sides in one place."
@@ -34,7 +39,6 @@
         "R2_SECRET_ACCESS_KEY",
         "R2_BUCKET",
         "GEMINI_API_KEY",
-        "GEMINI_OCR_MODEL",
         "AGENT_SERVICE_TOKEN",
         "GATEWAY_SERVICE_TOKEN"
       ]

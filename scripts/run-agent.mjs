@@ -45,6 +45,28 @@ if (!interpreter) {
   process.exit(1)
 }
 
+/**
+ * The port, or the default — and a blank value is neither.
+ *
+ * `??` falls back only on `null` and `undefined`, so `AGENT_PORT=""` reached
+ * uvicorn as `--port ""` and failed with a parse error that never names the
+ * variable. `agent/watchdog_agent/model.py` already states this rule for
+ * `REASONING_MODEL`: unset and blank are different states and only one of them
+ * is fine. Raised by CodeRabbit.
+ */
+function port() {
+  const configured = process.env.AGENT_PORT
+
+  if (configured === undefined || configured.trim() === '') return '8787'
+
+  if (!/^\d+$/.test(configured.trim())) {
+    console.error(`AGENT_PORT must be a number; got "${configured}".`)
+    process.exit(1)
+  }
+
+  return configured.trim()
+}
+
 // `--factory`, because `create_app` takes its router and narrator as parameters
 // so the suite can substitute them. A module-level app instance would have to
 // resolve them at import time, which is what makes a service untestable.
@@ -56,7 +78,7 @@ const result = spawnSync(
     'watchdog_agent.chat_service:create_app',
     '--factory',
     '--port',
-    process.env.AGENT_PORT ?? '8787',
+    port(),
     ...process.argv.slice(2),
   ],
   { cwd: AGENT, stdio: 'inherit' },

@@ -55,6 +55,7 @@ import logging
 from typing import Protocol
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -206,18 +207,30 @@ def create_app(*, route: Router | None = None, narrate: Narrator | None = None) 
         if not _authentic(_presented_token(request)):
             return _failure(401, "unauthenticated", "this endpoint serves the gateway only")
 
-        # Length first, so an oversized body is refused before it is parsed.
-        # `content-length` is a claim, so the read below is bounded too.
+        # `content-length` first, because it is free when honest.
         declared = request.headers.get("content-length")
         if declared is not None and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
             return _failure(413, "request_too_large", "a question is a sentence, not a payload")
 
-        body = await request.body()
-        if len(body) > MAX_BODY_BYTES:
-            return _failure(413, "request_too_large", "a question is a sentence, not a payload")
+        # Then read in chunks and stop at the limit. `await request.body()`
+        # buffers the whole body *before* it can be measured, so a caller that
+        # omits or falsifies `content-length` chooses the allocation — the header
+        # check above is a claim, not a bound.
+        #
+        # **No test here discriminates this fix**, and that is worth saying rather
+        # than implying. The oversized-body tests pass either way, because both
+        # shapes end in a 413; what changes is how much was allocated first, and
+        # neither the test client nor the assertion can observe that. The fix
+        # stands on the reasoning, not on a red test turning green.
+        # Raised by CodeRabbit.
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > MAX_BODY_BYTES:
+                return _failure(413, "request_too_large", "a question is a sentence, not a payload")
 
         try:
-            payload = json.loads(body)
+            payload = json.loads(bytes(body))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return _failure(400, "invalid_request", "the request body is not valid JSON")
 
@@ -228,7 +241,13 @@ def create_app(*, route: Router | None = None, narrate: Narrator | None = None) 
         question, actor_id = read
 
         try:
-            routed = router(question=question, actor_id=actor_id)
+            # In a threadpool, because both of these are *blocking* — the router
+            # makes an HTTP call to the gateway and the narrator calls a model,
+            # each a matter of seconds. Awaited directly in an async handler they
+            # block the event loop, so one slow turn stalls every other request
+            # this process is serving, including the health of the service
+            # itself. Raised by CodeRabbit.
+            routed = await run_in_threadpool(router, question=question, actor_id=actor_id)
         except (ModelChoseNothing, ModelChoseUnknownEntry) as refusal:
             # An honest "no entry answers that", not a fault. Story 3.7 gives it
             # a face; this gives it a status a caller can tell apart.
@@ -244,7 +263,7 @@ def create_app(*, route: Router | None = None, narrate: Narrator | None = None) 
             return _failure(500, "internal", "the turn could not be completed")
 
         try:
-            answer = narrator(question=question, routed=routed)
+            answer = await run_in_threadpool(narrator, question=question, routed=routed)
         except Exception:
             _log.exception("narration failed during a chat turn")
             return _failure(500, "internal", "the turn could not be completed")

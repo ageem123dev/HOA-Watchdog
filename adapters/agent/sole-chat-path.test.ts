@@ -38,8 +38,15 @@ const THE_DOOR = 'adapters/agent/chat-client.ts'
 
 const SCANNED_ROOTS = ['app', 'core', 'adapters', 'scripts'] as const
 
-const SOURCE = /\.(?:m?[jt]sx?)$/
-const IS_TEST = /\.test\.(?:m?[jt]sx?)$/
+// `.cjs` and `.cts` too. The pattern matched `.mjs` and not its CommonJS
+// counterpart, so a file with either extension would have been invisible to the
+// sweep — and invisible is the direction that fails silently. No such file
+// exists today, which is exactly when it costs nothing to fix.
+// `core/tools/sole-data-path.test.ts` shared the gap and is changed with it;
+// leaving one guard narrower than its sibling is how the two drift.
+// Raised by CodeRabbit.
+const SOURCE = /\.(?:[cm]?[jt]sx?)$/
+const IS_TEST = /\.test\.(?:[cm]?[jt]sx?)$/
 
 /**
  * How a file would betray that it talks to the agent directly: it names the
@@ -93,6 +100,22 @@ describe('the agent has one door', () => {
 
     expect(everyScannedFile()).toContain(THE_DOOR)
   })
+
+  it.each([
+    ['a .cjs production file', 'app/x.cjs'],
+    ['a .cts production file', 'app/x.cts'],
+    ['a .mjs production file', 'app/x.mjs'],
+  ])('scans %s', (_label, name) => {
+    expect(SOURCE.test(name)).toBe(true)
+    expect(IS_TEST.test(name)).toBe(false)
+  })
+
+  it.each([['a .cjs test', 'app/x.test.cjs'], ['a .cts test', 'app/x.test.cts']])(
+    'excludes %s from the sweep',
+    (_label, name) => {
+      expect(IS_TEST.test(name)).toBe(true)
+    },
+  )
 
   it.each([
     ['reading the base URL', "const base = process.env.AGENT_BASE_URL"],
