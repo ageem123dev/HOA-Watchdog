@@ -51,8 +51,11 @@ const FORBIDDEN_NAMES = [
  * developer it inconveniences, and NFR-2 dies with it.
  */
 const PERMITTED_NAMES = [
-  'ANTHROPIC_API_KEY',
+  // Both model credentials. They are separate names on purpose — AD-10's vendor
+  // clause was withdrawn on 2026-08-10 when reasoning moved to `gemini-3.6-flash`,
+  // so credential separation is what is left of the boundary.
   'GEMINI_API_KEY',
+  'REASONING_API_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
   'NEXT_PUBLIC_SUPABASE_URL',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',

@@ -1,7 +1,10 @@
 /**
  * AD-10 — the dual-LLM boundary, enforced rather than described.
  *
- * "Different vendor, different credential, different deploy unit."
+ * "Different credential, different deploy unit." The *vendor* clause was
+ * withdrawn on 2026-08-10, when reasoning moved to `gemini-3.6-flash` and both
+ * sides became Google. That was an architecture amendment, made in the spine
+ * before it was made here.
  *
  * This file has the same standing as `nfr2-guard.test.ts`: narrowing it is an
  * architecture change that needs a new AD. It is not a cleanup and it is not a
@@ -196,49 +199,49 @@ describe('AD-10: the dual-LLM boundary', () => {
     })
   })
 
-  describe('different vendor (C5)', () => {
-    it('fails when both sides point at one host', () => {
-      // The clause distinct credentials cannot cover: two keys at one provider
-      // is not a vendor boundary.
-      const violation = planted((draft) => ({
-        ...draft,
-        sides: {
-          ...draft.sides,
-          reasoning: { ...draft.sides.reasoning, origin: draft.sides.extraction.origin },
-        },
-      }))
-
-      expect(boundaryViolations(violation).map((v) => v.kind)).toContain('converged-origin')
-    })
-
-    it('fails on a same-host origin that differs only by path or scheme', () => {
-      const violation = planted((draft) => ({
-        ...draft,
-        sides: {
-          ...draft.sides,
-          reasoning: {
-            ...draft.sides.reasoning,
-            origin: `${draft.sides.extraction.origin}/v1/messages`,
-          },
-        },
-      }))
-
-      expect(boundaryViolations(violation).map((v) => v.kind)).toContain('converged-origin')
-    })
-
+  describe('a declared, usable origin (C5)', () => {
     it('fails on an origin that cannot be parsed, rather than passing it', () => {
       const violation = planted((draft) => ({
         ...draft,
         sides: { ...draft.sides, reasoning: { ...draft.sides.reasoning, origin: 'not-a-url' } },
       }))
 
-      expect(boundaryViolations(violation).map((v) => v.kind)).toContain('converged-origin')
+      expect(boundaryViolations(violation).map((v) => v.kind)).toContain('undeclared-origin')
     })
 
-    it('the real origins are genuinely different vendors', () => {
-      expect(new URL(manifest.sides.extraction.origin).host).not.toBe(
+    it('fails on a plaintext origin, which the API key would travel over', () => {
+      const violation = planted((draft) => ({
+        ...draft,
+        sides: {
+          ...draft.sides,
+          extraction: { ...draft.sides.extraction, origin: 'http://generativelanguage.googleapis.com' },
+        },
+      }))
+
+      expect(boundaryViolations(violation).map((v) => v.kind)).toContain('undeclared-origin')
+    })
+
+    it('the two sides share a host deliberately, and that is not a violation', () => {
+      // The clause this file used to enforce, inverted. Reasoning moved to
+      // `gemini-3.6-flash` on 2026-08-10 and extraction is `gemini-3.1-flash-lite`,
+      // so one host is the intended topology. Pinned rather than left implicit: a
+      // reader of a green suite would otherwise have to infer that the same-host
+      // manifest passes on purpose rather than because nothing looks.
+      expect(new URL(manifest.sides.extraction.origin).host).toBe(
         new URL(manifest.sides.reasoning.origin).host,
       )
+      expect(boundaryViolations(manifest)).toEqual([])
+    })
+
+    it('the real credentials are genuinely different names', () => {
+      // What the withdrawn vendor clause used to cover is now carried entirely by
+      // credential separation, so it is asserted against the real manifest rather
+      // than only against planted violations.
+      const shared = manifest.sides.extraction.credentials.filter((name) =>
+        manifest.sides.reasoning.credentials.includes(name),
+      )
+
+      expect(shared).toEqual([])
     })
   })
 

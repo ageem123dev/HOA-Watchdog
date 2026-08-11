@@ -1,15 +1,16 @@
 # The agent service: the second runtime, and the one that holds no data.
 #
-# AD-3 - "The Python agent service holds exactly one secret, the model API key,
-# and never a database credential, connection string, or storage key. It obtains
-# every fact by calling Node's tool endpoints."
+# AD-3 (amended 2026-08-10) - "The Python agent service holds exactly two
+# secrets, the model API key and AD-15's gateway service token, and never a
+# database credential, connection string, or storage key. It obtains every fact
+# by calling Node's tool endpoints."
 #
 # AD-15 - it reaches Node only through the versioned /tools/* endpoints.
 
 [project]
 name = "watchdog-agent"
 version = "0.1.0"
-description = "The reasoning runtime. Holds the model key and no data credential (AD-3)."
+description = "The reasoning runtime. Holds the model key and the gateway token, and no data credential (AD-3)."
 
 # The range AD-15 quotes from CrewAI's own `requires_python`, verbatim.
 #
