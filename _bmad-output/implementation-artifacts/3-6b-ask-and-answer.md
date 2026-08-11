@@ -1,0 +1,155 @@
+---
+baseline_commit: TBD
+---
+
+# Story 3.6b: Ask and answer
+
+Status: backlog
+
+## Why this story exists
+
+This is the first thing a board member sees. Everything in Epic 3 so far is machinery: a catalog, a
+provenance log, a token-checked endpoint, a Python runtime, a model that picks an entry, a validator
+that refuses an ungrounded number, and a wire between the two services. **Nobody can ask anything.**
+
+> **UX-DR11** — "Oracle surface — three-layer answer: prose, always-visible evidence table, collapsed
+> query disclosure. The question remains visible while the answer resolves."
+
+The three layers are the product's argument in miniature. The prose is what a model wrote. The
+evidence table is the rows it was drawn from, which AD-7 has already proved every number came from.
+The disclosure names the catalog entry and version, which AD-14 has frozen. A board member can read
+the first layer and act, or read the third and check.
+
+### Blocked on 3.6a
+
+Nothing here can start until a question round-trips. 3.6a builds `/chat/v1/turn`, the token in the
+Node→agent direction, and the gateway client. This story renders what that returns.
+
+### What this story is not
+
+- **Not the failure states.** Story 3.7 owns "no catalog match" and "service unavailable" as distinct,
+  honest states. This story renders a *successful* turn; 3.7 renders the rest, and the epic keeps
+  them apart on purpose.
+- **Not the access log.** Story 3.8 gives the provenance record a reader.
+- **Not a new number anywhere.** Every figure on screen comes from the rows, and AD-7's validator has
+  already said so. The renderer formats; it never computes.
+
+## Story
+
+**As** a board member,
+**I want** to ask a question in my own words and see the answer with the records it came from,
+**So that** I can act on it without asking the treasurer to check.
+
+## Acceptance Criteria
+
+**AC1 — The persistent ask field (UX-DR7).**
+An ask field on the dashboard. Submitting navigates to the Oracle **with the question already sent** —
+no intermediate empty state where the surface is present and the question is not. It must not overlay
+focusable content, and reserves scroll padding if sticky.
+
+**AC2 — The question stays visible while the answer resolves (UX-DR11).**
+From submission to answer, the question a board member typed remains on screen. They must never be
+looking at a loading state wondering what they asked.
+
+**AC3 — Three layers, in order (UX-DR11).**
+Prose, then an **always-visible** evidence table of the rows, then a query disclosure. The evidence
+table is not behind a control: the argument of this product is that the rows are always there.
+
+**AC4 — The query disclosure (UX-DR6).**
+Collapsed by default. Keyboard-operable with its state announced. Labelled with the catalog entry and
+version — `dues_status@1`, the pair AD-14 froze and AD-12 logged. Open state persists for the session.
+
+**AC5 — Every number on screen came from the rows.**
+The rendered answer passes `validateAnswer` before it is shown. A turn whose answer cannot be
+grounded renders no answer at all — story 3.7 owns what shows instead, and until it exists an honest
+placeholder rather than an ungrounded sentence.
+
+**AC6 — Formatting has one home.**
+Amounts are formatted through `core/answer/numerals.ts`'s `valueOf` contract rather than a second
+statement of how money is spelled. Two statements of number formatting with nothing failing on
+disagreement is what turned story 3.4's only wrong-answer-capable defect into prose that contradicted
+its own SQL.
+
+**AC7 — Focus and target rules (UX-DR9).**
+Focus ring is 2px ink with 2px offset on stone grounds, inverse on ink. Never removed, never
+colour-only. Interactive targets meet the minimum size the design system sets.
+
+**AC8 — It is tested as a rendered surface.**
+Render tests, per the pattern story 1.6c established — jsdom plus `@testing-library/react`, per-file
+opt-in, and `include` widened to `.tsx`. The disclosure's keyboard operation and announced state are
+asserted, not assumed.
+
+## Tasks / Subtasks
+
+- [ ] **Task 1 — The Oracle route and the question's journey (AC1, AC2)**
+  - [ ] The surface, and the dashboard ask field that navigates into it with the question already
+        sent.
+  - [ ] Test the *absence* of the intermediate empty state, which is the part UX-DR7 actually names.
+
+- [ ] **Task 2 — The three layers (AC3, AC4)**
+  - [ ] Prose, evidence table, disclosure — in that order, with the table always visible.
+  - [ ] Disclosure: collapsed by default, keyboard-operable, state announced, labelled
+        `entry@version`, session-persistent.
+
+- [ ] **Task 3 — Grounding and formatting (AC5, AC6)**
+  - [ ] `validateAnswer` before render. Nothing ungrounded reaches the screen.
+  - [ ] Formatting through the existing contract.
+
+- [ ] **Task 4 — Accessibility and the gate (AC7, AC8)**
+  - [ ] Focus rings, target sizes, and the render tests that prove the keyboard path.
+  - [ ] Gate, including `npm run test:db` if this touches `app/tools/`.
+
+## Dev Notes
+
+### Read the UX design before building any of this
+
+`_bmad-output/planning-artifacts/ux-designs/` holds the surface specifications, and
+`core/design/tokens.ts` holds the system. UX-DR9's focus ring and the target sizes are stated there
+precisely; this story must not invent a second version of either.
+
+### The evidence table is the argument, not a detail
+
+It is tempting to collapse it — it is the widest thing on the page. UX-DR11 says **always-visible**,
+and the reason is the whole product: an answer a board member has to expand something to verify is an
+answer they will stop verifying. The disclosure is collapsed; the table is not.
+
+### Learnings that apply directly
+
+- **Story 1.6c established the render-test harness**: jsdom + `@testing-library/react`, per-file
+  opt-in, `include` widened to `.tsx`. Do not re-derive it.
+- **Story 1.5d found four defects after 29 mutations found none**, one of which showed "Reading" to a
+  treasurer forever for a document already read. A surface story's defects are states that never
+  resolve, and mutation testing does not find them.
+- **Story 3.5**: an assertion that something is absent cannot tell "correctly excluded" from "never
+  seen". A render test asserting a thing is *not* shown passes on a component that renders nothing.
+
+### If this has to be cut
+
+Cut **AC1's dashboard ask field** last and keep the Oracle surface itself — a route reachable by URL
+still proves the three layers. What must not be cut is AC5: a surface that renders an ungrounded
+answer is the failure the whole epic was built to prevent, and it would be shipping it on the first
+day anyone can see it.
+
+### References
+
+- [Source: epics.md#Epic-3] — 3.6b's row, and the split rationale
+- [Source: epics.md] — UX-DR6, UX-DR7, UX-DR9, UX-DR11
+- [Source: ARCHITECTURE-SPINE.md#AD-7] — every numeric token is provenance-bound
+- [Source: ARCHITECTURE-SPINE.md#AD-14] — the entry@version pair the disclosure names
+- [Source: core/answer/] — `validateAnswer`, `groundedAnswer`, `valueOf`
+- [Source: 3-6a-the-chat-turn-crosses-the-wire.md] — what the turn returns
+- [Source: 1-6c-see-what-is-waiting.md] — the render-test harness
+
+## Dev Agent Record
+
+_To be filled by the dev agent._
+
+## Review Findings
+
+_To be filled by the review._
+
+## Change Log
+
+| Date | Change |
+| --- | --- |
+| 2026-08-11 | Story created when 3.6 was split. Stays `backlog` until 3.6a lands — the surface has nothing to render before the wire exists. |
