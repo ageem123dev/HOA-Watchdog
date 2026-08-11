@@ -1,10 +1,11 @@
 ---
-baseline_commit: TBD
+baseline_commit: 51b942a
+merge_request: 46
 ---
 
 # Story 3.6b: Ask and answer
 
-Status: backlog
+Status: review
 
 ## Why this story exists
 
@@ -42,10 +43,10 @@ Node→agent direction, and the gateway client. This story renders what that ret
 
 ## Acceptance Criteria
 
-**AC1 — The persistent ask field (UX-DR7).**
-An ask field on the dashboard. Submitting navigates to the Oracle **with the question already sent** —
-no intermediate empty state where the surface is present and the question is not. It must not overlay
-focusable content, and reserves scroll padding if sticky.
+**AC1 — ~~The persistent ask field (UX-DR7).~~ Moved to story 3.6c, 2026-08-11.**
+The dashboard entry point is its own story. This one ends at an Oracle reachable by URL with the
+question as a search parameter, which is what the three layers need in order to be proven. 3.6c adds
+the field that puts the question there, and owns UX-DR7 entirely.
 
 **AC2 — The question stays visible while the answer resolves (UX-DR11).**
 From submission to answer, the question a board member typed remains on screen. They must never be
@@ -64,11 +65,34 @@ The rendered answer passes `validateAnswer` before it is shown. A turn whose ans
 grounded renders no answer at all — story 3.7 owns what shows instead, and until it exists an honest
 placeholder rather than an ungrounded sentence.
 
-**AC6 — Formatting has one home.**
-Amounts are formatted through `core/answer/numerals.ts`'s `valueOf` contract rather than a second
-statement of how money is spelled. Two statements of number formatting with nothing failing on
-disagreement is what turned story 3.4's only wrong-answer-capable defect into prose that contradicted
-its own SQL.
+> **Decided 2026-08-11: one attempt, then fail.** AD-7 says a rejected answer "forces a retry", and
+> that is deliberately not implemented here. Since story 3.6a the model lives across a wire, so a
+> retry means another turn — which re-runs `route_question`, **re-executes the catalog entry**, and
+> returns *different rows*. The validator would then check attempt two against attempt one's
+> evidence, and AD-12 would record a second `query_log` row for one question, which a board member
+> reading the access log would have to have explained to them.
+>
+> The fix that preserves the retry is a narrate-only endpoint taking the rows already returned — and
+> that collides with AD-17's request clause. Rather than amend a second AD to keep a capability
+> nothing yet needs, the surface calls `groundedAnswer(rows, produce, { attempts: 1 })`: the producer
+> runs once, and a rejection raises `AnswerNotGrounded` for story 3.7 to render. **No code is dropped**
+> — the retry stays available for the day that endpoint exists, configured to one attempt today.
+>
+> `attempts: 1` rather than calling `validateAnswer` directly, so the decision is a number somebody
+> can change rather than a code path somebody has to rebuild.
+
+**AC6 — Formatting has one home, and the evidence table is not it.** *(Clarified 2026-08-11.)*
+No amount is re-spelled for display. The evidence table renders each value exactly as the rows carry
+it, because those are the values AD-7 compared the prose against — re-formatting would break "every
+figure in the answer must be locatable in the table", and would itself be the second statement of
+money formatting this AC exists to forbid.
+
+> **The original wording said amounts are "formatted through `valueOf`", and that is not a thing
+> `valueOf` does.** Argus read it literally and asked for it; applying that would print `124000` for
+> `1240.00`, since `valueOf` parses to minor units, and would *throw* on `unitNumber: '4B'`, taking
+> the table down. The AC meant "do not write a second formatter", and there is no first one — so the
+> correct implementation is to write none. Pinned by a test, so the suggestion cannot be applied
+> later without something going red.
 
 **AC7 — Focus and target rules (UX-DR9).**
 Focus ring is 2px ink with 2px offset on stone grounds, inverse on ink. Never removed, never
@@ -146,10 +170,68 @@ _To be filled by the dev agent._
 
 ## Review Findings
 
-_To be filled by the review._
+### Argus, whole-story diff (`51b942a..HEAD`)
+
+| # | Finding | Outcome |
+| --- | --- | --- |
+| 1 | `entryFor` outside the `try` crashed the page on a version skew instead of rendering the honest failure | Fixed — moved inside |
+| 2 | `aria-controls` pointed at an id absent from the document while collapsed | Fixed — set only while the target exists |
+| 3 | `attempts: 1` was pinned by nothing; changing it to 3 failed no test | Fixed — spy assertion added |
+| 4 | "Use `valueOf` in the table cells" | **Rejected.** `valueOf('1240.00')` is `124000` (minor units, not formatting) and `valueOf('4B')` throws, so the unit column would crash the table. AC6's wording was the real defect and was reworded. Pinned by a test so the suggestion cannot be applied later without a failure. |
+
+### CodeRabbit CLI — 13 of 13 files reviewed, none unreviewed
+
+| # | Severity | Finding | Outcome |
+| --- | --- | --- | --- |
+| 1 | **major** | `page.tsx` guarded on `!session?.user` and read `session.user.id ?? ''`; a session with no id was refused by `askOracle` and the refusal surfaced as *"The records could not be reached just now."* | Fixed — guard requires the id. Verified `page.tsx:67 → ask.ts:72` before acting. |
+| 2 | trivial | `vi.clearAllMocks()` keeps implementations, so a stub leaks between tests | Fixed — `resetAllMocks`. **Not pinned by any test, and cannot be** (see below). |
+| 3 | trivial | `questionFrom` unbounded | Fixed — truncates at `MAX_QUESTION_LENGTH` (500) |
+| 4 | trivial | Unrecognised failures swallowed before `explain()` | Fixed — logged first; the two named failures still are not |
+| 5 | trivial | The attempts test sat in an unrelated describe block | Fixed |
+| 6 | trivial | Columns from `rows[0]`, and `jsonb` values rendering `[object Object]` | Fixed — union of all keys, and objects serialized |
+
+**Sensitivity check on all six**: five fail when the fix is reverted. #2 does not and cannot — it
+prevents a *future* test from passing against a stub it never configured, and reverting it leaves all
+53 oracle tests green. That is the hazard, not evidence against the fix.
+
+**The correction this round produced.** `page.tsx` was believed untestable because importing it pulls
+`auth → next-auth → next/server` — the reason `questionFrom` was extracted. That was wrong:
+`app/quarantine/page.test.tsx` has mocked that chain since story 1.5, and `vi.mock` hoists above the
+fatal import. `app/oracle/page.test.tsx` now carries six tests. Its `redirect` mock throws the way
+the real one does; a mock that returned would let the page carry on and ask the question anyway.
+
+Argus re-run on the final head: no findings.
+
+### MR !46, round 1 — 2 actionable, both about tests that proved less than they looked
+
+| # | Finding | Outcome |
+| --- | --- | --- |
+| 1 | `never returns a partially scrubbed answer` asserted `toBeInstanceOf(Error)` | Fixed — asserts `AnswerNotGrounded` and the refused numeral. The loose form passed for a typo'd mock, an unconfigured `askAgent`, any `TypeError`; it could not tell "AD-7 refused this" from "the test is broken". |
+| 2 | The `does not log` test covered only `NoCatalogMatchError` | Fixed — a second test covers `AnswerNotGrounded`. **Verified unpinned first**: deleting `&& !(failure instanceof AnswerNotGrounded)` from `page.tsx` left all 53 green. |
+
+Both are findings in *last round's fix*, which is where the gate says to expect them.
+
+Sensitivity on the round: deleting the log clause fails 1 test; making `ask.ts` rewrap the refusal as
+a generic `Error` fails 6 — a mutation the old assertion sat green through, while `page.tsx` branches
+on that exact type to choose what a board member reads.
+
+**Two type errors caught by the gate, not the suite.** The round pushed tsc from 8 to 10: a duplicate
+`AnswerNotGrounded` import (the file already bound it via `await import`) and a `Rejection` missing
+its `index`. Vitest does not typecheck, so 54 tests passed over both.
+
+### Argus on the fix diff — 4 findings, 2 rejected
+
+| Severity | Finding | Outcome |
+| --- | --- | --- |
+| critical ×2 | `vi.mock` factories reference unhoisted consts → `ReferenceError` | **Rejected.** The consts are referenced inside arrow-function bodies, evaluated at first import of the mocked module, not at hoist time — and `./page` is imported dynamically inside each test. 54 tests run and pass, which a real hoisting `ReferenceError` cannot produce. |
+| medium | `logged.mockRestore()` after the assertions is skipped when one fails, muting `console.error` for every later test | **Fixed** — `afterEach(vi.restoreAllMocks)`. `resetAllMocks` does not restore a spy, so the mute persisted exactly when things were already going wrong. |
+| high | `.mcp.json` holds a machine-local absolute path | Out of scope — an uncommitted user file, not in this branch's diff. |
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-11 | Story created when 3.6 was split. Stays `backlog` until 3.6a lands — the surface has nothing to render before the wire exists. |
+| 2026-08-11 | 3.6a merged. Baselined on `51b942a`. Two decisions taken before any code: **one attempt, then fail** (AD-7's retry clause deliberately unimplemented — see AC5), and the whole surface ships as one story, since the three layers are meaningless apart. Status → in-progress. |
+| 2026-08-11 | Argus round: 3 fixed, 1 rejected with a pinning test. CodeRabbit CLI round: 6 findings, all fixed, 5 pinned. `app/oracle/page.test.tsx` added after the "untestable page" belief turned out to be wrong. MR !46 opened; gate green on `d384e44` — 2073 tests, 109 files. |
+| 2026-08-11 | MR !46 round 1: 2 findings, both in the previous round's fix, both fixed and pinned. Argus on the fix diff: 1 fixed, 2 rejected as false (hoisting), 1 out of scope. Two type errors caught by tsc that the suite ran past. |
