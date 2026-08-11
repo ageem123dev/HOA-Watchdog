@@ -5,7 +5,7 @@ merge_request: 42
 
 # Story 3.5: The numeric validator
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -276,7 +276,85 @@ integration risk sits in story 3.6 rather than here.
 
 ## Review Findings
 
-_To be filled by the review._
+**Six swallowed shapes, one silent rewrite, and three rounds of test-quality findings.**
+
+Every finding in this story reduced to one of two failures, and the first is the dangerous one:
+
+1. **A numeral the tokenizer does not see is one the validator cannot refuse**, and that failure is
+   silent. Six shapes: `.5` / `$.50`, `07-B`, slash-separated pairs, `1/2/3`, `1e6`, and
+   hyphen-or-colon-joined ranges like `240.00-500.00`.
+2. **A numeral rewritten before comparison is validated as a different number.** Malformed grouping —
+   `1,2` normalized to `12`, `1,,240` to `1240` — accepted whenever that other number happened to be
+   in the rows.
+
+Each was verified by running the code before it was fixed.
+
+### Argus, three rounds
+
+- *Round 1, and a wrong diagnosis.* The missing leading-dot decimal was reported as a false
+  *acceptance*. Checking rather than believing: the old pattern matched `50` inside `$.50`, so a
+  hallucination was still refused. The defect ran the other way — a **true** answer citing `$.50`
+  against a row carrying `0.50` was rejected. **The test written for the reported mechanism passed
+  with or without the fix**, and would have shipped as cover for a regression it could not see.
+- *Round 2, the fix diff.* Adding `/` to the adjacency separators fixed slash dates and blinded the
+  tokenizer to `$999.00/2026` entirely. A false rejection traded for a false acceptance.
+- *A bug invisible in every diff.* The `` anchors in the replacement pattern were written through a
+  Python heredoc, where `` is the **backspace** escape. The regex compiled, matched nothing, and
+  rendered identically to a correct one everywhere. Caught only because a test stayed red after a
+  change that should have turned it green; every tracked source was then swept for control
+  characters.
+
+### CodeRabbit CLI — 8 of 8 files reviewed, two majors
+
+`1/2/3` eaten by the replacement date pattern, and `1e6` falling between the rules — `e` is an
+identifier character, so `1` was excluded by what followed and `6` by what preceded.
+
+### MR !42 — four rounds
+
+| Round | Findings | Outcome |
+| --- | --- | --- |
+| 1 | 6 | 5 fixed, 1 skipped with a reason posted on its thread |
+| 2 | 2 | both fixed |
+| 3 | 1 | fixed |
+| 4 | 0 | **clean** — `No actionable comments were generated` |
+
+Round 1's major retired adjacency altogether: excluding a digit run because a hyphen or colon touched
+it removed ISO dates *and ordinary ranges with them*. **Nothing in the suite failed**, because the
+exclusion tests asserted only that a date yields nothing — which a rule yielding nothing for
+everything satisfies just as well. An assertion that something is absent cannot tell "correctly
+excluded" from "never seen".
+
+Round 1 also exposed a gap through a vacuous test of mine: "never returns an empty answer" duplicated
+the test above it and no producer in it ever returned one. Writing the case it claimed found that a
+blank answer *was* accepted — it carries no numerals, so the validator had nothing to object to.
+
+**Rounds 2, 3 and 4's findings were about test quality rather than code behaviour, and each was
+right** — bare `toThrow()` satisfied by unrelated failures, a default cap bounded rather than pinned,
+an alternation that let a letter-rejection satisfy a comma test, and well-formed cases asserting only
+that they did not throw.
+
+### Skipped, twice, with the reason recorded on the thread
+
+Threading an `AbortSignal` through the retry. Real, and premature: no caller exists until story 3.6,
+and a signal's lifetime belongs to whatever owns the request. Adding one now means guessing whether
+the deadline is per-attempt or per-turn and whether an abort is distinct from `AnswerNotGrounded` —
+and it would give the module a seam no test can exercise for real, which is the shape this story
+spent four rounds removing.
+
+### Two process notes
+
+**`argus_review` failed four times** — three transport errors and one SUCCESS returning neither
+structured output nor prose. None was recorded as a clean review. The consequence is stated rather
+than hidden: `argus_ingest` reported `reviews_skipped: 1 — no Argus run recorded for 4a55a5e`, so
+that round taught the reviewer nothing. A lost lesson, not a passed check.
+
+**A rate limit is not a clean review.** Round 3 first arrived as `Review limit reached … we couldn't
+start this review`, and the same note was later **edited in place** into a real review. Keying on
+note id rather than `updated_at` would have missed it — the failure story 3.2's watcher shipped.
+
+**And a reporting shape worth keeping.** A raw newline broke a test file's transform and vitest still
+printed `Tests 72 passed`; only `Test Files 1 failed` said otherwise, and the count had quietly
+dropped from 84. The summary line is not the result — the exit code and the file count are.
 
 ## Change Log
 
@@ -284,3 +362,4 @@ _To be filled by the review._
 | --- | --- |
 | 2026-08-11 | Story created. Baselined on `a9802c3`, the merge of story 3.4. |
 | 2026-08-11 | Implemented test-first across six tasks; 64 new tests. The recorded HALT was not triggered — the retry needed no change to the AD-15 wire contract. Status → review. |
+| 2026-08-11 | Three Argus rounds, one CodeRabbit CLI round and four MR rounds (6, 2, 1, clean). 97 tests in `core/answer`. Status → done, meaning ready-to-merge on an unmerged branch. |
