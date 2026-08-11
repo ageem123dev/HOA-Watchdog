@@ -136,7 +136,16 @@ def _require_https(url: str) -> None:
 
 
 def _urllib_transport(method: str, url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
-    request = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method=method)
+    # `data=b""` is not `data=None`: urllib attaches the body and a
+    # `Content-Length: 0` to the request, and a GET carrying a body is refused
+    # outright by some servers and proxies. The catalog request is the first GET
+    # this client makes. Raised by Argus.
+    request = urllib.request.Request(
+        url,
+        data=body.encode("utf-8") if body else None,
+        headers=headers,
+        method=method,
+    )
     # An **empty** ProxyHandler, which is not the default. `build_opener` adds one
     # that reads `HTTPS_PROXY` and friends from the environment, so an ambient
     # proxy variable would route this authenticated request - bearer token and

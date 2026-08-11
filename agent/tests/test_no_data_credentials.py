@@ -317,6 +317,26 @@ def test_the_credential_detector_sees_planted_violations() -> None:
 ENV_VAR_SHAPED = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
 
 
+def looks_like_an_environment_variable(value: str) -> bool:
+    """Upper snake case - **or** a credential name with no underscore at all.
+
+    The underscore requirement keeps `POST`, `Authorization` and `Content-Type`
+    out of the results, and it is worth keeping. It also made MR !39's fix
+    unreachable: libpq's variables are `PGPASSWORD`, `PGUSER`, `PGHOST`, with no
+    underscore anywhere, and `FORBIDDEN_NAME` was widened precisely to catch
+    them. This filter ran first and dropped them before that check ever saw one,
+    so the guard was blind to exactly the names it had been fixed to catch.
+    Verified by running the detector rather than by reading it. Raised by Argus.
+
+    The second branch widens by exactly the forbidden set rather than in general,
+    so `POST` is still not a variable and `PGPASSWORD` now is.
+    """
+    if ENV_VAR_SHAPED.match(value):
+        return True
+
+    return value.isupper() and bool(FORBIDDEN_NAME.search(value))
+
+
 
 def environment_variables_read_by(source: str) -> set[str]:
     """Every environment-variable name the service names, in any form.
@@ -349,7 +369,7 @@ def environment_variables_read_by(source: str) -> set[str]:
         for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
-        and ENV_VAR_SHAPED.match(node.value)
+        and looks_like_an_environment_variable(node.value)
     }
 
 
@@ -461,6 +481,13 @@ def test_the_environment_reader_detector_works() -> None:
         "AGENT_SERVICE_TOKEN"
     }
     assert environment_variables_read_by("environ.get('PG_PASSWORD')") == {"PG_PASSWORD"}
+
+    # No underscore anywhere, which is how libpq actually spells them. The shape
+    # filter required one and dropped these before `FORBIDDEN_NAME` could see
+    # them, making MR !39's fix unreachable. Raised by Argus on story 3.4.
+    assert environment_variables_read_by('os.environ["PGPASSWORD"]') == {"PGPASSWORD"}
+    assert environment_variables_read_by("os.getenv('PGUSER')") == {"PGUSER"}
+    assert environment_variables_read_by('os.environ.get("PGHOST")') == {"PGHOST"}
 
     # The form that actually ships: a module constant read indirectly. A
     # call-site matcher returns nothing here, and returning nothing is how the

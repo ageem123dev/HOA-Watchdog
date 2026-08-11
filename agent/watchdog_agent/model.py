@@ -61,9 +61,17 @@ def reasoning_llm(model: str | None = None) -> Any:
 
     import os
 
-    chosen = model or os.environ.get(MODEL_VARIABLE) or DEFAULT_MODEL
+    # `or` chaining would defeat the blank check below: an explicitly empty
+    # `REASONING_MODEL=""` is falsy, so it would fall through to the default and
+    # run a model nobody chose under a configuration saying something else. Unset
+    # and blank are different states and only one of them is fine. Raised by
+    # Argus; the parametrized blank test covered `"   "` and not `""`.
+    chosen = model if model is not None else os.environ.get(MODEL_VARIABLE, DEFAULT_MODEL)
     if chosen.strip() == "":
-        raise MisconfiguredAgent(f"{MODEL_VARIABLE} is set to a blank value")
+        raise MisconfiguredAgent(
+            f"{MODEL_VARIABLE} is set to a blank value. Unset it to use the default "
+            f"({DEFAULT_MODEL}), or name a model."
+        )
 
     # Imported here rather than at module scope: `crewai` pulls chromadb,
     # onnxruntime and several hundred other modules, and every caller that is not

@@ -283,6 +283,65 @@ class TestTheGatewayIsUnreachable:
     exceptions are known where urllib is used, and that is where they are caught.
     """
 
+    def test_a_bodyless_request_carries_no_body(self) -> None:
+        """`data=b""` is not `data=None`.
+
+        urllib attaches an empty body and a `Content-Length: 0` for the first,
+        and a GET carrying a body is refused outright by some servers and
+        proxies. Story 3.4's catalog request is the first GET this client makes.
+        Raised by Argus.
+        """
+        import urllib.request
+
+        from watchdog_agent import tools_client
+
+        captured: dict = {}
+
+        # `self` first: patching the class makes this a bound method, so the
+        # opener arrives ahead of the request. Without it `request` is the
+        # OpenerDirector and `.data` raises AttributeError.
+        def capture(self, request, *args, **kwargs):  # type: ignore[no-untyped-def]
+            captured["data"] = request.data
+            raise urllib.error.URLError("stop here")
+
+        import urllib.error
+
+        original = urllib.request.OpenerDirector.open
+        urllib.request.OpenerDirector.open = capture  # type: ignore[assignment]
+        try:
+            with pytest.raises(GatewayError):
+                tools_client._urllib_transport("GET", "https://nowhere.invalid", {}, "")
+        finally:
+            urllib.request.OpenerDirector.open = original  # type: ignore[assignment]
+
+        assert captured["data"] is None
+
+    def test_a_request_with_a_body_still_carries_it(self) -> None:
+        """The other direction, so the fix above cannot silently drop POST bodies."""
+        import urllib.error
+        import urllib.request
+
+        from watchdog_agent import tools_client
+
+        captured: dict = {}
+
+        # `self` first: patching the class makes this a bound method, so the
+        # opener arrives ahead of the request. Without it `request` is the
+        # OpenerDirector and `.data` raises AttributeError.
+        def capture(self, request, *args, **kwargs):  # type: ignore[no-untyped-def]
+            captured["data"] = request.data
+            raise urllib.error.URLError("stop here")
+
+        original = urllib.request.OpenerDirector.open
+        urllib.request.OpenerDirector.open = capture  # type: ignore[assignment]
+        try:
+            with pytest.raises(GatewayError):
+                tools_client._urllib_transport("POST", "https://nowhere.invalid", {}, '{"a":1}')
+        finally:
+            urllib.request.OpenerDirector.open = original  # type: ignore[assignment]
+
+        assert captured["data"] == b'{"a":1}'
+
     def test_the_opener_carries_no_proxy_handler(self) -> None:
         """`build_opener` adds a ProxyHandler that reads HTTPS_PROXY.
 

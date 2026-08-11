@@ -139,16 +139,23 @@ class TestWhichModel:
 
         assert reasoning_llm().model == "gemini-3.5-flash-lite"
 
+    @pytest.mark.parametrize("blank", ["", "   ", "	"])
     def test_a_blank_model_variable_is_refused_rather_than_defaulted(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, blank: str
     ) -> None:
         """A blank value is a broken deployment, not an unset one.
 
         Falling back to the default here would run a model nobody chose, under a
         configuration that says something else.
+
+        **The empty string is the case that shipped broken.** The first version
+        read `model or os.environ.get(...) or DEFAULT_MODEL`, and `""` is falsy —
+        so it fell straight through to the default while `"   "` was caught. The
+        parametrized list covered `"   "` and not `""`, which is exactly the gap
+        it existed to close. Raised by Argus.
         """
         monkeypatch.setenv(API_KEY_VARIABLE, OURS)
-        monkeypatch.setenv(MODEL_VARIABLE, "   ")
+        monkeypatch.setenv(MODEL_VARIABLE, blank)
 
         with pytest.raises(MisconfiguredAgent, match=MODEL_VARIABLE):
             reasoning_llm()
