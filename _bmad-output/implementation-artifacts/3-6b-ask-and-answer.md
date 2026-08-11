@@ -202,6 +202,31 @@ the real one does; a mock that returned would let the page carry on and ask the 
 
 Argus re-run on the final head: no findings.
 
+### MR !46, round 1 — 2 actionable, both about tests that proved less than they looked
+
+| # | Finding | Outcome |
+| --- | --- | --- |
+| 1 | `never returns a partially scrubbed answer` asserted `toBeInstanceOf(Error)` | Fixed — asserts `AnswerNotGrounded` and the refused numeral. The loose form passed for a typo'd mock, an unconfigured `askAgent`, any `TypeError`; it could not tell "AD-7 refused this" from "the test is broken". |
+| 2 | The `does not log` test covered only `NoCatalogMatchError` | Fixed — a second test covers `AnswerNotGrounded`. **Verified unpinned first**: deleting `&& !(failure instanceof AnswerNotGrounded)` from `page.tsx` left all 53 green. |
+
+Both are findings in *last round's fix*, which is where the gate says to expect them.
+
+Sensitivity on the round: deleting the log clause fails 1 test; making `ask.ts` rewrap the refusal as
+a generic `Error` fails 6 — a mutation the old assertion sat green through, while `page.tsx` branches
+on that exact type to choose what a board member reads.
+
+**Two type errors caught by the gate, not the suite.** The round pushed tsc from 8 to 10: a duplicate
+`AnswerNotGrounded` import (the file already bound it via `await import`) and a `Rejection` missing
+its `index`. Vitest does not typecheck, so 54 tests passed over both.
+
+### Argus on the fix diff — 4 findings, 2 rejected
+
+| Severity | Finding | Outcome |
+| --- | --- | --- |
+| critical ×2 | `vi.mock` factories reference unhoisted consts → `ReferenceError` | **Rejected.** The consts are referenced inside arrow-function bodies, evaluated at first import of the mocked module, not at hoist time — and `./page` is imported dynamically inside each test. 54 tests run and pass, which a real hoisting `ReferenceError` cannot produce. |
+| medium | `logged.mockRestore()` after the assertions is skipped when one fails, muting `console.error` for every later test | **Fixed** — `afterEach(vi.restoreAllMocks)`. `resetAllMocks` does not restore a spy, so the mute persisted exactly when things were already going wrong. |
+| high | `.mcp.json` holds a machine-local absolute path | Out of scope — an uncommitted user file, not in this branch's diff. |
+
 ## Change Log
 
 | Date | Change |
@@ -209,3 +234,4 @@ Argus re-run on the final head: no findings.
 | 2026-08-11 | Story created when 3.6 was split. Stays `backlog` until 3.6a lands — the surface has nothing to render before the wire exists. |
 | 2026-08-11 | 3.6a merged. Baselined on `51b942a`. Two decisions taken before any code: **one attempt, then fail** (AD-7's retry clause deliberately unimplemented — see AC5), and the whole surface ships as one story, since the three layers are meaningless apart. Status → in-progress. |
 | 2026-08-11 | Argus round: 3 fixed, 1 rejected with a pinning test. CodeRabbit CLI round: 6 findings, all fixed, 5 pinned. `app/oracle/page.test.tsx` added after the "untestable page" belief turned out to be wrong. MR !46 opened; gate green on `d384e44` — 2073 tests, 109 files. |
+| 2026-08-11 | MR !46 round 1: 2 findings, both in the previous round's fix, both fixed and pinned. Argus on the fix diff: 1 fixed, 2 rejected as false (hoisting), 1 out of scope. Two type errors caught by tsc that the suite ran past. |

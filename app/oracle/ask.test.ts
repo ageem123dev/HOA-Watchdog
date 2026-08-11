@@ -175,7 +175,19 @@ describe('how the validator is configured', () => {
       (e: Error) => e,
     )
 
-    expect(outcome).toBeInstanceOf(Error)
+    // `AnswerNotGrounded`, not `Error`. The looser assertion passed for any
+    // throw at all — a typo in the mock setup, a TypeError from a renamed
+    // field, `askAgent` rejecting because it was never configured. All of those
+    // are green under `toBeInstanceOf(Error)`, and none of them is evidence
+    // that AD-7 refused anything. A test that cannot tell "the validator
+    // rejected this" from "the test is broken" is not watching the validator.
+    // Raised by CodeRabbit on MR !46.
+    expect(outcome).toBeInstanceOf(AnswerNotGrounded)
+    // And the refusal names the numeral it refused, which is what makes the
+    // failure diagnosable in a log without carrying the answer into it.
+    expect((outcome as InstanceType<typeof AnswerNotGrounded>).lastRejection.numeral).toBe(
+      '$9,999.00',
+    )
   })
 })
 

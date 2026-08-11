@@ -50,6 +50,16 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+// `restoreAllMocks`, not a trailing `logged.mockRestore()` in each test. A
+// failing assertion throws before that line, and the spy then stays installed:
+// `console.error` is muted for every test after it, and `resetAllMocks` does
+// not put it back — it clears a spy's implementation rather than restoring the
+// original. The cost is paid exactly when things are already going wrong, which
+// is when a silenced console is most expensive. Raised by Argus.
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 async function renderPage(q?: string) {
   const { default: OraclePage } = await import('./page')
   return OraclePage({ searchParams: Promise.resolve({ q }) })
@@ -109,12 +119,10 @@ describe('what a failure leaves behind', () => {
 
     expect(logged).toHaveBeenCalledWith('oracle turn failed', boom)
     expect(screen.getByText(/records could not be reached/i)).toBeTruthy()
-    logged.mockRestore()
   })
 
-  it('does not log the two failures that are expected and self-describing', async () => {
-    // A no-catalog-match is the most likely daily failure per the UX spec.
-    // Logging it as a fault would bury the real ones in noise.
+  it('does not log a no-catalog-match, the most likely daily failure', async () => {
+    // Per the UX spec. Logging it as a fault would bury the real ones in noise.
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { NoCatalogMatchError } = await import('@/adapters/agent/chat-client')
     askOracle.mockRejectedValue(new NoCatalogMatchError('no entry'))
@@ -123,16 +131,37 @@ describe('what a failure leaves behind', () => {
 
     expect(logged).not.toHaveBeenCalled()
     expect(screen.getByText(/can't answer that one/i)).toBeTruthy()
-    logged.mockRestore()
+  })
+
+  it('does not log an ungrounded answer either', async () => {
+    // The other half of the condition, and it was unpinned: deleting
+    // `&& !(failure instanceof AnswerNotGrounded)` left all 53 tests green.
+    // Verified by deleting it. AD-7 refusing an answer is the system working —
+    // it is the guarantee this whole epic exists to provide — so it belongs in
+    // the provenance record, not in the error log beside socket failures.
+    // Raised by CodeRabbit on MR !46.
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { AnswerNotGrounded } = await import('@/core/answer/grounded-answer')
+    askOracle.mockRejectedValue(
+      new AnswerNotGrounded(1, {
+        numeral: '$9,999.00',
+        index: 13,
+        reason: 'appears in no row',
+      }),
+    )
+
+    render(await renderPage('What does 4B owe?'))
+
+    expect(logged).not.toHaveBeenCalled()
+    expect(screen.getByText(/could not produce an answer I can show the records for/i)).toBeTruthy()
   })
 
   it('keeps the question on screen through a failure, per UX-DR11', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     askOracle.mockRejectedValue(new Error('down'))
 
     render(await renderPage('What does 4B owe for 2026?'))
 
     expect(screen.getByText('What does 4B owe for 2026?')).toBeTruthy()
-    logged.mockRestore()
   })
 })
