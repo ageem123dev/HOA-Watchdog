@@ -235,6 +235,30 @@ class TestAD5TheModelNeverSeesSQL:
         with pytest.raises(MalformedCatalog, match="bind"):
             fetch_catalog(transport=_ok({**ENTRY, "bind": ["unitNumber"]}))
 
+    def test_mutating_a_declaration_does_not_change_the_view(self) -> None:
+        """The isolation the deep copy exists for, asserted rather than assumed.
+
+        Declarations are handed to CrewAI, which is third-party code, and the
+        view's schema is what `_checked_parameters` later validates the model's
+        arguments against. Sharing one dict between them means a provider that
+        normalises a schema in place moves the goalposts between the question and
+        the check.
+
+        **The first version of this fix copied only in `_view_of`**, which
+        separated the view from the decoded payload and left `declarations_for`
+        assigning `entry.parameters` by reference — so the declaration and the
+        view were still one dict and the fix did not fix the thing it was for.
+        Raised by Argus on the fix diff. This test is what would have caught it.
+        """
+        entries = fetch_catalog(transport=_ok(ENTRY))
+        declarations = declarations_for(entries)
+
+        declarations[0]["parameters"]["properties"]["injected"] = {"type": "string"}
+        declarations[0]["parameters"]["additionalProperties"] = True
+
+        assert "injected" not in entries[0].parameters["properties"]
+        assert entries[0].parameters["additionalProperties"] is False
+
     def test_no_declaration_carries_sql(self) -> None:
         declarations = declarations_for(fetch_catalog(transport=_ok(ENTRY)))
 

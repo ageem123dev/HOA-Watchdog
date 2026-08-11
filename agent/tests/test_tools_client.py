@@ -197,6 +197,11 @@ class TestSurfacesTheGatewaysRefusal:
             _call(transport)
 
         assert not isinstance(raised.value, CatalogEntryNotFound)
+        # Not only "some other error": without this the test passes if the 404 is
+        # swallowed or miscategorised entirely. Its counterpart in
+        # test_catalog_client.py asserts the status and this did not. Raised by
+        # Argus.
+        assert raised.value.status == 404
 
     @pytest.mark.parametrize("code", ["invalid_request", "invalid_parameters"])
     def test_400_raises_invalid_request(self, code: str) -> None:

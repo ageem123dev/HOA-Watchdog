@@ -187,7 +187,18 @@ def declarations_for(entries: list[CatalogEntryView]) -> list[dict[str, Any]]:
     this whole module exists to avoid.
     """
     return [
-        {"name": entry.id, "description": entry.description, "parameters": entry.parameters}
+        {
+            "name": entry.id,
+            "description": entry.description,
+            # Copied here as well as in `_view_of`, and the second copy is the one
+            # that matters. The first only separates the view from the decoded
+            # payload; assigning `entry.parameters` by reference handed CrewAI the
+            # *view's own* dict, so a provider normalising a schema in place would
+            # still have moved what `_checked_parameters` validates against. The
+            # first fix did not fix the thing it was written for. Raised by Argus
+            # on the fix diff.
+            "parameters": deepcopy(entry.parameters),
+        }
         for entry in entries
     ]
 
