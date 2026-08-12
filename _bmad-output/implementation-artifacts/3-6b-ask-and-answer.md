@@ -65,7 +65,11 @@ The rendered answer passes `validateAnswer` before it is shown. A turn whose ans
 grounded renders no answer at all — story 3.7 owns what shows instead, and until it exists an honest
 placeholder rather than an ungrounded sentence.
 
-> **Decided 2026-08-11: one attempt, then fail.** AD-7 says a rejected answer "forces a retry", and
+> **Resolved 2026-08-12: AD-7 was amended to match this decision.** The retry is now the reader's
+> rather than the system's — a refusal is shown honestly, and asking again is a new question logged
+> as one. What follows is the reasoning the amendment rests on, recorded as it was written.
+>
+> **Decided 2026-08-11: one attempt, then fail.** AD-7 said a rejected answer "forces a retry", and
 > that is deliberately not implemented here. Since story 3.6a the model lives across a wire, so a
 > retry means another turn — which re-runs `route_question`, **re-executes the catalog entry**, and
 > returns *different rows*. The validator would then check attempt two against attempt one's

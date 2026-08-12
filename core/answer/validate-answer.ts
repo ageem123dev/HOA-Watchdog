@@ -3,7 +3,9 @@
  *
  * "Every numeric token in a rendered answer must match a value present in the
  * tool result set for that turn. A pre-render validator rejects any unreferenced
- * numeral and forces a retry. […] **This supersedes NFR-3's system-prompt
+ * numeral. **A rejected answer is never shown and never repaired:** the surface
+ * says plainly that no answer could be grounded, and the board member may ask
+ * again. […] **This supersedes NFR-3's system-prompt
  * mechanism; prompt directives may remain as defence in depth but carry no
  * enforcement weight.**"
  *
