@@ -82,9 +82,20 @@ function poolFor(role: Role, connectionString: () => string): Pool {
   // request failure — the note `../auth/env.ts` carries.
   const pool = new Pool({ ...SETTINGS, connectionString: connectionString() })
 
-  pool.on('error', () => {
+  pool.on('error', (error) => {
     // An idle client failing has no request to reject. Without a listener Node
     // treats it as unhandled and takes the process down.
+    //
+    // **Logged, not merely swallowed.** Two of the fourteen adapters this
+    // replaced — document-repository and extraction-repository — printed this,
+    // and consolidating them into one silent handler quietly removed the only
+    // record that Postgres had restarted or the network had dropped. Raised by
+    // Argus, and correct: the loss is worse here than it was there, because one
+    // pool now serves every adapter, so a single idle failure is broader.
+    //
+    // The handler must not rethrow. A listener that throws converts the
+    // recoverable failure into the crash it was added to prevent.
+    console.error(`[db/pool:${role}] idle client error; the pool will discard it`, error)
   })
 
   open.set(role, pool)
@@ -119,5 +130,10 @@ export async function closeAllPools(): Promise<void> {
   const pools = [...open.values()]
   open.clear()
 
-  await Promise.all(pools.map((pool) => pool.end()))
+  // `allSettled`, not `all`. Both call `end()` on every pool — the `map` runs
+  // to completion either way — but `all` rejects on the first failure and
+  // abandons the others' promises, which surfaces as an unhandled rejection
+  // when the second one fails too. Closing is cleanup; one pool refusing must
+  // not hide whether the rest finished. Raised by Argus.
+  await Promise.allSettled(pools.map((pool) => pool.end()))
 }

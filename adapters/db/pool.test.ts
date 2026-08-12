@@ -145,15 +145,64 @@ describe('the idle-client guard', () => {
     expect(listened).toHaveBeenNthCalledWith(2, 'error', expect.any(Function))
   })
 
+  it('logs the idle error rather than dropping it silently', async () => {
+    // Two of the fourteen adapters this replaced printed this, and consolidating
+    // them into one silent handler removed the only record that Postgres had
+    // restarted or the network had dropped. Raised by Argus. Pinned because the
+    // same silent drop is exactly what a future tidy-up would do again.
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { readerPool } = await load()
+    readerPool()
+    const handler = listened.mock.calls[0]![1] as (error: Error) => void
+
+    handler(new Error('connection terminated unexpectedly'))
+
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('idle client error'),
+      expect.any(Error),
+    )
+    logged.mockRestore()
+  })
+
+  it('names which pool it was, so the log says reader or writer', async () => {
+    // One line saying "idle client error" across two pools cannot tell you which
+    // credential lost its connection — and they fail for different reasons.
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { writerPool } = await load()
+    writerPool()
+    const handler = listened.mock.calls[0]![1] as (error: Error) => void
+
+    handler(new Error('boom'))
+
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('writer'), expect.any(Error))
+    logged.mockRestore()
+  })
+
+  it('closes every pool even when one refuses to close', async () => {
+    // `Promise.all` rejects on the first failure and abandons the others'
+    // promises, which surfaces as an unhandled rejection when a second one
+    // fails. Cleanup must not depend on the order things break in.
+    const { readerPool, writerPool, closeAllPools } = await load()
+    const reader = readerPool()
+    writerPool()
+    vi.mocked(reader.end).mockRejectedValueOnce(new Error('will not close'))
+
+    await expect(closeAllPools()).resolves.toBeUndefined()
+
+    expect(ended).toHaveBeenCalledTimes(1)
+  })
+
   it('has a handler that swallows the error rather than rethrowing', async () => {
     // A registered listener that throws is worse than none: it turns a
     // recoverable idle failure into the crash it was added to prevent.
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { readerPool } = await load()
     readerPool()
 
     const handler = listened.mock.calls[0]![1] as (error: Error) => void
 
     expect(() => handler(new Error('connection terminated unexpectedly'))).not.toThrow()
+    logged.mockRestore()
   })
 })
 
