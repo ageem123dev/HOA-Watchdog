@@ -329,6 +329,51 @@ exists to prevent. Recorded in a comment at the use site.
    `sprint-status.yaml`. Argus also proposed moving `epic-4` to `review`; **not done** — an epic takes
    `backlog`/`in-progress`/`done`, and seven stories of Epic 4 remain.
 
+Round 4 on the fix commit: clean, no findings.
+
+### The AC audit, which found the one thing three review rounds did not
+
+AC4 reads: *"The lifecycle is one-way: unreviewed → reviewed. No dismissal, no deletion, **no
+un-reviewing**. Attempting any of them fails loudly rather than silently doing nothing."*
+
+Dismissal and deletion were satisfied by the grant. Un-reviewing was satisfied by **the port having no
+method for it** — which is precisely the argument this migration rejects one suite further down, where
+it says never-dismissed has to be a grant rather than a habit. Probed rather than assumed:
+
+```
+{"unreviewed": "ACCEPTED — the lifecycle is not one-way",
+ "reattribute": "ACCEPTED — the first reviewer can be replaced"}
+```
+
+`finding_review_is_attributed` cannot catch this. A check constraint sees one row and not the row that
+was there before, and setting all three columns back to their unreviewed values is internally
+consistent. So a plain `UPDATE` un-reviewed a finding, and a second one replaced the reviewer's name
+in the record of who looked — the defect the adapter refuses and nothing else did.
+
+**Fixed** by `finding_lifecycle_is_one_way`, a `before update` trigger: once `state` is `reviewed`,
+`state`, `reviewed_by` and `reviewed_at` are final. `evidence` stays mutable, deliberately, and has
+its own positive control — a rule that froze the reviewed row entirely would pass both new refusals
+and break AC3.
+
+Sensitivity: dropping the trigger fails both new tests; restoring it passes all 725.
+
+This is the third story where the AC audit caught something the review rounds did not (3.6b, 3.8, and
+now this), and the shape is consistent: a clause that is *mostly* satisfied, where the unsatisfied
+half is the one nobody would think to test.
+
+### AC audit — the rest
+
+| AC | Verdict |
+| --- | --- |
+| AC1 identity | `finding_identity` on the three columns; nothing on the record says how it was found |
+| AC2 one row | proven against the real database, including two spellings of one month |
+| AC3 amend without resetting | the decisive adapter test, plus a database-level control |
+| AC4 one-way | **gap found and closed** — see above |
+| AC5 who and when | recorded, and now un-replaceable |
+| AC6 one creation path | one method on `FindingRegister`, mirrored by the grants |
+| AC7 no model | asserted over both production files, with the specifiers resolved |
+| AC8 real database | 725 `test:db` cases |
+
 ## Change Log
 
 | Date | Change |

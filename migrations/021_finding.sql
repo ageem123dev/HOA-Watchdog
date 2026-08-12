@@ -121,6 +121,43 @@ create table finding (
 -- state and recency, and an index that arrives with the table costs nothing.
 create index finding_state_recent_idx on finding (state, raised_at desc);
 
+-- One-way is a rule of the table, not of the port.
+--
+-- `finding_review_is_attributed` above cannot express this: a check constraint
+-- sees one row, and it cannot see the row that was there before. Setting state,
+-- reviewed_by and reviewed_at all back to their unreviewed values is internally
+-- consistent, so the constraint accepts it -- measured against this database
+-- before this trigger was written.
+--
+-- Until then "no un-reviewing" was held only by `FindingReviewer` having no
+-- method for it, which is the same shape as trusting the application not to
+-- issue a DELETE. The property would have lasted exactly as long as nobody wrote
+-- the statement, and re-reviewing would have let a second board member replace
+-- the first one's name in the record of who looked.
+--
+-- What stays mutable is `evidence`, deliberately: a second detection run must
+-- still be able to correct what a finding says, whether or not somebody has read
+-- it. A rule that froze the reviewed row entirely would satisfy both refusals
+-- and break the amend half of AD-13's contract.
+create function finding_refuse_unreview() returns trigger
+language plpgsql as $$
+begin
+  if old.state = 'reviewed'
+     and (new.state       is distinct from old.state
+       or new.reviewed_by is distinct from old.reviewed_by
+       or new.reviewed_at is distinct from old.reviewed_at) then
+    raise exception
+      'finding % is reviewed; its state and reviewer are final', old.id;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger finding_lifecycle_is_one_way
+  before update on finding
+  for each row execute function finding_refuse_unreview();
+
 -- "Never dismissed" is a grant, not a habit.
 --
 -- Migration 002's default privileges hand watchdog_writer DELETE on every table

@@ -56,6 +56,8 @@ if (!configured) {
 const CHECK_VIOLATION = '23514'
 const UNIQUE_VIOLATION = '23505'
 const INSUFFICIENT_PRIVILEGE = '42501'
+/** What a plpgsql `raise exception` reports when it names no other errcode. */
+const RAISE_EXCEPTION = 'P0001'
 
 /**
  * Every row this file writes carries this in its `finding_type`.
@@ -301,6 +303,73 @@ describeWithDatabase('the lifecycle is one-way', () => {
     await expect(
       writer.query(`update finding set state = 'dismissed' where id = $1`, [id]),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
+  })
+
+  /**
+   * One-way has to be a rule of the table, not of the port.
+   *
+   * Found by auditing AC4 — "no un-reviewing, and attempting it fails loudly" —
+   * against what the database would actually do, rather than against what the
+   * port declares. It was a habit: `FindingReviewer` has no un-review method, so
+   * nothing in the application could do this, and a check constraint cannot see
+   * the previous row. A plain UPDATE setting the three columns back to their
+   * unreviewed values is internally consistent and was accepted. Measured.
+   *
+   * That is the same argument this migration makes about DELETE one suite below,
+   * arriving at the other end of the lifecycle: the property held only for as
+   * long as nobody wrote the statement.
+   */
+  it('refuses to un-review a reviewed finding', async () => {
+    const id = await raised('unreview')
+    await writer.query(
+      `update finding set state = 'reviewed', reviewed_by = $2, reviewed_at = now() where id = $1`,
+      [id, memberId],
+    )
+
+    await expect(
+      writer.query(
+        `update finding set state = 'unreviewed', reviewed_by = null, reviewed_at = null
+         where id = $1`,
+        [id],
+      ),
+    ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
+  })
+
+  it('refuses to replace the reviewer of a reviewed finding', async () => {
+    // The second half of AC5. "The treasurer looked at this on the 3rd" stops
+    // being evidence if a later statement can make it say somebody else. The
+    // adapter refuses a second review, but the adapter is not the only thing
+    // that can issue an UPDATE.
+    const id = await raised('reattribute')
+    await writer.query(
+      `update finding set state = 'reviewed', reviewed_by = $2, reviewed_at = now() where id = $1`,
+      [id, memberId],
+    )
+    const { rows } = await writer.query<{ id: string }>(
+      `insert into board_member (email, password_hash)
+       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      [`life-${RUN_PREFIX}-second@example.test`],
+    )
+
+    await expect(
+      writer.query(`update finding set reviewed_by = $2 where id = $1`, [id, rows[0]!.id]),
+    ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
+  })
+
+  it('still lets a reviewed finding have its evidence amended', async () => {
+    // **The positive control, and the one that matters most here.** A rule
+    // freezing a reviewed row entirely would pass both refusals above and break
+    // AC3: a second detection run must still be able to correct what a finding
+    // says, whether or not somebody has read it.
+    const id = await raised('amend')
+    await writer.query(
+      `update finding set state = 'reviewed', reviewed_by = $2, reviewed_at = now() where id = $1`,
+      [id, memberId],
+    )
+
+    await expect(
+      writer.query(`update finding set evidence = '{"corrected": true}'::jsonb where id = $1`, [id]),
+    ).resolves.toBeDefined()
   })
 })
 
