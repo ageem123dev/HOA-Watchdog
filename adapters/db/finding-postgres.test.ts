@@ -118,19 +118,28 @@ async function stateOf(id: string) {
 }
 
 describeWithDatabase('raising a finding', () => {
+  // No board member is seeded here. Nothing in this suite reviews anything, so
+  // the seed was a row nothing explained -- the same fixture Argus found unused
+  // in `migrations/finding.test.ts`, surviving in the file it was copied to. A
+  // defect found in one place is worth looking for in its siblings.
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
-    memberId = await seedMember()
   })
 
   afterAll(async () => {
-    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
-    await owner.end()
-    await writer.end()
+    try {
+      await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    } finally {
+      // Closed whatever the cleanup did. A delete that throws -- a foreign key
+      // from a row some later test added, say -- would otherwise leak both
+      // connections, and a suite that cannot close its connections is the shape
+      // `pool.ts` was written to stop. Raised by Argus.
+      await owner.end()
+      await writer.end()
+    }
   })
 
   beforeEach(() => {
@@ -239,10 +248,15 @@ describeWithDatabase('reviewing a finding', () => {
   })
 
   afterAll(async () => {
-    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
-    await owner.end()
-    await writer.end()
+    try {
+      // Findings first: `reviewed_by` references `board_member`, so the member
+      // cannot go while a finding still names them.
+      await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+      await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
+    } finally {
+      await owner.end()
+      await writer.end()
+    }
   })
 
   beforeEach(() => {

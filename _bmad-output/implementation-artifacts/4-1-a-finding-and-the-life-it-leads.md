@@ -362,6 +362,53 @@ This is the third story where the AC audit caught something the review rounds di
 now this), and the shape is consistent: a clause that is *mostly* satisfied, where the unsatisfied
 half is the one nobody would think to test.
 
+### CodeRabbit, on MR !53
+
+The CLI round could not run — `A valid organization session is required` (401), the session having expired
+again since it was restored. So the merge request was CodeRabbit's first look rather than its second.
+
+**Round 1 — two findings, both real, and both the same shape as the AC4 gap.**
+
+1. *(major)* **The lifecycle trigger fired on UPDATE only.** A plain `INSERT` carrying `state = 'reviewed'`
+   with both attribution columns filled in walked past it — `finding_review_is_attributed` finds that row
+   perfectly consistent, and the writer holds `INSERT` on every column. Measured: accepted, reviewed, and
+   attributed to a member who had never seen it. The audit had found this defect at the UPDATE door one
+   round earlier; I did not check that it had two. **Fixed** — `before insert or update`.
+2. *(minor, and the sharpest of the whole story)* **The AC7 control was satisfied by a comment.**
+   `core/ports/finding.ts` imports nothing at all, and the "did we read any imports?" assertion — added
+   specifically to stop a vacuous pass — was matching this sentence in the port's own prose:
+
+   > "dismissed" is indistinguishable from **from "hidden by whoever did not want it seen"**
+
+   **Fixed** more thoroughly than asked: comments are blanked before scanning with `declared-members.ts`'s
+   `neutralise`; the control is now five planted violations rather than a count, because a count is what a
+   comment can satisfy; the port is asserted to import *nothing at all*; and the prose sentence is kept as
+   its own case so the defect cannot return silently.
+
+Argus, reviewing the same fix diff, added two more of the same family:
+
+3. *(medium)* **The identity was mutable.** `finding_identity` refuses a *second* row for a key and never
+   stopped moving an *existing* row to a different one. One UPDATE changed type, subject and period at
+   once — the finding about one unit became a finding about another with its history intact, which is
+   worse than a duplicate because the register still looks complete. **Fixed** in the same trigger.
+4. *(info)* **"No end" had a second spelling.** `[2026-06-01,infinity)` has an upper bound that is not
+   null, so `finding_period_is_bounded` — written to refuse a window that grows as it ages — passed it.
+   The second-spelling failure the `daterange` decision exists to prevent, arriving inside the constraint
+   written to prevent it. **Fixed** with `isfinite` on both bounds.
+
+**Round 2 — one trivial finding, accepted.** The half-reviewed insert asserted `23514` *or* `P0001`. A
+`before insert` trigger runs before the row is checked, so it is always `P0001` and the constraint never
+gets the chance. An assertion that takes two answers cannot say which gate fired, and would keep passing
+if the trigger stopped covering the case and the constraint quietly caught it instead. Measured, then
+tightened. CodeRabbit resolved both round-1 threads on the same pass.
+
+Argus on the same fix diff found two more in the tests, both accepted: the `raising a finding` suite
+seeded a board member no test in it read — **the same unused fixture Argus had found in
+`migrations/finding.test.ts` two rounds earlier, surviving in the file it was copied to** — and the
+`afterAll` hooks closed their connections after the cleanup queries rather than in a `finally`, so a
+delete that threw would have leaked both. It also raised three items in `.mcp.json` and
+`.claude/commands/`; those are uncommitted files outside this story and were left alone.
+
 ### AC audit — the rest
 
 | AC | Verdict |
@@ -381,6 +428,7 @@ half is the one nobody would think to test.
 | --- | --- |
 | 2026-08-12 | Story created after the connection-pool chore merged. Deterministic detection confirmed by the project lead the same day, so this story takes no model dependency and Epic 4 stays independent of Epic 3. |
 | 2026-08-12 | Tasks 1–4 implemented. `period` decided as `daterange` with the reasoning probed rather than assumed; `finding_period_is_bounded` added after the probe found that every empty range collapses to one value. Gate green: lint clean, build clean, 2283 tests, 721 `test:db`, tsc at the 8-error baseline. |
+| 2026-08-12 | MR !53. Four review findings across CodeRabbit and Argus, all of one shape: a lifecycle rule the table did not enforce. The trigger now covers INSERT and the identity columns, `finding_period_is_bounded` refuses `infinity`, and AC7's control no longer passes on prose. Gate green: 2289 tests, 733 `test:db`. |
 
 ## File List
 

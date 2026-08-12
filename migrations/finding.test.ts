@@ -123,10 +123,15 @@ describeWithDatabase('the key AD-13 names', () => {
   })
 
   afterAll(async () => {
-    // As the owner: the writer cannot delete, which is the property under test.
-    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner.end()
-    await writer.end()
+    try {
+      // As the owner: the writer cannot delete, which is the property under test.
+      await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    } finally {
+      // Closed whatever the cleanup did, so a failing delete cannot also leak
+      // the connections. Raised by Argus.
+      await owner.end()
+      await writer.end()
+    }
   })
 
   const raise = (type: string, period: string, evidence = '{"seen": 1}') =>
@@ -260,10 +265,14 @@ describeWithDatabase('the lifecycle is one-way', () => {
   })
 
   afterAll(async () => {
-    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner.query(`delete from board_member where email like $1`, [`life-${RUN_PREFIX}%`])
-    await owner.end()
-    await writer.end()
+    try {
+      // Findings first: `reviewed_by` references `board_member`.
+      await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+      await owner.query(`delete from board_member where email like $1`, [`life-${RUN_PREFIX}%`])
+    } finally {
+      await owner.end()
+      await writer.end()
+    }
   })
 
   async function raised(suffix: string): Promise<string> {
@@ -403,17 +412,22 @@ describeWithDatabase('the lifecycle is one-way', () => {
   })
 
   it('refuses a raised finding that names a reviewer without saying so', async () => {
-    // The narrower spelling, which the check constraint already refuses — kept
-    // because the trigger now runs first and must not swallow it into a
-    // different error, and because a future edit to either could leave this
-    // combination reachable through the gap between them.
+    // The narrower spelling: `state` defaults to `unreviewed` while
+    // `reviewed_by` is set. `finding_review_is_attributed` would refuse it too,
+    // but it never gets the chance — a `before insert` trigger runs before the
+    // row is checked, so this is `P0001` and never `23514`. Measured.
+    //
+    // The first version accepted either code, which reads as thoroughness and
+    // is the opposite: an assertion that takes two answers cannot say which gate
+    // fired, so it would keep passing if the trigger stopped covering this and
+    // the constraint quietly caught it instead. Raised by CodeRabbit.
     await expect(
       writer.query(
         `insert into finding (finding_type, subject_id, period, evidence, reviewed_by)
          values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb, $2)`,
         [`${RUN_PREFIX}_halfreviewed`, memberId],
       ),
-    ).rejects.toMatchObject({ code: expect.stringMatching(/^(23514|P0001)$/) })
+    ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
   })
 
   /**
@@ -487,9 +501,12 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
   })
 
   afterAll(async () => {
-    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner.end()
-    await writer.end()
+    try {
+      await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    } finally {
+      await owner.end()
+      await writer.end()
+    }
   })
 
   it('refuses DELETE to the writer', async () => {
