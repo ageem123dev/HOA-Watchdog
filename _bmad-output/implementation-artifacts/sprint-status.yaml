@@ -83,7 +83,7 @@ development_status:
   2-7-the-roll-becomes-units-and-assessments: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   # AD-12 and AD-14. Provenance lands with the first execution path or becomes a
   # retrofit that logs only some paths.
   3-1-the-catalog-executed-and-logged: done
@@ -105,7 +105,7 @@ development_status:
   3-6c-the-dashboard-ask-field: done
   3-7-when-it-cannot-answer: done
   3-8-the-access-log: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
   epic-4: backlog
   4-1-a-finding-and-the-life-it-leads: backlog
@@ -133,7 +133,7 @@ action_items:
   - epic: 1
     action: "First Python story adds pytest to the local gate (package.json script + the Tested= line) in the same story - there is no CI as of 2026-08-07"
     owner: "Dev"
-    status: open
+    status: done
   - epic: 1
     action: "Fix $ARGUMENTS shell injection in .claude/commands/argus-review.md"
     owner: "Matt"
@@ -201,5 +201,24 @@ action_items:
   - epic: 3
     action: "ARCHITECTURE DECISION for Matt: AD-3 and AD-15 contradict each other on how many secrets the agent service holds. AD-3 says 'exactly one secret - the model API key'; AD-15's mechanism, decided later on 2026-07-31 and marked previously-deferred, requires 'a shared service token held only by the agent service and the gateway'. Story 3.3 implements both - the token is required and no data credential is permitted - but the spine's wording is self-contradictory. Defensible fix: amend AD-3 to 'one model credential and the gateway service token, and never a data credential'. Raised by CodeRabbit on MR !39 and left unresolved because amending an invariant is not a story's to make."
     owner: "Matt"
+    status: done
+  - epic: 3
+    action: "Shared connection pool - one change across all ten module-scoped adapters. DECIDED at the epic 3 retro: do this BEFORE epic 4. Three epics carried, one real test:db flake now mitigated by a load-bearing workaround, and Argus raised the disposal half again on story 3.8"
+    owner: "Dev"
     status: open
-
+  - epic: 3
+    action: "migrations/roles.test.ts proves the reader cannot write by running unbounded update and delete with no WHERE. On the one run where the grant has regressed, the test wipes the table it is checking. Story 3.1 fixed the identical shape in query-log.test.ts by scoping to RUN_PREFIX - Postgres checks the privilege before matching rows, so the assertion is unchanged. Rank above the rest of the backlog"
+    owner: "Dev"
+    status: open
+  - epic: 3
+    action: "Add .gitattributes and run git add --renormalize . - every commit in epic 3 emitted CRLF warnings"
+    owner: "Dev"
+    status: open
+  - epic: 3
+    action: "Settle epic 4's open question - detection and alert copy deterministic vs model-generated - BEFORE story 4.1. The epic's standalone claim is conditioned on it"
+    owner: "Matt"
+    status: open
+  - epic: 3
+    action: "Epic 3 is complete and entirely unexercised: never deployed, no board member has seen it, and the catalog holds one entry. Every claim of correctness is about tests and reviews, not about a treasurer asking a question"
+    owner: "Matt"
+    status: open
