@@ -5,7 +5,7 @@ merge_request: 53
 
 # Story 4.1: A finding, and the life it leads
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -435,6 +435,7 @@ on the same diff found nothing in this story's files.
 | 2026-08-12 | Story created after the connection-pool chore merged. Deterministic detection confirmed by the project lead the same day, so this story takes no model dependency and Epic 4 stays independent of Epic 3. |
 | 2026-08-12 | Tasks 1–4 implemented. `period` decided as `daterange` with the reasoning probed rather than assumed; `finding_period_is_bounded` added after the probe found that every empty range collapses to one value. Gate green: lint clean, build clean, 2283 tests, 721 `test:db`, tsc at the 8-error baseline. |
 | 2026-08-12 | MR !53. Four review findings across CodeRabbit and Argus, all of one shape: a lifecycle rule the table did not enforce. The trigger now covers INSERT and the identity columns, `finding_period_is_bounded` refuses `infinity`, and AC7's control no longer passes on prose. Gate green: 2289 tests, 733 `test:db`. |
+| 2026-08-12 | Merged as 1859d7c after three MR rounds. CodeRabbit's clean verdict arrived as an edit to the summary comment rather than a new note — recorded, because keying on new notes would have left the loop waiting on a review that had already happened. |
 
 ## File List
 
