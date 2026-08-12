@@ -107,8 +107,8 @@ development_status:
   3-8-the-access-log: done
   epic-3-retrospective: done
 
-  epic-4: backlog
-  4-1-a-finding-and-the-life-it-leads: backlog
+  epic-4: in-progress
+  4-1-a-finding-and-the-life-it-leads: review
   4-2-the-same-invoice-twice: backlog
   4-3-a-vendor-who-charged-more-than-usual: backlog
   4-4-the-dues-that-did-not-arrive: backlog
@@ -217,7 +217,7 @@ action_items:
   - epic: 3
     action: "Settle epic 4's open question - detection and alert copy deterministic vs model-generated - BEFORE story 4.1. The epic's standalone claim is conditioned on it"
     owner: "Matt"
-    status: open
+    status: done  # CONFIRMED 2026-08-12 by Matt: deterministic. SQL detects, templated prose describes, no model in FR-6/7/8. Epic 4 stays independent of epic 3 and SM-2 stays falsifiable
   - epic: 3
     action: "Epic 3 is complete and entirely unexercised: never deployed, no board member has seen it, and the catalog holds one entry. Every claim of correctness is about tests and reviews, not about a treasurer asking a question"
     owner: "Matt"
