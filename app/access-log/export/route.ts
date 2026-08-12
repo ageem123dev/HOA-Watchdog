@@ -32,7 +32,12 @@ import { filterFrom } from '../filter'
  * format, and a caller wanting the CSV for anything else should not have to
  * strip it.
  */
-const BOM = '﻿'
+const BOM = '\uFEFF'  // U+FEFF, written as an escape rather than as the
+// character itself. An invisible byte in source is exactly the hazard
+// `docs/no-control-characters.test.ts` exists for — that scanner does not catch
+// this one, because U+FEFF is not a C0 control — and a stray BOM is trivially
+// deleted by an editor or a copy-paste with nothing to show for it. Raised by
+// Argus.
 
 export async function GET(request: Request): Promise<Response> {
   const session = await auth()

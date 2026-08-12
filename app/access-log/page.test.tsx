@@ -131,6 +131,19 @@ describe('the filter', () => {
     expect((screen.getByLabelText(/who asked/i) as HTMLInputElement).value).toBe('user-3')
   })
 
+  it('carries the limit through a filter submit', async () => {
+    // A GET form submits only the fields it contains. Without a hidden input the
+    // limit is dropped, so a reader who widened the page to 500 rows and then
+    // filtered would silently fall back to 100 — and the rows that vanished
+    // would look like the filter's doing rather than the form's. Raised by
+    // Argus.
+    const { container } = render(await renderPage({ limit: '500' }))
+    const hidden = container.querySelector('input[name="limit"]') as HTMLInputElement
+
+    expect(hidden).not.toBeNull()
+    expect(hidden.value).toBe('500')
+  })
+
   it('carries the filter into the export link, so the download matches the screen', async () => {
     render(await renderPage({ actorId: 'user-9' }))
 

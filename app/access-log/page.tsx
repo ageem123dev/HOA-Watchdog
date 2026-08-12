@@ -84,6 +84,15 @@ export default async function AccessLogPage({
           style={styles.input}
         />
 
+        {/*
+          The limit rides along, because a GET form submits only the fields it
+          contains. Without this, a reader who widened the page to
+          `?limit=500` and then filtered was silently dropped back to 100 — and
+          the rows that disappeared would look like the filter's doing rather
+          than the form's. Raised by Argus.
+        */}
+        <input type="hidden" name="limit" value={filter.limit} />
+
         <button type="submit" style={styles.control}>
           Filter
         </button>
