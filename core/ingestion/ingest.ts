@@ -242,7 +242,18 @@ async function ingestOne(
       // After the write, because detection reads the records back to compare
       // them against earlier documents. It cannot throw: the document really was
       // ingested. See `run-detection.ts`.
-      await runDuplicateDetection(recorded.id, deps)
+      //
+      // `onError` is rewrapped rather than passed through. This path's version
+      // takes a **filename** as its second argument and `extract-document.ts`'s
+      // takes a document id; both are strings, so handing `deps` over wholesale
+      // type-checks and logs a uuid under the label `filename`. Raised by Argus,
+      // and worth the four lines: the label is the only thing that makes an
+      // upload error legible to whoever reads it.
+      await runDuplicateDetection(recorded.id, {
+        invoices: deps.invoices,
+        findings: deps.findings,
+        onError: deps.onError === undefined ? undefined : (error) => deps.onError?.(error, filename),
+      })
     } catch (error) {
       deps.onError?.(error, filename)
 

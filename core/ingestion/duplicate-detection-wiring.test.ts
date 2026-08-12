@@ -69,6 +69,18 @@ describe('when the collaborators are absent', () => {
   })
 })
 
+describe('the ingest path reports errors with its own vocabulary', () => {
+  it('rewraps onError so a filename is not a document id', () => {
+    // `ingest`'s `onError` takes a **filename**; `extract-document`'s takes a
+    // document id. Both are strings, so passing `deps` through wholesale
+    // type-checks and logs a uuid under the label `filename`. Raised by Argus.
+    const source = read('core/ingestion/ingest.ts')
+
+    expect(source).toMatch(/runDuplicateDetection\(recorded\.id, \{/)
+    expect(source).toMatch(/deps\.onError\?\.\(error, filename\)/)
+  })
+})
+
 describe('when detection fails', () => {
   const failing = (): { invoices: InvoiceReader; findings: FindingRegister } => ({
     invoices: {
