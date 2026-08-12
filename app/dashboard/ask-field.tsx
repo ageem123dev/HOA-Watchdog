@@ -34,14 +34,20 @@
  * renders its empty state. A submission that appears to have worked and did
  * nothing is precisely what AC5 forbids.
  *
- * **No backslash, deliberately.** The obvious spelling is `.*\S.*`, and on this
- * project a `\S` written through an intermediate layer has twice arrived with
- * the backslash eaten — including in this story's own first probe, where the
- * attribute landed as `.*S.*`. A corrupted pattern still compiles and silently
- * matches nothing, which makes it invisible in a diff and in a green suite.
- * This spelling cannot fail that way.
+ * **`\S`, and the corruption is caught rather than avoided.** The first version
+ * of this used `.*[^ ].*` to dodge a backslash, because `\S` has twice arrived
+ * on this project with the backslash eaten — including in this story's own probe,
+ * where the attribute landed as `.*S.*`. Dodging it was the wrong trade: `[^ ]`
+ * excludes only U+0020, so a pasted tab or non-breaking space passed validation
+ * and navigated to an Oracle that trimmed the question back to empty and showed
+ * its empty state. That is exactly the "appears to have worked" AC5 forbids, and
+ * Argus caught it.
+ *
+ * A corrupted pattern still compiles and silently matches nothing, so it is
+ * invisible in a diff and in a green suite — which is an argument for a test
+ * that reads the rendered attribute, not for a weaker pattern. There is one.
  */
-export const NON_BLANK_PATTERN = '.*[^ ].*'
+export const NON_BLANK_PATTERN = '.*\\S.*'
 
 /**
  * The most-read copy in the product, and load-bearing.

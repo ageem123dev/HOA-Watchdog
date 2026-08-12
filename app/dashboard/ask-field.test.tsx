@@ -56,23 +56,30 @@ describe('AC5: an empty question does nothing', () => {
   // Asserted through the browser's own constraint validation rather than by
   // simulating a submit, because that is the mechanism: `required` and
   // `pattern` hold with JavaScript disabled, and jsdom implements both.
-  function validityOf(value: string): boolean {
+  // Renders once and reuses the field, so a test may check several values.
+  // Rendering per call put two searchboxes in the document and `getByRole`
+  // threw — which is a better failure than the alternative, where the second
+  // render is silently ignored and the assertion passes against the first.
+  function validityOf(...values: string[]): boolean[] {
     render(<AskField />)
     const input = screen.getByRole('searchbox') as HTMLInputElement
-    input.value = value
 
-    return input.checkValidity()
+    return values.map((value) => {
+      input.value = value
+
+      return input.checkValidity()
+    })
   }
 
   it('refuses an empty question', () => {
-    expect(validityOf('')).toBe(false)
+    expect(validityOf('')).toEqual([false])
   })
 
   it('refuses a question that is only spaces', () => {
     // `required` alone accepts this, and it would navigate to `/oracle?q=%20`,
     // where the Oracle trims it back to empty and renders its empty state — a
     // submission that appears to have worked and did nothing.
-    expect(validityOf('   ')).toBe(false)
+    expect(validityOf('   ')).toEqual([false])
   })
 
   it('accepts a real question', () => {
@@ -80,20 +87,36 @@ describe('AC5: an empty question does nothing', () => {
     // that something is refused cannot tell "correctly refused" from "refuses
     // everything", and a field that rejected all input would pass both tests
     // above.
-    expect(validityOf('What does 4B owe for 2026?')).toBe(true)
+    expect(validityOf('What does 4B owe for 2026?')).toEqual([true])
   })
 
-  it('carries a pattern no intermediate layer can quietly corrupt', () => {
-    // `\S` was eaten twice on this project — once by a Python heredoc on story
-    // 3.5, once by this story's own first probe, where the attribute arrived as
-    // `.*S.*`. A corrupted pattern still compiles and silently matches nothing,
-    // so it is invisible in a diff and in a green suite.
-    expect(NON_BLANK_PATTERN).not.toContain('\\')
-    expect(screen.queryByRole('searchbox')).toBeNull()
+  it('refuses a pasted tab or non-breaking space', () => {
+    // Neither can be typed into a single-line input, but both arrive by paste —
+    // an NBSP every time somebody copies from a document or a web page.
+    //
+    // The first version of this field used `.*[^ ].*` to avoid writing a
+    // backslash, and that excludes only U+0020: both of these passed validation
+    // and navigated to an Oracle that trimmed the question back to empty and
+    // rendered its empty state. A submission that appears to have worked and did
+    // nothing is the exact thing AC5 forbids. Raised by Argus, which also
+    // predicted a server crash — that part was wrong, `questionFrom` trims them
+    // and the page returns its empty state before `askOracle` is reached.
+    expect(validityOf('\t', '\u00a0')).toEqual([false, false])
+  })
 
+  it('renders the pattern to the DOM uncorrupted', () => {
+    // The reason a backslash felt worth dodging: `\S` has twice arrived on this
+    // project with the backslash eaten, and a corrupted pattern still compiles
+    // and silently matches nothing — invisible in a diff and in a green suite.
+    //
+    // The answer is to read the attribute back rather than to weaken the
+    // pattern. Compared against a literal, not against the exported constant:
+    // comparing the constant to itself would move both sides together and pass
+    // while every question in the product was validated by `.*S.*`.
     render(<AskField />)
 
-    expect(screen.getByRole('searchbox').getAttribute('pattern')).toBe(NON_BLANK_PATTERN)
+    expect(screen.getByRole('searchbox').getAttribute('pattern')).toBe('.*\\S.*')
+    expect(NON_BLANK_PATTERN).toBe('.*\\S.*')
   })
 })
 
