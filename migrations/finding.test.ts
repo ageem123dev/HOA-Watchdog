@@ -69,6 +69,11 @@ const INSUFFICIENT_PRIVILEGE = '42501'
  */
 const RUN_PREFIX = `f${randomBytes(4).toString('hex')}`
 
+// `__dirname` under `type: module`, matching the other six migration tests and
+// relying on the same Vitest polyfill. The open action item from Epic 1 asks for
+// one choice **across the repo** rather than per file, so converting this one
+// alone is the churn that item exists to prevent. Raised by Argus; deferred to
+// the sweep, deliberately.
 const MIGRATION = readFileSync(join(__dirname, '021_finding.sql'), 'utf8')
 
 describe('the migration says what it does', () => {
@@ -340,27 +345,56 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
   })
 
-  it('refuses TRUNCATE to the writer, inside a transaction it rolls back', async () => {
-    // TRUNCATE has no scoped form — there is no `where` to add — so the DELETE
-    // test's fix does not transfer, and the same comment two tests up was
-    // written while this one sat here emptying the table on exactly the run
-    // where the grant had regressed. Raised by Argus.
-    //
-    // TRUNCATE is transactional in Postgres, so the statement can still be
-    // *executed* — which is what makes this a test of the privilege rather than
-    // of the catalogue — while the rollback keeps a regression from destroying
-    // the table it was about to report on.
-    await writer.query('begin')
-    try {
-      await expect(writer.query('truncate finding')).rejects.toMatchObject({
-        code: INSUFFICIENT_PRIVILEGE,
-      })
-    } finally {
-      // In `finally` rather than after the assertion: if the privilege has
-      // regressed, the assertion above throws, and the rollback that undoes the
-      // damage would be the line that never ran.
-      await writer.query('rollback')
-    }
+  /**
+   * TRUNCATE is asserted, never executed.
+   *
+   * It has no scoped form — there is no `where` to add — so the DELETE test's
+   * fix does not transfer, and the first version of this file ran a bare
+   * `truncate finding` two tests below a comment congratulating itself on not
+   * doing that. On the one run where the grant has regressed, which is the only
+   * run where the test does anything at all, it would have emptied the table
+   * before reporting it.
+   *
+   * The second version wrapped it in a transaction and rolled back. That worked
+   * — verified by granting TRUNCATE and watching the rows survive — but it is
+   * not what this repo decided. `query-log.test.ts` had the identical problem
+   * and settled it: *"the privilege set is the same proof without the loaded
+   * gun"*, and the open action item from story 3.1 names the exact-set assertion
+   * as the fix wherever this shape appears. A third answer to a settled question
+   * is churn, and executing a denied TRUNCATE still takes an ACCESS EXCLUSIVE
+   * lock on a table other test files are using. Raised by Argus, twice.
+   *
+   * **Both catalogs, both as exact sets.** Column-level grants do not appear in
+   * `table_privileges` at all — `roles.test.ts` records a live
+   * `GRANT UPDATE (note)` that a table-level assertion reported as clean — and a
+   * subset check would pass against a table that had quietly picked up DELETE.
+   */
+  it('holds no privilege beyond INSERT, SELECT and UPDATE', async () => {
+    // `distinct` on both: a privilege granted by more than one grantor appears
+    // once per grantor, and the exact-array assertions would then fail for a
+    // reason that has nothing to do with what the writer can do.
+    const { rows: table } = await writer.query<{ privilege_type: string }>(
+      `select distinct privilege_type
+         from information_schema.table_privileges
+        where grantee = 'watchdog_writer'
+          and table_schema = 'public'
+          and table_name = 'finding'
+        order by privilege_type`,
+    )
+    const { rows: column } = await writer.query<{ privilege_type: string }>(
+      `select distinct privilege_type
+         from information_schema.column_privileges
+        where grantee = 'watchdog_writer'
+          and table_schema = 'public'
+          and table_name = 'finding'
+        order by privilege_type`,
+    )
+
+    // UPDATE is present on purpose, and its absence would be the other failure:
+    // reviewing a finding is an update, so a migration that revoked it would
+    // pass every refusal in this file and make story 4.6 unimplementable.
+    expect(table.map((row) => row.privilege_type)).toEqual(['INSERT', 'SELECT', 'UPDATE'])
+    expect(column.map((row) => row.privilege_type)).toEqual(['INSERT', 'SELECT', 'UPDATE'])
   })
 
   it('still allows UPDATE, or the lifecycle could not happen', async () => {
@@ -386,5 +420,20 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
     } finally {
       await reader.end()
     }
+  })
+
+  it('holds no privilege of any kind for the reader', async () => {
+    // The catalogue half of the assertion above. A `select` refusal proves the
+    // reader cannot read; this proves it cannot do anything else either, which
+    // is what migration 021's silence is meant to mean.
+    const { rows } = await writer.query(
+      `select privilege_type
+         from information_schema.table_privileges
+        where grantee = 'watchdog_reader'
+          and table_schema = 'public'
+          and table_name = 'finding'`,
+    )
+
+    expect(rows).toEqual([])
   })
 })
