@@ -129,8 +129,12 @@ describeWithDatabase('the key AD-13 names', () => {
     } finally {
       // Closed whatever the cleanup did, so a failing delete cannot also leak
       // the connections. Raised by Argus.
-      await owner.end()
-      await writer.end()
+      //
+      // `allSettled` rather than two awaits, which is the same defect one level
+      // in: `owner.end()` rejecting would leave `writer.end()` unreached and
+      // leak the connection this `finally` was added to close. Raised by
+      // CodeRabbit; `pool.ts` reached the same idiom for the same reason.
+      await Promise.allSettled([owner.end(), writer.end()])
     }
   })
 
@@ -270,8 +274,7 @@ describeWithDatabase('the lifecycle is one-way', () => {
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
       await owner.query(`delete from board_member where email like $1`, [`life-${RUN_PREFIX}%`])
     } finally {
-      await owner.end()
-      await writer.end()
+      await Promise.allSettled([owner.end(), writer.end()])
     }
   })
 
@@ -504,8 +507,7 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
     try {
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
     } finally {
-      await owner.end()
-      await writer.end()
+      await Promise.allSettled([owner.end(), writer.end()])
     }
   })
 

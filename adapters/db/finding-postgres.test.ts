@@ -133,12 +133,17 @@ describeWithDatabase('raising a finding', () => {
     try {
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
     } finally {
-      // Closed whatever the cleanup did. A delete that throws -- a foreign key
-      // from a row some later test added, say -- would otherwise leak both
+      // Closed whatever the cleanup did. A delete that throws — a foreign key
+      // from a row some later test added, say — would otherwise leak both
       // connections, and a suite that cannot close its connections is the shape
-      // `pool.ts` was written to stop. Raised by Argus.
-      await owner.end()
-      await writer.end()
+      // `pool.ts` exists to stop. Raised by Argus.
+      //
+      // `allSettled` rather than two awaits, which is the same defect one level
+      // in: `owner.end()` rejecting would leave `writer.end()` unreached and
+      // leak the connection this `finally` was added to close. `pool.ts`
+      // reached the same idiom for the same reason — one client refusing must
+      // not make the caller's teardown fail. Raised by CodeRabbit.
+      await Promise.allSettled([owner.end(), writer.end()])
     }
   })
 
@@ -254,8 +259,7 @@ describeWithDatabase('reviewing a finding', () => {
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
       await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
     } finally {
-      await owner.end()
-      await writer.end()
+      await Promise.allSettled([owner.end(), writer.end()])
     }
   })
 

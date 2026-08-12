@@ -409,6 +409,12 @@ seeded a board member no test in it read — **the same unused fixture Argus had
 delete that threw would have leaked both. It also raised three items in `.mcp.json` and
 `.claude/commands/`; those are uncommitted files outside this story and were left alone.
 
+**Round 3 — one finding, the same defect one level in.** The `finally` blocks added in round 2 awaited
+`owner.end()` before `writer.end()`, so an `end()` that rejected would leave the second unreached and leak
+the connection the `finally` was added to close. `Promise.allSettled` on both, which is the idiom
+`pool.ts` reached for the same reason — one client refusing must not make the caller's teardown fail. Argus
+on the same diff found nothing in this story's files.
+
 ### AC audit — the rest
 
 | AC | Verdict |
