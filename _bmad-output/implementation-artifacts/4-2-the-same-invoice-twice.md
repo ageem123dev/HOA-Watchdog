@@ -1,5 +1,6 @@
 ---
 baseline_commit: 1859d7c
+merge_request: 54
 ---
 
 # Story 4.2: The same invoice, twice
