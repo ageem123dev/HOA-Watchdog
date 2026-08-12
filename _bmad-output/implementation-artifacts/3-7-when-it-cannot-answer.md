@@ -4,7 +4,7 @@ baseline_commit: d4ad9f3
 
 # Story 3.7: When it cannot answer
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -177,10 +177,42 @@ _To be filled by the dev agent._
 
 ## Review Findings
 
-_To be filled by the review._
+### AC audit, done before the MR
+
+| AC | Status | Pinned by |
+| --- | --- | --- |
+| AC1 blames the question, not the records | met | "says it cannot look that up, and that nothing is missing" |
+| AC2 offer is a single action, catalog-derived | met | `suggested-question.test.ts` (7 cases) + the link's `href` |
+| AC3 unavailable is distinct, question retained, retry offered | met | three tests, incl. a question containing `&` and `#` |
+| AC4 a refusal is its own state | met | "explains that the check did its job" + "ask again" link |
+| AC5 no partial answer | met | `it.each` over all three: no `<table>` renders |
+| AC6 the three are distinguishable | met | each state asserts its own copy **and** the absence of the other two |
+| AC7 keyboard, focus, targets | met | all three controls: `tagName`, `href`, both dimensions, no `outline` override |
+| AC8 tested as a rendered surface | met | 15 render tests under 1.6c's harness |
+
+### Argus — three rounds, four findings, two rejected
+
+| Round | Finding | Outcome |
+| --- | --- | --- |
+| 1 | **high** — logging the failure object leaks the gateway token, because a rejected `fetch` carries its request config | **Rejected, then pinned.** `chat-client.ts` reduces the fetch error to its `name` and throws a fresh `AgentUnavailableError` with no `cause`. But that was read once and enforced by nothing, so there is now a test that rejects a fetch *with* a request config attached and asserts the token appears nowhere in the serialised error. Wrapping the original as `cause` fails it. |
+| 1 | **medium** — the AC7 loop omits `NoCatalogMatch` | **Fixed.** Its suggested question is the control a reader is most likely to use. |
+| 2 | **high** — `vi.resetAllMocks()` destroys the throwing `redirect` mock, so the auth tests pass on a `TypeError` | **Rejected.** Probed: in this Vitest, `mockReset` *restores* the function passed to `vi.fn(impl)` and discards only runtime-configured implementations. The finding also mispredicts the failure — those tests assert the `NEXT_REDIRECT` message specifically, so a `TypeError` would fail them. Reasoning moved into the `beforeEach` so it is not re-raised. |
+| 2 | **medium** — `EXAMPLE_IDS` vs `ALL_ENTRIES.map(id)` without dedup | **Fixed.** `indexEntries` accepts two versions of one id (verified), so publishing `dues_status@2` would have failed a test about copy that was still correct. Deduplicated, with a positive control so the relaxation did not relax what the test is *for*. |
+| 3 | **medium** — `next/link` requires JavaScript | **Rejected.** `Link` renders a real `<a href>` and degrades to ordinary navigation without JS; the AC7 test already asserts `tagName === 'A'` with a real `href`. It is also the project's established choice from story 1.5's review, where a bare anchor was rejected for discarding router state. |
+
+**Both rejections came from a probe, not an argument.** The `resetAllMocks` one is worth keeping: story
+3.6b made the *opposite* change for the opposite reason, and the two are not in conflict — there the
+implementations came from `mockResolvedValue` inside tests and had to be discarded; here it comes
+from the `vi.fn(impl)` constructor and is restored. Same API, two lifetimes.
+
+### CodeRabbit CLI — clean
+
+`review_completed`, **9 of 9 files reviewed, none unreviewed, zero findings.** Joined by
+`argus_ingest` on `537ae14`.
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-12 | Story created after 3.6c merged. Scoped to **three** states rather than the two the epics row names: AD-7's amendment of the same day makes the ungrounded refusal a first-class surface, distinct from an outage. |
+| 2026-08-12 | Implemented test-first. Three Argus rounds (two findings fixed, two rejected by probe), CodeRabbit CLI clean on 9 of 9 files. AC audit done before the MR. |
