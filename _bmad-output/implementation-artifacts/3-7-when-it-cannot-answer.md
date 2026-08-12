@@ -1,5 +1,6 @@
 ---
 baseline_commit: d4ad9f3
+merge_request: 49
 ---
 
 # Story 3.7: When it cannot answer
