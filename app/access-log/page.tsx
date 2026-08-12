@@ -5,6 +5,7 @@ import { createQueryLogReader } from '@/adapters/db/query-log-reader-postgres'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { LogTable } from './log-table'
 import { filterFrom, DEFAULT_LIMIT } from './filter'
+import type { QueryLogFilter } from '@/core/ports/query-log-reader'
 
 export const metadata = { title: 'Access log — Fiduciary Watchdog' }
 
@@ -113,15 +114,14 @@ export default async function AccessLogPage({
   )
 }
 
-function isFiltered(filter: { actorId?: string; entryId?: string }): boolean {
+// The port's type, not a restatement of its fields. A filter gaining a field
+// should reach the export automatically rather than silently stopping here.
+// Raised by CodeRabbit.
+function isFiltered(filter: QueryLogFilter): boolean {
   return filter.actorId !== undefined || filter.entryId !== undefined
 }
 
-function exportQuery(filter: {
-  actorId?: string
-  entryId?: string
-  limit: number
-}): string {
+function exportQuery(filter: QueryLogFilter): string {
   const query = new URLSearchParams()
   if (filter.actorId !== undefined) query.set('actorId', filter.actorId)
   if (filter.entryId !== undefined) query.set('entryId', filter.entryId)

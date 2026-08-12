@@ -65,6 +65,16 @@ describe('formula injection', () => {
     expect(cell(payload).startsWith('"\t')).toBe(true)
   })
 
+  it.each(['＝1+1', '＋1', '－1', '＠1'])(
+    'neutralises the full-width leader in %s',
+    (payload) => {
+      // Excel with a Japanese IME converts a leading full-width ＝ into a
+      // formula, so a payload written that way walks past a filter that knows
+      // only the ASCII four. Raised by CodeRabbit.
+      expect(cell(payload).startsWith('"\t')).toBe(true)
+    },
+  )
+
   it('preserves the value exactly, whitespace and all', () => {
     // The check trims; the value must not. This is an audit trail, and a defence
     // that quietly edited what somebody typed would be its own falsification.

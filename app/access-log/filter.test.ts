@@ -49,6 +49,13 @@ describe('the limit', () => {
     expect(filterFrom({ limit: '10.9' }).limit).toBe(10)
   })
 
+  it.each(['0.5', '0.9'])('falls back to the default for %s rather than to one row', (value) => {
+    // Truncating after the `> 0` check turned 0.5 into a limit of 0, which the
+    // adapter clamped *up* to 1 — so a reader who mistyped a decimal saw a single
+    // row of the audit trail with nothing to explain it. Raised by CodeRabbit.
+    expect(filterFrom({ limit: value }).limit).toBe(DEFAULT_LIMIT)
+  })
+
   it('clamps to the port bound, so the URL cannot promise more than arrives', () => {
     // When only the adapter clamped, `?limit=10000` stayed in the URL and in the
     // form while the database returned 500 — telling a reader they were looking

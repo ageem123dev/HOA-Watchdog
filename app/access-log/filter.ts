@@ -35,19 +35,24 @@ function one(value: string | string[] | undefined): string | undefined {
 export function filterFrom(
   params: Record<string, string | string[] | undefined>,
 ): QueryLogFilter {
-  const requested = Number(one(params['limit']))
-  // Clamped to the port's bound here, not only in the adapter. When only the
-  // adapter clamped, `?limit=10000` stayed in the URL and in the form while the
-  // database returned 500 — telling a reader they were looking at more of the
-  // audit trail than they were. Raised by Argus.
+  // **Truncated before it is validated**, not after. `Math.trunc` first and the
+  // `> 0` check second, because the other order turns `?limit=0.5` into a limit
+  // of 0 — which the adapter then clamps *up* to 1, so a reader who mistyped a
+  // decimal got a single row of the audit trail and no indication why. Raised by
+  // CodeRabbit; verified before fixing.
+  const requested = Math.trunc(Number(one(params['limit'])))
   const limit =
-    Number.isFinite(requested) && requested > 0
-      ? Math.min(Math.trunc(requested), MAX_LIMIT)
-      : DEFAULT_LIMIT
+    Number.isFinite(requested) && requested >= 1 ? Math.min(requested, MAX_LIMIT) : DEFAULT_LIMIT
+
+  // Bound once each. Calling `one` twice per key invited the two calls to
+  // disagree and forced a non-null assertion to paper over the fact that the
+  // compiler could not see they were the same value. Raised by CodeRabbit.
+  const actorId = one(params['actorId'])
+  const entryId = one(params['entryId'])
 
   return {
-    ...(one(params['actorId']) !== undefined ? { actorId: one(params['actorId'])! } : {}),
-    ...(one(params['entryId']) !== undefined ? { entryId: one(params['entryId'])! } : {}),
+    ...(actorId !== undefined ? { actorId } : {}),
+    ...(entryId !== undefined ? { entryId } : {}),
     limit,
   }
 }

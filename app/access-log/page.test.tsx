@@ -126,6 +126,15 @@ describe('the filter', () => {
     // Argus.
     const { rerender } = render(await renderPage({ actorId: 'user-9' }))
 
+    // Dirty the box first, which is what makes this the real scenario rather
+    // than a re-render: a reader types, navigates, then comes back. An
+    // uncontrolled input that React reuses keeps whatever is in the DOM, so
+    // without the remount this half-typed text survives a navigation and sits
+    // above rows it does not describe. Raised by CodeRabbit, and it is a
+    // stronger test than the one it replaced.
+    const before = screen.getByLabelText(/who asked/i) as HTMLInputElement
+    before.value = 'half-typed'
+
     rerender(await renderPage({ actorId: 'user-3' }))
 
     expect((screen.getByLabelText(/who asked/i) as HTMLInputElement).value).toBe('user-3')

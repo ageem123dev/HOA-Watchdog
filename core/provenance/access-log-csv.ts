@@ -21,8 +21,24 @@ import type { QueryLogRecord } from '../ports/query-log-reader'
  * treat as text and which a reader does not see as a stray quote mark.
  */
 
-/** What a spreadsheet reads as the start of a formula. */
-const FORMULA_LEADERS = new Set(['=', '+', '-', '@'])
+/**
+ * What a spreadsheet reads as the start of a formula.
+ *
+ * The full-width forms are here too, and they are not decoration: Excel with a
+ * Japanese IME converts a leading full-width ＝ into a formula, so a payload
+ * written that way walks past a filter that only knows the ASCII four. Raised by
+ * CodeRabbit.
+ */
+const FORMULA_LEADERS = new Set([
+  '=',
+  '+',
+  '-',
+  '@',
+  '＝',
+  '＋',
+  '－',
+  '＠',
+])
 
 /**
  * One CSV cell: neutralised, then quoted.
