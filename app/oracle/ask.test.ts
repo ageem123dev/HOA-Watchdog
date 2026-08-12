@@ -6,9 +6,10 @@
  * whether that prose may be shown, by checking every numeral against the rows of
  * the same turn.
  *
- * **One attempt, then fail** — decided 2026-08-11. AD-7 says a rejected answer
- * "forces a retry", and since 3.6a the model is across a wire, so a retry means
- * another turn: `route_question` runs again, the catalog entry is *re-executed*,
+ * **One attempt, then fail** — decided 2026-08-11, and AD-7 amended to match on
+ * 2026-08-12: a rejected answer is shown as an honest failure and the reader may
+ * ask again. Since 3.6a the model is across a wire, so an *automatic* retry
+ * would mean another turn: `route_question` runs again, the catalog entry is *re-executed*,
  * and different rows come back. The validator would then be checking attempt two
  * against attempt one's evidence, and AD-12 would record a second `query_log`
  * row for one question — something a board member reading the access log would

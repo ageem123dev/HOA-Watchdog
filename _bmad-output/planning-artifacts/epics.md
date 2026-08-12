@@ -44,7 +44,7 @@ NFR-1a: No data credentials in the LLM runtime. The Python agent service holds e
 
 NFR-2: No external write tokens. No API key with write permission for a banking platform, payment processor, or external accounting system may exist in the environment variables, secret store, or CI configuration of any deploy unit.
 
-NFR-3: Zero-LLM token arithmetic, enforced structurally. Every numeric token in a rendered answer must match a value present in that turn's tool result set; a pre-render validator rejects unreferenced numerals and forces a retry.
+NFR-3: Zero-LLM token arithmetic, enforced structurally. Every numeric token in a rendered answer must match a value present in that turn's tool result set; a pre-render validator rejects unreferenced numerals, and a rejected answer is shown as an honest failure the reader may retry by asking again.
 
 NFR-4: The reasoning model must support strict tool use and schema-validated structured outputs. Current binding is `gemini-3.6-flash`; the capability bar is the invariant, not the model id.
 
@@ -812,7 +812,7 @@ That is a known gap, recorded rather than glossed.
 | 3.2 | Tool endpoints as the only way in | AD-15, AD-3 | The endpoints are the sole data path and reject an unauthenticated caller |
 | 3.3 | The Python service exists | AD-3, **pytest in CI** | A second runtime holding only the model key, obtaining facts by calling Node |
 | 3.4 | The model picks an entry | AD-5, AD-11, NFR-4 | Intent routing with strict tool use; no model-authored SQL is possible |
-| 3.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected and forces a retry, invisibly |
+| 3.5 | The numeric validator | AD-7, NFR-3 | An unreferenced numeral is rejected, and the refusal is shown rather than hidden |
 | 3.6a | The chat turn crosses the wire | AD-17 | A question reaches the agent service and an answer comes back, with nothing rendered yet |
 | 3.6b | Ask and answer | UX-DR6, 11 | The first user-visible Oracle, evidence table beside the answer |
 | 3.6c | The dashboard ask field | UX-DR7 | A question typed on the dashboard arrives at the Oracle already asked |

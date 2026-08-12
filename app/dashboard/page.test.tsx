@@ -74,3 +74,37 @@ describe('the dashboard', () => {
     expect(screen.getAllByRole('link', { name: /waiting on you/i })).toHaveLength(1)
   })
 })
+
+describe('the ask field (story 3.6c, UX-DR7)', () => {
+  it('is on the dashboard', async () => {
+    await renderDashboard()
+
+    expect(screen.getByRole('searchbox')).toBeTruthy()
+  })
+
+  it('comes before the other links, so a keyboard reaches it first', async () => {
+    // EXPERIENCE.md: "reachable by keyboard from the top of the dashboard
+    // without traversing every finding". Tab order follows DOM order, so this
+    // is the accessibility requirement rather than a layout preference — and it
+    // is the clause a later story adding UX-DR10's findings list above it would
+    // silently break.
+    //
+    // Asserted on document position, so moving the markup fails here rather
+    // than being noticed by somebody holding Tab.
+    await renderDashboard()
+
+    const field = screen.getByRole('searchbox')
+    const queueLink = screen.getByRole('link', { name: /waiting on you/i })
+
+    expect(field.compareDocumentPosition(queueLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('submits to the Oracle rather than back to the dashboard', async () => {
+    // The one assertion that says this field does its job at all. A form with
+    // no action posts to the current URL, which would reload the dashboard and
+    // look, to a board member, like nothing happened.
+    await renderDashboard()
+
+    expect(screen.getByRole('search').getAttribute('action')).toBe('/oracle')
+  })
+})

@@ -3,7 +3,8 @@
  *
  * "Every numeric token in a rendered answer must match a value present in the
  * tool result set for that turn. A pre-render validator rejects any unreferenced
- * numeral and forces a retry."
+ * numeral. A rejected answer is never shown and never repaired: the surface says
+ * plainly that no answer could be grounded, and the board member may ask again."
  *
  * **This is the guard this project has shipped broken ten times** — one that
  * passes whether or not the thing it guards against is present. So the tests

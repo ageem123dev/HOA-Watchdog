@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { auth, signOut as authSignOut } from '@/adapters/auth/auth'
 import { QUARANTINE_ROUTE, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
+import { AskField } from './ask-field'
 
 export const metadata = { title: 'Dashboard — Fiduciary Watchdog' }
 
@@ -36,6 +37,16 @@ export default async function DashboardPage() {
       <p style={styles.body}>
         Signed in as <strong>{user.email}</strong>.
       </p>
+      {/*
+        **Before the links, deliberately.** EXPERIENCE.md requires the ask field
+        to be "reachable by keyboard from the top of the dashboard without
+        traversing every finding", and tab order follows DOM order — so where
+        this sits in the markup *is* the accessibility requirement, not a
+        layout preference. UX-DR10's figure blocks and findings list land after
+        it for the same reason.
+      */}
+      <AskField />
+
       {/*
         Shown whether or not anything is waiting. EXPERIENCE.md lists this
         surface as entered from the dashboard "when non-empty", and the queue's

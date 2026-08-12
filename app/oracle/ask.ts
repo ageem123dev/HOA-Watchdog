@@ -12,10 +12,12 @@ import { groundedAnswer } from '@/core/answer/grounded-answer'
  *
  * ## One attempt, then fail
  *
- * Decided 2026-08-11. AD-7 says a rejected answer "forces a retry", and that is
- * deliberately not what happens here.
+ * Decided 2026-08-11, and **AD-7 was amended to match on 2026-08-12** — the
+ * retry is the reader's now, not the system's. A refusal is shown honestly and
+ * asking again is a new question, logged as one.
  *
- * Since story 3.6a the model is across a wire, so a retry means *another turn* —
+ * The reason, recorded because the amendment turns on it: since story 3.6a the
+ * model is across a wire, so an automatic retry means *another turn* —
  * `route_question` runs again, the catalog entry is **re-executed**, and
  * different rows come back. Two things go wrong at once: the validator would be
  * checking attempt two against attempt one's evidence, and AD-12 would record a
