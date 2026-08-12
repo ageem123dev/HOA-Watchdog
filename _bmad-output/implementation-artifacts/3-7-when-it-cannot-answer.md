@@ -5,7 +5,7 @@ merge_request: 49
 
 # Story 3.7: When it cannot answer
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -217,3 +217,4 @@ from the `vi.fn(impl)` constructor and is restored. Same API, two lifetimes.
 | --- | --- |
 | 2026-08-12 | Story created after 3.6c merged. Scoped to **three** states rather than the two the epics row names: AD-7's amendment of the same day makes the ungrounded refusal a first-class surface, distinct from an outage. |
 | 2026-08-12 | Implemented test-first. Three Argus rounds (two findings fixed, two rejected by probe), CodeRabbit CLI clean on 9 of 9 files. AC audit done before the MR. |
+| 2026-08-12 | MR !49 merged. **No MR-level CodeRabbit review ran** — the only service-account note on it is a rate-limit notice. The evidence for that SHA is three Argus rounds, a clean CodeRabbit CLI round over 9 of 9 files, and the local gate. Recorded rather than described as a review that happened. |
