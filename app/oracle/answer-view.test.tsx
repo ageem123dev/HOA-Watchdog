@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AnswerView } from './answer-view'
 
@@ -38,6 +38,17 @@ const TURN = {
 }
 
 afterEach(cleanup)
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+afterEach(() => {
+  // AC4's persistence is real state that outlives a render. Without this, the
+  // "collapsed by default" test passes or fails depending on which test ran
+  // before it.
+  sessionStorage.clear()
+})
 
 describe('the question stays visible', () => {
   it('shows the question the board member asked', () => {
@@ -212,6 +223,116 @@ describe('layer three: the query disclosure', () => {
 
     expect(screen.queryByText(/select unit\.unit_number/)).toBeNull()
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  })
+})
+
+describe('AC4: the open state persists for the session', () => {
+  it('reopens on a later answer once the reader has opened it', () => {
+    // "Open state persists for the session." A board member who has decided
+    // they want to see the query should not re-open it on every question —
+    // UX-DR6 puts the query behind a control because most people never want it,
+    // not to charge a click to the people who do.
+    render(<AnswerView {...TURN} />)
+    fireEvent.click(screen.getByRole('button', { name: /query/i }))
+    cleanup()
+
+    render(<AnswerView {...TURN} />)
+
+    expect(screen.getByText(/select unit\.unit_number/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /query/i }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('stays closed for a reader who never opened it', () => {
+    // The positive control's opposite, and the reason the suite clears storage
+    // between tests: an assertion that something persists is worthless if it
+    // cannot also observe the thing not persisting.
+    render(<AnswerView {...TURN} />)
+
+    expect(screen.queryByText(/select unit\.unit_number/)).toBeNull()
+  })
+
+  it('forgets it again when the reader closes it', () => {
+    render(<AnswerView {...TURN} />)
+    const toggle = screen.getByRole('button', { name: /query/i })
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    cleanup()
+
+    render(<AnswerView {...TURN} />)
+
+    expect(screen.queryByText(/select unit\.unit_number/)).toBeNull()
+  })
+})
+
+describe('a browser that refuses storage still gets a working disclosure', () => {
+  // `sessionStorage` throws `SecurityError` rather than returning null when a
+  // browser restricts it — Safari's private mode and restricted embedding both
+  // do this. The read happens *during render*, so an unguarded call takes the
+  // whole Oracle down: the one surface in this product whose job is to be
+  // trusted. Raised by Argus.
+
+  function refuseStorage() {
+    // A restricted browser refuses *both* operations. Mocking only the write
+    // invents a state no browser is in, and an earlier version of this suite
+    // grew a whole reconciliation flag to satisfy it.
+    const denied = () => {
+      throw new DOMException('denied', 'SecurityError')
+    }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(denied)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(denied)
+  }
+
+  it('renders the answer when storage throws', () => {
+    refuseStorage()
+
+    render(<AnswerView {...TURN} />)
+
+    expect(screen.getByText(/Unit 4B owes \$240\.00/)).toBeTruthy()
+    expect(screen.getByRole('table')).toBeTruthy()
+  })
+
+  it('still toggles the disclosure when storage throws', () => {
+    // Asserted as a *flip* from whatever the starting state is, not against a
+    // hardcoded `false`. The fallback is page-lifetime state by design, so a
+    // test that assumed it started closed would pass or fail on which test ran
+    // before it — which is exactly the bug `--sequence.shuffle.tests` caught in
+    // the first version of this suite.
+    refuseStorage()
+
+    render(<AnswerView {...TURN} />)
+    const toggle = screen.getByRole('button', { name: /query/i })
+    const before = toggle.getAttribute('aria-expanded')
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).not.toBe(before)
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe(before)
+  })
+})
+
+describe('AC7: the disclosure is a real target', () => {
+  it('meets the 24px minimum DESIGN.md sets', () => {
+    // "Minimum target 24x24 CSS px." Asserted on the value rather than eyeballed,
+    // because jsdom lays nothing out and a control too small to hit is invisible
+    // in every test that only asks whether it exists.
+    render(<AnswerView {...TURN} />)
+    const toggle = screen.getByRole('button', { name: /query/i })
+
+    expect(Number.parseInt(toggle.style.minHeight, 10)).toBeGreaterThanOrEqual(24)
+    // 24x24 is two numbers. Asserting only the height passes for a control one
+    // pixel wide. Raised by CodeRabbit.
+    expect(Number.parseInt(toggle.style.minWidth, 10)).toBeGreaterThanOrEqual(24)
+  })
+
+  it('does not remove the focus ring the base stylesheet provides', () => {
+    // UX-DR9: "never removed, never colour-only". The ring is global —
+    // `:focus-visible` in BASE_CSS — so the only way this surface can break it
+    // is by overriding `outline` locally. That is what this asserts.
+    render(<AnswerView {...TURN} />)
+    const toggle = screen.getByRole('button', { name: /query/i })
+
+    expect(toggle.style.outline).toBe('')
   })
 })
 
