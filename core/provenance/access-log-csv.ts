@@ -36,9 +36,25 @@ export function cell(value: unknown): string {
   // worse: Excel hides it but LibreOffice and every plain-text reader show a
   // stray quote in front of every affected value, and this is a document people
   // read as a record.
-  const safe = FORMULA_LEADERS.has(text.charAt(0)) ? `\t${text}` : text
+  const safe = startsFormula(text) ? `\t${text}` : text
 
   return `"${safe.replaceAll('"', '""')}"`
+}
+
+/**
+ * Whether a value would be read as a formula, **after leading whitespace**.
+ *
+ * The first version tested `charAt(0)` and was trivially bypassed: a payload
+ * written as `" =cmd|…"` or `"\r=cmd|…"` has an ordinary character first, so it
+ * passed through unprefixed while spreadsheets discard the whitespace and read
+ * the formula underneath. Raised by Argus.
+ *
+ * The check trims; **the value does not**. Prefixing the original preserves the
+ * record byte for byte — this is an audit trail, and a defence that quietly
+ * edited what somebody typed would be its own kind of falsification.
+ */
+function startsFormula(text: string): boolean {
+  return FORMULA_LEADERS.has(text.trimStart().charAt(0))
 }
 
 function stringify(value: unknown): string {

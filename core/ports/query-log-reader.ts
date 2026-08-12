@@ -84,6 +84,18 @@ export interface QueryLogFilter {
   readonly limit: number
 }
 
+/**
+ * The most rows any single read will return.
+ *
+ * Declared on the port rather than inside the adapter, because two callers need
+ * to agree about it. The adapter clamps to this; the surface parses a `?limit=`
+ * against it. When only the adapter knew, a URL asking for 10,000 rows kept that
+ * number in the page and in the form while the database returned 500 — the
+ * reader was told they were looking at more of the audit trail than they were.
+ * Raised by Argus.
+ */
+export const MAX_LIMIT = 500
+
 export interface QueryLogReader {
   /**
    * The matching records, newest first.

@@ -1,4 +1,4 @@
-import type { QueryLogFilter } from '@/core/ports/query-log-reader'
+import { MAX_LIMIT, type QueryLogFilter } from '@/core/ports/query-log-reader'
 
 /**
  * Reading the filter out of the URL.
@@ -36,7 +36,14 @@ export function filterFrom(
   params: Record<string, string | string[] | undefined>,
 ): QueryLogFilter {
   const requested = Number(one(params['limit']))
-  const limit = Number.isFinite(requested) && requested > 0 ? Math.trunc(requested) : DEFAULT_LIMIT
+  // Clamped to the port's bound here, not only in the adapter. When only the
+  // adapter clamped, `?limit=10000` stayed in the URL and in the form while the
+  // database returned 500 — telling a reader they were looking at more of the
+  // audit trail than they were. Raised by Argus.
+  const limit =
+    Number.isFinite(requested) && requested > 0
+      ? Math.min(Math.trunc(requested), MAX_LIMIT)
+      : DEFAULT_LIMIT
 
   return {
     ...(one(params['actorId']) !== undefined ? { actorId: one(params['actorId'])! } : {}),

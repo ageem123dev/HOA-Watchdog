@@ -1,9 +1,10 @@
 import { Pool } from 'pg'
 
-import type {
-  QueryLogFilter,
-  QueryLogReader,
-  QueryLogRecord,
+import {
+  MAX_LIMIT,
+  type QueryLogFilter,
+  type QueryLogReader,
+  type QueryLogRecord,
 } from '../../core/ports/query-log-reader'
 import { readWriterDatabaseUrl } from '../auth/env'
 
@@ -56,9 +57,6 @@ function getPool(): Pool {
 
   return sharedPool
 }
-
-/** The most rows one page will ever ask for, whatever a caller passes. */
-export const MAX_LIMIT = 500
 
 interface Row {
   id: string

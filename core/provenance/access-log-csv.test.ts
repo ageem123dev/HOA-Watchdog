@@ -51,6 +51,26 @@ describe('formula injection', () => {
     expect(csv).toContain('cmd')
   })
 
+  it.each([
+    [' =cmd|\'/c calc\'!A1', 'a leading space'],
+    ['\t=cmd|\'/c calc\'!A1', 'a leading tab'],
+    ['\r=cmd|\'/c calc\'!A1', 'a leading carriage return'],
+    ['\n=cmd|\'/c calc\'!A1', 'a leading newline'],
+    ['   +1+1', 'several leading spaces'],
+  ])('neutralises a payload hidden behind %s', (payload) => {
+    // The first version of this checked `charAt(0)` and let every one of these
+    // through: an ordinary character comes first, so nothing was prefixed, while
+    // a spreadsheet discards the whitespace and reads the formula underneath.
+    // Raised by Argus.
+    expect(cell(payload).startsWith('"\t')).toBe(true)
+  })
+
+  it('preserves the value exactly, whitespace and all', () => {
+    // The check trims; the value must not. This is an audit trail, and a defence
+    // that quietly edited what somebody typed would be its own falsification.
+    expect(cell(' =1+1')).toBe('"\t =1+1"')
+  })
+
   it('leaves an ordinary value alone', () => {
     // The positive control. A neutraliser that prefixed everything would pass
     // every test above and produce a file full of stray tabs.

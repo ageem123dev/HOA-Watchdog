@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { MAX_LIMIT } from '@/core/ports/query-log-reader'
 import { DEFAULT_LIMIT, filterFrom } from './filter'
 
 describe('what counts as a filter', () => {
@@ -46,5 +47,18 @@ describe('the limit', () => {
 
   it('truncates a fractional limit rather than passing it to SQL', () => {
     expect(filterFrom({ limit: '10.9' }).limit).toBe(10)
+  })
+
+  it('clamps to the port bound, so the URL cannot promise more than arrives', () => {
+    // When only the adapter clamped, `?limit=10000` stayed in the URL and in the
+    // form while the database returned 500 — telling a reader they were looking
+    // at more of the audit trail than they were. Raised by Argus.
+    expect(filterFrom({ limit: '10000' }).limit).toBe(MAX_LIMIT)
+  })
+
+  it('leaves a limit under the bound alone', () => {
+    // The positive control: a clamp that returned MAX_LIMIT for everything would
+    // pass the test above and quietly widen every page.
+    expect(filterFrom({ limit: '25' }).limit).toBe(25)
   })
 })
