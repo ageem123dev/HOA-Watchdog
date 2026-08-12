@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { FindingObservation, FindingRegister, RaisedFinding } from '../ports/finding'
 import type { InvoiceReader } from '../ports/invoice-reader'
-import { DUPLICATE_INVOICE, detectDuplicateInvoices } from './detect-duplicates'
+import { POSSIBLE_DUPLICATE_INVOICE, detectDuplicateInvoices } from './detect-duplicates'
 import type { InvoiceReading } from './duplicate-invoice'
 
 const DOCUMENT = 'd-subject'
@@ -68,7 +68,7 @@ describe('raising what was found', () => {
 
     expect(findings.raised).toHaveLength(1)
     expect(findings.raised[0]).toMatchObject({
-      findingType: DUPLICATE_INVOICE,
+      findingType: POSSIBLE_DUPLICATE_INVOICE,
       subjectId: DOCUMENT,
       period: { from: '2026-03-01', until: '2026-04-01' },
     })

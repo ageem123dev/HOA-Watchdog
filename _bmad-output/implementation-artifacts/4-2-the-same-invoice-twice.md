@@ -4,7 +4,7 @@ baseline_commit: 1859d7c
 
 # Story 4.2: The same invoice, twice
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -129,43 +129,43 @@ mock cannot be wrong about any of those.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The invoice-number rule (AC2, AC3)**
-  - [ ] A pure function in `core/`, no I/O, exhaustively tested. Case, whitespace, punctuation and
+- [x] **Task 1 — The invoice-number rule (AC2, AC3)**
+  - [x] A pure function in `core/`, no I/O, exhaustively tested. Case, whitespace, punctuation and
         leading zeros fold; **nothing else does**.
-  - [ ] Tests that name the trap: `INV-1001` vs `INV-1002` must **not** match, and a test comment
+  - [x] Tests that name the trap: `INV-1001` vs `INV-1002` must **not** match, and a test comment
         should say why edit distance was refused. This is the assertion that stops a later
         "improvement" from introducing the false positive.
-  - [ ] Decide what an absent or empty `document_number` does. A null invoice number cannot make a
+  - [x] Decide what an absent or empty `document_number` does. A null invoice number cannot make a
         fuzzy match; whether it can still make an *exact* one is a separate question with a separate
         answer.
 
-- [ ] **Task 2 — The detector (AC1, AC2, AC3, AC5, AC9)**
-  - [ ] The comparison as **SQL with bound parameters**, never interpolation (AD-8). Vendor identity
+- [x] **Task 2 — The detector (AC1, AC2, AC3, AC5, AC9)**
+  - [x] The comparison as **SQL with bound parameters**, never interpolation (AD-8). Vendor identity
         through `vendor_normalised_name`, not a second rule.
-  - [ ] A port for it, following `core/ports/finding.ts`'s shape: the capability a caller holds is the
+  - [x] A port for it, following `core/ports/finding.ts`'s shape: the capability a caller holds is the
         design. The detector needs to *read* invoices and *raise* findings — those are two ports it
         already has or can be given, not one new one that does both.
-  - [ ] `test:db` with fixture rows covering every AC3 case, because a detector is only as good as
+  - [x] `test:db` with fixture rows covering every AC3 case, because a detector is only as good as
         what it declines to flag.
 
-- [ ] **Task 3 — Raising the finding (AC4, AC5, AC6)**
-  - [ ] `subject_id` and `period` decided **with the reasoning written into the code**, the way 4.1
+- [x] **Task 3 — Raising the finding (AC4, AC5, AC6)**
+  - [x] `subject_id` and `period` decided **with the reasoning written into the code**, the way 4.1
         recorded the `daterange` decision. Re-running detection over unchanged data must produce zero
         new rows, proven.
-  - [ ] `finding_type` as `verb_noun`, matching `finding_type_is_verb_noun`.
-  - [ ] Evidence as an object of derived values (AD-6), holding what a board member needs to see the
+  - [x] `finding_type` as `verb_noun`, matching `finding_type_is_verb_noun`.
+  - [x] Evidence as an object of derived values (AD-6), holding what a board member needs to see the
         comparison.
 
-- [ ] **Task 4 — The wiring (AC7)**
-  - [ ] The dependency added to `ExtractDocumentDependencies` and run when an invoice is written.
-  - [ ] A wiring test asserting the production call site supplies it, per `payment-wiring.test.ts`.
-  - [ ] Detection failing must not lose the ingestion. Decide whether a failed detection fails the
+- [x] **Task 4 — The wiring (AC7)**
+  - [x] The dependency added to `ExtractDocumentDependencies` and run when an invoice is written.
+  - [x] A wiring test asserting the production call site supplies it, per `payment-wiring.test.ts`.
+  - [x] Detection failing must not lose the ingestion. Decide whether a failed detection fails the
         upload or is recorded and moved past — and say why in the code.
 
-- [ ] **Task 5 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`
+- [x] **Task 5 — The gate**
+  - [x] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`
         against the 8-error baseline.
-  - [ ] Extend `core/ports/finding.test.ts`'s AC7 assertion to this story's production files (AC8).
+  - [x] Extend `core/ports/finding.test.ts`'s AC7 assertion to this story's production files (AC8).
 
 ## Dev Notes
 
@@ -305,10 +305,40 @@ migration 009's function.
 
 ## Review Findings
 
-_To be filled by the review._
+### Argus, round 1
+
+Clean over the whole branch diff. No correctness, security or maintainability findings.
+
+### The AC audit, which found AC6
+
+**AC6 was satisfied by half the vocabulary.** The evidence reasons hedged correctly from the start —
+`same-amount-and-date` states what was compared rather than what happened — and the `finding_type` did
+not: `duplicate_invoice` asserts the thing UX-DR23 forbids asserting.
+
+The AC names the type explicitly as the thing that must carry the hedge, because 4.5 renders it as a
+heading and 4.8 puts it in an email subject. A type that claims a duplicate puts the claim in front of
+a board member however carefully the surrounding copy hedges. Renamed to
+`possible_duplicate_invoice`, with the reason at the constant.
+
+Cheap now, expensive later: three stories read this value, and one of them mails it.
+
+### AC audit — the rest
+
+| AC | Verdict |
+| --- | --- |
+| AC1 exact duplicate | pure matcher and `test:db`, the case SM-2's 100% is measured against |
+| AC2 fuzzy duplicate | both, including `INV-0002002` against `inv 2002` through the database |
+| AC3 what must not be flagged | six refusals, each its own case, plus a positive control |
+| AC4 running twice yields one | proven to be `finding_identity`'s doing: dropping it fails the case |
+| AC5 evidence as derived values | count checked, rule named, pairs as written; SQL fully parameterised |
+| AC6 the copy says possible | **gap found and closed** — see above |
+| AC7 detection runs, wiring proven | both call sites, read as source; removing either fails |
+| AC8 no model anywhere | story 4.1's list grown to this story's six production files |
+| AC9 real database | 752 `test:db` |
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-12 | Story created after 4.1 merged as 1859d7c. Written against the discovery that there is no invoice table — an invoice is an `extraction` row — and that every field this detector compares is nullable. |
+| 2026-08-12 | Implemented. `period` and `subject_id` decided by probe — both obvious answers fail. The invoice-number rule is normalisation rather than edit distance, because `INV-1001` and `INV-1002` are one character apart and certainly different invoices. Gate green: 2357 tests, 752 `test:db`. |

@@ -29,8 +29,21 @@ import { INVOICE_MATCH_RULE } from './invoice-number'
  * detection again lands on the same key and AD-13's no-op holds.
  */
 
-/** `verb_noun`, matching `finding_type_is_verb_noun` in migration 021. */
-export const DUPLICATE_INVOICE = 'duplicate_invoice'
+/**
+ * `verb_noun`, matching `finding_type_is_verb_noun` in migration 021.
+ *
+ * **"possible", and the word is load-bearing.** UX-DR23 forbids implying
+ * certainty the system lacks, and the epic spells this case out: *"these two
+ * rows match on amount and date" is not the same claim as "you paid twice" -- an
+ * association can legitimately pay one vendor the same amount on the same day.*
+ *
+ * The detector is exact; what it found is not. Stories 4.5 and 4.8 render this
+ * type as a heading and put it in an email subject, so a type that asserted a
+ * duplicate would put the claim in front of a board member no matter how
+ * carefully the surrounding copy hedged. Caught by the acceptance-criteria audit:
+ * the evidence reasons hedged correctly from the start and the type did not.
+ */
+export const POSSIBLE_DUPLICATE_INVOICE = 'possible_duplicate_invoice'
 
 export interface DuplicateDetectionDependencies {
   readonly invoices: InvoiceReader
@@ -153,7 +166,7 @@ export async function detectDuplicateInvoices(
 
   for (const [month, pairs] of byMonth) {
     const outcome: RaisedFinding = await deps.findings.raise({
-      findingType: DUPLICATE_INVOICE,
+      findingType: POSSIBLE_DUPLICATE_INVOICE,
       subjectId: documentId,
       period: monthRange(month),
       evidence: {

@@ -142,7 +142,9 @@ describeWithDatabase('detecting a duplicate invoice', () => {
 
     const [finding] = await findingsFor(newer)
     expect(finding).toMatchObject({
-      finding_type: 'duplicate_invoice',
+      // "possible", per UX-DR23: the detector is exact, what it found is not.
+      // 4.5 renders this as a heading and 4.8 puts it in a subject line.
+      finding_type: 'possible_duplicate_invoice',
       period: '[2026-03-01,2026-04-01)',
       state: 'unreviewed',
     })
