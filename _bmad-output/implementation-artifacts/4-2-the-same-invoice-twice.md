@@ -78,8 +78,15 @@ about, so it is the case that must never be missed.
 
 **AC2 — A fuzzy duplicate is flagged: same vendor, identical amount, the same invoice number written
 differently.**
-`INV-1001`, `inv 1001` and `0001001` are one invoice number typed three ways. The amount must be
-*identical* — FR-6 says so, and it is what keeps this from firing on a vendor's ordinary billing.
+`INV-1001`, `inv 1001`, `INV1001` and `INV-0001001` are one invoice number typed four ways. The amount
+must be *identical* — FR-6 says so, and it is what keeps this from firing on a vendor's ordinary
+billing.
+
+**A bare `0001001` is not one of them**, and the correction is worth keeping: an earlier draft of this
+story claimed it was. Any rule that folds `0001001` onto `INV-1001` has to discard a leading
+non-numeric prefix, and that same rule folds `CR-1001` — a credit note — onto the invoice it credits.
+A false positive that pairs an invoice with its own reversal is worse than the one AC3 guards against,
+because the two documents genuinely are about the same money.
 
 **AC3 — What must not be flagged, asserted as its own criterion.**
 - **Adjacent invoice numbers.** `INV-1001` and `INV-1002` are one character apart and are certainly
@@ -234,7 +241,31 @@ one that re-raises on every upload is the defect story 4.1 was ordered first to 
 
 ## Dev Agent Record
 
-_To be filled by the dev agent._
+### Test Design — Task 1, `normaliseInvoiceNumber`
+
+One behaviour: fold an invoice number to a comparison key. No I/O, total on any string.
+
+| Failure mode | Class | Forced by |
+| --- | --- | --- |
+| Two invoices with **no** number fold to equal keys and fuzzy-match each other | GUARD | `''` in, `''` out; the caller must never match on an empty key, and a test says so |
+| Punctuation-only (`---`, `#`) folds to `''` — the same fact as absent, reached differently | GUARD | asserted equal to the empty case |
+| An all-zero number (`0`, `000`) is stripped to `''` and silently becomes "no number" | GUARD | keeps one digit |
+| Non-ASCII case folding: `'İ'.toLowerCase()` is **two** code points, so a key can grow | GUARD | folds `A`–`Z` only, exactly as `normaliseVendorName` does |
+| Edit-distance thinking: `INV-1001` vs `INV-1002` | GUARD | asserted **not** equal |
+| Prefix stripping: `0001001` vs `INV-1001`, and worse, `CR-1001` vs `INV-1001` | GUARD | asserted **not** equal |
+| Leading zeros inside the number: `INV-0001001` vs `INV-1001` | GUARD | asserted equal |
+| Full-width digits from a PDF extractor never match their ASCII twins | OUT-OF-SCOPE | recorded: a *missed* duplicate, not a false one. Conservative in the safe direction |
+| A 64-character bound and longer input | OUT-OF-SCOPE | `extraction_document_number_length` bounds it at the database |
+
+**The fold is deliberately narrower than "alphanumeric only".** Characters outside ASCII are kept
+rather than dropped, so `ÁBC-1001` and `ABC-1001` stay different. Dropping them would fold unknown
+characters together and manufacture matches; keeping them can only miss one. For a detector whose
+false positives cost a board member's trust, and where SM-2's 100% is promised on the *exact* rule
+(AC1) rather than this one, missing is the right direction to fail.
+
+Separators come from `NAME_FOLD_WHITESPACE` in `core/vendor/name.ts` rather than a second list —
+the same argument migration 010 makes for generating `quarantine_item.normalised_name` from
+migration 009's function.
 
 ## Review Findings
 
