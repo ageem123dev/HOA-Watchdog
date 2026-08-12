@@ -103,8 +103,8 @@ development_status:
   3-6a-the-chat-turn-crosses-the-wire: done
   3-6b-ask-and-answer: done
   3-6c-the-dashboard-ask-field: done
-  3-7-when-it-cannot-answer: in-progress
-  3-8-the-access-log: backlog
+  3-7-when-it-cannot-answer: done
+  3-8-the-access-log: done
   epic-3-retrospective: optional
 
   epic-4: backlog
