@@ -268,6 +268,11 @@ const styles = {
     borderRadius: 'var(--radius-none)',
     padding: 'var(--space-row)',
     minHeight: '44px',
+    // Both dimensions. DESIGN.md says 24x24, and this control is only wide
+    // enough today because its label happens to be long — `Query —
+    // dues_status@1`. That is a property of the copy, not a guarantee, and a
+    // shorter entry id would quietly shrink it. Raised by CodeRabbit.
+    minWidth: '24px',
     cursor: 'pointer',
   },
 } as const

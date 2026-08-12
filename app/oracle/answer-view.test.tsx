@@ -320,6 +320,9 @@ describe('AC7: the disclosure is a real target', () => {
     const toggle = screen.getByRole('button', { name: /query/i })
 
     expect(Number.parseInt(toggle.style.minHeight, 10)).toBeGreaterThanOrEqual(24)
+    // 24x24 is two numbers. Asserting only the height passes for a control one
+    // pixel wide. Raised by CodeRabbit.
+    expect(Number.parseInt(toggle.style.minWidth, 10)).toBeGreaterThanOrEqual(24)
   })
 
   it('does not remove the focus ring the base stylesheet provides', () => {
