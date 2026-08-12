@@ -130,10 +130,16 @@ export async function closeAllPools(): Promise<void> {
   const pools = [...open.values()]
   open.clear()
 
-  // `allSettled`, not `all`. Both call `end()` on every pool — the `map` runs
-  // to completion either way — but `all` rejects on the first failure and
-  // abandons the others' promises, which surfaces as an unhandled rejection
-  // when the second one fails too. Closing is cleanup; one pool refusing must
-  // not hide whether the rest finished. Raised by Argus.
+  // `allSettled`, not `all`, for two reasons — neither of which is unhandled
+  // rejections. `Promise.all` subscribes to every promise it is given, so a
+  // later failure is handled and warns about nothing; an earlier version of
+  // this comment claimed otherwise and was wrong. Verified with a probe.
+  //
+  // What `all` actually does here is **reject on the first failure and return
+  // immediately**, so a caller awaiting `closeAllPools` resumes while the other
+  // pools are still closing — during a shutdown that is the difference between
+  // closed and closing. And it throws, when this is cleanup: one pool refusing
+  // must not make the caller's teardown fail. Raised by Argus, corrected by
+  // CodeRabbit.
   await Promise.allSettled(pools.map((pool) => pool.end()))
 }

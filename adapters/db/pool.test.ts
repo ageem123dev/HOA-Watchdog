@@ -179,9 +179,14 @@ describe('the idle-client guard', () => {
   })
 
   it('closes every pool even when one refuses to close', async () => {
-    // `Promise.all` rejects on the first failure and abandons the others'
-    // promises, which surfaces as an unhandled rejection when a second one
-    // fails. Cleanup must not depend on the order things break in.
+    // `Promise.all` would reject on the first failure and return immediately,
+    // so a caller awaiting this would resume while the other pools were still
+    // closing — and teardown would throw on a pool that merely refused to shut.
+    // Cleanup must not depend on the order things break in.
+    //
+    // Not because of unhandled rejections: `Promise.all` subscribes to every
+    // promise it is given, so a later failure is handled. An earlier version of
+    // this comment said otherwise and was wrong.
     const { readerPool, writerPool, closeAllPools } = await load()
     const reader = readerPool()
     writerPool()
