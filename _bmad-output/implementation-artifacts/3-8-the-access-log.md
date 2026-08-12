@@ -157,19 +157,32 @@ is unreadable the moment it is long enough to matter.
 
 ## Dev Agent Record
 
-### `test:db` could not be run in this environment
+### `test:db`, and the grant proven rather than asserted
 
-`WATCHDOG_WRITER_DATABASE_URL` is unset here, so `adapters/db/query-log-reader-postgres.test.ts`
-**skips** — 8 cases, including the one that proves the `select` grant exists. That test is the only
-thing that can catch an adapter built on the wrong credential, because a mocked pool answers happily
-either way and the real failure is a `42501` in production.
+**An earlier version of this section said the database was unreachable and these tests could not
+run. That was wrong**, and the mistake is worth recording: `vitest` was invoked directly instead of
+through `npm run test:db`, which passes `--env-file-if-exists=.env.local`. Without the env file the
+suite saw no `WATCHDOG_WRITER_DATABASE_URL` and skipped itself exactly as designed — a skip that
+looks identical to "no database here" from the outside. The user pointed at the env file.
 
-What *did* run is `query-log-reader-connection.test.ts`, which asserts the adapter asks for the
-**writer** URL and never touches the reader one. Sensitivity-checked: pointing it at the reader pool
-fails both cases. So the credential choice is verified; the grant behind it is asserted but unproven
-until this runs somewhere with a database.
+Run properly, the first attempt then failed on a real constraint: `board_member.password_hash` is
+`not null` and the seed omitted it. A mocked pool would have accepted that insert without comment,
+which is a fair advertisement for this file existing at all.
 
-Stated rather than buried, because "2213 passing" and "the access log works" are not the same claim.
+**The grant is now proven.** Pointing the adapter at the reader pool and running against the real
+database produces:
+
+```
+error: permission denied for table query_log
+code: '42501'
+```
+
+That is migration 020's decision executing, not a comment describing it. Two tests catch the
+credential choice — `query-log-reader-connection.test.ts` asserts which URL is requested, and this
+suite asserts the URL requested actually works — and the failure mode they prevent has no build-time
+signal at all.
+
+All 8 cases pass.
 
 ## Review Findings
 

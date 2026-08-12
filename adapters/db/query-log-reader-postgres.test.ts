@@ -42,9 +42,13 @@ let memberId: string
 let scope = ''
 
 async function seedMember(): Promise<string> {
+  // `password_hash` is `not null`, and the shape it holds is checked — the same
+  // placeholder every other adapter test uses. Omitting it is how the first
+  // version of this file failed, which is a fair advertisement for running these
+  // against a real database rather than a mock that would have accepted it.
   const { rows } = await writer.query<{ id: string }>(
-    `insert into board_member (email, display_name)
-     values ($1, 'Access Log Test')
+    `insert into board_member (email, password_hash)
+     values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
      returning id`,
     [`access-log-${randomBytes(6).toString('hex')}@example.test`],
   )
