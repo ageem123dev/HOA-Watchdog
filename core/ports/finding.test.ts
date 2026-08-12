@@ -243,6 +243,27 @@ describe('epic 4 does not depend on epic 3', () => {
     expect(specifiersIn(readFileSync(PORT, 'utf8'))).toEqual([])
   })
 
+  /**
+   * Story 4.2's production files, added because this test's own comment asked
+   * for it: *"When 4.2 adds one, this list grows with it."* A detector is the
+   * component the independence matters most for — SM-2 claims 100% of exact
+   * duplicates are flagged, and a reasoning model cannot be held to a number.
+   */
+  const DETECTOR = [
+    'core/detection/invoice-number.ts',
+    'core/detection/duplicate-invoice.ts',
+    'core/detection/detect-duplicates.ts',
+    'core/ingestion/run-detection.ts',
+    'core/ports/invoice-reader.ts',
+    'adapters/db/invoice-reader-postgres.ts',
+  ]
+
+  it.each(DETECTOR)('%s reaches nothing on the model path', (file) => {
+    const path = join(REPO_ROOT, file)
+
+    expect(modelPathImports(readFileSync(path, 'utf8'), path)).toEqual([])
+  })
+
   it('the adapter reaches nothing on the model path', () => {
     const text = readFileSync(ADAPTER, 'utf8')
 
