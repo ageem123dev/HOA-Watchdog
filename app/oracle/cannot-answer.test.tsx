@@ -165,9 +165,14 @@ describe('AC5: no partial answer, in any state', () => {
 })
 
 describe('AC7: the actions are real controls', () => {
-  it.each([
+  it.each<[string, React.ReactElement, string | RegExp]>([
     ['refused', <AnswerRefused key="r" question={QUESTION} />, /ask again/i],
     ['unavailable', <ServiceUnavailable key="u" question={QUESTION} />, /try again/i],
+    // The suggested question is a primary control too — it is the "single
+    // action" UX-DR17 requires — and leaving it out of this loop left the
+    // control a reader is most likely to use unchecked for size and focus.
+    // Raised by Argus.
+    ['no catalog match', <NoCatalogMatch key="n" question={QUESTION} />, suggestedQuestion()!.text],
   ])('%s offers a keyboard-reachable link at a usable size', (_label, element, name) => {
     // Asserted as *what the element is*, per story 3.6b: jsdom does not
     // translate Enter into activation, so a keypress test would pass equally
