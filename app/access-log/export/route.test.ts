@@ -81,6 +81,24 @@ describe('what it sends', () => {
     expect(response.headers.get('content-disposition')).toContain('attachment')
   })
 
+  it('starts with a UTF-8 BOM, so Excel does not mangle a name', async () => {
+    // Excel ignores `charset=utf-8` on a downloaded file and falls back to the
+    // system ANSI codepage. Without the BOM a board member named José appears
+    // in the audit trail as JosÃ©, which is the record of who did what getting
+    // somebody's name wrong. Raised by Argus.
+    recent.mockResolvedValue([{ ...RECORD, actorId: 'José Álvarez' }])
+
+    const response = await get()
+    // The **bytes**, not `text()`. The Fetch spec's UTF-8 decode strips a
+    // leading BOM, so a test reading `text()` can never see one and fails
+    // against a perfectly correct implementation — which is what the first
+    // version of this test did.
+    const bytes = new Uint8Array(await response.arrayBuffer())
+
+    expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf])
+    expect(new TextDecoder().decode(bytes)).toContain('José Álvarez')
+  })
+
   it('is never cached', async () => {
     // Per-actor authorised content. A shared cache holding this would serve one
     // board member's export to the next caller.

@@ -24,6 +24,16 @@ import { filterFrom } from '../filter'
  * quietly a much larger one, which on an audit trail means handing over more
  * than they asked for.
  */
+/**
+ * The UTF-8 byte order mark.
+ *
+ * Written here rather than inside `accessLogCsv`, which stays a producer of
+ * plain CSV: the BOM is a fact about how this file is *consumed*, not about the
+ * format, and a caller wanting the CSV for anything else should not have to
+ * strip it.
+ */
+const BOM = '﻿'
+
 export async function GET(request: Request): Promise<Response> {
   const session = await auth()
   if (!session?.user?.id) {
@@ -33,12 +43,16 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url)
   const records = await createQueryLogReader().recent(filterFrom(searchParamsOf(url)))
 
-  return new Response(accessLogCsv(records), {
+  return new Response(`${BOM}${accessLogCsv(records)}`, {
     status: 200,
     headers: {
-      // `text/csv` with an explicit charset: the trail carries text a member
-      // typed, and a spreadsheet guessing the encoding renders a name wrongly
-      // in the record of who did what.
+      // The charset is declared *and* the BOM is written, because the header
+      // alone does not reach the program that matters. Excel ignores
+      // `charset=utf-8` on a downloaded file and falls back to the system ANSI
+      // codepage, so a board member named José arrives as JosÃ© in the record of
+      // who did what. Raised by Argus — an earlier version of this comment
+      // claimed the header handled it, which was the risk correctly named and
+      // then not solved.
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': 'attachment; filename="access-log.csv"',
       // Never cached. This is per-actor authorised content, and a shared cache
