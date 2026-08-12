@@ -1,5 +1,6 @@
 ---
 baseline_commit: 9b2902f
+merge_request: 48
 ---
 
 # Story 3.6c: The dashboard ask field
