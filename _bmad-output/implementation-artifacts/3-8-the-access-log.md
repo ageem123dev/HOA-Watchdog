@@ -5,7 +5,7 @@ merge_request: 50
 
 # Story 3.8: The access log
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -240,6 +240,16 @@ Skipped with reason: the hidden `limit` input keeps `value` rather than `default
 warning for a hidden input (checked), and `value` is correct — it is derived state that must mirror
 the filter, and `defaultValue` would reintroduce the staleness the keyed inputs were fixed for.
 
+### MR !50, round 1 — 2 findings, both on the test file
+
+| Finding | Outcome |
+| --- | --- |
+| `does not put the SQL in the table` asserted no column is named `sqlText` — never possible, so it could not fail | **Fixed.** The vacuous-guard shape this project has shipped ten times, and I introduced it while rewriting the test around the new disclosure, one commit before opening the MR. It now asserts *containment*: the SQL must sit inside the `<details>`. Moving the `<pre>` outside now fails; the version it replaced passed that mutation. |
+| `getAttribute('dateTime') ?? getAttribute('datetime')` — the second branch is unreachable | **Fixed.** `getAttribute` lowercases for HTML elements. An unreachable fallback reads as uncertainty about the DOM and hides which spelling is asserted. |
+
+Round 2: **clean** — `No actionable comments were generated`, range `75cea60 → 56deac6`, both threads
+resolved.
+
 ### `argus_ingest` could not join this round
 
 The CLI reviewed `b9867ee`; the last Argus run was recorded against the commit before it. Recorded
@@ -252,3 +262,4 @@ critical/major threshold and would have been filtered out regardless.
 | --- | --- |
 | 2026-08-12 | Story created after 3.7 merged. Two design decisions were already fixed by earlier stories: a separate read port, and the writer credential. |
 | 2026-08-12 | Implemented test-first. Five Argus rounds (8 fixed, 1 rejected, 1 skipped), CodeRabbit CLI 17 of 17 files with 5 of 6 applied. AC audit before the MR found AC1's per-row SQL clause unmet and fixed it. |
+| 2026-08-12 | MR !50 round 1: 2 findings on the test file, both fixed; round 2 clean. Gate re-run on the final head. Status → done, meaning ready-to-merge on an unmerged branch. |
