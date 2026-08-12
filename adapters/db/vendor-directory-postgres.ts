@@ -1,11 +1,10 @@
-import { Pool } from 'pg'
 
 import type {
   VendorDirectory,
   VendorResolution,
   VendorSuggestion,
 } from '../../core/ports/vendor-directory'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `VendorDirectory` port backed by Postgres.
@@ -37,27 +36,8 @@ import { readWriterDatabaseUrl } from '../auth/env'
  */
 const SUGGESTION_FLOOR = 0.3
 
-let sharedPool: Pool | null = null
 
 /** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 export function createVendorDirectory(): VendorDirectory {
   return {
@@ -65,7 +45,7 @@ export function createVendorDirectory(): VendorDirectory {
       // Equality on the indexed generated column. Not `similarity`, not `like`,
       // not a prefix — each of those resolves names that are merely close, and
       // a wrong resolution here is both silent and permanent.
-      const { rows } = await getPool().query<{ id: string }>(
+      const { rows } = await writerPool().query<{ id: string }>(
         'select id from vendor where normalised_name = vendor_normalised_name($1)',
         [extractedName],
       )
@@ -87,7 +67,7 @@ export function createVendorDirectory(): VendorDirectory {
 
       if (limit === 0) return []
 
-      const { rows } = await getPool().query<{
+      const { rows } = await writerPool().query<{
         id: string
         display_name: string
         // `similarity()` is float4, which pg deserialises to a JS number --

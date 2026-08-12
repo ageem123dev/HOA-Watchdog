@@ -205,7 +205,7 @@ action_items:
   - epic: 3
     action: "Shared connection pool - one change across all ten module-scoped adapters. DECIDED at the epic 3 retro: do this BEFORE epic 4. Three epics carried, one real test:db flake now mitigated by a load-bearing workaround, and Argus raised the disposal half again on story 3.8"
     owner: "Dev"
-    status: open
+    status: done  # 14 pools (not 10) consolidated to 2; test:db back to one invocation
   - epic: 3
     action: "migrations/roles.test.ts proves the reader cannot write by running unbounded update and delete with no WHERE. On the one run where the grant has regressed, the test wipes the table it is checking. Story 3.1 fixed the identical shape in query-log.test.ts by scoping to RUN_PREFIX - Postgres checks the privilege before matching rows, so the assertion is unchanged. Rank above the rest of the backlog"
     owner: "Dev"

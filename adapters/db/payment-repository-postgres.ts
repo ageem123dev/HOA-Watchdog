@@ -3,7 +3,7 @@ import { Pool, type PoolClient } from 'pg'
 import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import type { PaymentRepository } from '../../core/ports/payment-repository'
 import type { ResolvedLine } from '../../core/payment/resolve-line'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `PaymentRepository` port backed by Postgres.
@@ -16,27 +16,8 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * including the part that is easy to leave out.
  */
 
-let sharedPool: Pool | null = null
 
 /** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 
 /** Absent, not empty. See the note at the held-payment insert. */
@@ -45,7 +26,7 @@ function blankToNull(value: string): string | null {
 }
 
 export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentRepository {
-  const pool = () => options.pool ?? getPool()
+  const pool = () => options.pool ?? writerPool()
 
   return {
     async replace(

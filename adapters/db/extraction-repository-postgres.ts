@@ -3,7 +3,7 @@ import { Pool, type PoolClient } from 'pg'
 import type { ExtractionRecord } from '../../core/extraction/record'
 import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import type { ExtractionRepository } from '../../core/ports/extraction-repository'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `ExtractionRepository` port backed by Postgres.
@@ -18,26 +18,8 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * new set lands, or the previous one is still there afterwards.
  */
 
-let sharedPool: Pool | null = null
 
 /** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', (error) => {
-      console.error('[extraction-repository] idle client error; the pool will discard it', error)
-    })
-  }
-
-  return sharedPool
-}
 
 export interface PostgresExtractionRepositoryOptions {
   /** Injected by tests; production uses the shared pool. */
@@ -57,7 +39,7 @@ interface ExtractionRow {
 export function createPostgresExtractionRepository(
   options: PostgresExtractionRepositoryOptions = {},
 ): ExtractionRepository {
-  const pool = () => options.pool ?? getPool()
+  const pool = () => options.pool ?? writerPool()
 
   return {
     async replace(

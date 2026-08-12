@@ -1,7 +1,6 @@
-import { Pool } from 'pg'
-
+import type { Pool } from 'pg'
 import type { UnitDirectory, UnitHolding } from '../../core/ports/unit-directory'
-import { readReaderDatabaseUrl } from '../auth/env'
+import { readerPool } from './pool'
 
 /**
  * The `UnitDirectory` port backed by Postgres.
@@ -17,27 +16,8 @@ import { readReaderDatabaseUrl } from '../auth/env'
  * answer.
  */
 
-let sharedPool: Pool | null = null
 
 /** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readReaderDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 /**
  * The tenure columns, spelled once.
@@ -75,7 +55,7 @@ function sendable(reference: string): boolean {
 }
 
 export function createUnitDirectory(options: { pool?: Pool } = {}): UnitDirectory {
-  const pool = () => options.pool ?? getPool()
+  const pool = () => options.pool ?? readerPool()
 
   return {
     async heldBy(unitNumber: string, on: string): Promise<UnitHolding | null> {

@@ -39,6 +39,7 @@ const poolConstructor = vi.fn()
 vi.mock('pg', () => ({
   Pool: class {
     on = vi.fn()
+    end = vi.fn(async () => {})
     query = vi.fn(async () => ({ rows: [] }))
 
     constructor(config: unknown) {

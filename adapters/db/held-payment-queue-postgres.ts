@@ -1,7 +1,6 @@
-import { Pool } from 'pg'
-
+import type { Pool } from 'pg'
 import type { HeldPayment, HeldPaymentQueue } from '../../core/ports/held-payment-queue'
-import { readReaderDatabaseUrl } from '../auth/env'
+import { readerPool } from './pool'
 
 /**
  * The `HeldPaymentQueue` port backed by Postgres.
@@ -16,27 +15,8 @@ import { readReaderDatabaseUrl } from '../auth/env'
  * path that renders the queue is deliberately incapable of emptying it.
  */
 
-let sharedPool: Pool | null = null
 
 /** One pool per process, built on first use -- see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readReaderDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 /**
  * The pool is injectable so the SQL can actually be executed in a test.
@@ -47,7 +27,7 @@ function getPool(): Pool {
  * `payment-repository-postgres.ts` takes the same option for the same reason.
  */
 export function createHeldPaymentQueue(options: { pool?: Pool } = {}): HeldPaymentQueue {
-  const resolvePool = () => options.pool ?? getPool()
+  const resolvePool = () => options.pool ?? readerPool()
 
   return {
     async held(): Promise<readonly HeldPayment[]> {
