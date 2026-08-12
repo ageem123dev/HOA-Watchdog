@@ -92,24 +92,24 @@ not a thing a mock can be wrong about.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The read port (AC1, AC6)**
-  - [ ] `core/ports/query-log-reader.ts`. No `record` method, and a comment saying why.
-  - [ ] The record shape includes `executedAt` and the id, both of which the writer's entry type
+- [x] **Task 1 — The read port (AC1, AC6)**
+  - [x] `core/ports/query-log-reader.ts`. No `record` method, and a comment saying why.
+  - [x] The record shape includes `executedAt` and the id, both of which the writer's entry type
         deliberately omits.
 
-- [ ] **Task 2 — The adapter (AC2, AC3, AC6, AC8)**
-  - [ ] Postgres, on the **writer** pool. A `test:db` test that it can actually select.
-  - [ ] Newest first, limit, filter by actor and entry id — in SQL.
+- [x] **Task 2 — The adapter (AC2, AC3, AC6, AC8)**
+  - [x] Postgres, on the **writer** pool. A `test:db` test that it can actually select.
+  - [x] Newest first, limit, filter by actor and entry id — in SQL.
 
-- [ ] **Task 3 — The surface (AC1, AC4, AC7)**
-  - [ ] Props-driven component, the `AnswerView` shape.
-  - [ ] Two distinct empty states, each asserting the other's copy is absent.
+- [x] **Task 3 — The surface (AC1, AC4, AC7)**
+  - [x] Props-driven component, the `AnswerView` shape.
+  - [x] Two distinct empty states, each asserting the other's copy is absent.
 
-- [ ] **Task 4 — Export (AC5)**
-  - [ ] CSV of the filtered rows, with formula neutralisation and a test that plants `=cmd|`.
+- [x] **Task 4 — Export (AC5)**
+  - [x] CSV of the filtered rows, with formula neutralisation and a test that plants `=cmd|`.
 
-- [ ] **Task 5 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npm run test:db` (this touches an adapter and
+- [x] **Task 5 — The gate**
+  - [x] `npm run lint`, `npm run build`, `npm test`, `npm run test:db` (this touches an adapter and
         the schema), `npx --no-install tsc --noEmit` against the 8-error baseline.
 
 ## Dev Notes
@@ -157,7 +157,19 @@ is unreadable the moment it is long enough to matter.
 
 ## Dev Agent Record
 
-_To be filled by the dev agent._
+### `test:db` could not be run in this environment
+
+`WATCHDOG_WRITER_DATABASE_URL` is unset here, so `adapters/db/query-log-reader-postgres.test.ts`
+**skips** — 8 cases, including the one that proves the `select` grant exists. That test is the only
+thing that can catch an adapter built on the wrong credential, because a mocked pool answers happily
+either way and the real failure is a `42501` in production.
+
+What *did* run is `query-log-reader-connection.test.ts`, which asserts the adapter asks for the
+**writer** URL and never touches the reader one. Sensitivity-checked: pointing it at the reader pool
+fails both cases. So the credential choice is verified; the grant behind it is asserted but unproven
+until this runs somewhere with a database.
+
+Stated rather than buried, because "2213 passing" and "the access log works" are not the same claim.
 
 ## Review Findings
 
