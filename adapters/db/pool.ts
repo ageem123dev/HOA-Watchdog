@@ -16,8 +16,9 @@ import { readReaderDatabaseUrl, readWriterDatabaseUrl } from '../auth/env'
  * again on 3.1, again by Argus on 3.8 — and it stopped being latent on story
  * 3.2, where widening `test:db` to `app/tools/` put two more pools in parallel
  * with the rest and `roll-ingestion.test.ts` began timing out at 5s on roughly
- * one run in three. `package.json` still carries the workaround for that: two
- * sequential vitest invocations instead of one.
+ * one run in three. `package.json` carried a workaround for that until this
+ * change: two sequential vitest invocations instead of one. **It is now one
+ * again**, verified over six consecutive clean runs of the combined form.
  *
  * ## Two pools, not one
  *

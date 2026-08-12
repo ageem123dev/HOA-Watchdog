@@ -33,10 +33,14 @@ vi.mock('../auth/env', () => ({
 
 const constructed = vi.fn()
 const ended = vi.fn()
+/** Every `on(event, handler)` any pool registers, so a test can assert one exists. */
+const listened = vi.fn()
 
 vi.mock('pg', () => ({
   Pool: class {
-    on = vi.fn()
+    on = vi.fn((event: string, handler: () => void) => {
+      listened(event, handler)
+    })
     end = vi.fn(async () => {
       ended()
     })
@@ -119,6 +123,37 @@ describe('there is one pool per credential, not one per adapter', () => {
 
     expect(readReaderDatabaseUrl).not.toHaveBeenCalled()
     expect(readWriterDatabaseUrl).not.toHaveBeenCalled()
+  })
+})
+
+describe('the idle-client guard', () => {
+  it('registers an error listener on every pool it opens', async () => {
+    // Without this the tests passed with the handler deleted — a guard that
+    // proves nothing, which is this project's signature defect. Raised by
+    // CodeRabbit.
+    //
+    // What the handler prevents: an idle client failing has no request to reject,
+    // so Node treats the error as unhandled and takes the process down. On a
+    // shared pool that is every adapter at once, not one.
+    const { readerPool, writerPool } = await load()
+
+    readerPool()
+    writerPool()
+
+    expect(listened).toHaveBeenCalledTimes(2)
+    expect(listened).toHaveBeenNthCalledWith(1, 'error', expect.any(Function))
+    expect(listened).toHaveBeenNthCalledWith(2, 'error', expect.any(Function))
+  })
+
+  it('has a handler that swallows the error rather than rethrowing', async () => {
+    // A registered listener that throws is worse than none: it turns a
+    // recoverable idle failure into the crash it was added to prevent.
+    const { readerPool } = await load()
+    readerPool()
+
+    const handler = listened.mock.calls[0]![1] as (error: Error) => void
+
+    expect(() => handler(new Error('connection terminated unexpectedly'))).not.toThrow()
   })
 })
 
