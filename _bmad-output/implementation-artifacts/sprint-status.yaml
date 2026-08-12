@@ -102,7 +102,7 @@ development_status:
   # the surface on it. Blocked until AD-17 (the Node->agent wire) is approved.
   3-6a-the-chat-turn-crosses-the-wire: done
   3-6b-ask-and-answer: done
-  3-6c-the-dashboard-ask-field: in-progress
+  3-6c-the-dashboard-ask-field: review
   3-7-when-it-cannot-answer: backlog
   3-8-the-access-log: backlog
   epic-3-retrospective: optional

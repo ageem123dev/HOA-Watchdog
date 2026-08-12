@@ -4,7 +4,7 @@ baseline_commit: 9b2902f
 
 # Story 3.6c: The dashboard ask field
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -220,7 +220,55 @@ literal rather than the exported constant, so corruption cannot move both sides 
 
 ## Review Findings
 
-_To be filled by the review._
+### AC audit, done before the MR rather than after
+
+Story 3.6b merged with two of its own criteria unimplemented, past four green review rounds, because
+nobody read the AC list against the code. Every criterion here was checked one at a time, and the
+test that pins each one is named so the claim is falsifiable.
+
+| AC | Status | Pinned by |
+| --- | --- | --- |
+| AC1 field on the dashboard, present without scrolling | met | `page.test.tsx` — "is on the dashboard", plus the DOM-order test |
+| AC2 arrives at the Oracle with the question already sent | met | GET form to `/oracle`, field named `q`, submit control — three tests |
+| AC3 does not overlay focusable content | met | "does not position itself over the page" |
+| AC4 placeholder promises only what the catalog serves | met | pinned against `ALL_ENTRIES`, plus four over-promise patterns |
+| AC5 an empty question does nothing | met | empty, whitespace, tab, NBSP refused; a real question accepted |
+| AC6 keyboard and focus | met | form association for both controls; no local `outline` override |
+| AC7 tested as a rendered surface | met | 21 render tests under story 1.6c's harness |
+
+**AC1's "persistent" is delivered as a field in normal flow, not sticky.** That is the story file's
+own stated fallback, and it is a choice rather than an omission: AC3 exists only because sticky
+positioning creates the overlay hazard, so not being sticky removes the hazard instead of managing
+it. A test asserts the form is unpositioned, so making it sticky later fails here and whoever does it
+owes the scroll padding AC3 requires.
+
+### Argus — two rounds, three findings
+
+| Round | Finding | Outcome |
+| --- | --- | --- |
+| 1 | `.*[^ ].*` excludes only U+0020, so a pasted tab or NBSP passed validation and navigated | **Fixed.** Real AC5 violation. |
+| 1 | *"…and triggers a `RangeError` on the server"* | **Rejected.** Verified with a probe: `questionFrom` trims both to empty and the page returns its empty state before `askOracle`. The defect was a silent no-op, not a crash. |
+| 2 | The input's `minWidth` was 24px while the story claimed 44px on both dimensions | **Fixed** toward the stricter reading — 44px on both controls. |
+| 2 | The Dev Agent Record still argued for the abandoned backslash-free pattern | **Fixed**, and see below. |
+
+### CodeRabbit CLI — clean
+
+`review_completed`, **14 of 14 files reviewed, none unreviewed, zero findings.** The first clean CLI
+round on this project. `argus_ingest` joined it on `1e39400` after an Argus run was recorded for that
+same SHA — the first ingest attempt skipped because the CLI had reviewed a commit made *after* the
+previous Argus pass.
+
+### The bug that had been hiding in the prose
+
+The stale paragraph Argus flagged cited `` as the story 3.5 precedent, and that `` was sitting in
+the file **as a literal backspace character** — invisible in every diff since it was written. A
+paragraph about backslash corruption had itself been corrupted by the mechanism it described, and
+neither the docs suite nor two review rounds saw it, because a backspace renders as nothing and
+breaks no test.
+
+The cause is now understood rather than merely observed: a command string loses one level of
+backslash escaping before the shell receives it, so `\S` reaches a file as `\S` and JavaScript then
+reads `'\S'` as `'S'`. Anything carrying a backslash is written with the editing tool from here on.
 
 ## Change Log
 
