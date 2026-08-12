@@ -87,30 +87,30 @@ grants, and a mock cannot be wrong about either.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The migration (AC1, AC2, AC4, AC5, AC6)**
-  - [ ] `finding` table: type, subject, period, state, evidence, timestamps, reviewer.
-  - [ ] A unique constraint on `(finding_type, subject_id, period)` — the key AD-13 names.
-  - [ ] A check constraint that a reviewed finding carries its reviewer and time, and an unreviewed
+- [x] **Task 1 — The migration (AC1, AC2, AC4, AC5, AC6)**
+  - [x] `finding` table: type, subject, period, state, evidence, timestamps, reviewer.
+  - [x] A unique constraint on `(finding_type, subject_id, period)` — the key AD-13 names.
+  - [x] A check constraint that a reviewed finding carries its reviewer and time, and an unreviewed
         one carries neither. The state and its evidence must not be able to disagree.
-  - [ ] Grants: the writer inserts and updates; **no delete for anyone**, the way migration 020
+  - [x] Grants: the writer inserts and updates; **no delete for anyone**, the way migration 020
         revoked update and delete on `query_log`. "Never dismissed" is a grant, not a habit.
 
-- [ ] **Task 2 — The port (AC1, AC3, AC6, AC7)**
-  - [ ] `core/ports/finding.ts`. One creation method whose contract is *raise or update*, never
+- [x] **Task 2 — The port (AC1, AC3, AC6, AC7)**
+  - [x] `core/ports/finding.ts`. One creation method whose contract is *raise or update*, never
         *append*. A `dismiss` or `delete` method must not exist, and a comment should say why.
-  - [ ] The review transition as its own method, so "record a finding" and "record that a human read
+  - [x] The review transition as its own method, so "record a finding" and "record that a human read
         it" are separately grantable capabilities.
 
-- [ ] **Task 3 — The adapter (AC2, AC3, AC8)**
-  - [ ] `insert … on conflict (finding_type, subject_id, period) do update`, so the no-op is the
+- [x] **Task 3 — The adapter (AC2, AC3, AC8)**
+  - [x] `insert … on conflict (finding_type, subject_id, period) do update`, so the no-op is the
         database's guarantee rather than a read-then-write race.
-  - [ ] The conflict path updates the evidence and **leaves `state`, `reviewed_by` and `reviewed_at`
+  - [x] The conflict path updates the evidence and **leaves `state`, `reviewed_by` and `reviewed_at`
         alone** — AC3's whole point.
-  - [ ] `test:db` proving: raise twice → one row; raise after review → still reviewed; review twice →
+  - [x] `test:db` proving: raise twice → one row; raise after review → still reviewed; review twice →
         the second is refused or is a no-op, decided explicitly and tested either way.
 
-- [ ] **Task 4 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npm run test:db` (this adds a migration and an
+- [x] **Task 4 — The gate**
+  - [x] `npm run lint`, `npm run build`, `npm test`, `npm run test:db` (this adds a migration and an
         adapter), `npx --no-install tsc --noEmit` against the 8-error baseline.
 
 ## Dev Notes
@@ -169,7 +169,117 @@ that manufactures duplicates.
 
 ## Dev Agent Record
 
-_To be filled by the dev agent._
+### The `period` decision, and the probe that made it
+
+`daterange`, not a month string and not a nullable column. The Dev Notes asked for the reasoning to
+be recorded; it is recorded in `migrations/021_finding.sql`'s header, and it was **measured against
+this database rather than reasoned about**:
+
+```
+{"a": "[2026-03-01,2026-04-01)", "b": "[2026-03-01,2026-04-01)", "same": true,
+ "annual_eq_monthly": false}
+```
+
+Two spellings of March 2026 — `[2026-03-01,2026-04-01)` and `[2026-03-01,2026-03-31]` — canonicalise
+to one value and compare equal. A `text` column holding `'2026-03'` cannot see that `'2026-3'` is the
+same month, and the unique constraint would then pass two rows for one finding: a duplicate-detection
+product manufacturing duplicates, which is the exact failure the epic orders this story first to
+prevent. Ranges also carry the per-member dues cadences recorded on 2026-08-07 without a global one.
+
+### What the probe found that reasoning had not
+
+Canonicalisation cuts both ways. **Every empty range collapses to the single value `empty`**, so
+`[2026-05-01,2026-05-01)` and `[2026-09-09,2026-09-09)` — May and September, nothing alike — compare
+equal and collide on `finding_identity`. Measured: the second upsert updated the first row and
+reported `inserted: false`. That is the text-column defect arriving through a different door, and a
+detector computing a window from two dates that turn out equal produces it.
+
+An unbounded bound fails differently: "from June onwards", read in 2030, covers four years it did not
+cover when it was written, and a register of evidence cannot hold an entry that quietly grows.
+
+Both are now refused by `finding_period_is_bounded`, added to migration 021 after two failing tests.
+The table was dropped and re-applied locally rather than fixed in a 022 — the migration has never
+been on `main`, and a 022 correcting a table created one commit earlier is history nobody benefits
+from reading.
+
+### Why `raise` reports whether the finding was already known
+
+`RaisedFinding.wasAlreadyKnown` is the field story 4.8 needs and cannot work out for itself. AD-13
+forbids emitting "a second alert for a finding already raised", and a mailer firing on every raise
+would do exactly that — the no-op would hold in the table and fail in the inbox, which is the failure
+a board member actually experiences.
+
+It comes from `(xmax = 0) as inserted` on the upsert's `returning` clause, which is true only for a
+row the statement inserted. Probed before it was used, and asserted in `finding-postgres.test.ts`
+rather than trusted: it is exactly the sort of clever thing that must be proven against a real
+database. A preceding `select` could not answer it correctly anyway — two detection runs arriving
+together would both read "absent" and both believe they raised it.
+
+### Reviewing twice is refused, and that was a decision
+
+Task 3 asked for it to be decided explicitly. Letting a second review through would overwrite
+`reviewed_by`, erasing the first board member's name from the record of who looked — which is the one
+question the register exists to answer. Treating it as a quiet no-op fails the other way: the caller
+is told their review was recorded when the row names somebody else. So `AlreadyReviewedError`, and it
+is distinct from `FindingNotFoundError` because an UPDATE matching nothing succeeds and the two
+reasons it can match nothing mean opposite things to whoever reads the surface.
+
+The guard is `and state = 'unreviewed'` in the `where` clause rather than a preceding read, so two
+board members clicking at the same moment resolve to one winner in the database.
+
+### Test Design — the failure modes, and what each one is
+
+| Behaviour | Failure mode | Class | Where it is forced |
+| --- | --- | --- | --- |
+| raise | the same finding raised twice appends | GUARD | `finding-postgres.test.ts`, one row and the same id |
+| raise | two spellings of one period pass the key | GUARD | `migrations/finding.test.ts`, `23505` |
+| raise | an empty period collapses unrelated windows | GUARD | both files, `23514` |
+| raise | an unbounded period grows as it ages | GUARD | `migrations/finding.test.ts`, `23514` |
+| raise | re-raising resets a reviewed finding | GUARD | `finding-postgres.test.ts`, the decisive case |
+| raise | the conflict key names too few columns | GUARD | a second subject stays a second finding |
+| raise | reversed bounds | PROPAGATE | Postgres refuses at construction, `22000` |
+| markReviewed | a second review overwrites the first reviewer | GUARD | `AlreadyReviewedError`, first name survives |
+| markReviewed | an UPDATE matching nothing reports success | GUARD | `FindingNotFoundError` |
+| markReviewed | an unattributable reviewer is recorded | PROPAGATE | `23503`, and the row stays unreviewed |
+| markReviewed | a caller backdates a review | OUT-OF-SCOPE | no parameter exists; `now()` stamps it |
+| both | a delete path exists | GUARD | grant revoked, and `42501` proven in `migrations/finding.test.ts` |
+
+### Sensitivity checks — five mutations, five caught
+
+Run against the adapter, each reverted immediately:
+
+| Mutation | Result |
+| --- | --- |
+| the conflict branch also resets `state`/`reviewed_by`/`reviewed_at` | 1 failed |
+| `'[)'` becomes `'[]'` | 2 failed |
+| `(xmax = 0)` becomes `true` | 1 failed |
+| `and state = 'unreviewed'` dropped from the `where` clause | 1 failed |
+| the `FindingNotFoundError` branch removed | 1 failed |
+
+The first attempt at the `'[]'` mutation edited the *comment* rather than the SQL and reported all
+twelve passing. Worth recording: a sensitivity check that patches the wrong occurrence looks exactly
+like a test that is not sensitive.
+
+It also corrected a comment. "Treats `until` as exclusive" claimed the two-window test caught an
+inclusive upper bound; it does not — under `[]` those ranges are still distinct. What catches it is
+the test that reads the stored period back. The comment now says so.
+
+Two mutations on the port, both caught: adding `dismiss()` failed two tests, and planting
+`import '../answer/grounded-answer'` and `import '../agent/chat-client'` failed AC7's assertion.
+
+### Completion Notes
+
+- **AC7 is asserted, and the first version of the assertion was wrong.** Matching `'core/answer'` as
+  a substring misses `'../answer/grounded-answer'`, which is how the import would actually be spelled
+  from `core/ports/`. Specifiers are now resolved to paths, the way `boundary.test.ts` does it.
+- The assertion is scoped to the two production files this story ships, which is what can honestly be
+  checked while there is no detector. Story 4.2 should extend the list.
+- `README.md`'s migration count moved 20 → 21. `docs/readme.test.ts` caught it, which is the gate
+  working.
+- **Deferred, and not this story's**: `adapters/auth/user-directory-postgres.ts` still builds its own
+  `Pool` with settings identical to `pool.ts`'s `SETTINGS`. The fourteen-to-two consolidation missed
+  it, almost certainly because it sits under `adapters/auth/` rather than `adapters/db/`. Not fixed
+  here — mixing a chore into a story is what the one-story-one-branch rule exists to prevent.
 
 ## Review Findings
 
@@ -180,3 +290,16 @@ _To be filled by the review._
 | Date | Change |
 | --- | --- |
 | 2026-08-12 | Story created after the connection-pool chore merged. Deterministic detection confirmed by the project lead the same day, so this story takes no model dependency and Epic 4 stays independent of Epic 3. |
+| 2026-08-12 | Tasks 1–4 implemented. `period` decided as `daterange` with the reasoning probed rather than assumed; `finding_period_is_bounded` added after the probe found that every empty range collapses to one value. Gate green: lint clean, build clean, 2283 tests, 721 `test:db`, tsc at the 8-error baseline. |
+
+## File List
+
+| File | Change |
+| --- | --- |
+| `migrations/021_finding.sql` | NEW — the table, the key, the one-way lifecycle, and the revoked delete |
+| `migrations/finding.test.ts` | NEW — 19 cases against the real database, including the two spellings of one month |
+| `core/ports/finding.ts` | NEW — `FindingRegister` and `FindingReviewer`, and the absent `dismiss` |
+| `core/ports/finding.test.ts` | NEW — what the ports may declare, and AC7's independence assertion |
+| `adapters/db/finding-postgres.ts` | NEW — the upsert and the one-way review, on the shared writer pool |
+| `adapters/db/finding-postgres.test.ts` | NEW — 12 cases, five mutations caught |
+| `README.md` | migration count 20 → 21 |

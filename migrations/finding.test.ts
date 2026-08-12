@@ -173,6 +173,40 @@ describeWithDatabase('the key AD-13 names', () => {
 
     await expect(raise(type, '[2026-03-01,2026-04-01)')).resolves.toBeDefined()
   })
+
+  it('refuses a period that is no time at all', async () => {
+    // **The one way the key can still be defeated, found by probing rather than
+    // by reasoning.** Postgres canonicalises *every* empty range to the single
+    // value `empty`, so `[2026-05-01,2026-05-01)` and `[2026-09-09,2026-09-09)`
+    // — May and September, nothing alike — compare equal and collide on
+    // `finding_identity`. Measured: the second upsert updated the first row and
+    // reported `inserted: false`.
+    //
+    // That is the same defect a text column would have had, arriving through a
+    // different door: a May finding silently replaced by a September one. And it
+    // is not hypothetical arithmetic — a detector computing a window from two
+    // dates that turn out equal produces exactly this.
+    const type = `${RUN_PREFIX}_empty`
+
+    await expect(raise(type, '[2026-05-01,2026-05-01)')).rejects.toMatchObject({
+      code: CHECK_VIOLATION,
+    })
+  })
+
+  it('refuses a period with no end', async () => {
+    // An unbounded upper bound is a window whose meaning changes with the date
+    // it is read on: "from June onwards", read in 2030, covers four years it did
+    // not cover when it was written. This table is a register of evidence, and
+    // an entry that quietly grows is not evidence.
+    //
+    // A detector meaning "still ongoing" bounds it at today, which says the same
+    // thing and keeps saying it.
+    const type = `${RUN_PREFIX}_open`
+
+    await expect(raise(type, '[2026-06-01,)')).rejects.toMatchObject({
+      code: CHECK_VIOLATION,
+    })
+  })
 })
 
 describeWithDatabase('the lifecycle is one-way', () => {

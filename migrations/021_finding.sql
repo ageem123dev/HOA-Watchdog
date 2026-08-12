@@ -31,6 +31,10 @@
 -- made a monthly payer and an annual payer indistinguishable for eleven months
 -- of the year.
 --
+-- Canonicalisation cuts both ways, which is why finding_period_is_bounded below
+-- exists: every empty range collapses to the same value too, so two unrelated
+-- empty windows collide. See that constraint's comment.
+--
 -- NOT NULL, deliberately. A nullable period would need `nulls not distinct` for
 -- the unique constraint to dedupe at all, and it lets a detector avoid saying
 -- what window its finding concerns. Every finding is about a period of time;
@@ -80,6 +84,24 @@ create table finding (
   constraint finding_identity unique (finding_type, subject_id, period),
 
   constraint finding_type_is_verb_noun check (finding_type ~ '^[a-z][a-z0-9_]*$'),
+
+  -- The one way the key can still be defeated, and it was found by probing this
+  -- database rather than by reasoning about it.
+  --
+  -- Postgres canonicalises *every* empty range to the single value `empty`, so
+  -- [2026-05-01,2026-05-01) and [2026-09-09,2026-09-09) -- May and September,
+  -- nothing alike -- compare equal and collide on finding_identity. Measured:
+  -- the second insert updated the first row rather than adding one. That is the
+  -- text-column defect arriving through a different door, and a detector
+  -- computing a window from two dates that turn out equal produces it.
+  --
+  -- An unbounded bound fails differently: "from June onwards", read in 2030,
+  -- covers four years it did not cover when it was written. A register of
+  -- evidence cannot hold an entry that quietly grows. A detector meaning "still
+  -- ongoing" bounds it at today, which says the same thing and keeps saying it.
+  constraint finding_period_is_bounded check (
+    not isempty(period) and lower(period) is not null and upper(period) is not null
+  ),
 
   constraint finding_state_is_known check (state in ('unreviewed', 'reviewed')),
 
