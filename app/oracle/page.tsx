@@ -6,6 +6,7 @@ import { entryFor } from '@/catalog/registry'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { AnswerNotGrounded } from '@/core/answer/grounded-answer'
 import { AnswerView } from './answer-view'
+import { AnswerRefused, NoCatalogMatch, ServiceUnavailable } from './cannot-answer'
 import { askOracle } from './ask'
 import { questionFrom } from './question'
 
@@ -103,17 +104,15 @@ export default async function OraclePage({
       console.error('oracle turn failed', failure)
     }
 
-    // **Story 3.7 owns these surfaces**, and the epic keeps them apart on
-    // purpose: "no-catalog-match and service-unavailable as distinct, honest
-    // states". What matters here is that they are already distinct in the code,
-    // so 3.7 has two things to render rather than one lump — and that the
-    // question stays on screen in every one of them, per UX-DR11.
-    return (
-      <main>
-        <h1>{question}</h1>
-        <p>{explain(failure)}</p>
-      </main>
-    )
+    // **Story 3.7's surfaces.** The epic kept these apart on purpose and the
+    // branch below is why: "no-catalog-match and service-unavailable as
+    // distinct, honest states", plus AD-7's refusal, which its 2026-08-12
+    // amendment made a first-class third state rather than a kind of outage.
+    //
+    // The reader must not conclude the wrong thing from any of them. Told "no
+    // data", a treasurer goes looking for a bookkeeping problem that does not
+    // exist; told "we're down", they wait for a recovery that is not coming.
+    return <main>{cannotAnswer(failure, question)}</main>
   }
 
   return (
@@ -131,26 +130,24 @@ export default async function OraclePage({
 }
 
 /**
- * The honest sentence for each failure, pending story 3.7's real surfaces.
+ * Which surface a failure gets.
  *
- * Deliberately never a partial answer. UX: "Never present a partial answer",
- * and an ungrounded one is the failure this entire epic exists to prevent —
- * shipping it on the first day anybody can see the page would be the worst
- * possible time.
+ * Deliberately never a partial answer. UX: "Never present a partial answer", and
+ * an ungrounded one is the failure this entire epic exists to prevent.
  */
-function explain(error: unknown): string {
+function cannotAnswer(error: unknown, question: string) {
   if (error instanceof NoCatalogMatchError) {
     // The most likely daily failure, per the UX spec, and the one where the
     // wrong words do real harm: never imply the records are missing when it is
     // the question that is not supported.
-    return "I can't answer that one from the records I can query."
+    return <NoCatalogMatch question={question} />
   }
 
   if (error instanceof AnswerNotGrounded) {
-    // AD-7 refused the answer. A board member is told nothing was shown rather
-    // than shown something unverified.
-    return 'I could not produce an answer I can show the records for, so I have not shown one.'
+    // AD-7 refused the answer. That is the system working, and the surface says
+    // so rather than apologising for an outage that is not happening.
+    return <AnswerRefused question={question} />
   }
 
-  return 'The records could not be reached just now.'
+  return <ServiceUnavailable question={question} />
 }

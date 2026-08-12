@@ -150,6 +150,42 @@ describe('configuration', () => {
 
     expect(String(error)).not.toContain(ENV.GATEWAY_SERVICE_TOKEN)
   })
+
+  it('carries nothing from the request when the network fails', async () => {
+    // Raised by Argus on story 3.7: `app/oracle/page.tsx` logs the whole failure
+    // object, so if a rejected `fetch` reached that log still carrying its
+    // request configuration, the gateway service token would be sitting in
+    // server logs.
+    //
+    // It does not — the fetch error is reduced to its `name` here and a fresh
+    // `AgentUnavailableError` is thrown — but that was a property of the code
+    // read once, not a property anything enforced. The previous test covers only
+    // the configuration path and only `String(error)`, which would miss a token
+    // hiding in an own property or a `cause`.
+    const failing = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new TypeError('fetch failed'), {
+          // What a client that attached its request would look like. If the
+          // implementation ever wraps the original error instead of naming it,
+          // this is what would travel.
+          config: { headers: { authorization: `Bearer ${ENV.GATEWAY_SERVICE_TOKEN}` } },
+        }),
+      ),
+    ) as unknown as typeof globalThis.fetch
+
+    const error = (await ask({ fetch: failing }).catch((e: Error) => e)) as Error
+
+    expect(error).toBeInstanceOf(AgentUnavailableError)
+    // Everything `console.error` would render: message, stack, own properties
+    // and any `cause` chained onto it.
+    const logged = JSON.stringify({
+      ...error,
+      message: error.message,
+      stack: error.stack,
+      cause: (error as { cause?: unknown }).cause,
+    })
+    expect(logged).not.toContain(ENV.GATEWAY_SERVICE_TOKEN)
+  })
 })
 
 describe('a refusal is never an empty answer', () => {
