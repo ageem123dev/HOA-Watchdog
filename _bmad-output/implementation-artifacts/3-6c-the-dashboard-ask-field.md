@@ -85,7 +85,9 @@ no-intermediate-state claim of AC2 is asserted on where submitting *goes*, not o
   - [x] Placeholder copy, pinned against `ALL_ENTRIES`: the test fails when the catalog gains or
         loses an entry, which is what makes the copy unable to outgrow it silently.
   - [x] Focus ring inherited from `BASE_CSS`'s global `:focus-visible`, with a test that this
-        surface does not override `outline`. Target size 44px on both dimensions.
+        surface does not override `outline`. Target 44px on both dimensions for both controls,
+        exceeding the 24x24 the spec sets for desktop and matching what it asks of the phone surface.
+        The test pins the 24x24 the criterion actually requires.
   - [x] A real `<label>`, because a placeholder disappears the moment somebody types.
 
 - [x] **Task 2 — Submitting (AC2, AC5)**
@@ -197,10 +199,24 @@ validation. It does: `required` plus `pattern` refuses `""` and `"   "` and acce
 So the whole surface is a plain GET form and no client component — which also satisfies AC2 by
 construction, since there is no second request that could produce an intermediate state.
 
-**The pattern carries no backslash, deliberately.** The first probe used `.*\S.*` and the attribute
-arrived as `.*S.*` — the backslash was eaten in transit, exactly as `` was on story 3.5. A
-corrupted pattern still compiles and silently matches nothing, so it is invisible in a diff and in a
-green suite. `.*[^ ].*` cannot be corrupted that way.
+**The pattern is `.*\S.*`, and the corruption is detected rather than dodged.** *(Revised after
+the Argus round — the first version of this section claimed the opposite, and was wrong.)*
+
+The first probe used `.*\S.*` and the attribute arrived as `.*S.*`: the backslash eaten in transit,
+exactly as `\b` was on story 3.5. The cause was found during this story — a command string loses one
+level of backslash escaping before the shell sees it, so `\\S` reaches the file as `\S`, and
+JavaScript then reads `'\S'` as `'S'`. **The same corruption hit this very paragraph**: the `\b`
+above was written as a literal backspace character until the Argus round caught the section. Anything
+carrying a backslash is now written with the editing tool rather than through a shell heredoc.
+
+The first response was to avoid backslashes entirely, with `.*[^ ].*`. **That traded a correctness bug
+for a tooling inconvenience**, and Argus caught it: `[^ ]` excludes only U+0020, so a pasted tab or
+non-breaking space passed validation, navigated, and reached an Oracle that trimmed the question back
+to empty and showed its empty state — the "appears to have worked" AC5 forbids.
+
+A corrupted pattern still compiles and silently matches nothing, which is an argument for a test that
+reads the attribute back out of the DOM, not for a weaker pattern. That test compares against a
+literal rather than the exported constant, so corruption cannot move both sides together.
 
 ## Review Findings
 

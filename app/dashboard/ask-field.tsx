@@ -135,8 +135,13 @@ const styles = {
     border: 'var(--component-rule-hairline) solid var(--color-rule-strong)',
     borderRadius: 'var(--radius-none)',
     padding: 'var(--space-row)',
+    // 44 on both, matching the submit button rather than sitting at the 24x24
+    // the spec sets for desktop. EXPERIENCE.md asks 44x44 on the phone surface,
+    // and this field is one control with one size at every width. In practice
+    // `flex` decides the width and this is only a floor — but a floor below the
+    // phone requirement is a discrepancy waiting to be discovered on a phone.
     minHeight: '44px',
-    minWidth: '24px',
+    minWidth: '44px',
     flex: '1 1 auto',
   },
   submit: {
