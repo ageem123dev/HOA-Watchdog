@@ -1,10 +1,10 @@
 ---
-baseline_commit: TBD
+baseline_commit: 9b2902f
 ---
 
 # Story 3.6c: The dashboard ask field
 
-Status: backlog
+Status: in-progress
 
 ## Why this story exists
 
@@ -79,25 +79,30 @@ no-intermediate-state claim of AC2 is asserted on where submitting *goes*, not o
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The field (AC1, AC4, AC6)**
-  - [ ] The component, props-driven so its tests need no server — the shape `QueueList` established
-        after a server-action import pulled `next-auth` in and broke the suite's ability to load the
-        file.
-  - [ ] Placeholder copy, and the test that pins it against `ALL_ENTRIES`.
-  - [ ] Focus ring and target size from `core/design/tokens.ts`. Do not invent a second version.
+- [x] **Task 1 — The field (AC1, AC4, AC6)**
+  - [x] The component. It needed **no props at all** — a plain form has nothing to inject, so the
+        `QueueList` shape was not required. Not a client component either.
+  - [x] Placeholder copy, pinned against `ALL_ENTRIES`: the test fails when the catalog gains or
+        loses an entry, which is what makes the copy unable to outgrow it silently.
+  - [x] Focus ring inherited from `BASE_CSS`'s global `:focus-visible`, with a test that this
+        surface does not override `outline`. Target size 44px on both dimensions.
+  - [x] A real `<label>`, because a placeholder disappears the moment somebody types.
 
-- [ ] **Task 2 — Submitting (AC2, AC5)**
-  - [ ] Navigate to `/oracle?q=…` — a `GET` form is the whole mechanism, and it is worth preferring
-        precisely because it needs no client JavaScript to satisfy AC2.
-  - [ ] Blank submits do not navigate. Test that nothing is called and nowhere is reached.
+- [x] **Task 2 — Submitting (AC2, AC5)**
+  - [x] `<form action="/oracle" method="get">` with the field named `q`. No client JavaScript, so
+        AC2 holds by construction — there is no second request that could make an intermediate state.
+  - [x] Blank submits do not navigate: `required` plus `pattern` refuse empty *and* whitespace-only
+        before any navigation, with JavaScript disabled. Asserted via `checkValidity`, which is the
+        real mechanism, plus the positive case in the same breath.
 
-- [ ] **Task 3 — Layout (AC3)**
-  - [ ] Scroll padding if sticky. A test that the field does not sit above focusable content.
+- [x] **Task 3 — Layout (AC3)**
+  - [x] Not sticky, which is the story's own fallback and removes the overlay hazard rather than
+        managing it. A test asserts the form is not positioned, so making it sticky later fails here
+        and whoever does it owes the scroll padding.
 
-- [ ] **Task 4 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npx --no-install tsc --noEmit` against the
-        8-error baseline. `test:db` and `test:py` only if this touches `app/tools/` or `agent/`,
-        which it should not.
+- [x] **Task 4 — The gate**
+  - [x] lint 0 errors, build clean, 2098 tests across 110 files, tsc at its 8-error baseline.
+        `test:db` and `test:py` correctly not run — this touches neither `app/tools/` nor `agent/`.
 
 ## Dev Notes
 
@@ -153,7 +158,49 @@ positioning is what creates the overlay hazard.
 
 ## Dev Agent Record
 
-_To be filled by the dev agent._
+### Test Design — failure modes, written before any code
+
+**B1 — The field exists on the dashboard and is reachable.**
+| Failure mode | Class | Note |
+| --- | --- | --- |
+| Rendered below the findings list, so keyboard users traverse every finding to reach it | GUARD | EXPERIENCE.md: "reachable by keyboard from the top of the dashboard without traversing every finding" |
+| Sticky positioning overlays focusable content | GUARD | WCAG 2.4.11; AC3 |
+| Focus ring removed or overridden locally | GUARD | The ring is global in `BASE_CSS`; the only way to break it here is to override `outline` |
+| Target below 24x24 CSS px | GUARD | Both dimensions — story 3.6b shipped with only the height pinned |
+| Placeholder used as the only label | GUARD | A placeholder disappears on input, leaving a screen reader with no accessible name |
+
+**B2 — Submitting arrives at the Oracle with the question already sent.**
+| Failure mode | Class | Note |
+| --- | --- | --- |
+| Client-side `router.push` produces an intermediate empty state | GUARD | AC2's actual claim. A plain GET form cannot produce one — there is no second request to make it |
+| The question is not URL-encoded, so `&` or `#` truncates it | GUARD | The browser encodes a GET form's fields; building the URL by hand is what breaks this |
+| Input named something other than `q` | GUARD | `/oracle` reads `?q=`; any other name renders the empty state and looks like the app lost the question |
+| Question longer than the Oracle accepts | OUT-OF-SCOPE | `questionFrom` truncates at `MAX_QUESTION_LENGTH`, added in 3.6b |
+
+**B3 — An empty question does nothing.**
+| Failure mode | Class | Note |
+| --- | --- | --- |
+| Blank submit navigates to `/oracle?q=`, showing the empty state — it *appears* to have worked | GUARD | AC5 |
+| Whitespace-only passes a naive emptiness check | GUARD | `required` alone accepts `"   "` |
+| The guard is JavaScript-only, so it does not hold without JS | GUARD | Solved by `required` + `pattern`, which are the browser's own |
+
+**B4 — The placeholder promises only what the catalog serves.**
+| Failure mode | Class | Note |
+| --- | --- | --- |
+| Copy names capabilities AD-5 makes impossible | GUARD | The UX spec's own example lists four; the catalog holds **one** |
+| Copy silently outgrows the catalog as entries are added or removed | GUARD | AC4 wants a test that *fails* when this happens |
+
+### The probe that decided the design
+
+Whether AC5 could be met without JavaScript turned on whether jsdom implements constraint
+validation. It does: `required` plus `pattern` refuses `""` and `"   "` and accepts a real question.
+So the whole surface is a plain GET form and no client component — which also satisfies AC2 by
+construction, since there is no second request that could produce an intermediate state.
+
+**The pattern carries no backslash, deliberately.** The first probe used `.*\S.*` and the attribute
+arrived as `.*S.*` — the backslash was eaten in transit, exactly as `` was on story 3.5. A
+corrupted pattern still compiles and silently matches nothing, so it is invisible in a diff and in a
+green suite. `.*[^ ].*` cannot be corrupted that way.
 
 ## Review Findings
 
@@ -164,3 +211,4 @@ _To be filled by the review._
 | Date | Change |
 | --- | --- |
 | 2026-08-11 | Story created when 3.6b was re-scoped to the Oracle surface alone. Carries UX-DR7 in full. |
+| 2026-08-12 | AD-7 amended in this branch: a rejected answer is shown as an honest failure the reader may retry by asking again. Implemented test-first as a plain GET form with no client JavaScript. Seven sensitivity mutations, all caught. |
