@@ -1,4 +1,4 @@
-import { Pool, type PoolClient } from 'pg'
+import type { PoolClient } from 'pg'
 
 import type {
   AlreadyResolved,
@@ -6,7 +6,7 @@ import type {
   VendorMatched,
   VendorResolution,
 } from '../../core/ports/vendor-resolution'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `VendorResolution` port backed by Postgres.
@@ -24,28 +24,6 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * still standing — is merely untidy, because the next attempt matches it.
  */
 
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
-
 /**
  * Run `work` inside a transaction, rolling back on any throw.
  *
@@ -54,7 +32,7 @@ function getPool(): Pool {
  * resolutions from a dead adapter.
  */
 async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect()
+  const client = await writerPool().connect()
   let released = false
 
   try {

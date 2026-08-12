@@ -1,7 +1,5 @@
-import { Pool } from 'pg'
-
 import type { HeldItem, QuarantineQueue } from '../../core/ports/quarantine-queue'
-import { readReaderDatabaseUrl } from '../auth/env'
+import { readerPool } from './pool'
 
 /**
  * The `QuarantineQueue` port backed by Postgres.
@@ -16,28 +14,6 @@ import { readReaderDatabaseUrl } from '../auth/env'
  * treasurer's decision is the failure AD-8 exists to prevent, so the path that
  * renders the queue is deliberately incapable of emptying it.
  */
-
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readReaderDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 export function createQuarantineQueue(): QuarantineQueue {
   return {
@@ -57,7 +33,7 @@ export function createQuarantineQueue(): QuarantineQueue {
       // by one statement share `now()` to the microsecond, and without it the
       // order is whatever the plan happened to produce. Two renders of an
       // unchanged queue would then disagree with each other.
-      const { rows } = await getPool().query<HeldItem>(
+      const { rows } = await readerPool().query<HeldItem>(
         `select quarantine_item.document_id  as "documentId",
                 document.filename            as "filename",
                 quarantine_item.extracted_name as "extractedName"

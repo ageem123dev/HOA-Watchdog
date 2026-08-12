@@ -1,12 +1,10 @@
-import { Pool } from 'pg'
-
 import {
   MAX_LIMIT,
   type QueryLogFilter,
   type QueryLogReader,
   type QueryLogRecord,
 } from '../../core/ports/query-log-reader'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * Reading the provenance log (story 3.8).
@@ -35,28 +33,6 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * interpolating a caller's string, which on *this* table would be an injection
  * into the audit trail itself.
  */
-
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. Without a listener Node
-      // treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 interface Row {
   id: string
@@ -96,7 +72,7 @@ export function createQueryLogReader(): QueryLogReader {
       const where = conditions.length > 0 ? `where ${conditions.join(' and ')}` : ''
       values.push(limit)
 
-      const { rows } = await getPool().query<Row>(
+      const { rows } = await writerPool().query<Row>(
         `select id, actor_id, executed_at, entry_id, entry_version, parameters, sql_text
            from query_log
            ${where}

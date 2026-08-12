@@ -3,7 +3,7 @@ import { Pool, type PoolClient } from 'pg'
 import type { ExtractionRecord } from '../../core/extraction/record'
 import { StaleExtractionClaimError } from '../../core/ports/document-repository'
 import type { ExtractionRepository } from '../../core/ports/extraction-repository'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `ExtractionRepository` port backed by Postgres.
@@ -17,27 +17,6 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * So the destructive part and the fallible part share a fate: either the whole
  * new set lands, or the previous one is still there afterwards.
  */
-
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', (error) => {
-      console.error('[extraction-repository] idle client error; the pool will discard it', error)
-    })
-  }
-
-  return sharedPool
-}
 
 export interface PostgresExtractionRepositoryOptions {
   /** Injected by tests; production uses the shared pool. */
@@ -57,7 +36,7 @@ interface ExtractionRow {
 export function createPostgresExtractionRepository(
   options: PostgresExtractionRepositoryOptions = {},
 ): ExtractionRepository {
-  const pool = () => options.pool ?? getPool()
+  const pool = () => options.pool ?? writerPool()
 
   return {
     async replace(
@@ -76,6 +55,9 @@ export function createPostgresExtractionRepository(
       }
 
       const client: PoolClient = await pool().connect()
+      // Tracks whether the catch already released, so `finally` does not release
+      // a second time — a double release is its own pool corruption.
+      let released = false
 
       try {
         await client.query('begin')
@@ -145,10 +127,28 @@ export function createPostgresExtractionRepository(
         // The rollback is what makes the previous set survive. Without it the
         // delete stands and the document is left empty — the failure this whole
         // method is shaped around.
-        await client.query('rollback').catch(() => undefined)
+        //
+        // **If the rollback itself fails the connection is still inside a
+        // transaction**, and releasing it normally hands a poisoned client to the
+        // next caller. `release(true)` tells `pg` to destroy it instead. The
+        // three other transactional writers here — payment, roll and
+        // vendor-resolution — already did this; the swallowed `.catch()` on this
+        // one lost the signal entirely.
+        //
+        // Pre-existing, and **this change is what makes it matter**: that client
+        // used to return to this module's own pool, and now returns to the
+        // writer pool nine adapters share. Raised by Argus.
+        let rollbackFailed = false
+        try {
+          await client.query('rollback')
+        } catch {
+          rollbackFailed = true
+        }
+        client.release(rollbackFailed)
+        released = true
         throw error
       } finally {
-        client.release()
+        if (!released) client.release()
       }
     },
 

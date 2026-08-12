@@ -1,5 +1,4 @@
-import { Pool } from 'pg'
-
+import type { Pool } from 'pg'
 import type {
   DocumentRepository,
   ExtractionClaim,
@@ -9,7 +8,7 @@ import type {
   RecordedDocument,
 } from '../../core/ports/document-repository'
 import { StaleExtractionClaimError } from '../../core/ports/document-repository'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `DocumentRepository` port backed by Postgres.
@@ -28,31 +27,6 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * why this adapter defers to it rather than reimplementing it.
  */
 
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    // `pg` emits `error` on the pool when an *idle* client fails. That event has
-    // no request to reject, so with no listener Node treats it as unhandled and
-    // terminates the process — an upload should not take the gateway down
-    // because the database recycled a connection nobody was using.
-    sharedPool.on('error', (error) => {
-      console.error('[document-repository] idle client error; the pool will discard it', error)
-    })
-  }
-
-  return sharedPool
-}
-
 /**
  * How long a document rests after the provider could not be reached.
  *
@@ -70,7 +44,7 @@ export interface PostgresDocumentRepositoryOptions {
 export function createPostgresDocumentRepository(
   options: PostgresDocumentRepositoryOptions = {},
 ): DocumentRepository {
-  const pool = () => options.pool ?? getPool()
+  const pool = () => options.pool ?? writerPool()
 
   return {
     async record(document: NewDocument): Promise<RecordedDocument> {

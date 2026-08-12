@@ -1,7 +1,5 @@
-import { Pool } from 'pg'
-
 import type { AssessmentDirectory, UnitAssessment } from '../../core/ports/assessment-directory'
-import { readReaderDatabaseUrl } from '../auth/env'
+import { readerPool } from './pool'
 
 /**
  * The `AssessmentDirectory` port backed by Postgres.
@@ -16,28 +14,6 @@ import { readReaderDatabaseUrl } from '../auth/env'
  * once a year — and an assessment that existed because the LLM-driven query path
  * asked for one would carry dues nobody owes.
  */
-
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readReaderDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
 
 export function createAssessmentDirectory(): AssessmentDirectory {
   return {
@@ -63,7 +39,7 @@ export function createAssessmentDirectory(): AssessmentDirectory {
       // `migrations/assessment.test.ts` each prove their half fires. No
       // defensive length check is written for a case nothing could produce
       // without dropping one of them.
-      const { rows } = await getPool().query<UnitAssessment>(
+      const { rows } = await readerPool().query<UnitAssessment>(
         `select unit.unit_number             as "unitNumber",
                 assessment.assessment_year   as "assessmentYear",
                 assessment.annual_amount     as "annualAmount",

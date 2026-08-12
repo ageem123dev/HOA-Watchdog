@@ -37,6 +37,7 @@ const poolConstructor = vi.fn()
 vi.mock('pg', () => ({
   Pool: class {
     on = vi.fn()
+    end = vi.fn(async () => {})
     query = vi.fn(async () => ({ rows: [] }))
 
     constructor(config: unknown) {
@@ -45,7 +46,13 @@ vi.mock('pg', () => ({
   },
 }))
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The pools are shared process-wide and cached on `globalThis`, so without
+  // this the second case in this file finds the pool the first one opened and
+  // never re-reads the credential — the assertion would pass or fail on test
+  // order rather than on the adapter.
+  const { closeAllPools } = await import('./pool')
+  await closeAllPools()
   vi.clearAllMocks()
   vi.resetModules()
 })

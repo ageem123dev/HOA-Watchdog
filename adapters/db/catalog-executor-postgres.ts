@@ -1,5 +1,3 @@
-import { Pool } from 'pg'
-
 import { bindValues } from '../../catalog/bind-values'
 import { entryFor } from '../../catalog/registry'
 import { validateParameters } from '../../catalog/validate-parameters'
@@ -9,8 +7,8 @@ import type {
   CatalogExecutor,
 } from '../../core/ports/catalog-executor'
 import type { QueryLog } from '../../core/ports/query-log'
-import { readReaderDatabaseUrl } from '../auth/env'
 import { createQueryLog } from './query-log-postgres'
+import { readerPool } from './pool'
 
 /**
  * The only thing that executes a catalog entry.
@@ -51,30 +49,8 @@ export interface CatalogExecutorDependencies {
   readonly runQuery: CatalogQueryRunner
 }
 
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readReaderDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
-
 const runAgainstReader: CatalogQueryRunner = async (sql, values) => {
-  const { rows } = await getPool().query<Record<string, unknown>>(sql, [...values])
+  const { rows } = await readerPool().query<Record<string, unknown>>(sql, [...values])
 
   return rows
 }

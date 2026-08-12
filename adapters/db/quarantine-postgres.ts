@@ -1,7 +1,5 @@
-import { Pool } from 'pg'
-
 import type { Quarantine } from '../../core/ports/quarantine'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `Quarantine` port backed by Postgres.
@@ -15,28 +13,6 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * settle it, so the unique index settles it and this defers.
  */
 
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
-
 export function createQuarantine(): Quarantine {
   return {
     async hold(documentId: string, extractedName: string): Promise<void> {
@@ -44,7 +20,7 @@ export function createQuarantine(): Quarantine {
       // keyed on the normalised name -- so a second *spelling* of a name this
       // document already waits on is absorbed here too, not just an identical
       // repeat. That is the point of sharing migration 009's rule.
-      await getPool().query(
+      await writerPool().query(
         `insert into quarantine_item (document_id, extracted_name)
          values ($1, $2)
          on conflict (document_id, normalised_name) do nothing`,
@@ -53,7 +29,7 @@ export function createQuarantine(): Quarantine {
     },
 
     async heldNames(documentId: string): Promise<readonly string[]> {
-      const { rows } = await getPool().query<{ extracted_name: string }>(
+      const { rows } = await writerPool().query<{ extracted_name: string }>(
         'select extracted_name from quarantine_item where document_id = $1 order by created_at asc',
         [documentId],
       )

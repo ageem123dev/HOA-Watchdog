@@ -2,7 +2,7 @@ import { Pool, type PoolClient } from 'pg'
 
 import type { RollRow } from '../../core/extraction/roll'
 import { ConflictingTenureError, type RollRepository } from '../../core/ports/roll-repository'
-import { readWriterDatabaseUrl } from '../auth/env'
+import { writerPool } from './pool'
 
 /**
  * The `RollRepository` port backed by Postgres.
@@ -18,30 +18,8 @@ import { readWriterDatabaseUrl } from '../auth/env'
  * size.
  */
 
-let sharedPool: Pool | null = null
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-function getPool(): Pool {
-  if (sharedPool === null) {
-    sharedPool = new Pool({
-      connectionString: readWriterDatabaseUrl(),
-      max: 5,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      statement_timeout: 10_000,
-    })
-
-    sharedPool.on('error', () => {
-      // An idle client failing has no request to reject. With no listener here
-      // Node treats it as unhandled and takes the process down.
-    })
-  }
-
-  return sharedPool
-}
-
 export function createRollRepository(options: { pool?: Pool } = {}): RollRepository {
-  const pool = () => options.pool ?? getPool()
+  const pool = () => options.pool ?? writerPool()
 
   return {
     async apply(documentId: string, rows: readonly RollRow[]): Promise<void> {
