@@ -92,9 +92,30 @@ describe('AC1: who asked what, and when', () => {
     render(<LogTable records={[RECORD]} filtered={false} />)
 
     expect(screen.getByRole('table')).toBeTruthy()
-    for (const heading of ['When', 'Who asked', 'What ran', 'With']) {
+    for (const heading of ['When', 'Who asked', 'What ran', 'With', 'Query']) {
       expect(screen.getByRole('columnheader', { name: heading })).toBeTruthy()
     }
+  })
+
+  it('makes the exact SQL available per row, behind a disclosure', () => {
+    // AC1: "the exact SQL is available per row - it is the column that makes the
+    // record reproducible a year later". It was in the export only until the
+    // close-out audit caught it.
+    render(<LogTable records={[RECORD]} filtered={false} />)
+
+    expect(screen.getByText('select 1')).toBeTruthy()
+  })
+
+  it('keeps the SQL collapsed, so it does not crowd out the scannable columns', () => {
+    // The same argument UX-DR6 makes for the Oracle's query disclosure: it is the
+    // widest value by far. `<details>` rather than a button because this is a
+    // server component - it carries its own state, keyboard operation and
+    // announced state with no JavaScript.
+    const { container } = render(<LogTable records={[RECORD]} filtered={false} />)
+    const details = container.querySelector('details')!
+
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(false)
   })
 
   it('does not put the SQL in the table', () => {
@@ -103,6 +124,7 @@ describe('AC1: who asked what, and when', () => {
     // is where a reader goes to reproduce a query rather than to scan the trail.
     render(<LogTable records={[RECORD]} filtered={false} />)
 
-    expect(screen.queryByText('select 1')).toBeNull()
+    // Not as a column of its own beside the four scannable ones.
+    expect(screen.queryByRole('columnheader', { name: 'sqlText' })).toBeNull()
   })
 })

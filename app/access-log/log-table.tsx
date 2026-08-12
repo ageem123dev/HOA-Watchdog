@@ -64,6 +64,7 @@ export function LogTable({ records, filtered }: LogTableProps) {
           <th scope="col">Who asked</th>
           <th scope="col">What ran</th>
           <th scope="col">With</th>
+          <th scope="col">Query</th>
         </tr>
       </thead>
       <tbody>
@@ -86,6 +87,26 @@ export function LogTable({ records, filtered }: LogTableProps) {
               {record.entryId}@{record.entryVersion}
             </td>
             <td>{JSON.stringify(record.parameters)}</td>
+            {/*
+              AC1's clause that the exact SQL is "available per row". It was in
+              the export only until the close-out audit caught that, which is
+              what the audit is for.
+
+              Behind a `<details>` because it is the widest value by far and
+              would push the four columns a reader actually scans off the
+              screen — the same argument UX-DR6 makes for the Oracle's query
+              disclosure. `<details>` rather than the Oracle's button because
+              this is a server component: the element carries its own open state,
+              keyboard operation and announced state with no JavaScript at all.
+            */}
+            <td>
+              <details>
+                <summary style={styles.summary}>Show</summary>
+                <pre style={styles.sql}>
+                  <code>{record.sqlText}</code>
+                </pre>
+              </details>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -108,5 +129,15 @@ const styles = {
   body: {
     margin: 0,
     maxWidth: '60ch',
+  },
+  summary: {
+    cursor: 'pointer',
+    minHeight: '24px',
+    minWidth: '24px',
+  },
+  sql: {
+    margin: 0,
+    maxWidth: '60ch',
+    whiteSpace: 'pre-wrap',
   },
 } as const

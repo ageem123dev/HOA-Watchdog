@@ -4,7 +4,7 @@ baseline_commit: 721fd67
 
 # Story 3.8: The access log
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -186,10 +186,68 @@ All 8 cases pass.
 
 ## Review Findings
 
-_To be filled by the review._
+### AC audit, done before the MR — and it caught one
+
+| AC | Status | Pinned by |
+| --- | --- | --- |
+| AC1 who asked what and when | met | actor, ISO timestamp with `<time>`, `entry@version`, parameters, **and the SQL per row** |
+| AC2 newest first, bounded | met | db test asserts order; `MAX_LIMIT` clamped in two places |
+| AC3 filterable, in the query | met | page test asserts the filter reaches `recent`; db tests filter by actor and entry |
+| AC4 empty vs filtered-to-nothing | met | each state asserts the other's copy is absent |
+| AC5 exportable, formula-safe | met | ASCII and full-width leaders, whitespace-hidden payloads, BOM, planted payload through the route |
+| AC6 reader cannot write, right credential | met | port has no `record`; connection test names the URL; **db test proves the grant** |
+| AC7 only a signed-in board member | met | page and route each refuse twice and assert the reader was never called |
+| AC8 rendered surface + real database | met | 44 render/unit cases; 10 db cases |
+
+**AC1 was not met when the audit started.** The exact SQL was in the export only, and AC1 says it is
+"available per row". It is now behind a `<details>` in each row — collapsed, because it is the widest
+value by far and would crowd out the four columns a reader scans, which is the same argument UX-DR6
+makes for the Oracle's disclosure. `<details>` rather than a button because this is a server
+component: it brings its own state, keyboard operation and announced state with no JavaScript.
+
+That is the second story running where the audit found something four review rounds had not, and both
+times it was a clause that was *partly* satisfied — the shape reviewers are worst at seeing, because
+the code in front of them looks finished.
+
+### Argus — five rounds
+
+| Finding | Outcome |
+| --- | --- |
+| Export and page disagreed on repeated parameters: `?actorId=A&actorId=B` showed A, downloaded B | **Fixed** |
+| Filter boxes went stale after a soft navigation | **Fixed** — keyed remount |
+| Missing UTF-8 BOM, so Excel mangles a non-ASCII name | **Fixed** |
+| Form dropped `limit` on submit | **Fixed** — hidden input |
+| BOM written as a literal invisible character | **Fixed** — escape |
+| `searchParamsOf` contradicted its own docblock | **Fixed** |
+| CSV formula check bypassable by a leading space | **Fixed** — trims before testing, never trims the value |
+| `limit` above `MAX_LIMIT` mismatched between URL and rows | **Fixed** — bound moved to the port |
+| "The newest-first test is flaky, the id is a random UUID" | **Rejected** — migration 020 defaults `id` to `uuidv7()`, which sorts by creation time. Five consecutive runs pass. |
+| "The pool has no dispose, so the runner hangs" | **Skipped** — the writer adapter beside it has the same pattern and the suite does not hang. A lifecycle for module-scoped pools is one change across every adapter, not a lopsided fix inside this story. |
+
+### CodeRabbit CLI — 17 of 17 files, six findings, five applied
+
+The major one: the formula filter knew only the ASCII four, and Excel with a Japanese IME converts a
+leading full-width `＝` into a formula. **Two separate rounds widened this one defence** — first for
+leading whitespace, then for full-width — which is a fair argument for treating "neutralise formulas"
+as something to keep attacking rather than a box to tick.
+
+Also fixed: `?limit=0.5` returned **one row** (truncation ran before the `> 0` check, and the adapter
+clamped 0 up to 1); `one()` called twice per key; the filter shape restated instead of imported; and
+the remount test strengthened to dirty the input first, which is the real back-button scenario.
+
+Skipped with reason: the hidden `limit` input keeps `value` rather than `defaultValue`. React emits no
+warning for a hidden input (checked), and `value` is correct — it is derived state that must mirror
+the filter, and `defaultValue` would reintroduce the staleness the keyed inputs were fixed for.
+
+### `argus_ingest` could not join this round
+
+The CLI reviewed `b9867ee`; the last Argus run was recorded against the commit before it. Recorded
+rather than presented as a comparison that happened — five of the six findings were below the
+critical/major threshold and would have been filtered out regardless.
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-12 | Story created after 3.7 merged. Two design decisions were already fixed by earlier stories: a separate read port, and the writer credential. |
+| 2026-08-12 | Implemented test-first. Five Argus rounds (8 fixed, 1 rejected, 1 skipped), CodeRabbit CLI 17 of 17 files with 5 of 6 applied. AC audit before the MR found AC1's per-row SQL clause unmet and fixed it. |
