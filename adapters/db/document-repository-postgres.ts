@@ -27,9 +27,6 @@ import { writerPool } from './pool'
  * why this adapter defers to it rather than reimplementing it.
  */
 
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-
 /**
  * How long a document rests after the provider could not be reached.
  *

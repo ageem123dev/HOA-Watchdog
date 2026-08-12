@@ -1,4 +1,3 @@
-
 import type { QueryLog, QueryLogEntry } from '../../core/ports/query-log'
 import { writerPool } from './pool'
 
@@ -16,9 +15,6 @@ import { writerPool } from './pool'
  * could issue is the INSERT below. That is not a comment about discipline — an
  * UPDATE written here fails with a `42501` on the first call.
  */
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 export function createQueryLog(): QueryLog {
   return {

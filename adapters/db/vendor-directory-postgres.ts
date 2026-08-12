@@ -1,4 +1,3 @@
-
 import type {
   VendorDirectory,
   VendorResolution,
@@ -35,9 +34,6 @@ import { writerPool } from './pool'
  * lengthens a list; it cannot merge two vendors.
  */
 const SUGGESTION_FLOOR = 0.3
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 export function createVendorDirectory(): VendorDirectory {
   return {

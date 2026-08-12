@@ -1,4 +1,3 @@
-
 import { bindValues } from '../../catalog/bind-values'
 import { entryFor } from '../../catalog/registry'
 import { validateParameters } from '../../catalog/validate-parameters'
@@ -49,9 +48,6 @@ export interface CatalogExecutorDependencies {
   readonly queryLog: QueryLog
   readonly runQuery: CatalogQueryRunner
 }
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 const runAgainstReader: CatalogQueryRunner = async (sql, values) => {
   const { rows } = await readerPool().query<Record<string, unknown>>(sql, [...values])

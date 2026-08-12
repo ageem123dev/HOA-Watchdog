@@ -46,7 +46,13 @@ vi.mock('pg', () => ({
 }))
 
 describe('the queue adapter connection', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // The pools are shared process-wide and cached on `globalThis`, so
+    // `resetModules` alone does not clear them: the second case in this file
+    // would find the pool the first one opened, never re-read the credential,
+    // and pass on test order rather than on the adapter. Raised by Argus.
+    const { closeAllPools } = await import('./pool')
+    await closeAllPools()
     vi.clearAllMocks()
     vi.resetModules()
   })

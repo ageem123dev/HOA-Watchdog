@@ -16,10 +16,6 @@ import { writerPool } from './pool'
  * including the part that is easy to leave out.
  */
 
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-
-
 /** Absent, not empty. See the note at the held-payment insert. */
 function blankToNull(value: string): string | null {
   return value.trim().length === 0 ? null : value

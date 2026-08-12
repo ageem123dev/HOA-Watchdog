@@ -1,4 +1,3 @@
-
 import {
   MAX_LIMIT,
   type QueryLogFilter,
@@ -34,9 +33,6 @@ import { writerPool } from './pool'
  * interpolating a caller's string, which on *this* table would be an injection
  * into the audit trail itself.
  */
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 interface Row {
   id: string

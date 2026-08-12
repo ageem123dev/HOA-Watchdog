@@ -15,9 +15,6 @@ import { readerPool } from './pool'
  * path that renders the queue is deliberately incapable of emptying it.
  */
 
-
-/** One pool per process, built on first use -- see the `next build` note in `../auth/env.ts`. */
-
 /**
  * The pool is injectable so the SQL can actually be executed in a test.
  *

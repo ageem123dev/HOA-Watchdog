@@ -16,9 +16,6 @@ import { readerPool } from './pool'
  * answer.
  */
 
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-
 /**
  * The tenure columns, spelled once.
  *

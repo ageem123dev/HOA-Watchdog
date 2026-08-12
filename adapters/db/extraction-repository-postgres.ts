@@ -18,9 +18,6 @@ import { writerPool } from './pool'
  * new set lands, or the previous one is still there afterwards.
  */
 
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-
 export interface PostgresExtractionRepositoryOptions {
   /** Injected by tests; production uses the shared pool. */
   readonly pool?: Pool
@@ -58,6 +55,9 @@ export function createPostgresExtractionRepository(
       }
 
       const client: PoolClient = await pool().connect()
+      // Tracks whether the catch already released, so `finally` does not release
+      // a second time — a double release is its own pool corruption.
+      let released = false
 
       try {
         await client.query('begin')
@@ -127,10 +127,28 @@ export function createPostgresExtractionRepository(
         // The rollback is what makes the previous set survive. Without it the
         // delete stands and the document is left empty — the failure this whole
         // method is shaped around.
-        await client.query('rollback').catch(() => undefined)
+        //
+        // **If the rollback itself fails the connection is still inside a
+        // transaction**, and releasing it normally hands a poisoned client to the
+        // next caller. `release(true)` tells `pg` to destroy it instead. The
+        // three other transactional writers here — payment, roll and
+        // vendor-resolution — already did this; the swallowed `.catch()` on this
+        // one lost the signal entirely.
+        //
+        // Pre-existing, and **this change is what makes it matter**: that client
+        // used to return to this module's own pool, and now returns to the
+        // writer pool nine adapters share. Raised by Argus.
+        let rollbackFailed = false
+        try {
+          await client.query('rollback')
+        } catch {
+          rollbackFailed = true
+        }
+        client.release(rollbackFailed)
+        released = true
         throw error
       } finally {
-        client.release()
+        if (!released) client.release()
       }
     },
 

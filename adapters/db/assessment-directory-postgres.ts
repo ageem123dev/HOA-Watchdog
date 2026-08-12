@@ -1,4 +1,3 @@
-
 import type { AssessmentDirectory, UnitAssessment } from '../../core/ports/assessment-directory'
 import { readerPool } from './pool'
 
@@ -15,9 +14,6 @@ import { readerPool } from './pool'
  * once a year — and an assessment that existed because the LLM-driven query path
  * asked for one would carry dues nobody owes.
  */
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 export function createAssessmentDirectory(): AssessmentDirectory {
   return {

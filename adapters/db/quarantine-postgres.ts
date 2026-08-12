@@ -1,4 +1,3 @@
-
 import type { Quarantine } from '../../core/ports/quarantine'
 import { writerPool } from './pool'
 
@@ -13,9 +12,6 @@ import { writerPool } from './pool'
  * about content hashes, and reaches the same answer: only the database can
  * settle it, so the unique index settles it and this defers.
  */
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 export function createQuarantine(): Quarantine {
   return {

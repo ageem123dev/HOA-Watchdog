@@ -1,4 +1,3 @@
-
 import type { HeldItem, QuarantineQueue } from '../../core/ports/quarantine-queue'
 import { readerPool } from './pool'
 
@@ -15,9 +14,6 @@ import { readerPool } from './pool'
  * treasurer's decision is the failure AD-8 exists to prevent, so the path that
  * renders the queue is deliberately incapable of emptying it.
  */
-
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
 
 export function createQuarantineQueue(): QuarantineQueue {
   return {

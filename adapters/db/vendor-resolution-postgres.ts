@@ -24,9 +24,6 @@ import { writerPool } from './pool'
  * still standing — is merely untidy, because the next attempt matches it.
  */
 
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-
 /**
  * Run `work` inside a transaction, rolling back on any throw.
  *

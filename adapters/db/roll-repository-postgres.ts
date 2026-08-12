@@ -18,9 +18,6 @@ import { writerPool } from './pool'
  * size.
  */
 
-
-/** One pool per process, built on first use — see the `next build` note in `../auth/env.ts`. */
-
 export function createRollRepository(options: { pool?: Pool } = {}): RollRepository {
   const pool = () => options.pool ?? writerPool()
 
