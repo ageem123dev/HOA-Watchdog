@@ -34,14 +34,22 @@ import { executable } from './executable-sql'
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
-const configured = Boolean(writerUrl && readerUrl)
+/**
+ * All three, and `DATABASE_URL` is not optional.
+ *
+ * Cleanup runs as the owner because the writer cannot delete — that is the point
+ * of the migration — so without the admin URL these tests would run, pass, and
+ * leave every row they wrote behind. An `owner` that might be null makes the
+ * leak silent; requiring it here makes the absence say so. Raised by Argus.
+ */
+const configured = Boolean(writerUrl && readerUrl && adminUrl)
 
 const describeWithDatabase = configured ? describe : describe.skip
 
 if (!configured) {
   console.warn(
-    '\n  finding migration tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL and ' +
-      'WATCHDOG_READER_DATABASE_URL must both be set.\n',
+    '\n  finding migration tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL, ' +
+      'WATCHDOG_READER_DATABASE_URL and DATABASE_URL must all be set.\n',
   )
 }
 
@@ -93,17 +101,15 @@ describe('the migration says what it does', () => {
 
 describeWithDatabase('the key AD-13 names', () => {
   let writer: Client
-  let owner: Client | null = null
+  let owner: Client
   let memberId: string
   let subject: string
 
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
-    if (adminUrl) {
-      owner = new Client({ connectionString: adminUrl })
-      await owner.connect()
-    }
+    owner = new Client({ connectionString: adminUrl })
+    await owner.connect()
     const { rows } = await writer.query<{ id: string }>(
       `insert into board_member (email, password_hash)
        values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
@@ -114,9 +120,9 @@ describeWithDatabase('the key AD-13 names', () => {
 
   afterAll(async () => {
     // As the owner: the writer cannot delete, which is the property under test.
-    await owner?.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner?.query(`delete from board_member where email like $1`, [`finding-${RUN_PREFIX}%`])
-    await owner?.end()
+    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    await owner.query(`delete from board_member where email like $1`, [`finding-${RUN_PREFIX}%`])
+    await owner.end()
     await writer.end()
   })
 
@@ -211,16 +217,14 @@ describeWithDatabase('the key AD-13 names', () => {
 
 describeWithDatabase('the lifecycle is one-way', () => {
   let writer: Client
-  let owner: Client | null = null
+  let owner: Client
   let memberId: string
 
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
-    if (adminUrl) {
-      owner = new Client({ connectionString: adminUrl })
-      await owner.connect()
-    }
+    owner = new Client({ connectionString: adminUrl })
+    await owner.connect()
     const { rows } = await writer.query<{ id: string }>(
       `insert into board_member (email, password_hash)
        values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
@@ -230,9 +234,9 @@ describeWithDatabase('the lifecycle is one-way', () => {
   })
 
   afterAll(async () => {
-    await owner?.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner?.query(`delete from board_member where email like $1`, [`life-${RUN_PREFIX}%`])
-    await owner?.end()
+    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    await owner.query(`delete from board_member where email like $1`, [`life-${RUN_PREFIX}%`])
+    await owner.end()
     await writer.end()
   })
 
@@ -301,16 +305,14 @@ describeWithDatabase('the lifecycle is one-way', () => {
 
 describeWithDatabase('never dismissed is a grant, not a habit', () => {
   let writer: Client
-  let owner: Client | null = null
+  let owner: Client
   let id: string
 
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
-    if (adminUrl) {
-      owner = new Client({ connectionString: adminUrl })
-      await owner.connect()
-    }
+    owner = new Client({ connectionString: adminUrl })
+    await owner.connect()
     const { rows } = await writer.query<{ id: string }>(
       `insert into finding (finding_type, subject_id, period, evidence)
        values ($1, gen_random_uuid(), '[2026-08-01,2026-09-01)'::daterange, '{}'::jsonb)
@@ -321,8 +323,8 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
   })
 
   afterAll(async () => {
-    await owner?.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner?.end()
+    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    await owner.end()
     await writer.end()
   })
 
@@ -338,10 +340,27 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
   })
 
-  it('refuses TRUNCATE to the writer', async () => {
-    await expect(writer.query('truncate finding')).rejects.toMatchObject({
-      code: INSUFFICIENT_PRIVILEGE,
-    })
+  it('refuses TRUNCATE to the writer, inside a transaction it rolls back', async () => {
+    // TRUNCATE has no scoped form — there is no `where` to add — so the DELETE
+    // test's fix does not transfer, and the same comment two tests up was
+    // written while this one sat here emptying the table on exactly the run
+    // where the grant had regressed. Raised by Argus.
+    //
+    // TRUNCATE is transactional in Postgres, so the statement can still be
+    // *executed* — which is what makes this a test of the privilege rather than
+    // of the catalogue — while the rollback keeps a regression from destroying
+    // the table it was about to report on.
+    await writer.query('begin')
+    try {
+      await expect(writer.query('truncate finding')).rejects.toMatchObject({
+        code: INSUFFICIENT_PRIVILEGE,
+      })
+    } finally {
+      // In `finally` rather than after the assertion: if the privilege has
+      // regressed, the assertion above throws, and the rollback that undoes the
+      // damage would be the line that never ran.
+      await writer.query('rollback')
+    }
   })
 
   it('still allows UPDATE, or the lifecycle could not happen', async () => {

@@ -30,12 +30,19 @@ import { createFindingRegister, createFindingReviewer } from './finding-postgres
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
-const configured = Boolean(writerUrl)
+/**
+ * Both, and `DATABASE_URL` is not optional.
+ *
+ * Cleanup runs as the owner because the writer cannot delete, so an absent admin
+ * URL would leave these tests passing and every row they wrote behind — a leak
+ * with nothing to report it. Raised by Argus.
+ */
+const configured = Boolean(writerUrl && adminUrl)
 
 const describeWithDatabase = configured ? describe : describe.skip
 
 if (!configured) {
-  console.warn('\n  finding adapter tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL must be set.\n')
+  console.warn('\n  finding adapter tests SKIPPED: WATCHDOG_WRITER_DATABASE_URL and DATABASE_URL must both be set.\n')
 }
 
 const CHECK_VIOLATION = '23514'
@@ -45,7 +52,7 @@ const FOREIGN_KEY_VIOLATION = '23503'
 const RUN_PREFIX = `a${randomBytes(4).toString('hex')}`
 
 let writer: Client
-let owner: Client | null = null
+let owner: Client
 let memberId: string
 
 /**
@@ -71,12 +78,21 @@ function observation(overrides: Partial<FindingObservation> = {}): FindingObserv
   }
 }
 
+/**
+ * A board member, scoped to this run by email.
+ *
+ * The scope is not cosmetic. Cleanup deletes findings for this run's prefix and
+ * then the members it seeded; an unscoped `finding-adapter-%` would also match
+ * members left by an earlier aborted run, whose findings are still there and
+ * still reference them — a `23503` thrown out of `afterAll`, which reads as a
+ * failing suite for a reason that has nothing to do with the code.
+ */
 async function seedMember(): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
     `insert into board_member (email, password_hash)
      values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
      returning id`,
-    [`finding-adapter-${randomBytes(6).toString('hex')}@example.test`],
+    [`finding-adapter-${RUN_PREFIX}-${randomBytes(4).toString('hex')}@example.test`],
   )
   const id = rows[0]?.id
   if (id === undefined) throw new Error('seeding a board member returned no id')
@@ -105,17 +121,15 @@ describeWithDatabase('raising a finding', () => {
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
-    if (adminUrl) {
-      owner = new Client({ connectionString: adminUrl })
-      await owner.connect()
-    }
+    owner = new Client({ connectionString: adminUrl })
+    await owner.connect()
     memberId = await seedMember()
   })
 
   afterAll(async () => {
-    await owner?.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner?.query(`delete from board_member where email like $1`, ['finding-adapter-%'])
-    await owner?.end()
+    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
+    await owner.end()
     await writer.end()
   })
 
@@ -219,17 +233,15 @@ describeWithDatabase('reviewing a finding', () => {
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
-    if (adminUrl) {
-      owner = new Client({ connectionString: adminUrl })
-      await owner.connect()
-    }
+    owner = new Client({ connectionString: adminUrl })
+    await owner.connect()
     memberId = await seedMember()
   })
 
   afterAll(async () => {
-    await owner?.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner?.query(`delete from board_member where email like $1`, ['finding-adapter-%'])
-    await owner?.end()
+    await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
+    await owner.end()
     await writer.end()
   })
 
