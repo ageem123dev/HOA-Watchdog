@@ -2,6 +2,8 @@ import { readRows, readTable } from '../extraction/tabular'
 import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
+import type { FindingRegister } from '../ports/finding'
+import type { InvoiceReader } from '../ports/invoice-reader'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
 import type { PaymentRepository } from '../ports/payment-repository'
 import type { Quarantine } from '../ports/quarantine'
@@ -10,6 +12,7 @@ import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
+import { runDuplicateDetection } from './run-detection'
 import { recordRoll } from './record-roll'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
@@ -96,6 +99,16 @@ export interface IngestDependencies {
   readonly vendors?: VendorDirectory
   /** Where a name nobody recognises waits for a human (AD-8). */
   readonly quarantine?: Quarantine
+
+  /**
+   * Duplicate detection, run once the records are stored (story 4.2).
+   *
+   * Optional for the same reason as everything above it, and absent it is the
+   * same real gap: an uploaded invoice is stored and never compared against what
+   * came before.
+   */
+  readonly invoices?: InvoiceReader
+  readonly findings?: FindingRegister
   /**
    * Asked which unit a deposit reference names. Never asked to create one.
    *
@@ -225,6 +238,11 @@ async function ingestOne(
       await recordPayments(recorded.id, reading.records, deps)
 
       await deps.extractions.replace(recorded.id, reading.records)
+
+      // After the write, because detection reads the records back to compare
+      // them against earlier documents. It cannot throw: the document really was
+      // ingested. See `run-detection.ts`.
+      await runDuplicateDetection(recorded.id, deps)
     } catch (error) {
       deps.onError?.(error, filename)
 

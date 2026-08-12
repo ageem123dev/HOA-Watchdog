@@ -5,6 +5,8 @@ import {
 } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
+import type { FindingRegister } from '../ports/finding'
+import type { InvoiceReader } from '../ports/invoice-reader'
 import type { Extractor } from '../ports/extractor'
 import type { PaymentRepository } from '../ports/payment-repository'
 import type { Quarantine } from '../ports/quarantine'
@@ -12,6 +14,7 @@ import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
+import { runDuplicateDetection } from './run-detection'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -85,6 +88,15 @@ export interface ExtractDocumentDependencies {
   readonly units?: UnitDirectory
   /** Where an attributed payment and a held one are written together. */
   readonly payments?: PaymentRepository
+  /**
+   * Duplicate detection, run once the records are stored (story 4.2).
+   *
+   * Optional like `units` and `payments` before them, and the absence is the
+   * same real gap: without these a document is read, stored, and never checked
+   * against what came before, and nothing fails.
+   */
+  readonly invoices?: InvoiceReader
+  readonly findings?: FindingRegister
   readonly onError?: (error: unknown, documentId: string) => void
 }
 
@@ -260,6 +272,15 @@ export async function extractDocument(
       // transaction as the state change, which is why nothing releases it here:
       // a second release could free a document a *later* claimant already holds.
       await deps.extractions.replace(documentId, result.records, { token: claim.token })
+
+      // **After** the write, unlike the hold and the payments, because detection
+      // reads the records back to compare them against earlier documents and
+      // before `replace` they are not there to read. It therefore does not get
+      // the self-healing the two above rely on, and it must not throw: the
+      // document really was read, and failing the upload for a bookkeeping step
+      // would report a success as a failure. `run-detection.ts` says what that
+      // costs.
+      await runDuplicateDetection(documentId, deps)
 
       return { outcome: 'read', documentId, records: result.records.length }
     } catch (error) {
