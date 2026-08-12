@@ -107,26 +107,22 @@ describe('the migration says what it does', () => {
 describeWithDatabase('the key AD-13 names', () => {
   let writer: Client
   let owner: Client
-  let memberId: string
   let subject: string
 
+  // No board member is seeded here. Nothing in this suite reviews anything —
+  // the key is about `(finding_type, subject_id, period)` — and the seed was
+  // copied from the lifecycle suite below, where a reviewer is genuinely
+  // needed. Raised by Argus; a fixture nothing reads is a row nothing explains.
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
-    const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
-      [`finding-${RUN_PREFIX}@example.test`],
-    )
-    memberId = rows[0]!.id
   })
 
   afterAll(async () => {
     // As the owner: the writer cannot delete, which is the property under test.
     await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
-    await owner.query(`delete from board_member where email like $1`, [`finding-${RUN_PREFIX}%`])
     await owner.end()
     await writer.end()
   })

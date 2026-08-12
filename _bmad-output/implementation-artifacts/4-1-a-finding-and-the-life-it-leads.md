@@ -4,7 +4,7 @@ baseline_commit: acf90a0
 
 # Story 4.1: A finding, and the life it leads
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -283,7 +283,51 @@ Two mutations on the port, both caught: adding `dismiss()` failed two tests, and
 
 ## Review Findings
 
-_To be filled by the review._
+### Argus, three rounds
+
+Every finding was verified against the real file before it was acted on, and every one was real.
+
+**Round 1 — three findings, all in the tests, none in the code.**
+
+1. *(high)* `migrations/finding.test.ts` ran a bare `truncate finding` to prove the writer cannot
+   truncate. On the one run where the grant has regressed — the only run where the test does anything
+   at all — it would have emptied the table before reporting it. Two tests above it sat a comment
+   congratulating the DELETE test for being scoped. **Fixed**, then fixed again in round 2.
+2. *(medium, ×2)* Both test files read `DATABASE_URL` for the owner connection used in teardown, but
+   neither counted it as required. With the role URLs set and `DATABASE_URL` absent, the suites ran,
+   passed, and left every row behind — `owner?.` made the skipped cleanup invisible. **Fixed**:
+   `DATABASE_URL` is part of `configured`, and `owner` is a `Client` rather than a `Client | null`,
+   which removes the silent path instead of documenting it.
+
+Found while fixing those: the adapter test seeded members as `finding-adapter-<random>` and cleaned
+up on `finding-adapter-%`, which also matches members from an aborted earlier run whose findings still
+reference them — a `23503` out of `afterAll`. The emails now carry the run prefix.
+
+**Round 2 — the repo had already answered the TRUNCATE question, and better.**
+
+The transactional rollback worked, and was verified by granting `TRUNCATE` and watching the rows
+survive. It was still the wrong answer: `query-log.test.ts` settled this shape with *"the privilege
+set is the same proof without the loaded gun"*, and the open action item from story 3.1 names the
+exact-set assertion over `information_schema` as the fix wherever it appears. I had read that item —
+the DELETE test two lines up cites it — and invented a third approach for the case it calls out. A
+denied `TRUNCATE` also still takes an `ACCESS EXCLUSIVE` lock on a table other files use concurrently.
+
+**Fixed**: exact-set assertions over `table_privileges` *and* `column_privileges`, because a
+column-level grant does not appear in the first — `roles.test.ts` records a live `GRANT UPDATE (note)`
+that a table-level assertion reported as clean. Sensitivity, both directions: `grant truncate` fails
+the privilege assertion; `grant delete` fails it *and* the behavioural refusal.
+
+*(low)* `__dirname` under `type: module`. **Skipped with a reason**: the open action item asks for one
+choice across the repo rather than per file, so converting this file alone is the churn the item
+exists to prevent. Recorded in a comment at the use site.
+
+**Round 3 — two `info` findings, both accepted.**
+
+1. The `the key AD-13 names` suite seeded a `board_member` no test in it reads — copied from the
+   lifecycle suite below, where a reviewer is genuinely needed. **Removed**, with its cleanup.
+2. The story was still `in-progress` while going to review. **Fixed** in the story file and
+   `sprint-status.yaml`. Argus also proposed moving `epic-4` to `review`; **not done** — an epic takes
+   `backlog`/`in-progress`/`done`, and seven stories of Epic 4 remain.
 
 ## Change Log
 
