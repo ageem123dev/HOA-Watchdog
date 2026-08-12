@@ -99,8 +99,17 @@ create table finding (
   -- covers four years it did not cover when it was written. A register of
   -- evidence cannot hold an entry that quietly grows. A detector meaning "still
   -- ongoing" bounds it at today, which says the same thing and keeps saying it.
+  -- `isfinite` as well as `is not null`, because "no end" has two spellings.
+  -- `[2026-06-01,infinity)` has an upper bound that is not null, so the null
+  -- checks alone passed it -- the second spelling of a period getting through,
+  -- which is the exact failure the daterange decision was made to prevent,
+  -- arriving inside the constraint written to prevent it. Raised by Argus.
+  --
+  -- Both checks stay: `isfinite(null)` is null, and a null check result passes.
   constraint finding_period_is_bounded check (
-    not isempty(period) and lower(period) is not null and upper(period) is not null
+    not isempty(period)
+    and lower(period) is not null and upper(period) is not null
+    and isfinite(lower(period)) and isfinite(upper(period))
   ),
 
   constraint finding_state_is_known check (state in ('unreviewed', 'reviewed')),
@@ -139,9 +148,45 @@ create index finding_state_recent_idx on finding (state, raised_at desc);
 -- still be able to correct what a finding says, whether or not somebody has read
 -- it. A rule that froze the reviewed row entirely would satisfy both refusals
 -- and break the amend half of AD-13's contract.
-create function finding_refuse_unreview() returns trigger
+-- **Both ends of the lifecycle, not just the update.** The first version of this
+-- trigger fired on UPDATE alone, and a plain INSERT carrying state = 'reviewed'
+-- with both attribution columns filled in walked straight past it:
+-- finding_review_is_attributed finds that row perfectly consistent, and the
+-- writer holds INSERT on every column. Measured — the row was accepted,
+-- reviewed, and attributed to a member who had never seen it.
+--
+-- "A detector cannot raise a finding already reviewed" was therefore held by
+-- FindingObservation omitting the fields, which is the same shape as trusting
+-- the application not to issue a DELETE. Raised by CodeRabbit.
+create function finding_lifecycle_is_one_way() returns trigger
 language plpgsql as $$
 begin
+  if tg_op = 'INSERT' then
+    -- A finding is raised unreviewed or not at all. The attribution columns
+    -- belong to the reviewer, and are reachable only through an update this
+    -- trigger has already seen.
+    if new.state <> 'unreviewed'
+       or new.reviewed_by is not null
+       or new.reviewed_at is not null then
+      raise exception 'a finding cannot be raised already reviewed';
+    end if;
+
+    return new;
+  end if;
+
+  -- AC1: "a durable record with a **stable identity**". `finding_identity`
+  -- refuses a second row for the same key and says nothing about moving an
+  -- existing row to a different one -- and one UPDATE could change the type,
+  -- the subject and the period at once, turning a finding about one unit into a
+  -- finding about another with its history intact. That is worse than a
+  -- duplicate: the register still looks complete. Raised by Argus.
+  if new.finding_type is distinct from old.finding_type
+     or new.subject_id is distinct from old.subject_id
+     or new.period     is distinct from old.period then
+    raise exception
+      'finding % is keyed on its type, subject and period; those are its identity', old.id;
+  end if;
+
   if old.state = 'reviewed'
      and (new.state       is distinct from old.state
        or new.reviewed_by is distinct from old.reviewed_by
@@ -155,8 +200,8 @@ end;
 $$;
 
 create trigger finding_lifecycle_is_one_way
-  before update on finding
-  for each row execute function finding_refuse_unreview();
+  before insert or update on finding
+  for each row execute function finding_lifecycle_is_one_way();
 
 -- "Never dismissed" is a grant, not a habit.
 --

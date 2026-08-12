@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { AlreadyReviewedError, FindingNotFoundError } from './finding'
-import { declaredMembers } from './declared-members'
+import { declaredMembers, neutralise } from './declared-members'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(HERE, 'finding.ts'), 'utf8')
@@ -142,7 +142,8 @@ describe('epic 4 does not depend on epic 3', () => {
 
   const REPO_ROOT = join(HERE, '..', '..')
 
-  const SHIPPED = ['core/ports/finding.ts', 'adapters/db/finding-postgres.ts']
+  const PORT = join(REPO_ROOT, 'core', 'ports', 'finding.ts')
+  const ADAPTER = join(REPO_ROOT, 'adapters', 'db', 'finding-postgres.ts')
 
   /**
    * Resolved to paths, never matched as text.
@@ -161,37 +162,94 @@ describe('epic 4 does not depend on epic 3', () => {
   /** Bare package specifiers that are a model however they are reached. */
   const MODEL_PACKAGES = ['gemini', 'anthropic', 'openai']
 
-  it.each(SHIPPED)('%s reaches nothing on the model path', (file) => {
-    const path = join(REPO_ROOT, file)
-    const text = readFileSync(path, 'utf8')
-    const specifiers = [...text.matchAll(MODULE_SPECIFIER)].map(([, specifier]) => specifier ?? '')
+  /**
+   * Every module specifier in `text`, **with comments blanked first**.
+   *
+   * The blanking is not tidiness. Without it this file's own prose — *"dismissed"
+   * is indistinguishable from "hidden by whoever did not want it seen"* —
+   * matches `from '…'`, and the port reports one import when it has none. That
+   * mattered because the "did we read any imports at all?" control below was
+   * satisfied by that sentence: the guard written to stop a vacuous pass was
+   * itself passing on a comment. Raised by CodeRabbit.
+   *
+   * `neutralise` is `declared-members.ts`'s, which keeps string literals while
+   * blanking comments and has its own tests for the way a naive `//` strip eats
+   * the closing quote of `'https://example.com'`.
+   */
+  function specifiersIn(text: string): string[] {
+    const { commentsBlanked } = neutralise(text)
 
-    // The control: a file whose imports were not read at all would pass every
-    // assertion below, and both of these files do import something.
-    expect(specifiers.length).toBeGreaterThan(0)
+    return [...commentsBlanked.matchAll(MODULE_SPECIFIER)].map(([, specifier]) => specifier ?? '')
+  }
 
-    // `@/` is the tsconfig alias for the repo root, so it is a relative import
-    // wearing a different hat and has to resolve the same way.
+  /**
+   * The specifiers in `text` that reach the model path, resolved from `from`.
+   *
+   * `@/` is the tsconfig alias for the repo root, so it is a relative import
+   * wearing a different hat and has to resolve the same way.
+   */
+  function modelPathImports(text: string, from: string): string[] {
+    const specifiers = specifiersIn(text)
+
     const resolved = specifiers.map((specifier) =>
       specifier.startsWith('.')
-        ? resolve(dirname(path), specifier)
+        ? resolve(dirname(from), specifier)
         : specifier.startsWith('@/')
           ? resolve(REPO_ROOT, specifier.slice(2))
           : specifier,
     )
 
-    for (const { directory, why } of MODEL_PATH) {
-      expect(
-        resolved.filter((target) => target === directory || target.startsWith(`${directory}${sep}`)),
-        why,
-      ).toEqual([])
-    }
+    const reachesDirectory = resolved.filter((target) =>
+      MODEL_PATH.some(({ directory }) => target === directory || target.startsWith(`${directory}${sep}`)),
+    )
+    const reachesPackage = specifiers.filter((specifier) =>
+      MODEL_PACKAGES.some((name) => specifier.toLowerCase().includes(name)),
+    )
 
-    for (const name of MODEL_PACKAGES) {
-      expect(specifiers.filter((s) => s.toLowerCase().includes(name)), `${name} is a model`).toEqual(
-        [],
-      )
-    }
+    return [...reachesDirectory, ...reachesPackage]
+  }
+
+  /**
+   * The control, and it is a planted violation rather than a count.
+   *
+   * A count of "did we find any imports" is what a comment can satisfy. What
+   * cannot be faked is the scanner finding something that is really there, in
+   * each spelling a model dependency could arrive in — the shape
+   * `boundary.test.ts` adopted after five member forms escaped its first
+   * version.
+   */
+  it.each([
+    ['a relative import', "import '../answer/grounded-answer'"],
+    ['an aliased import', "import { chat } from '@/adapters/agent/chat-client'"],
+    ['a require', "const entries = require('../../catalog/entries')"],
+    ['a dynamic import', "await import('@/core/answer/grounded-answer')"],
+    ['a model package', "import { GoogleGenAI } from '@google/gemini'"],
+  ])('sees a model dependency arriving as %s', (_label, line) => {
+    expect(modelPathImports(line, PORT)).toHaveLength(1)
+  })
+
+  it('does not mistake prose for an import', () => {
+    // The defect itself, kept as a case. This sentence is really in the port.
+    const prose = '/** "dismissed" is indistinguishable from "hidden by whoever did not want it seen". */'
+
+    expect(specifiersIn(prose)).toEqual([])
+  })
+
+  it('the port imports nothing at all', () => {
+    // Stronger than "nothing on the model path", and true: `finding.ts` is types
+    // and two error classes. Asserting the empty set means a future edit that
+    // adds *any* dependency to this port has to come through this test, which is
+    // the right place to argue about it.
+    expect(specifiersIn(readFileSync(PORT, 'utf8'))).toEqual([])
+  })
+
+  it('the adapter reaches nothing on the model path', () => {
+    const text = readFileSync(ADAPTER, 'utf8')
+
+    // A real control now: this file genuinely imports, and the count is taken
+    // after comments are blanked.
+    expect(specifiersIn(text).length).toBeGreaterThan(0)
+    expect(modelPathImports(text, ADAPTER)).toEqual([])
   })
 })
 

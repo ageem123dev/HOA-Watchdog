@@ -202,6 +202,29 @@ describeWithDatabase('the key AD-13 names', () => {
     })
   })
 
+  it('refuses a period that ends at infinity', async () => {
+    // **The bound defeated by spelling, which is this table's own theme.**
+    // `finding_period_is_bounded` was written to refuse a window with no end,
+    // and `[2026-06-01,infinity)` has one: `upper()` returns `infinity`, which
+    // is not null, so the constraint passed it. Measured. It means the same
+    // thing as the unbounded form and had to be refused the same way — the
+    // second spelling of a period getting through is exactly the failure the
+    // `daterange` decision was made to prevent.
+    const type = `${RUN_PREFIX}_inf`
+
+    await expect(raise(type, '[2026-06-01,infinity)')).rejects.toMatchObject({
+      code: CHECK_VIOLATION,
+    })
+  })
+
+  it('refuses a period that begins at the dawn of time', async () => {
+    const type = `${RUN_PREFIX}_neginf`
+
+    await expect(raise(type, '[-infinity,2026-06-01)')).rejects.toMatchObject({
+      code: CHECK_VIOLATION,
+    })
+  })
+
   it('refuses a period with no end', async () => {
     // An unbounded upper bound is a window whose meaning changes with the date
     // it is read on: "from June onwards", read in 2030, covers four years it did
@@ -354,6 +377,77 @@ describeWithDatabase('the lifecycle is one-way', () => {
     await expect(
       writer.query(`update finding set reviewed_by = $2 where id = $1`, [id, rows[0]!.id]),
     ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
+  })
+
+  it('refuses a finding raised already reviewed', async () => {
+    // **The same defect at the other door, and the trigger did not cover it.**
+    // The first version fired `before update` only, so nothing stopped a plain
+    // INSERT carrying `state = 'reviewed'` with both attribution columns filled
+    // in: `finding_review_is_attributed` finds that row perfectly consistent,
+    // and the writer holds INSERT on every column. Measured — the row was
+    // accepted, reviewed, attributed to a member who had never seen it.
+    //
+    // "A detector cannot raise a finding already reviewed" was therefore held by
+    // `FindingObservation` omitting the fields, which is the shape this
+    // migration rejects twice over. Raised by CodeRabbit on the merge request,
+    // one round after the audit that found the UPDATE half.
+    await expect(
+      writer.query(
+        `insert into finding
+           (finding_type, subject_id, period, evidence, state, reviewed_by, reviewed_at)
+         values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb,
+                 'reviewed', $2, now())`,
+        [`${RUN_PREFIX}_prereviewed`, memberId],
+      ),
+    ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
+  })
+
+  it('refuses a raised finding that names a reviewer without saying so', async () => {
+    // The narrower spelling, which the check constraint already refuses — kept
+    // because the trigger now runs first and must not swallow it into a
+    // different error, and because a future edit to either could leave this
+    // combination reachable through the gap between them.
+    await expect(
+      writer.query(
+        `insert into finding (finding_type, subject_id, period, evidence, reviewed_by)
+         values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb, $2)`,
+        [`${RUN_PREFIX}_halfreviewed`, memberId],
+      ),
+    ).rejects.toMatchObject({ code: expect.stringMatching(/^(23514|P0001)$/) })
+  })
+
+  /**
+   * AC1 says "a durable record with a **stable identity**", and until this the
+   * stability was the adapter's habit rather than the table's rule.
+   *
+   * `finding_identity` refuses a *second* row for the same key; nothing refused
+   * moving an *existing* row to a different one. Measured: a single UPDATE
+   * changed the type, the subject and the period at once, and the finding about
+   * one unit became a finding about another with its history intact. That is
+   * worse than a duplicate, because the register still looks complete.
+   *
+   * These live beside the lifecycle cases because one trigger enforces both.
+   * Raised by Argus, on the round after the lifecycle gap was closed.
+   */
+  it.each([
+    ['the subject', 'subject_id = gen_random_uuid()'],
+    ['the kind of finding it is', `finding_type = '${RUN_PREFIX}_moved'`],
+    ['the period it concerns', `period = '[2030-01-01,2031-01-01)'::daterange`],
+  ])('refuses to change %s', async (_label, assignment) => {
+    const id = await raised(`identity_${assignment.slice(0, 6)}`)
+
+    await expect(
+      writer.query(`update finding set ${assignment} where id = $1`, [id]),
+    ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
+  })
+
+  it('still lets a finding be raised the ordinary way', async () => {
+    // The positive control for the two refusals above. A trigger that refused
+    // every INSERT would satisfy both and make the table write-only in the
+    // wrong direction — every test in this file that raises a finding would
+    // fail, which is a loud enough alarm, but this states the requirement where
+    // the rule is.
+    await expect(raised('ordinary')).resolves.toBeTruthy()
   })
 
   it('still lets a reviewed finding have its evidence amended', async () => {
