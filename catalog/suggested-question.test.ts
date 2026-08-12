@@ -19,7 +19,23 @@ describe('the examples cannot drift from the catalog', () => {
     // Both directions in one assertion. Adding an entry without writing its
     // example fails here; leaving an example behind after removing its entry
     // fails here too. Either alone would let the copy rot in one direction.
-    expect([...EXAMPLE_IDS].sort()).toEqual(ALL_ENTRIES.map((e) => e.id).sort())
+    //
+    // Deduplicated, because `ALL_ENTRIES` holds one object per *version* and
+    // `indexEntries` accepts two versions of one id — verified, not assumed.
+    // Comparing the raw list would fail the day `dues_status@2` is published,
+    // which is a false alarm about copy that is still perfectly correct: the
+    // example belongs to the entry, not to the version. Raised by Argus.
+    const registered = [...new Set(ALL_ENTRIES.map((e) => e.id))].sort()
+
+    expect([...EXAMPLE_IDS].sort()).toEqual(registered)
+  })
+
+  it('still fails when a genuinely new entry has no example', () => {
+    // The positive control for the dedup above: relaxing the comparison must not
+    // relax what it is for. A second *id* is still a gap in the copy.
+    const ids = [...new Set([...ALL_ENTRIES.map((e) => e.id), 'vendor_totals'])].sort()
+
+    expect([...EXAMPLE_IDS].sort()).not.toEqual(ids)
   })
 
   it('names an entry that actually exists', () => {

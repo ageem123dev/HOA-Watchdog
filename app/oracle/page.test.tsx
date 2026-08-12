@@ -49,6 +49,20 @@ const TURN = {
 }
 
 beforeEach(() => {
+  // `resetAllMocks` is safe for the throwing `redirect` above, and the reason is
+  // worth writing down because it looks unsafe and has been raised as a bug.
+  //
+  // In this Vitest, `mockReset` restores the implementation passed to
+  // `vi.fn(impl)` rather than clearing it — so `redirect` keeps throwing. What
+  // it *does* discard is an implementation configured at runtime, like a
+  // `mockResolvedValue` set inside a test, which is exactly what has to go
+  // between tests so one test's stub cannot satisfy the next one's assertions.
+  //
+  // Verified with a probe rather than read from release notes. If it were false,
+  // `redirect` would return `undefined`, the unauthenticated path would carry on
+  // to `session.user.id` and throw a `TypeError`, and the two redirect tests
+  // below would fail — they assert the `NEXT_REDIRECT` message specifically, not
+  // merely that something rejected.
   vi.resetAllMocks()
   entryFor.mockReturnValue({ sql: 'select 1' })
 })
