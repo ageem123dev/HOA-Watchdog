@@ -32,6 +32,11 @@ vi.mock('next/navigation', () => ({ redirect: (path: string) => redirect(path) }
 vi.mock('./ask', () => ({ askOracle: (input: unknown) => askOracle(input) }))
 vi.mock('@/catalog/registry', () => ({
   entryFor: (id: string, version: number) => entryFor(id, version),
+  // Story 3.7's no-catalog-match surface derives its suggested question from the
+  // real registry, so the mock has to carry it. A mock that omits an export the
+  // component reaches for fails loudly here, which is the good outcome — the
+  // quiet version returns undefined and the surface renders half of itself.
+  ALL_ENTRIES: [{ id: 'dues_status', version: 1 }],
 }))
 
 const TURN = {
@@ -118,7 +123,7 @@ describe('what a failure leaves behind', () => {
     render(await renderPage('What does 4B owe?'))
 
     expect(logged).toHaveBeenCalledWith('oracle turn failed', boom)
-    expect(screen.getByText(/records could not be reached/i)).toBeTruthy()
+    expect(screen.getByText(/reach the records just now/i)).toBeTruthy()
   })
 
   it('does not log a no-catalog-match, the most likely daily failure', async () => {
@@ -130,7 +135,7 @@ describe('what a failure leaves behind', () => {
     render(await renderPage('What is the weather?'))
 
     expect(logged).not.toHaveBeenCalled()
-    expect(screen.getByText(/can't answer that one/i)).toBeTruthy()
+    expect(screen.getByText(/nothing is missing from them/i)).toBeTruthy()
   })
 
   it('does not log an ungrounded answer either', async () => {
@@ -153,7 +158,7 @@ describe('what a failure leaves behind', () => {
     render(await renderPage('What does 4B owe?'))
 
     expect(logged).not.toHaveBeenCalled()
-    expect(screen.getByText(/could not produce an answer I can show the records for/i)).toBeTruthy()
+    expect(screen.getByText(/back with the records/i)).toBeTruthy()
   })
 
   it('keeps the question on screen through a failure, per UX-DR11', async () => {
