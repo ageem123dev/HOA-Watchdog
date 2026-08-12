@@ -260,14 +260,14 @@ previous Argus pass.
 
 ### The bug that had been hiding in the prose
 
-The stale paragraph Argus flagged cited `` as the story 3.5 precedent, and that `` was sitting in
+The stale paragraph Argus flagged cited `\b` as the story 3.5 precedent, and that `\b` was sitting in
 the file **as a literal backspace character** — invisible in every diff since it was written. A
 paragraph about backslash corruption had itself been corrupted by the mechanism it described, and
 neither the docs suite nor two review rounds saw it, because a backspace renders as nothing and
 breaks no test.
 
 The cause is now understood rather than merely observed: a command string loses one level of
-backslash escaping before the shell receives it, so `\S` reaches a file as `\S` and JavaScript then
+backslash escaping before the shell receives it, so `\\S` reaches a file as `\S` and JavaScript then
 reads `'\S'` as `'S'`. Anything carrying a backslash is written with the editing tool from here on.
 
 ## Change Log

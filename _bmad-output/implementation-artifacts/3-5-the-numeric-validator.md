@@ -298,8 +298,8 @@ Each was verified by running the code before it was fixed.
   with or without the fix**, and would have shipped as cover for a regression it could not see.
 - *Round 2, the fix diff.* Adding `/` to the adjacency separators fixed slash dates and blinded the
   tokenizer to `$999.00/2026` entirely. A false rejection traded for a false acceptance.
-- *A bug invisible in every diff.* The `` anchors in the replacement pattern were written through a
-  Python heredoc, where `` is the **backspace** escape. The regex compiled, matched nothing, and
+- *A bug invisible in every diff.* The `\b` anchors in the replacement pattern were written through a
+  Python heredoc, where `\b` is the **backspace** escape. The regex compiled, matched nothing, and
   rendered identically to a correct one everywhere. Caught only because a test stayed red after a
   change that should have turned it green; every tracked source was then swept for control
   characters.
