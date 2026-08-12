@@ -74,9 +74,12 @@ describe('AC1: who asked what, and when', () => {
     const { container } = render(<LogTable records={[RECORD]} filtered={false} />)
     const time = container.querySelector('time')!
 
-    expect(time.getAttribute('dateTime') ?? time.getAttribute('datetime')).toBe(
-      '2026-08-12T01:00:00.000Z',
-    )
+    // One call, not a `??` hedge across two spellings. `getAttribute` lowercases
+    // the name for HTML elements, so the second branch could never run — an
+    // unreachable fallback in a test reads as uncertainty about what the DOM
+    // does, and hides which spelling is actually being asserted. Raised by
+    // CodeRabbit.
+    expect(time.getAttribute('datetime')).toBe('2026-08-12T01:00:00.000Z')
   })
 
   it('renders one row per record beneath the header', () => {
@@ -118,13 +121,20 @@ describe('AC1: who asked what, and when', () => {
     expect(details.open).toBe(false)
   })
 
-  it('does not put the SQL in the table', () => {
-    // Deliberate: the SQL is the widest column by far and would push the four
-    // that a reader actually scans off the screen. It is in the export, which
-    // is where a reader goes to reproduce a query rather than to scan the trail.
-    render(<LogTable records={[RECORD]} filtered={false} />)
+  it('keeps the SQL inside the disclosure rather than loose in a cell', () => {
+    // The previous version of this asserted no column was named `sqlText`,
+    // which was never possible and so proved nothing — the vacuous-guard shape
+    // this project has shipped ten times. Raised by CodeRabbit.
+    //
+    // What actually matters is containment: the SQL must sit *within* the
+    // `<details>`, because that is what keeps it collapsed. A cell rendering it
+    // beside the disclosure would satisfy every other test here — the text is
+    // present, the details element exists and is closed — while putting the
+    // widest value in the product back on screen.
+    const { container } = render(<LogTable records={[RECORD]} filtered={false} />)
+    const details = container.querySelector('details')!
+    const sql = screen.getByText('select 1')
 
-    // Not as a column of its own beside the four scannable ones.
-    expect(screen.queryByRole('columnheader', { name: 'sqlText' })).toBeNull()
+    expect(details.contains(sql)).toBe(true)
   })
 })
