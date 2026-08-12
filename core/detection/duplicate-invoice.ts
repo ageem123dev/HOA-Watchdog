@@ -42,6 +42,16 @@ export interface InvoiceReading {
   readonly issuedOn: string | null
   /** The decimal string, exactly as the database rendered it. */
   readonly amount: string | null
+
+  /**
+   * The day the document arrived, `YYYY-MM-DD`.
+   *
+   * Document-level rather than invoice-level, and here because the finding's
+   * period needs a month even when the invoice refuses to state one. Never used
+   * for matching -- two invoices uploaded on the same day are not thereby
+   * related.
+   */
+  readonly documentUploadedAt: string
 }
 
 /**

@@ -203,6 +203,7 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
     documentNumber: 'INV-1001',
     issuedOn: '2026-03-14',
     amount: '250.00',
+    documentUploadedAt: '2026-06-01',
     ...overrides,
   })
 

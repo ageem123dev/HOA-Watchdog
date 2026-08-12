@@ -42,6 +42,7 @@ interface Row {
   document_number: string | null
   issued_on: string | null
   amount: string | null
+  uploaded_at: string
 }
 
 /**
@@ -58,7 +59,8 @@ const COLUMNS = `e.id,
        e.vendor_name,
        e.document_number,
        to_char(e.issued_on, 'YYYY-MM-DD') as issued_on,
-       e.total_amount::text as amount`
+       e.total_amount::text as amount,
+       to_char(d.uploaded_at, 'YYYY-MM-DD') as uploaded_at`
 
 function toReading(row: Row): InvoiceReading {
   return {
@@ -68,6 +70,7 @@ function toReading(row: Row): InvoiceReading {
     documentNumber: row.document_number,
     issuedOn: row.issued_on,
     amount: row.amount,
+    documentUploadedAt: row.uploaded_at,
   }
 }
 
@@ -77,6 +80,7 @@ export function createInvoiceReader(): InvoiceReader {
       const { rows } = await writerPool().query<Row>(
         `select ${COLUMNS}
            from extraction e
+           join document d on d.id = e.document_id
           where e.document_id = $1
             and e.document_kind = 'invoice'
           order by e.id`,
