@@ -83,7 +83,13 @@ export async function GET(request: Request): Promise<Response> {
 function searchParamsOf(url: URL): Record<string, string | string[]> {
   const params: Record<string, string | string[]> = {}
   for (const key of new Set(url.searchParams.keys())) {
-    params[key] = url.searchParams.getAll(key)
+    const values = url.searchParams.getAll(key)
+    // A single value is a string, not a one-element array — which is what Next.js
+    // actually hands a page, and therefore what this claims to produce. The
+    // behaviour was already correct because `filterFrom` unwraps either shape,
+    // but a helper whose docblock and return type disagree is one the next
+    // caller is entitled to be wrong about. Raised by Argus.
+    params[key] = values.length === 1 ? values[0]! : values
   }
 
   return params

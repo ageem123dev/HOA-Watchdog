@@ -112,6 +112,14 @@ export function createQueryLogReader(): QueryLogReader {
       // timestamp — and an unstable order makes a paged audit trail show the
       // same row twice or skip one, which is the sort of defect that only
       // appears under load and destroys trust in the record.
+      //
+      // **And the tie-break is itself chronological**, which is what makes it a
+      // fix rather than merely a stabiliser: migration 020 defaults `id` to
+      // `uuidv7()`, and a v7 UUID sorts by creation time. A random v4 here would
+      // give a stable order that was nonetheless the wrong one — two queries a
+      // millisecond apart shown in an arbitrary sequence, in the document
+      // somebody reads to establish what happened first. Raised as a flakiness
+      // risk by Argus, on the assumption the id was random; it is not.
       return rows.map((row) => ({
         id: row.id,
         actorId: row.actor_id,
