@@ -54,8 +54,18 @@ export default async function AccessLogPage({
         <label htmlFor="actor" style={styles.label}>
           Who asked
         </label>
+        {/*
+          `key` tied to the value, not decoration. These are uncontrolled inputs,
+          so React keeps their DOM value across a re-render and `defaultValue` is
+          only read on mount — after a soft navigation (the back button, most
+          obviously) the box would still show the previous filter while the URL
+          and the rows below it said something else. Keying on the filter
+          remounts the input, which is the only thing that makes `defaultValue`
+          reflect the new URL. Raised by Argus.
+        */}
         <input
           id="actor"
+          key={`actor-${filter.actorId ?? ''}`}
           name="actorId"
           type="search"
           defaultValue={filter.actorId ?? ''}
@@ -67,6 +77,7 @@ export default async function AccessLogPage({
         </label>
         <input
           id="entry"
+          key={`entry-${filter.entryId ?? ''}`}
           name="entryId"
           type="search"
           defaultValue={filter.entryId ?? ''}

@@ -31,8 +31,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const url = new URL(request.url)
-  const params = Object.fromEntries(url.searchParams.entries())
-  const records = await createQueryLogReader().recent(filterFrom(params))
+  const records = await createQueryLogReader().recent(filterFrom(searchParamsOf(url)))
 
   return new Response(accessLogCsv(records), {
     status: 200,
@@ -47,4 +46,26 @@ export async function GET(request: Request): Promise<Response> {
       'cache-control': 'no-store',
     },
   })
+}
+
+/**
+ * The query string in the shape a Next.js page receives it.
+ *
+ * `Object.fromEntries(url.searchParams.entries())` is the obvious spelling and
+ * it is **wrong here**: it keeps the *last* value of a repeated parameter, while
+ * the page is handed arrays and `filterFrom` takes the *first*. So
+ * `?actorId=A&actorId=B` showed a board member records for A and downloaded
+ * records for B — which is precisely the invariant this endpoint exists to hold,
+ * broken in the direction that hands over more than was on screen.
+ *
+ * `getAll` keeps both paths reading the same value from the same URL. Raised by
+ * Argus.
+ */
+function searchParamsOf(url: URL): Record<string, string | string[]> {
+  const params: Record<string, string | string[]> = {}
+  for (const key of new Set(url.searchParams.keys())) {
+    params[key] = url.searchParams.getAll(key)
+  }
+
+  return params
 }

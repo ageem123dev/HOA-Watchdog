@@ -95,6 +95,17 @@ describe('what it sends', () => {
     )
   })
 
+  it('reads a repeated parameter the way the page does', async () => {
+    // The page is handed arrays by Next.js and `filterFrom` takes the first.
+    // This endpoint built its params with `Object.fromEntries`, which keeps the
+    // *last* — so `?actorId=A&actorId=B` displayed A's records and downloaded
+    // B's. That is the invariant this endpoint exists to hold, broken in the
+    // direction that hands over more than was on screen. Raised by Argus.
+    await get('https://example.test/access-log/export?actorId=user-A&actorId=user-B')
+
+    expect(recent).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'user-A' }))
+  })
+
   it('neutralises a formula that reached the trail through a parameter', async () => {
     // End to end rather than only in the CSV module's own test: this is the path
     // the payload actually travels, and a route that built its own string would
