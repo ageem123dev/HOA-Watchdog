@@ -241,6 +241,42 @@ one that re-raises on every upload is the defect story 4.1 was ordered first to 
 
 ## Dev Agent Record
 
+### The identity decision, settled by probe — both obvious answers are wrong
+
+`subject_id` is one uuid and a duplicate is a pair. The two candidates each fail, and the database
+said so rather than reasoning:
+
+```
+{"multiInvoiceDocuments": [{"document_id": "019fe8de…", "invoice_rows": "3"}],
+ "extractionIdDefault":   {"column_default": "uuidv7()"},
+ "documentHasStableKey":  ["content_hash", "uploaded_at"]}
+```
+
+- **`extraction.id` is not stable.** It defaults to `uuidv7()`, and migration 006 replaces a
+  document's rows set-shaped on re-ingest — *"every record this document produced is deleted and the
+  new reading inserted"*. So the same invoice gets a new id every upload, the key changes, and
+  re-ingestion raises **a second finding for a finding already raised**. That is the sentence AD-13
+  forbids, and the reason story 4.1 was ordered first. An id that looks like the natural subject is
+  the one that breaks the guarantee the epic is built on.
+- **`document_id` alone collapses.** A real document in this database carries **three** invoice rows,
+  and migration 006 says that is the design, not an accident. Three duplicates on one upload would
+  key onto one row and two would be lost.
+
+**Decided: the subject is the document, the period is the calendar month of the invoice's
+`issued_on`, and the collapse is the design.** One finding per document per month, whose evidence
+lists *every* matching pair. Nothing is lost — the pairs are in the evidence — and it is also the
+truer sentence for a board member: "this upload contains invoices you appear to have paid already" is
+one thing to review, not three. It keeps migration 021's comment (*"a duplicate-invoice finding is
+about a document"*) correct rather than needing an amendment.
+
+`document_id` and `uploaded_at` are both stable across re-ingest, so re-running detection lands on the
+same key and AD-13's no-op holds — which is the property that has to be proven, not assumed.
+
+**Where an invoice carries no date**, the period falls back to the month the *document* was uploaded.
+FR-6's fuzzy rule is "similar invoice number, identical amount" and names no date, so requiring one
+would narrow the criterion; and "when this was noticed" is an honest answer for a window the invoice
+refuses to state. The fallback is a decision to write down, not a default to slip in.
+
 ### Test Design — Task 1, `normaliseInvoiceNumber`
 
 One behaviour: fold an invoice number to a comparison key. No I/O, total on any string.
