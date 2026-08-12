@@ -5,7 +5,7 @@ merge_request: 48
 
 # Story 3.6c: The dashboard ask field
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -277,3 +277,4 @@ reads `'\S'` as `'S'`. Anything carrying a backslash is written with the editing
 | --- | --- |
 | 2026-08-11 | Story created when 3.6b was re-scoped to the Oracle surface alone. Carries UX-DR7 in full. |
 | 2026-08-12 | AD-7 amended in this branch: a rejected answer is shown as an honest failure the reader may retry by asking again. Implemented test-first as a plain GET form with no client JavaScript. Seven sensitivity mutations, all caught. |
+| 2026-08-12 | MR !48 reviewed clean by CodeRabbit on the first pass — 10 files, no actionable comments, zero threads. Gate re-run on the final head. Status → done, meaning ready-to-merge on an unmerged branch. |
