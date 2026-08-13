@@ -51,11 +51,28 @@ export interface DuesReader {
    * something. Story 2.3 kept the schedule clock-free for the same reason; a
    * detector that reached for `now()` would undo it.
    *
-   * The cost is stated rather than discovered: a deposit uploaded in January
-   * covering the previous year is evaluated against the *new* year's schedule.
-   * Re-running detection for a chosen year is the fix, not a heuristic here.
+   * It answers *when*, never *which year* — see `yearsCoveredBy`.
    */
   evaluationDateFor(documentId: string): Promise<string | null>
+
+  /**
+   * Every assessment year this deposit's payments fall in.
+   *
+   * **Without this, a late payment never corrects the finding it settles.** The
+   * detector originally evaluated only the year of the upload date, and the
+   * limitation was written down as acceptable: a deposit arriving in January
+   * covering December would be checked against the new year. Argus pushed on it
+   * and the consequence is worse than the note admitted — the *previous* year's
+   * shortfall finding is never re-evaluated, so a board member goes on reading
+   * arrears that have been paid. Migration 021 makes a finding one-way, so
+   * nothing else would ever correct it.
+   *
+   * Returning the years the money is *for*, rather than the year it arrived in,
+   * is what lets the register be amended where the debt actually was. The
+   * detector unions this with the evaluation year, so a deposit carrying no
+   * payments at all still checks the current roll.
+   */
+  yearsCoveredBy(documentId: string): Promise<readonly number[]>
   /**
    * Every unit assessed for `year`, with what it owed and what arrived.
    *

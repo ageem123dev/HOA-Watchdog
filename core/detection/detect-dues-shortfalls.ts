@@ -59,44 +59,56 @@ export async function detectDuesShortfalls(
   const evaluatedOn = await deps.dues.evaluationDateFor(documentId)
   if (evaluatedOn === null) return { raised: 0, amended: 0, subjectsChecked: 0 }
 
-  const year = Number(evaluatedOn.slice(0, 4))
-  const units = await deps.dues.duesForYear(year, evaluatedOn)
+  // **Every year this deposit's money is for, not only the year it arrived
+  // in.** A payment settling last year's arrears has to amend last year's
+  // finding; nothing else ever will, because migration 021 makes a finding
+  // one-way. The evaluation year is always included, so a deposit carrying no
+  // payments still checks the current roll.
+  const covered = await deps.dues.yearsCoveredBy(documentId)
+  const years = [...new Set([Number(evaluatedOn.slice(0, 4)), ...covered])].sort((a, b) => a - b)
 
   let raised = 0
   let amended = 0
+  let subjectsChecked = 0
 
-  for (const unit of units) {
-    const shortfall = shortfallAgainst(unit.assessment, unit.payments, evaluatedOn)
-    if (shortfall === null) continue
+  for (const year of years) {
+    const units = await deps.dues.duesForYear(year, evaluatedOn)
+    subjectsChecked += units.length
 
-    const outcome: RaisedFinding = await deps.findings.raise({
-      findingType: UNIT_DUES_SHORTFALL,
-      subjectId: unit.unitId,
-      period: yearRange(year),
-      evidence: {
-        ...shortfall,
+    for (const unit of units) {
+      const shortfall = shortfallAgainst(unit.assessment, unit.payments, evaluatedOn)
+      if (shortfall === null) continue
+
+      const outcome: RaisedFinding = await deps.findings.raise({
+        findingType: UNIT_DUES_SHORTFALL,
+        subjectId: unit.unitId,
+        period: yearRange(year),
+        evidence: {
+          ...shortfall,
         // As a treasurer would recognise it, and who to ask. The holder is the
         // one who held it **at the evaluation date**, which is the whole point
         // of reading it by containment rather than by recency.
-        unitNumber: unit.unitNumber,
-        holderName: unit.holderName,
-        // **UX-DR24's denominator is `instalmentsDue`**, which arrives above in
-        // `...shortfall`. A `unitsChecked: units.length` sat here until Argus
-        // read it against its own comment: the comment said "how many
-        // instalments this rests on" and the value was the size of the whole
-        // roll — a number about the association stored inside a finding about
-        // one unit, and one that changes every time a unit is assessed. Storing
-        // it would have amended every finding's evidence whenever the roll grew.
+          unitNumber: unit.unitNumber,
+          holderName: unit.holderName,
+          // **UX-DR24's denominator is `instalmentsDue`**, which arrives above in
+          // `...shortfall`. A `unitsChecked: units.length` sat here until Argus
+          // read it against its own comment: the comment said "how many
+          // instalments this rests on" and the value was the size of the whole
+          // roll — a number about the association stored inside a finding
+          // about one unit, and one that changes every time a unit is
+          // assessed. Storing it would have amended every finding's evidence
+          // whenever the roll grew.
         //
-        // 4.2 and 4.3 do carry a count of what was compared, and correctly:
-        // their findings are keyed on a document, so "of the 3 invoices on this
-        // upload" is about the subject. Here it is not.
-      },
-    })
+          // 4.2 and 4.3 do carry a count of what was compared, and correctly:
+          // their findings are keyed on a document, so "of the 3 invoices on
+          // this upload" is about the subject. Here it is not.
+        },
+      })
 
-    if (outcome.wasAlreadyKnown) amended += 1
-    else raised += 1
+      if (outcome.wasAlreadyKnown) amended += 1
+      else raised += 1
+    }
   }
 
-  return { raised, amended, subjectsChecked: units.length }
+  return { raised, amended, subjectsChecked }
 }

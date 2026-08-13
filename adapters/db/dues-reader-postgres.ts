@@ -66,6 +66,22 @@ export function createDuesReader(): DuesReader {
       return rows[0]?.on ?? null
     },
 
+    async yearsCoveredBy(documentId: string): Promise<readonly number[]> {
+      // `extract` off the `date` column rather than off a timestamp: `paid_on`
+      // is a calendar day, so no timezone can move it across a year boundary.
+      // `::int` because `extract` returns numeric, which `pg` hands back as a
+      // string, and a string year would build the period range `"2026"-01-01`.
+      const { rows } = await writerPool().query<{ year: number }>(
+        `select distinct extract(year from p.paid_on)::int as year
+           from payment p
+          where p.document_id = $1
+          order by year`,
+        [documentId],
+      )
+
+      return rows.map((row) => row.year)
+    },
+
     async duesForYear(year: number, on: string): Promise<readonly UnitDues[]> {
       // Bound parameters throughout (AD-8). `on` reaches a `::date` cast and a
       // range containment, both of which would be an injection point spelled

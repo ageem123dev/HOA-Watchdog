@@ -27,10 +27,19 @@ function dues(overrides: Partial<UnitDues> = {}): UnitDues {
   }
 }
 
-function reader(units: readonly UnitDues[], evaluatedOn: string | null = '2026-04-01'): DuesReader {
+function reader(
+  units: readonly UnitDues[],
+  evaluatedOn: string | null = '2026-04-01',
+  covered: readonly number[] = [],
+): DuesReader {
   return {
     evaluationDateFor: vi.fn(async () => evaluatedOn),
-    duesForYear: vi.fn(async () => units),
+    yearsCoveredBy: vi.fn(async () => covered),
+    duesForYear: vi.fn(async (year: number) =>
+      // Keyed on the year so a multi-year deposit can hand back different rolls,
+      // which is the whole point of the case below.
+      units.filter((unit) => unit.assessment.assessmentYear === year),
+    ),
   }
 }
 
@@ -125,6 +134,50 @@ describe('raising a shortfall', () => {
     // kind moves with the evidence.
     expect(findings.raised[0]!.evidence).toMatchObject({ kind: 'not-recorded' })
     expect(findings.raised[1]!.evidence).toMatchObject({ kind: 'below-expected' })
+  })
+
+  it('evaluates every year the deposit carries money for', async () => {
+    // **The defect Argus found, and it was worse than the note admitting it.**
+    // A deposit arriving in January settling last year's arrears was only ever
+    // checked against the new year, so the *previous* year's finding was never
+    // re-evaluated — and migration 021 makes a finding one-way, so nothing else
+    // would ever correct it. A board member would go on reading arrears that
+    // had been paid.
+    const findings = register()
+    const lastYear = dues({
+      unitId: 'u-1',
+      assessment: { annualAmount: '1200.00', billingCycle: 'annual', assessmentYear: 2025 },
+    })
+    const thisYear = dues({
+      unitId: 'u-1',
+      assessment: { annualAmount: '1200.00', billingCycle: 'annual', assessmentYear: 2026 },
+    })
+
+    const outcome = await detectDuesShortfalls(DOCUMENT, {
+      // Uploaded in January 2026, carrying a payment dated 2025.
+      dues: reader([lastYear, thisYear], '2026-01-10', [2025]),
+      findings: findings.port,
+    })
+
+    expect(findings.raised.map((request) => request.period)).toEqual([
+      { from: '2025-01-01', until: '2026-01-01' },
+      { from: '2026-01-01', until: '2027-01-01' },
+    ])
+    // Accumulated across the years, not overwritten by the last one — a
+    // mutation replacing `+=` with `=` survived until this line existed.
+    expect(outcome).toMatchObject({ raised: 2, subjectsChecked: 2 })
+  })
+
+  it('checks the current roll even when the deposit carries no payments', async () => {
+    const findings = register()
+
+    await detectDuesShortfalls(DOCUMENT, {
+      dues: reader([dues()], '2026-04-01', []),
+      findings: findings.port,
+    })
+
+    expect(findings.raised).toHaveLength(1)
+    expect(findings.raised[0]!.period).toEqual({ from: '2026-01-01', until: '2027-01-01' })
   })
 
   it('raises one finding per unit and counts them all', async () => {

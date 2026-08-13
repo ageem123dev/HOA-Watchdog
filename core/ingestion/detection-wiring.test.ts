@@ -107,6 +107,7 @@ describe('a missing reader silences its own detector and no other', () => {
 
   const emptyDues = (): DuesReader => ({
     evaluationDateFor: vi.fn(async () => '2026-04-01'),
+    yearsCoveredBy: vi.fn(async () => []),
     duesForYear: vi.fn(async () => []),
   })
 
