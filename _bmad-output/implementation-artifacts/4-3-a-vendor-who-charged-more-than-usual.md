@@ -1,5 +1,6 @@
 ---
 baseline_commit: f676fb1
+merge_request: 55
 ---
 
 # Story 4.3: A vendor who charged more than usual
@@ -253,7 +254,43 @@ assumption is what a later story would be tempted to build a cache on.
 
 ## Review Findings
 
-_To be filled by the review._
+Reviewed as a whole-story diff (`main...HEAD`) three times by Argus and once by the CodeRabbit CLI,
+plus the acceptance-criteria audit. Every finding was verified against the real file before being
+acted on.
+
+### Taken
+
+| # | From | Finding |
+| --- | --- | --- |
+| 1 | AC audit | `EvidenceSpike extends VendorSpike`, so the threshold was stored once per spike *and* once per finding. A document with three spikes wrote the constant four times. |
+| 2 | Argus | The sum-zero guard was covered by a test that never reached it: the case used credits, which `cents` drops before the sum, so it passed on the minimum-history guard instead. |
+| 3 | Argus | Dead `|| '0'` fallback — `padEnd` always returns two characters. |
+| 4 | CodeRabbit | **A throwing `onError` escaped `attempt`**, so the second detector never ran and the exception reached an ingestion path that had already stored the document's records. |
+| 5 | CodeRabbit | `cents` promised null for anything "not positive" and returned `0n` for zero. A 0.00 prior dragged the average down and manufactured a spike. |
+| 6 | CodeRabbit | A seeded day component would have produced `2026-03-010` on a tenth history entry. |
+
+Finding 5 made the sum-zero guard from finding 2 unreachable, so it was deleted and its test
+re-pointed at the invariant that replaced it — a division by zero now fails as a test rather than as an
+ingestion.
+
+### Refused
+
+| From | Finding | Why |
+| --- | --- | --- |
+| Argus | **[high]** `trailingInvoices` carries an `e.document_id != $2` clause inherited from duplicate detection | No such clause exists. The query binds three parameters and none is a document id; it was reconstructed from `priorCandidates`, seen partly. The behaviour Argus wanted is what the code already does, and `vendor-spike-detection.test.ts` seeds exactly that pair. |
+| Argus | **[low]** the two detectors run sequentially rather than through `Promise.all` | True, and kept. Each issues a query per invoice against a pool of five shared connections. The duplication that costs something is not the ordering: both open with `invoicesOn(documentId)`, so that query runs twice either way. Recorded in the code. |
+| CodeRabbit | **[trivial]** N+1 window query per invoice | Bounded by invoices per document — the largest here carries three — and `detectDuplicateInvoices` has had the same shape since 4.2. Batching changes the port. Recorded in the code. |
+
+### What the review round cost, and what found what
+
+Argus missed both of CodeRabbit's majors; `argus_ingest` scored the round and wrote two lessons. The
+acceptance-criteria audit found something no engine did, for the fifth story running — and the test it
+retired was one no mutation could have caught, because an expired premise fails loudly when you break
+the code and therefore looks healthy.
+
+Twice this story a test of mine passed for the wrong reason, and both times something else had to point
+it out: the refusal case that measured against a baseline where refusing and finding-nothing were
+indistinguishable, and the eleven db tests that shared a vendor and therefore shared a window.
 
 ## Change Log
 
