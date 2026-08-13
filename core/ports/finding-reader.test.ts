@@ -75,13 +75,25 @@ describe('the FindingReader port', () => {
     // confuse this, and none exists here. `declared-members.ts` refuses to grow
     // into a type parser for the same reason, and the exact-list assertion
     // above is what pins the signatures.
-    const returnTypeOf = (member: string): string =>
-      (member.replace(/[;,]\s*$/, '').split(':').pop() ?? '')
-        // A function-typed property (`byId: (id: string) => Promise<…>`) keeps
-        // its arrow after the split, and every check below would then read the
-        // arrow rather than the type and reject a design that is correct.
-        .replace(/^\s*\([^)]*\)\s*=>\s*/, '')
-        .trim()
+    const returnTypeOf = (member: string): string => {
+      const line = member.replace(/[;,]\s*$/, '')
+
+      // **The last colon, then the arrow inside what that leaves — in that
+      // order.** The colon gets the return type of a method
+      // (`byId(id: string): T`) and of a plain property (`latest: T`) alike.
+      // The arrow then unwraps a function-typed property, whose own parameters
+      // carry colons that would otherwise win: `latest: (id: string) => T`
+      // reduced to `string) => T`, which failed the union check and rejected a
+      // correct design.
+      //
+      // Doing the arrow first instead — the previous version — reaches for a
+      // *parameter's* arrow on a method taking a callback
+      // (`find(cb: (f: T) => boolean): Promise<…>`), which is the same
+      // false-positive one level further out. Both raised by CodeRabbit.
+      const last = (line.split(':').pop() ?? '').trim()
+
+      return last.includes('=>') ? (last.split('=>').pop() ?? '').trim() : last
+    }
 
     // **No member is optional, and that is checked before anything else.** A
     // `byId?:` adds `undefined` to whatever follows the colon, so the union
@@ -94,13 +106,20 @@ describe('the FindingReader port', () => {
     )
     expect(optional, 'an optional member admits undefined').toEqual([])
 
+    // A list of them, in either spelling. Excluded on purpose: a list answers
+    // "none" with `[]` and owes nobody a null. `Array<…>` and `ReadonlyArray<…>`
+    // join `T[]` here because leaving them out made this reject a correct
+    // design rather than admit a wrong one — the same false-positive direction
+    // as the arrow above. Raised by CodeRabbit, having been skipped once on the
+    // grounds that this codebase spells lists `readonly T[]`; it still does,
+    // and the exclusion is a line of regex.
+    const isList = /\b(?:Readonly)?Array<\s*FindingDetail\b|\bFindingDetail\[\]/
+
     // Anything handing back a single detail, however the union is ordered and
-    // whether or not it is awaited. An array — `Promise<readonly
-    // FindingDetail[]>` — is excluded on purpose: a list answers "none" with
-    // `[]` and owes nobody a null.
+    // whether or not it is awaited.
     const returningOne = declaredMembers(findingSource, 'FindingReader')
       .map((member) => ({ member, returns: returnTypeOf(member) }))
-      .filter(({ returns }) => /\bFindingDetail\b(?!\[)/.test(returns))
+      .filter(({ returns }) => /\bFindingDetail\b/.test(returns) && !isList.test(returns))
 
     expect(returningOne.length).toBeGreaterThan(0)
 

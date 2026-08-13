@@ -705,7 +705,7 @@ test is the port's null-contract property check, rewritten in round 1. Taken in 
   `readonly latest: Promise<FindingDetail>` was dropped before the assertion saw it. This is the
   defect shape `declared-members.ts`'s own header records five review rounds finding — a
   function-typed property is how a capability sneaks onto a port. Also: an unanchored assertion let
-  `| null | undefined` pass, and `` finds no boundary inside `autoResolve`.
+  `| null | undefined` pass, and a word-boundary escape finds no boundary inside `autoResolve`.
 - **Argus, on *that* fix:** an optional `latest?:` drops its `?` in the split and smuggles
   `undefined` back in; a function-typed property keeps its arrow and was falsely rejected.
 
@@ -723,6 +723,42 @@ honours the contract, so passing is right.
 member syntaxes on a two-member port. The exact-list assertion is the primary guard; this property
 test is the thing that keeps biting after someone deliberately edits that list. Further parser
 hypotheticals here are declined.
+
+#### MR !60, CodeRabbit round 3 — 1 of 1 taken, and the guard caught me
+
+`Actionable comments posted: 1` on `74eef48..ef10aa39`. Same test, same parser, and one genuinely
+new false positive: a function-typed property **with parameters**,
+`latest: (id: string) => Promise<…>`, splits on the *parameter's* colon and leaves
+`string) => Promise<…>`. Fixed — and the first fix for it reached for the last arrow instead, which
+is the same false positive one level out, on a method taking a callback
+(`find(cb: (f: T) => boolean): Promise<…>`). Raised by Argus, and its suggested order — colon first,
+then the arrow inside what that leaves — handles both, so it was taken as offered.
+
+`Array<FindingDetail>` and `ReadonlyArray<FindingDetail>` are now excluded too. That was skipped
+last round on the grounds that this codebase spells every list `readonly T[]`; it still does, but
+the exclusion is one line of regex and leaving it out made the test reject a correct design rather
+than admit a wrong one, which is the worse direction.
+
+*Gate:* fifteen member shapes now checked across the two rounds, each for the outcome it **should**
+have rather than only for failure.
+
+#### The stray backspace landed a third time — and this time I nearly shipped it
+
+**`docs/no-control-characters.test.ts` failed the suite, exactly as designed**, on the round-2
+write-up *above this line*: a word-boundary escape written through a shell heredoc became a literal
+`U+0008` inside prose describing that very defect. Story 3.6c did the same thing twice in a
+paragraph about it; this story has now done it three times.
+
+**The part worth recording is how close it came to shipping.** The gate run before committing round
+2 was piped through `tail -3`, which shows the timing lines and *not* the pass count — so a red
+suite was read as a green one and `ef10aa3` was pushed with a failing test. The next full run caught
+it. Two lessons, both mechanical rather than about care:
+
+- **Never truncate a gate's output past its verdict.** `tail -3` on `npm test` cuts the one line
+  that matters.
+- **The heredoc rule in this story's own Dev Notes exists for this**, and was broken three times in
+  the story that wrote it down. The follow-up below is the only fix that does not rely on
+  remembering.
 
 #### A follow-up this round produced, recorded in `sprint-status.yaml`
 
