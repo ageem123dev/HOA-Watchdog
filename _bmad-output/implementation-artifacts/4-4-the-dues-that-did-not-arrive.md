@@ -119,13 +119,13 @@ real mid-year change of holder.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The rule (AC1, AC2, AC4, AC6)**
-  - [ ] A pure function in `core/detection/`: given an assessment, that unit's payments, and an
+- [x] **Task 1 — The rule (AC1, AC2, AC4, AC6)**
+  - [x] A pure function in `core/detection/`: given an assessment, that unit's payments, and an
         evaluation date, return the shortfall or nothing. **Call `deriveSchedule` and `expectedBy`** —
         do not re-derive instalments.
-  - [ ] Exact decimal via `toMinorUnits`. No float, no division before a decision (story 4.3).
-  - [ ] AC2 as a test with two cycles side by side, because it is the criterion most likely to regress.
-  - [ ] The *late* versus *wrong amount* decision, argued in prose before it is coded.
+  - [x] Exact decimal via `toMinorUnits`. No float, no division before a decision (story 4.3).
+  - [x] AC2 as a test with two cycles side by side, because it is the criterion most likely to regress.
+  - [x] The *late* versus *wrong amount* decision, argued in prose before it is coded.
 
 - [ ] **Task 2 — Reading what arrived and who held it (AC5, AC11)**
   - [ ] A read-only port, following `InvoiceReader`'s shape and the reason for it: payments for a unit
