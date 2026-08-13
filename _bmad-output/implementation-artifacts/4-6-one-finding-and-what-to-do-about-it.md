@@ -4,7 +4,7 @@ baseline_commit: 26bf300
 
 # Story 4.6: One finding, and what to do about it
 
-Status: ready-for-dev
+Status: in-progress
 
 ## Why this story exists
 
@@ -129,12 +129,12 @@ stylesheet rather than two. Recorded so its absence is a decision rather than an
   - [x] A malformed id must not reach Postgres as a cast error the page shows. `subject_id` and
         `id` are `uuid`; decide where the shape is checked and test it.
 
-- [ ] **Task 2 — The evidence, laid out** (AC: 2)
-  - [ ] Extend `core/findings/` with a detail view: the same copy rules as the row, more of it.
+- [x] **Task 2 — The evidence, laid out** (AC: 2)
+  - [x] Extend `core/findings/` with a detail view: the same copy rules as the row, more of it.
         Reuse `formatAmount`, the severity map and the titles — a second wording of the same
         finding is what `finding-view.ts`'s header argues against.
-  - [ ] `evidence` is still `unknown`. Every read narrows; nothing throws (4.5's AC6, unchanged).
-  - [ ] Follow `app/oracle/answer-view.tsx` for evidence-table semantics if a table is used —
+  - [x] `evidence` is still `unknown`. Every read narrows; nothing throws (4.5's AC6, unchanged).
+  - [x] Follow `app/oracle/answer-view.tsx` for evidence-table semantics if a table is used —
         UX-DR5 wants real `<table>`, `<th scope>`, tabular right-aligned numerics.
 
 - [ ] **Task 3 — The held write** (AC: 3, 4, 5)
@@ -225,6 +225,52 @@ worth listing is a way that claim and the record come apart.
 
 claude-opus-5[1m]
 
+### Test Design
+
+#### Task 2 — the evidence, laid out
+
+**Behaviour: `toFindingDetail(finding: FindingDetail): FindingDetailView`.** One pure function, the
+same shape as `toFindingRow` and tested the same way — a literal `FindingDetail`, no seams needed,
+because `evidence` is a plain value and nothing here reads a clock or a database.
+
+*If it ran correctly, how would I know?* The header fields are **identical to the row's** for the
+same finding (cross-check: call `toFindingRow` on the same input and compare), and the comparisons
+table holds exactly one row per stored pair or spike, each carrying that entry's own figures.
+
+*Could this happen anywhere else?* Yes — every defect shape below already exists in
+`finding-view.ts`, which is why the narrowing helpers are **extracted to `core/findings/evidence.ts`
+and shared** rather than copied. A second copy of `text()` is a second answer to "what counts as a
+value", and this story's whole argument is that three surfaces describing one finding must not
+disagree.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | `evidence` is a string, an array, or `null` | GUARD | every field read degrades; no table, no throw |
+| 2 | `findingType` unrecognised | GUARD | humanised title, `worth-checking`, no invented sentence |
+| 3 | `findingType` is `constructor` | GUARD | `known()` via `Object.hasOwn`; severity is not a function |
+| 4 | detail title disagrees with the row's title | GUARD | derived *from* `toFindingRow`, asserted equal |
+| 5 | `pairs` / `spikes` absent or not an array | GUARD | no comparisons table at all |
+| 6 | `pairs` holds a string, `null`, or a nested array | GUARD | non-objects filtered; the real pairs still render |
+| 7 | zero pairs | GUARD | **no table**, not an empty one — an empty table claims a comparison that found nothing |
+| 8 | one pair / ten pairs | GUARD | zero-one-many; order preserved |
+| 9 | a pair's `amount` absent or unparseable | GUARD | that cell only is absent; the row keeps its other cells |
+| 10 | `reason` is `constructor` | GUARD | prototype reach into `MATCH_REASON` |
+| 11 | `reason` is a rule this code does not know | GUARD | slug made legible (`same-amount-and-vat` → `same amount and vat`); never dropped, never invented |
+| 12 | `percentOverAverage` is not a number (`"abc"`, a number, absent) | GUARD | no `abc%` on a fiduciary surface — the cell is absent |
+| 13 | `average` / `invoicesAveraged` absent on one spike | GUARD | AC2 wants each spike's own figures; losing one must not lose the others |
+| 14 | dues `kind: 'not-recorded'` | GUARD | **no `$0.00` received** — the row already refused to manufacture that zero |
+| 15 | `expected` / `shortfall` / `instalmentsDue` / `evaluatedOn` absent | GUARD | each figure omitted independently |
+| 16 | `unitNumber` / `holderName` absent | GUARD | never `unit undefined`; the figure is omitted |
+| 17 | `invoicesChecked` absent | GUARD | omitted, never `0` — UX-DR24 forbids a manufactured denominator |
+| 18 | `thresholdPercent` / `windowMonths` absent | GUARD | omitted |
+| 19 | a hostile string reaches a cell (`<script>`, a lone `"`) | PROPAGATE | carried verbatim; React escapes it, and re-escaping here would double it |
+| 20 | `matchRule` (`normalised-exact`) rendered to the board | OUT-OF-SCOPE | deliberately not shown: it names the *matcher's* internals, not what was compared. Recorded so its absence is a decision |
+
+**Reverse-it / cross-check.** The cross-check is #4 and it is the strong one: the detail header is
+verified against an independent existing implementation of the same copy (`toFindingRow`) rather
+than against a literal an author of this test chose. A reverse operation does not apply — the view
+is a projection that deliberately discards, so nothing reconstructs the evidence from it.
+
 ### Completion Notes
 
 **Baseline (1ef0b6e):** 2599 tests passing, 813 db tests, 8 pre-existing `tsc` errors.
@@ -273,6 +319,60 @@ findings, **all four confirmed and taken**:
   `display_name`, when an inner join filters on the join condition, not on the columns selected
   through it. The real reason is that `reviewed_by` is null on every unreviewed finding. Same defect
   class as story 4.3's migration comment.
+
+#### Task 2 — the evidence, laid out
+
+`toFindingDetail` **calls `toFindingRow`** for the header rather than re-deriving any of it, and the
+tests assert equality against that call rather than against literals. A literal would have passed
+while the two surfaces drifted, which is the defect the arrangement exists to prevent — the
+mutation that appended `" (detail)"` to the title failed 6 tests.
+
+The narrowing helpers moved out of `finding-view.ts` into **`core/findings/evidence.ts`**. Two
+copies of `text()` would be two answers to "what counts as a value", and the row and the page
+disagreeing about whether `""` is a vendor name is where that drift actually starts.
+
+**A table is `null`, never empty.** Headers over no rows claim a comparison ran and matched nothing;
+an absent `pairs` means it did not run. The two are indistinguishable once drawn, and the mutation
+that returned an empty table instead of `null` failed 8 tests.
+
+**A dues shortfall gets no comparisons table at all** — one unit against its own schedule is
+arithmetic, and a one-row table would imply there could have been others. Its figures are the
+comparison. `matchRule` (`normalised-exact`) is likewise omitted on purpose: it names how the
+matcher spells invoice numbers to itself, not what was compared.
+
+*Sensitivity:* four mutations, all caught — always-emit-a-table (8), manufacture the `$0.00`
+received (1), let the title drift from the row's (6), drop the percentage guard (1).
+
+*Test-value pass — it found something the mutations could not.* The blank guard in `text()`
+(`"   "` is not a vendor name) was **covered by nothing**: all 115 tests passed with it removed.
+Not lost cover from the extraction — it was unasserted while private in `finding-view.ts` too, and
+promoting it to a shared module with a stated contract is what exposed it. Four cases added, failing
+first: a blank cell reads as empty and is not, and a title built from one gains a separator with
+nothing after it.
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 1.0 · 7/7 files · 1 agy
+call. Two findings, **both confirmed against the real files and both taken**:
+
+- **[medium] the dashboard row had no percentage guard**, and it is the sibling of the one this task
+  built. `text(only['percentOverAverage'])` was interpolated straight into the sentence, so a stored
+  `"abc"` rendered *"abc% above a 6-month average of $980.00"* — verified live before fixing. The
+  validation is now `decimal()` in `evidence.ts` and both surfaces use it; a value carrying its own
+  `$` is refused too, because the surface adds the mark.
+- **[low] `MATCH_REASON` was duplicated** into the new file. Moved to `evidence.ts`. The two readers
+  stay deliberately different — the row *drops* a slug it does not know because its sentence has a
+  grammatical slot, the table *makes it legible* because a cell has none — but they now read one
+  table. Mutating it failed 3 tests across both callers.
+
+### File List
+
+**Task 1** — `core/ports/finding-reader.ts`, `core/ports/finding-reader.test.ts`,
+`adapters/db/finding-reader-postgres.ts`, `adapters/db/finding-reader-postgres.test.ts`,
+`core/findings/finding-view.ts`, `core/findings/finding-view.test.ts`,
+`core/findings/dashboard-view.test.ts`.
+
+**Task 2** — `core/findings/evidence.ts` (new), `core/findings/detail-view.ts` (new),
+`core/findings/detail-view.test.ts` (new), `core/findings/finding-view.ts`,
+`core/findings/finding-view.test.ts`.
 
 ## Change Log
 

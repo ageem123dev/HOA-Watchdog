@@ -321,6 +321,37 @@ describe('an invoice above the vendor average', () => {
 
     expect(row.title).toBe(`Invoice above average — ${said}`)
   })
+
+  it.each([
+    ['is not a number at all', 'abc'],
+    ['carries a currency mark the sentence would repeat', '$31.4'],
+    ['is a number rather than the decimal string the detector stores', 31.4],
+  ])('builds no sentence when the percentage %s', (_name, percentOverAverage) => {
+    // **`abc%` on a fiduciary surface.** `percentOverAverage` comes out of
+    // `jsonb`, and a non-blank-string check is not a number check — the row
+    // interpolated it straight into the sentence a board member reads. Raised
+    // by Argus against story 4.6's detail view, which guards this; the row is
+    // the sibling that did not, and the two describing the same finding
+    // differently is what this story exists to prevent.
+    const row = toFindingRow(
+      spike({ ...spikeEvidence, spikes: [{ ...spikeEvidence.spikes[0], percentOverAverage }] }),
+    )
+
+    expect(row.evidenceLine).toBeNull()
+  })
+
+  it('does not hang a separator off a vendor name that is only whitespace', () => {
+    // A blank name is an absent one, and treating it as present produces
+    // `Invoice above average — ` with nothing after the dash: a title that
+    // looks like the extractor dropped the vendor mid-render. Found by story
+    // 4.6's test-value pass — the blank guard this rests on was carried by both
+    // callers and asserted by neither.
+    const row = toFindingRow(
+      spike({ ...spikeEvidence, spikes: [{ ...spikeEvidence.spikes[0], vendorName: '   ' }] }),
+    )
+
+    expect(row.title).toBe('Invoice above average')
+  })
 })
 
 describe('a unit that is short on its dues', () => {
