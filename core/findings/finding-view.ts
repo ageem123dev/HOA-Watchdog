@@ -1,5 +1,5 @@
 import type { FindingRecord } from '../ports/finding-reader'
-import { MATCH_REASON, decimal, entries, fields, known, text, whole, words } from './evidence'
+import { MATCH_REASON, counted, decimal, entries, fields, known, text, whole, words } from './evidence'
 import { formatAmount } from './money'
 
 /**
@@ -152,7 +152,7 @@ function readDuplicate(evidence: Readonly<Record<string, unknown>>): Reading {
 
   return {
     title,
-    evidenceLine: `${pairs.length} of ${checked} invoices on this upload ${verb} an earlier one${on}.`,
+    evidenceLine: `${pairs.length} of ${counted(checked, 'invoice')} on this upload ${verb} an earlier one${on}.`,
     amount,
   }
 }
@@ -171,7 +171,7 @@ function readSpike(evidence: Readonly<Record<string, unknown>>): Reading {
     const line =
       percent === null || average === null || averaged === null || windowMonths === null
         ? null
-        : `${percent}% above a ${windowMonths}-month average of ${average} across ${averaged} invoices.`
+        : `${percent}% above a ${windowMonths}-month average of ${average} across ${counted(averaged, 'invoice')}.`
 
     return { title: named('Invoice above average', vendorName), evidenceLine: line, amount }
   }
@@ -182,7 +182,7 @@ function readSpike(evidence: Readonly<Record<string, unknown>>): Reading {
   const line =
     spikes.length === 0 || checked === null || windowMonths === null
       ? null
-      : `${spikes.length} of ${checked} invoices are above a ${windowMonths}-month average for their vendor.`
+      : `${spikes.length} of ${counted(checked, 'invoice')} are above a ${windowMonths}-month average for their vendor.`
 
   return { title: named('Invoices above average', vendorName), evidenceLine: line, amount }
 }
@@ -206,7 +206,7 @@ function readShortfall(evidence: Readonly<Record<string, unknown>>): Reading {
   const evidenceLine =
     expected === null || instalments === null || evaluatedOn === null || arrival === null
       ? null
-      : `${expected} expected by ${evaluatedOn} across ${instalments} instalments; ${arrival}.`
+      : `${expected} expected by ${evaluatedOn} across ${counted(instalments, 'instalment')}; ${arrival}.`
 
   return { title, evidenceLine, amount: formatAmount(evidence['shortfall']) }
 }

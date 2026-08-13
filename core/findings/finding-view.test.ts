@@ -354,6 +354,50 @@ describe('an invoice above the vendor average', () => {
   })
 })
 
+describe('the copy counts in singulars as well as plurals', () => {
+  // Raised by Argus on the whole-story pass. "1 instalments" and "across 1
+  // invoices" are what a template with a hard-coded plural produces, and this
+  // is copy a board member reads beside a figure they are being asked to act
+  // on — the surface's credibility is most of what it has.
+
+  it('says one instalment', () => {
+    const row = toFindingRow(shortfall({ ...shortfallEvidence, instalmentsDue: 1 }))
+
+    expect(row.evidenceLine).toMatch(/across 1 instalment;/)
+    expect(row.evidenceLine).not.toMatch(/1 instalments/)
+  })
+
+  it('still says several instalments', () => {
+    const row = toFindingRow(shortfall({ ...shortfallEvidence, instalmentsDue: 3 }))
+
+    expect(row.evidenceLine).toMatch(/across 3 instalments;/)
+  })
+
+  it('says one invoice was averaged', () => {
+    const row = toFindingRow(
+      spike({ ...spikeEvidence, spikes: [{ ...spikeEvidence.spikes[0], invoicesAveraged: 1 }] }),
+    )
+
+    expect(row.evidenceLine).toMatch(/across 1 invoice\./)
+    expect(row.evidenceLine).not.toMatch(/1 invoices/)
+  })
+
+  it('says one invoice was checked', () => {
+    const row = toFindingRow(
+      duplicate({ ...duplicateEvidence, invoicesChecked: 1, pairs: [duplicateEvidence.pairs[0]] }),
+    )
+
+    expect(row.evidenceLine).toMatch(/1 of 1 invoice on this upload/)
+    expect(row.evidenceLine).not.toMatch(/1 invoices/)
+  })
+
+  it('still says several invoices were checked', () => {
+    const row = toFindingRow(duplicate(duplicateEvidence))
+
+    expect(row.evidenceLine).toMatch(/of 3 invoices on this upload/)
+  })
+})
+
 describe('a unit that is short on its dues', () => {
   it('says what was expected against what arrived, and by when', () => {
     const row = toFindingRow(shortfall(shortfallEvidence))

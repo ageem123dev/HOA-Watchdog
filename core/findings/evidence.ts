@@ -119,3 +119,20 @@ export function entries(value: unknown): readonly Readonly<Record<string, unknow
 export function words(slug: string): string {
   return slug.replace(/[-_]+/g, ' ').trim()
 }
+
+/**
+ * `1 instalment`, `3 instalments`.
+ *
+ * A hard-coded plural in a template reads fine on every example an author
+ * happens to try and produces "1 instalments" the first time an association has
+ * a single-instalment schedule. This is copy a board member reads beside a
+ * figure they are being asked to act on, and the surface's credibility is most
+ * of what it has. Raised by Argus on story 4.6's whole-story pass.
+ *
+ * English regular plurals only, which is all this product's nouns need —
+ * instalments, invoices, months, documents. A noun needing anything else passes
+ * its own plural.
+ */
+export function counted(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}

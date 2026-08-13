@@ -1,5 +1,5 @@
 import type { FindingDetail } from '../ports/finding-reader'
-import { MATCH_REASON, decimal, entries, fields, known, text, whole, words } from './evidence'
+import { MATCH_REASON, counted, decimal, entries, fields, known, text, whole, words } from './evidence'
 import {
   INVOICE_ABOVE_VENDOR_AVERAGE,
   POSSIBLE_DUPLICATE_INVOICE,
@@ -160,7 +160,7 @@ function periodLabel(period: { readonly from: string; readonly until: string }):
 }
 
 /** A count as a string, or `null` — never `"0"` manufactured from an absent field. */
-function counted(value: unknown): string | null {
+function countText(value: unknown): string | null {
   const count = whole(value)
   return count === null ? null : String(count)
 }
@@ -241,7 +241,7 @@ function layDuplicate(evidence: Readonly<Record<string, unknown>>): Laid {
   ])
 
   return {
-    figures: figuresOf([['Invoices checked', counted(evidence['invoicesChecked']), true]]),
+    figures: figuresOf([['Invoices checked', countText(evidence['invoicesChecked']), true]]),
     // `matchRule` is deliberately absent. `normalised-exact` names how the
     // matcher spells invoice numbers to itself, which is a fact about this
     // code rather than about the association's invoices — and UX-DR23 wants
@@ -257,18 +257,18 @@ function laySpike(evidence: Readonly<Record<string, unknown>>): Laid {
     text(spike['issuedOn']),
     formatAmount(spike['amount']),
     formatAmount(spike['average']),
-    counted(spike['invoicesAveraged']),
+    countText(spike['invoicesAveraged']),
     percentage(spike['percentOverAverage']),
   ])
 
   const months = whole(evidence['windowMonths'])
-  const threshold = counted(evidence['thresholdPercent'])
+  const threshold = countText(evidence['thresholdPercent'])
 
   return {
     figures: figuresOf([
-      ['Invoices checked', counted(evidence['invoicesChecked']), true],
+      ['Invoices checked', countText(evidence['invoicesChecked']), true],
       ['Threshold', threshold === null ? null : `${threshold}%`, true],
-      ['Trailing window', months === null ? null : `${months} ${months === 1 ? 'month' : 'months'}`, true],
+      ['Trailing window', months === null ? null : counted(months, 'month'), true],
     ]),
     comparisons: table("Invoices above their vendor's average", SPIKE_COLUMNS, rows),
   }
@@ -289,7 +289,7 @@ function layShortfall(evidence: Readonly<Record<string, unknown>>): Laid {
       ['Expected', formatAmount(evidence['expected']), true],
       ['Received', received, evidence['kind'] !== 'not-recorded'],
       ['Shortfall', formatAmount(evidence['shortfall']), true],
-      ['Instalments due', counted(evidence['instalmentsDue']), true],
+      ['Instalments due', countText(evidence['instalmentsDue']), true],
       ['Evaluated on', text(evidence['evaluatedOn']), false],
     ]),
     // One unit measured against its own schedule is arithmetic, not a set of
