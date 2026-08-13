@@ -4,7 +4,7 @@ baseline_commit: b99195e
 
 # Story 4.4: The dues that did not arrive
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -140,17 +140,17 @@ real mid-year change of holder.
         to. A unit id is stable where an extraction id is not, but check rather than assume.
   - [x] Evidence per AC9.
 
-- [ ] **Task 4 — Wiring (AC10)**
-  - [ ] `run-detection.ts` runs three detectors. The isolation contract is already there and already
+- [x] **Task 4 — Wiring (AC10)**
+  - [x] `run-detection.ts` runs three detectors. The isolation contract is already there and already
         tested — one failing detector must not stop the others — so this grows it rather than deciding
         it again.
-  - [ ] Note: the other two detectors key on a *document*; this one keys on a *unit*, and runs off a
+  - [x] Note: the other two detectors key on a *document*; this one keys on a *unit*, and runs off a
         deposit document. Check the wiring still reads naturally with a detector that is not
         document-shaped, and say so if it does not.
-  - [ ] Grow the AC10 model-path list.
+  - [x] Grow the AC10 model-path list.
 
-- [ ] **Task 5 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`
+- [x] **Task 5 — The gate**
+  - [x] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`
         against the 8-error baseline.
 
 ## Dev Notes

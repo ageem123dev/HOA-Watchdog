@@ -1,7 +1,9 @@
+import { detectDuesShortfalls } from '../detection/detect-dues-shortfalls'
 import { detectDuplicateInvoices } from '../detection/detect-duplicates'
 import { detectVendorSpikes } from '../detection/detect-vendor-spikes'
 import type { DetectionOutcome } from '../detection/detection-run'
 import type { FindingRegister } from '../ports/finding'
+import type { DuesReader } from '../ports/dues-reader'
 import type { InvoiceReader } from '../ports/invoice-reader'
 
 /**
@@ -46,7 +48,7 @@ import type { InvoiceReader } from '../ports/invoice-reader'
  *
  * ## Sequential, deliberately
  *
- * The two `await`s below run one after the other rather than through
+ * The `await`s below run one after the other rather than through
  * `Promise.all`, and the upload does wait for both. Raised by Argus as a missed
  * concurrency win; kept sequential because the win is smaller than it looks and
  * the cost is not:
@@ -61,15 +63,25 @@ import type { InvoiceReader } from '../ports/invoice-reader'
  *   side effect. `Promise.all` on top of the duplicate read would buy the
  *   smaller half of that.
  *
- * ## Absent collaborators mean "do nothing", and that is a real gap
+ * ## Absent collaborators mean "do nothing", per detector rather than for all
  *
  * `recordPayments` made the same choice for `units` and `payments`, and
  * `payment-wiring.test.ts` exists because the gap is invisible: a document is
  * read, stored, and never checked, and **nothing fails**. The wiring test is what
  * keeps this honest.
+ *
+ * Story 4.4 made that check per detector, and it had to. The two invoice
+ * detectors need an `InvoiceReader`; dues detection needs a `DuesReader` and
+ * never touches the other. An all-or-nothing gate would mean a caller wiring
+ * only the reader it has silently gets **no detection at all** — the invisible
+ * gap again, one level up, and produced by the very check written to prevent it.
+ *
+ * `findings` is the exception and is genuinely all-or-nothing: without somewhere
+ * to record what it finds, a detector can only burn queries.
  */
 export interface DetectionDependencies {
   readonly invoices?: InvoiceReader
+  readonly dues?: DuesReader
   readonly findings?: FindingRegister
   readonly onError?: (error: unknown, documentId: string) => void
 }
@@ -83,14 +95,18 @@ export interface DetectionDependencies {
 export interface DetectionRun {
   readonly duplicates: DetectionOutcome | null
   readonly spikes: DetectionOutcome | null
+  readonly dues: DetectionOutcome | null
 }
 
 export async function runDetection(
   documentId: string,
   deps: DetectionDependencies,
 ): Promise<DetectionRun | null> {
-  const { invoices, findings } = deps
-  if (invoices === undefined || findings === undefined) return null
+  const { invoices, dues, findings } = deps
+  // Nowhere to record a finding means no detector can do anything but spend
+  // queries. Missing *readers* are handled per detector below.
+  if (findings === undefined) return null
+  if (invoices === undefined && dues === undefined) return null
 
   const attempt = async (
     detector: string,
@@ -115,11 +131,23 @@ export async function runDetection(
   }
 
   return {
-    duplicates: await attempt('duplicate-invoice', () =>
-      detectDuplicateInvoices(documentId, { invoices, findings }),
-    ),
-    spikes: await attempt('vendor-spike', () =>
-      detectVendorSpikes(documentId, { invoices, findings }),
-    ),
+    duplicates:
+      invoices === undefined
+        ? null
+        : await attempt('duplicate-invoice', () =>
+            detectDuplicateInvoices(documentId, { invoices, findings }),
+          ),
+    spikes:
+      invoices === undefined
+        ? null
+        : await attempt('vendor-spike', () =>
+            detectVendorSpikes(documentId, { invoices, findings }),
+          ),
+    dues:
+      dues === undefined
+        ? null
+        : await attempt('dues-shortfall', () =>
+            detectDuesShortfalls(documentId, { dues, findings }),
+          ),
   }
 }

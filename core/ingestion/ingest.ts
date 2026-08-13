@@ -3,6 +3,7 @@ import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { FindingRegister } from '../ports/finding'
+import type { DuesReader } from '../ports/dues-reader'
 import type { InvoiceReader } from '../ports/invoice-reader'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
 import type { PaymentRepository } from '../ports/payment-repository'
@@ -108,6 +109,7 @@ export interface IngestDependencies {
    * came before.
    */
   readonly invoices?: InvoiceReader
+  readonly dues?: DuesReader
   readonly findings?: FindingRegister
   /**
    * Asked which unit a deposit reference names. Never asked to create one.
@@ -251,6 +253,7 @@ async function ingestOne(
       // upload error legible to whoever reads it.
       await runDetection(recorded.id, {
         invoices: deps.invoices,
+        dues: deps.dues,
         findings: deps.findings,
         onError: deps.onError === undefined ? undefined : (error) => deps.onError?.(error, filename),
       })

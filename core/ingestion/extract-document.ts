@@ -6,6 +6,7 @@ import {
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
 import type { FindingRegister } from '../ports/finding'
+import type { DuesReader } from '../ports/dues-reader'
 import type { InvoiceReader } from '../ports/invoice-reader'
 import type { Extractor } from '../ports/extractor'
 import type { PaymentRepository } from '../ports/payment-repository'
@@ -96,6 +97,7 @@ export interface ExtractDocumentDependencies {
    * against what came before, and nothing fails.
    */
   readonly invoices?: InvoiceReader
+  readonly dues?: DuesReader
   readonly findings?: FindingRegister
   readonly onError?: (error: unknown, documentId: string) => void
 }

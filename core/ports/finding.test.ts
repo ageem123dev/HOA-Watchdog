@@ -263,6 +263,13 @@ describe('epic 4 does not depend on epic 3', () => {
     'core/detection/vendor-spike.ts',
     'core/detection/detect-vendor-spikes.ts',
     'core/detection/detection-run.ts',
+    // Story 4.4's dues half. The independence argument is sharpest here: this
+    // detector's findings name a person, and a model asked whether someone
+    // "seems behind on their dues" is a different product with the same screen.
+    'core/detection/dues-shortfall.ts',
+    'core/detection/detect-dues-shortfalls.ts',
+    'core/ports/dues-reader.ts',
+    'adapters/db/dues-reader-postgres.ts',
   ]
 
   it.each(DETECTOR)('%s reaches nothing on the model path', (file) => {
