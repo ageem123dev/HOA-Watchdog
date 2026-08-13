@@ -77,7 +77,9 @@ function cents(amount: string | null): bigint | null {
   if (match === null) return null
 
   const [, sign, whole, fraction = ''] = match
-  const value = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, '0') || '0')
+  // `padEnd` always returns two characters here, so no fallback is needed for
+  // an absent fraction — `''` becomes `'00'`. Raised by Argus.
+  const value = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, '0'))
 
   // A credit is not a spike. `total_amount` is negative for a credit to the
   // association (migration 006), and a large one is money coming back.

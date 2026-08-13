@@ -84,6 +84,62 @@ describe('the boundary', () => {
   })
 })
 
+describe('reading the amount', () => {
+  // `numeric(14,2)::text` always renders two decimals, so the adapter never
+  // sends these forms. The parser accepts them anyway, and until this block
+  // existed nothing checked that it read them *correctly* — a mutation making
+  // an absent fraction worth 99 cents passed the whole suite.
+  it.each([
+    { written: '120', as: 'a whole number' },
+    { written: '120.0', as: 'one decimal place' },
+    { written: '120.00', as: 'two decimal places' },
+  ])('reads $written written with $as as the same amount', ({ written }) => {
+    // 120.00 against an average of 100.00 is exactly the threshold, and the
+    // boundary is strict — so all three forms must be refused, and a misread
+    // fraction would push one of them over.
+    expect(spikeAgainst(invoice(written), STEADY)).toBeNull()
+  })
+
+  it('reads an amount padded with whitespace', () => {
+    // `numeric(14,2)::text` never pads, so this is not the adapter's doing —
+    // but `InvoiceReading.amount` is a plain string and the port promises
+    // nothing about its shape, so the leniency is deliberate rather than
+    // decoration. Untested until a mutation removed the trim and all 92 cases
+    // still passed.
+    expect(spikeAgainst(invoice(' 130.00 '), STEADY)).toMatchObject({
+      percentOverAverage: '30.0',
+    })
+  })
+
+  it('reads a trailing fraction as cents, not as a whole number', () => {
+    // 120.5 is 120.50, comfortably over the 120.00 threshold. Read as 120.05
+    // it would fall short, and read as 1205.00 it would be a different invoice.
+    expect(spikeAgainst(invoice('120.5'), STEADY)).toMatchObject({
+      percentOverAverage: '20.5',
+    })
+  })
+
+  it.each(['', ' ', 'USD 120.00', '120.000', '1,200.00', '12O.00', '120.', '.50'])(
+    'refuses %j rather than guessing at an amount',
+    (unreadable) => {
+      // **Measured against a baseline of one cent, and that is the whole
+      // point.** The first version of this case used the ordinary baseline, so
+      // a parser that read "120.000" as 120.00 still returned null — at the
+      // threshold, not over it — and the test passed with the anchors stripped
+      // off the pattern. Refusing and finding-nothing looked identical.
+      //
+      // Against three priors of 0.01, any amount a loosened parser could
+      // salvage is a spike. Null now means refused and nothing else.
+      const tiny = [invoice('0.01', 'p1'), invoice('0.01', 'p2'), invoice('0.01', 'p3')]
+
+      expect(spikeAgainst(invoice(unreadable), tiny)).toBeNull()
+      // The control: the baseline really is low enough for that to mean
+      // something. Without this the case above passes on an empty history.
+      expect(spikeAgainst(invoice('1.00'), tiny)).not.toBeNull()
+    },
+  )
+})
+
 describe('too little history', () => {
   it.each([0, 1, 2])('is not flagged against %i prior invoices', (count) => {
     // The false positive most likely to ship: a brand-new vendor's second
@@ -132,9 +188,24 @@ describe('what must not be flagged', () => {
     expect(spikeAgainst(invoice('1000.00'), history)).toBeNull()
   })
 
-  it('refuses history whose amounts sum to nothing', () => {
-    // Every prior a credit, so the sum is refused before it becomes a divisor.
+  it('refuses a history of nothing but credits', () => {
+    // Every prior dropped by `cents`, so this never reaches the sum at all —
+    // it is refused for having no history, which is the honest reason.
     const history = [invoice('-1.00', 'p1'), invoice('-2.00', 'p2'), invoice('-3.00', 'p3')]
+
+    expect(spikeAgainst(invoice('100.00'), history)).toBeNull()
+  })
+
+  it('refuses history whose amounts sum to nothing', () => {
+    // **This case used credits until Argus pointed out they never reach the
+    // sum**, so the test passed on the minimum-history guard and the divisor
+    // guard beside it was covered by nothing. Zeroes are what actually gets
+    // there: three readable priors of 0.00 — a voided or corrected invoice.
+    //
+    // Without the guard the sum is 0, every positive amount clears a threshold
+    // of zero, and `ratioToDecimal` divides by it. BigInt division by zero
+    // throws, so the finding a board member would get is a crashed ingestion.
+    const history = [invoice('0.00', 'p1'), invoice('0.00', 'p2'), invoice('0.00', 'p3')]
 
     expect(spikeAgainst(invoice('100.00'), history)).toBeNull()
   })
