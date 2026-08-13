@@ -147,11 +147,11 @@ stylesheet rather than two. Recorded so its absence is a decision rather than an
         (EXPERIENCE.md: *"Every action states its outcome in the past tense afterwards"*).
   - [x] `prefers-reduced-motion`: no countdown animation. The window is a delay, not a spectacle.
 
-- [ ] **Task 4 — The two states that are not the ordinary one** (AC: 6, 7, 8)
-  - [ ] Already-reviewed: status, reviewer, date, no action.
-  - [ ] `AlreadyReviewedError` and `FindingNotFoundError` reach the surface as *different*
+- [x] **Task 4 — The two states that are not the ordinary one** (AC: 6, 7, 8)
+  - [x] Already-reviewed: status, reviewer, date, no action.
+  - [x] `AlreadyReviewedError` and `FindingNotFoundError` reach the surface as *different*
         outcomes. A test that cannot tell them apart is the defect.
-  - [ ] Unknown id → 404 via `notFound()`.
+  - [x] Unknown id → 404 via `notFound()`.
 
 - [ ] **Task 5 — Wire it up** (AC: 1, 9)
   - [ ] `app/findings/[id]/page.tsx`, and the dashboard row becomes a link to it.
@@ -316,6 +316,46 @@ nothing is persisted during the window, so there is no state to read back and in
 cross-check is structural instead — every negative is asserted on the injected spy, which is the
 only observer that can tell "not written" from "written and not visible".
 
+#### Task 4 — the two states that are not the ordinary one
+
+**Behaviour A: `markFindingReviewed` — the server action.** Its whole job is to turn three
+distinguishable failures into three distinguishable answers, and AC7 says the defect is a test that
+cannot tell them apart.
+
+*Seams:* `vi.mock` over `@/adapters/auth/auth` and the two adapters, as `app/quarantine/actions.ts`'s
+test does. The guard is asserted by **the write port never being called**, not only by the returned
+value — a server action is its own entry point, reachable without the page ever rendering.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | no session | GUARD | `refused`, and `markReviewed` never called |
+| 2 | a session carrying no user id | GUARD | same — the truthiness check alone passes a session with no user |
+| 3 | a malformed finding id | GUARD | `not-found` **before Postgres sees it**; a 22P02 reported as "the register could not be reached" is a lie about which thing broke |
+| 4 | `AlreadyReviewedError` | GUARD | `already-reviewed`, carrying who and when |
+| 5 | `FindingNotFoundError` | GUARD | `not-found`, and **a test that cannot separate this from 4 is the defect** |
+| 6 | the follow-up read of who/when fails or returns nothing | GUARD | still `already-reviewed`, with no date — never `failed`, because the review does exist |
+| 7 | any other rejection | GUARD | `failed`, logged before it is discarded |
+| 8 | the failure is swallowed with no trace | GUARD | `console.error` asserted; this is the only write path in the story |
+| 9 | the reviewer has no display name | GUARD | says what is known; never "by null" |
+
+**Behaviour B: the already-reviewed state (AC6).** The finding is shown with its register status,
+who reviewed it and when, and no action.
+
+| 10 | the detail view carries no lifecycle | GUARD | `reviewed` is present exactly when the row is reviewed |
+| 11 | the static state and the refusal are worded differently | GUARD | **both come from `reviewMessage`, asserted equal** — AC6 and AC7 describe the same fact reached two ways, and two wordings of it is the drift this story exists to prevent |
+
+**Cross-check** — #11 is one, and the strong one: the sentence a reader gets by arriving late is
+compared against the sentence they get by being refused, rather than against a literal.
+
+**The uuid shape check is shared, not copied.** Task 1 put one in the reader; the action needs the
+same answer, and a second regex is the `MATCH_REASON` mistake again. It moves to
+`core/findings/finding-id.ts` and both callers import it.
+
+**Deviation, recorded:** AC8's `notFound()` is listed under this task but lands with `page.tsx` in
+task 5, because it is a page behaviour and creating the page here would mean committing a route
+before task 5 adds its auth guard. Everything else in AC8 — refusing a malformed id without
+rendering a finding-shaped page — is this task's and is asserted here.
+
 ### Completion Notes
 
 **Baseline (1ef0b6e):** 2599 tests passing, 813 db tests, 8 pre-existing `tsc` errors.
@@ -472,6 +512,51 @@ the previous one's "Moved to register." for a frame.
 not observable from a test, and a test that passed either way would be worth nothing. The fix (state
 adjusted during render) is applied and the *race* half is asserted.
 
+#### Task 4 — the two states that are not the ordinary one
+
+AC6 and AC7 are the same fact reached two ways — arriving late, and being refused a moment too late
+— so **both come from one `reviewMessage`**, and the test compares the page's sentence against the
+refusal's rather than against a literal. A literal would pass while the two drifted, which is the
+only way this could go wrong.
+
+`already-reviewed` carries `on: string | null` because the date is read in a **second** query issued
+after the refusal, and that query can fail on its own. Reporting `failed` when it does would tell a
+board member the register was unreachable at the moment it had just answered them; the copy says
+only what is known instead.
+
+`refused` joined the union: a signed-out caller is not an unreachable register, and calling it
+`failed` would offer a retry that cannot help.
+
+The uuid check moved to `core/findings/finding-id.ts` and both callers import it — the reader (so a
+bad path segment is a 404, not a 500) and the action (so a bad id is not reported as "the register
+could not be reached", which names the wrong thing as broken).
+
+*Sensitivity:* three mutations on the action, all caught — merge the two refusals (5), drop the id
+shape guard (5), drop the session guard (3). Plus five red assertions before the already-reviewed
+view existed.
+
+*Review gate — `argus_review` on the task diff:* the first two calls **failed in the provider**
+(`agy` returned nothing; a direct probe confirmed the CLI itself was healthy). The third, with
+`refine: false`, completed: `moderate` · confidence 0.9 · 11/11 files.
+
+All three findings landed in `adapters/db/finding-reader-postgres.test.ts` — **task 1's file, outside
+this task's diff**, pulled in as repo context. Verified anyway, since it is inside the story's range.
+**None required a change, and all three are recorded rather than dropped:**
+
+- **[high] `setPoolTimeZone` breaks isolation across concurrently executing files — not reproduced.**
+  `writerPool()` is module-scoped, and `vitest.config.ts` overrides neither `pool` nor `isolate`, so
+  each test *file* runs in its own module registry with its own pool; there is nothing shared to
+  interfere with. No `.concurrent` anywhere in `adapters/db/`, so tests within a file are sequential,
+  and the zone is restored in a `finally`.
+- **[medium] a connection leaks if the second `beforeAll` connect fails — disagree.** `afterAll` ends
+  both through `Promise.allSettled`, and a socket held by a worker that is exiting dies with it.
+- **[medium] the bracketed counts can be straddled by a concurrent insert *and* delete — confirmed,
+  and accepted.** Real: another file's `afterAll` deletes findings, so the count is not monotonic and
+  task 1's "the answer lies between the controls" reasoning holds only for inserts. Not fixed,
+  because `unreviewed()` returns a **global** total by design and cannot be scoped to this file's
+  rows — every alternative weakens the assertion, which the hard rules forbid. Left as a known
+  residual: it needs a concurrent insert and delete inside a sub-second window.
+
 ### File List
 
 **Task 1** — `core/ports/finding-reader.ts`, `core/ports/finding-reader.test.ts`,
@@ -485,6 +570,11 @@ adjusted during render) is applied and the *race* half is asserted.
 
 **Task 3** — `core/findings/review.ts` (new), `core/findings/review.test.ts` (new),
 `app/findings/review-control.tsx` (new), `app/findings/review-control.test.tsx` (new).
+
+**Task 4** — `core/findings/finding-id.ts` (new), `app/findings/actions.ts` (new),
+`app/findings/actions.test.ts` (new), `core/findings/review.ts`, `core/findings/review.test.ts`,
+`core/findings/detail-view.ts`, `core/findings/detail-view.test.ts`,
+`adapters/db/finding-reader-postgres.ts`.
 
 ## Change Log
 

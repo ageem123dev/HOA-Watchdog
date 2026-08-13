@@ -65,11 +65,34 @@ describe('what the surface says once the register has answered', () => {
     expect(message.canRetry).toBe(true)
   })
 
+  it('says only what is known when the date could not be read back', () => {
+    // The date arrives from a second query issued *after* the refusal, and that
+    // query can fail on its own. The review still exists when it does — calling
+    // that `failed` would tell a board member the register was unreachable at
+    // the moment it had just answered them.
+    expect(reviewMessage({ outcome: 'already-reviewed', by: 'R. Mbeki', on: null }).text).toBe(
+      'Already reviewed by R. Mbeki.',
+    )
+    expect(reviewMessage({ outcome: 'already-reviewed', by: null, on: null }).text).toBe(
+      'Already reviewed.',
+    )
+  })
+
+  it('says nothing was recorded, and offers no retry, when nobody is signed in', () => {
+    const message = reviewMessage({ outcome: 'refused' })
+
+    expect(message.text).toMatch(/not signed in/i)
+    expect(message.text).toMatch(/nothing was recorded/i)
+    // Pressing again while signed out does the same nothing.
+    expect(message.canRetry).toBe(false)
+  })
+
   it('never claims the move except when the move happened', () => {
     const others = [
       reviewMessage({ outcome: 'already-reviewed', by: 'R. Mbeki', on: '2026-04-02' }),
       reviewMessage({ outcome: 'not-found' }),
       reviewMessage({ outcome: 'failed' }),
+      reviewMessage({ outcome: 'refused' }),
     ]
 
     for (const message of others) {
@@ -83,6 +106,7 @@ describe('what the surface says once the register has answered', () => {
       reviewMessage({ outcome: 'already-reviewed', by: null, on: '2026-04-02' }),
       reviewMessage({ outcome: 'not-found' }),
       reviewMessage({ outcome: 'failed' }),
+      reviewMessage({ outcome: 'refused' }),
     ]
 
     for (const message of all) {

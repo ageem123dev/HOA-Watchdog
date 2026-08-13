@@ -54,9 +54,20 @@ export const REVIEW_UNDO_WINDOW_MS = 5_000
  */
 export type ReviewOutcome =
   | { readonly outcome: 'recorded' }
-  | { readonly outcome: 'already-reviewed'; readonly by: string | null; readonly on: string }
+  /**
+   * `on` is nullable because the date is read *after* the refusal, in a second
+   * query that can itself fail. The review still exists when it does, and
+   * reporting that as `failed` would tell a board member the register was
+   * unreachable at the moment it had just answered them.
+   */
+  | { readonly outcome: 'already-reviewed'; readonly by: string | null; readonly on: string | null }
   | { readonly outcome: 'not-found' }
   | { readonly outcome: 'failed' }
+  /**
+   * The caller is not signed in. Distinct from `failed`: nothing was attempted,
+   * and nothing about the register is known to be wrong.
+   */
+  | { readonly outcome: 'refused' }
 
 /** What the surface says, and whether pressing again could change the answer. */
 export interface ReviewMessage {
@@ -94,10 +105,7 @@ export function reviewMessage(outcome: ReviewOutcome): ReviewMessage {
         // surface whose whole purpose is to answer *which human* — inventing a
         // name here is the worst available answer, and "by null" is the second
         // worst. The date is guaranteed by `finding_review_is_attributed`.
-        text:
-          outcome.by === null
-            ? `Already reviewed on ${outcome.on}.`
-            : `Already reviewed by ${outcome.by} on ${outcome.on}.`,
+        text: alreadyReviewed(outcome.by, outcome.on),
         canRetry: false,
       }
 
@@ -108,5 +116,24 @@ export function reviewMessage(outcome: ReviewOutcome): ReviewMessage {
 
     case 'failed':
       return { text: 'The register could not be reached. Nothing was recorded.', canRetry: true }
+
+    case 'refused':
+      // Not a retry: pressing again signed out does the same nothing.
+      return { text: 'You are not signed in. Nothing was recorded.', canRetry: false }
   }
+}
+
+/**
+ * Who reviewed it and when, saying only what is known.
+ *
+ * Shared by the refusal and by the ordinary already-reviewed page, which are the
+ * same fact reached two ways — a board member who arrives late and one who
+ * presses the control a moment too late must not be told it in two different
+ * sentences.
+ */
+function alreadyReviewed(by: string | null, on: string | null): string {
+  if (by === null && on === null) return 'Already reviewed.'
+  if (by === null) return `Already reviewed on ${on}.`
+  if (on === null) return `Already reviewed by ${by}.`
+  return `Already reviewed by ${by} on ${on}.`
 }

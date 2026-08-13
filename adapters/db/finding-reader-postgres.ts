@@ -5,6 +5,7 @@ import type {
   FindingRecord,
   UnreviewedQueue,
 } from '../../core/ports/finding-reader'
+import { isFindingId } from '../../core/findings/finding-id'
 import { writerPool } from './pool'
 
 interface FindingRow {
@@ -51,9 +52,6 @@ interface CheckedRow {
  * story 4.7's job and belongs on a surface built to stream it.
  */
 const MOST_ROWS = 200
-
-/** The shape `uuid` accepts, checked before Postgres is asked to cast it. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * The dashboard's read of the finding register.
@@ -159,7 +157,7 @@ export function createFindingReader(): FindingReader {
       // typing. A database error is the wrong answer to "is there a finding
       // here": the honest one is no, which is what the surface turns into a
       // 404.
-      if (!UUID.test(id)) return null
+      if (!isFindingId(id)) return null
 
       const { rows } = await writerPool().query<DetailRow>(
         `select f.id,

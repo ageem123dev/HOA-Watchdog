@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { FindingDetail } from '@/core/ports/finding-reader'
 import { toFindingDetail } from './detail-view'
+import { reviewMessage } from './review'
 import { toFindingRow } from './finding-view'
 
 function detail(overrides: Partial<FindingDetail> = {}): FindingDetail {
@@ -149,6 +150,56 @@ describe('the header agrees with the dashboard row', () => {
     expect(view.severity).toBe('worth-checking')
     expect(view.severityLabel).toBe('Worth checking')
     expect(typeof view.title).toBe('string')
+  })
+})
+
+describe('AC6: the finding that somebody has already reviewed', () => {
+  it('offers no review message at all while the finding is unreviewed', () => {
+    expect(toFindingDetail(duplicate()).reviewed).toBeNull()
+  })
+
+  it('says who reviewed it and when', () => {
+    const view = toFindingDetail(detail({ reviewed: { by: 'R. Mbeki', on: '2026-04-20' } }))
+
+    expect(view.reviewed?.text).toBe('Already reviewed by R. Mbeki on 2026-04-20.')
+  })
+
+  it('says what is known when the reviewer never had a display name', () => {
+    const view = toFindingDetail(detail({ reviewed: { by: null, on: '2026-04-20' } }))
+
+    expect(view.reviewed?.text).toBe('Already reviewed on 2026-04-20.')
+    expect(view.reviewed?.text).not.toMatch(/null|undefined/i)
+  })
+
+  it('offers no action, because the register has already answered', () => {
+    const view = toFindingDetail(detail({ reviewed: { by: 'R. Mbeki', on: '2026-04-20' } }))
+
+    // Not an error and not a retry — an ordinary outcome that someone got
+    // there first.
+    expect(view.reviewed?.canRetry).toBe(false)
+  })
+
+  it('words it exactly as the refusal words it', () => {
+    // **The cross-check AC6 and AC7 need.** A board member who arrives late and
+    // one who presses the control a moment too late are told the same fact, and
+    // two wordings of it is the drift this story exists to prevent. Compared
+    // against the refusal's own message rather than against a literal here.
+    const by = 'R. Mbeki'
+    const on = '2026-04-20'
+
+    expect(toFindingDetail(detail({ reviewed: { by, on } })).reviewed).toEqual(
+      reviewMessage({ outcome: 'already-reviewed', by, on }),
+    )
+  })
+
+  it('still lays out the evidence, because the finding is what the page is about', () => {
+    const view = toFindingDetail({
+      ...duplicate(),
+      reviewed: { by: 'R. Mbeki', on: '2026-04-20' },
+    })
+
+    expect(view.comparisons?.rows).toHaveLength(1)
+    expect(figure(view, 'Invoices checked')).toBe('3')
   })
 })
 

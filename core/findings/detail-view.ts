@@ -8,6 +8,7 @@ import {
   type Severity,
 } from './finding-view'
 import { formatAmount } from './money'
+import { reviewMessage, type ReviewMessage } from './review'
 
 /**
  * One finding, laid out at the length a page has room for (AC2).
@@ -87,6 +88,17 @@ export interface FindingDetailView {
   readonly figures: readonly Figure[]
   /** One row per stored comparison, or `null` when there is no table to draw. */
   readonly comparisons: ComparisonTable | null
+  /**
+   * Who reviewed it and when, or `null` while it is still unreviewed (AC6).
+   *
+   * **The same `ReviewMessage` the refusal produces, and that is the point.** A
+   * board member who arrives from an old email link and one who presses the
+   * control a moment too late have learned the same fact, and telling them in
+   * two different sentences is the drift this story exists to prevent. Its
+   * presence is also what the page branches on: a reviewed finding offers no
+   * action, because the register has already answered.
+   */
+  readonly reviewed: ReviewMessage | null
 }
 
 /**
@@ -273,5 +285,13 @@ export function toFindingDetail(finding: FindingDetail): FindingDetailView {
     raisedOn: row.raisedOn,
     figures: laid.figures,
     comparisons: laid.comparisons,
+    reviewed:
+      finding.reviewed === null
+        ? null
+        : reviewMessage({
+            outcome: 'already-reviewed',
+            by: finding.reviewed.by,
+            on: finding.reviewed.on,
+          }),
   }
 }
