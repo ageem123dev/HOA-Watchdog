@@ -113,6 +113,16 @@ async function controlCount(from: string): Promise<number> {
   return Number(rows[0]!.n)
 }
 
+/** The newest read upload, computed a second way. Same UTC rule, written separately. */
+async function controlLatestRead(): Promise<string | null> {
+  const { rows } = await owner.query<{ on: string | null }>(
+    `select to_char(max(uploaded_at) at time zone 'UTC', 'YYYY-MM-DD') as on
+       from document where extraction_state = 'read'`,
+  )
+
+  return rows[0]!.on
+}
+
 /** This file's rows, in the order the reader returned them, with everyone else's dropped. */
 function ours(ids: readonly string[], wanted: readonly string[]): readonly string[] {
   return ids.filter((id) => wanted.includes(id))
@@ -308,23 +318,55 @@ describeWithDatabase('the finding reader', () => {
     // The "as of" date UX-DR3 hangs on has to describe the same set as the
     // figure beside it, so it is the newest *read* document. The held one
     // seeded a day later must not move it.
+    // **Against a control query, bracketed — the same shape as the count above.**
+    // Two weaker versions came before this one, and each was wrong in a way the
+    // other was not. The literal `toBe('2099-03-04')` asserted that no other
+    // file had seeded into 2099, which is the technique this file documents at
+    // the top and recommends. Replacing it with `>= '2099-03-04'` and two
+    // `not.toBe` exclusions was worse: both pass trivially the moment another
+    // file seeds anything later, so the filtering under test stops being
+    // checked at all. Raised by CodeRabbit, then by Argus against the fix.
+    const before = await controlLatestRead()
     const checked = await createCheckedDocuments().checked()
+    const after = await controlLatestRead()
 
-    expect(checked.latestUploadOn).toBe('2099-03-04')
+    expect(checked.latestUploadOn).not.toBeNull()
+    expect([before, after]).toContain(checked.latestUploadOn)
+    // And the control is genuinely narrower than the table: this file seeded a
+    // held and an unreadable document *later* than its newest read one, so a
+    // reader that counted every state would answer with one of those.
+    expect(checked.latestUploadOn).not.toBe('2099-03-06')
   })
 
   it('reads that date as the same calendar day in any session timezone', async () => {
-    // 2099-03-04T02:00Z is 2099-03-03 in Los Angeles. A figure block labelled
-    // "as of 3 March" for one board member and "4 March" for another is the
-    // register disagreeing with itself.
-    await setPoolTimeZone('America/Los_Angeles')
+    // A figure block labelled "as of 3 March" for one board member and "4 March"
+    // for another is the register disagreeing with itself.
+    //
+    // **Asserted as "the answer does not move", not as a literal date.** A
+    // literal only holds while this file owns the newest read document; a
+    // `>=` comparison holds even when the answer has moved a day, which is the
+    // whole bug. Reading the same value either side of the timezone change
+    // asks the actual question, and keeps asking it whatever else is in the
+    // table. Raised by Argus against the previous fix.
+    const inUtc = await createCheckedDocuments().checked()
 
+    let inLosAngeles
     try {
-      const checked = await createCheckedDocuments().checked()
-
-      expect(checked.latestUploadOn).toBe('2099-03-04')
+      await setPoolTimeZone('America/Los_Angeles')
+      inLosAngeles = await createCheckedDocuments().checked()
     } finally {
       await setPoolTimeZone('UTC')
     }
+    const utcAgain = await createCheckedDocuments().checked()
+
+    // **The second UTC read has to happen after the timezone is put back.** An
+    // earlier draft took it inside the Los Angeles block and called it
+    // `stillInUtc`; it was a second Los Angeles read, so the buggy value was in
+    // its own bracket and the test passed against the defect it exists for.
+    //
+    // Bracketed, because a concurrent insert can move the maximum forward
+    // between reads. It cannot move it backwards, which is the direction the
+    // timezone defect shifts it.
+    expect([inUtc.latestUploadOn, utcAgain.latestUploadOn]).toContain(inLosAngeles.latestUploadOn)
   })
 })

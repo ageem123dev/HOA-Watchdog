@@ -622,6 +622,47 @@ the amount is absent rather than invented, both empty states are distinct and ne
 without a count, the figure blocks carry no interactive element, and the ask field still precedes
 the list in the DOM.
 
+### The integration pass and the local CodeRabbit round
+
+**`argus_review` on `0c95659..HEAD` (17 production and test files, 2,674 lines): clean.** No
+findings. `moderate` · confidence 1.0 · context 19/19 files · 1 agy call, 287,242 tokens.
+
+Worth recording that it took four attempts. Three calls failed with `agy failed: Command failed`
+before one succeeded, and a direct probe of `agy` in between returned normally — so the backend was
+healthy and the failures were transient rather than a broken engine. This pass covers every line of
+task 5's diff, which closes the gap recorded there.
+
+**The one local CodeRabbit CLI round** (`review_completed`, 19 files reviewed, on `ae21671`). Every
+changed path appeared in `reviewedFiles`; nothing went unreviewed. Two findings, both confirmed:
+
+- **[minor] the `latestUploadOn` tests assert the literal `2099-03-04`** — which asserts that no
+  other test file has seeded into 2099, and seeding into 2099 is the technique this very file
+  documents at the top and recommends to the next author.
+- **[trivial] a local `known` shadows the module-level `known()` lookup helper** — harmless today
+  because nothing in that function calls it, and a bug the moment somebody does. Renamed to
+  `stored`.
+
+`argus_ingest` compared the two against the integration run on the same SHA: both fall below the
+configured critical+major threshold, so nothing was written to memory. Correct — the store is for
+the misses that matter.
+
+**Then the fix diff turned out to be the dangerous one, again.** The review gate on it found that my
+repair of the first finding had made the tests *weaker*:
+
+- `>= '2099-03-04'` passes for any date further in the future, so a timezone defect shifting a
+  newer row by a day still passes — the exact bug the test exists for.
+- `not.toBe('2099-03-05')` and `not.toBe('2099-03-06')` pass trivially the moment another file
+  seeds anything later, so the filtering under test stops being checked at all.
+
+Both are now compared against an independently written control query, bracketed either side the way
+the count assertion already was. And **the second attempt at the timezone test was vacuous in a way
+I caught before mutating it**: the "second UTC read" was taken inside the Los Angeles block, so the
+buggy value sat in its own bracket and the assertion passed against the defect. Moved after the
+timezone is restored.
+
+Three versions of that assertion, each wrong differently, and the mutations now confirm both
+properties: removing the UTC cast fails 1, removing the `extraction_state` filter fails 2.
+
 ## Change Log
 
 | Date | Change |

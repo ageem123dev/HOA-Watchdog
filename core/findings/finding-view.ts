@@ -254,15 +254,18 @@ function readShortfall(evidence: Readonly<Record<string, unknown>>): Reading {
 }
 
 function read(findingType: string, evidence: unknown): Reading {
-  const known = fields(evidence)
+  // Not `known` — that is the module-level lookup helper, and a local of the
+  // same name shadows it here. Harmless today because nothing in this function
+  // calls it, and a bug the moment somebody does. Raised by CodeRabbit.
+  const stored = fields(evidence)
 
   switch (findingType) {
     case POSSIBLE_DUPLICATE_INVOICE:
-      return readDuplicate(known)
+      return readDuplicate(stored)
     case INVOICE_ABOVE_VENDOR_AVERAGE:
-      return readSpike(known)
+      return readSpike(stored)
     case UNIT_DUES_SHORTFALL:
-      return readShortfall(known)
+      return readShortfall(stored)
     default:
       // AC3. A type from a later story is shown with its name made legible and
       // no sentence invented for it. Dropping it would be the worst thing this
