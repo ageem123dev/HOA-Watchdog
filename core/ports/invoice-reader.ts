@@ -41,4 +41,34 @@ export interface InvoiceReader {
    * event twice.
    */
   priorCandidates(subject: InvoiceReading): Promise<readonly InvoiceReading[]>
+
+  /**
+   * The same vendor's invoices in the trailing window ending at **this
+   * invoice's own issue date**.
+   *
+   * ## The window ends at the invoice, not at today
+   *
+   * A window ending at `now()` gives a different answer for the same invoice
+   * every time it is computed, so re-running detection next year would amend a
+   * finding a board member already reviewed — and AD-13's no-op would stop
+   * meaning anything. Ending it at the invoice's own date makes the answer a
+   * property of the invoice rather than of when the question was asked.
+   *
+   * ## Strictly earlier, which is also what excludes the invoice itself
+   *
+   * An invoice cannot be in its own average. The date comparison is what
+   * enforces that — its own row is not strictly earlier than itself — rather
+   * than an id exclusion, because `extraction.id` is exactly what re-ingestion
+   * changes (migration 006 replaces a document's rows set-shaped). A rule that
+   * held only until the next upload is not a rule.
+   *
+   * An invoice with no issue date has no window and therefore no history. The
+   * upload date is not a substitute: it records when we noticed the invoice,
+   * not when the vendor charged.
+   *
+   * Unlike `priorCandidates`, this narrows on **nothing but** the vendor and
+   * the window — the amounts are what is being averaged, so narrowing on them
+   * would average the answer with itself.
+   */
+  trailingInvoices(subject: InvoiceReading): Promise<readonly InvoiceReading[]>
 }

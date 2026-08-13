@@ -86,19 +86,19 @@ Inlining either number at the query is what the epic's decision explicitly rules
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The rule (AC1, AC3, AC4, AC7)**
-  - [ ] Threshold and window as named exports in `core/detection/`.
-  - [ ] A pure function: given an invoice and its prior invoices, return the computed percentage over the
+- [x] **Task 1 — The rule (AC1, AC3, AC4, AC7)**
+  - [x] Threshold and window as named exports in `core/detection/`.
+  - [x] A pure function: given an invoice and its prior invoices, return the computed percentage over the
         trailing average, or nothing. **Exact decimal, never a float** — story 2.2's rule, and the reason
         4.2 compares decimal strings.
-  - [ ] The minimum-history decision, with both sides tested.
+  - [x] The minimum-history decision, with both sides tested.
 
-- [ ] **Task 2 — Reading the history (AC1, AC4, AC9)**
-  - [ ] Extend `InvoiceReader` rather than adding a port: it already answers "this vendor, earlier
+- [x] **Task 2 — Reading the history (AC1, AC4, AC9)**
+  - [x] Extend `InvoiceReader` rather than adding a port: it already answers "this vendor, earlier
         documents" and this needs "this vendor, a date window". Keep the read-only shape and the reason
         for it.
-  - [ ] `vendor_normalised_name`, never a second rule. Bound parameters, never interpolation (AD-8).
-  - [ ] `test:db` for the window boundary, the nulls, and the credit.
+  - [x] `vendor_normalised_name`, never a second rule. Bound parameters, never interpolation (AD-8).
+  - [x] `test:db` for the window boundary, the nulls, and the credit.
 
 - [ ] **Task 3 — Raising it (AC2, AC5, AC6)**
   - [ ] The same `(document, month)` key and the same grouping-before-raising that 4.2 arrived at —
@@ -155,7 +155,71 @@ which, and test a case where the two would disagree.
 
 ## Dev Agent Record
 
-_To be filled by the dev agent._
+### Test Design
+
+**Task 1 — the rule.** Behaviours: read an amount, refuse an unusable one, compare against a trailing
+average, report the comparison. Failure modes classified GUARD: an amount that will not parse, a
+negative amount (a credit is not a spike), priors that will not parse, priors summing to zero (a
+divisor), too little history. PROPAGATE: none — the function returns `null` rather than throwing,
+because "nothing to say about this invoice" is an answer and not an error. OUT-OF-SCOPE: selecting the
+window, which is the reader's job, the way ordering is in `duplicatesAmong`.
+
+**Task 2 — the reader.** The behaviour is a window, and it is arithmetic Postgres does rather than
+this process. GUARD: none in TypeScript — see the deleted guard below. What the tests force instead is
+each SQL semantic that looks like an omission: a null date, a null vendor, a date on the far edge, a
+date one day outside it, a month end that has no counterpart six months earlier.
+
+### Debug Log
+
+**Where the rounding is allowed to happen (Task 1).** `numeric(14,2)` over six months does not divide
+evenly, so a percentage from a rounded average is a different number from one off the exact sum. The
+decision: never compute the average before comparing. With `n` priors summing to `s`, `amount /
+average = amount * n / s`, so the test is `(amount * n - s) * 100 > threshold * s` — integer `BigInt`
+cents, no division, no rounding. Rounding enters only when formatting for a board member, where it
+cannot change what was flagged.
+
+Finding a case where the two readings disagree took a calculation, not an intuition: against priors of
+100.00 / 100.00 / 100.02 the exact threshold is 120.008 so **120.01 is flagged**, while rounding the
+average to 100.01 first puts the threshold at 120.012 and 120.01 falls short. The first version of that
+test asserted a pair both readings answer identically, and failed.
+
+**Minimum history is three.** The false positive most likely to ship is a brand-new vendor's second
+invoice, where the "average" is a single opening bill — the least typical invoice a vendor ever sends.
+With two, one unusual bill still sets half the baseline. A judgement, not a derivation, so it is named,
+tested on both sides, and carried into the evidence.
+
+**Two assumptions in the reader's first test were wrong, and the database said so.** `vendor_normalised_name`
+does *not* strip a legal suffix — `, Inc.` survives the fold — and `extraction_kind_known` permits only
+invoice / statement / assessment_roll / deposit / other, so the `bank_statement` control violated a check
+constraint. Both were probed and corrected rather than asserted.
+
+**Test isolation, found by eleven failures.** The window query narrows on the vendor and the window and
+nothing else — that is the point of it — so a vendor shared across tests is a window shared across tests.
+The vendor is now scoped per test rather than per run.
+
+**A guard nothing could break, deleted.** A `subject.issuedOn === null` early return stood in
+`trailingInvoices` until the sensitivity check removed it and all fourteen tests still passed: `null::date
+- interval` is null, every comparison against null is null, so SQL already returns an empty window. The
+second such guard deleted from this file — `priorCandidates` lost `e.document_id <> $1` for the same
+reason in 4.2.
+
+### Completion Notes
+
+Sensitivity checks run, all mutations caught except the one that led to a deletion:
+
+| Mutation | Result |
+| --- | --- |
+| boundary comparison loosened (`<=` for `<`) | caught |
+| minimum history dropped | caught |
+| credits treated as positive | caught |
+| unreadable priors counted as zero | caught |
+| average rounded before comparing | caught |
+| window far edge `>=` becomes `>` | caught (3 tests) |
+| window near edge `<` becomes `<=` | caught |
+| vendor fold replaced with raw equality | caught |
+| window widened to 7 months | caught (3 tests) |
+| `document_kind` filter dropped | caught |
+| null-date early return removed | **survived — guard deleted** |
 
 ## Review Findings
 

@@ -54,6 +54,12 @@ function reader(invoices: readonly InvoiceReading[], priors: readonly InvoiceRea
   return {
     invoicesOn: vi.fn(async () => invoices),
     priorCandidates: vi.fn(async () => priors),
+    // The spike detector's half of the port. Throwing rather than returning
+    // nothing: the duplicate detector has no business reading a trailing
+    // window, and a fake that quietly answered would let it start.
+    trailingInvoices: vi.fn(async () => {
+      throw new Error('duplicate detection must not read a trailing window')
+    }),
   }
 }
 

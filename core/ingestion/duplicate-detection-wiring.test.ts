@@ -97,6 +97,7 @@ describe('when detection fails', () => {
         throw new Error('the database went away')
       }),
       priorCandidates: vi.fn(async () => []),
+      trailingInvoices: vi.fn(async () => []),
     },
     findings: { raise: vi.fn() } as unknown as FindingRegister,
   })
