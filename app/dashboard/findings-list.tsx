@@ -115,6 +115,16 @@ function Row({ row }: { row: FindingRow }) {
           a plausible one.
         */}
         {row.evidenceLine === null ? null : <p style={styles.evidence}>{row.evidenceLine}</p>}
+        {/*
+          **EXPERIENCE.md, State Patterns: "Findings show their detection date."**
+          A `<time>` rather than a bare string, so the value is legible to
+          anything that reads the page rather than looks at it — and so a queue
+          entry can be aged by the person reading it, which is most of what a
+          queue is for.
+        */}
+        <p style={styles.noticed}>
+          Noticed <time dateTime={row.raisedOn}>{row.raisedOn}</time>
+        </p>
       </div>
       {/*
         Nothing at all where the record supports no figure — never `$0.00`, a
@@ -187,6 +197,12 @@ const styles = {
   evidence: {
     margin: 0,
     fontSize: 'var(--type-scale-body)',
+    color: 'var(--color-ink-muted)',
+  },
+  noticed: {
+    margin: 0,
+    fontFamily: 'var(--type-sans)',
+    fontSize: 'var(--type-scale-label)',
     color: 'var(--color-ink-muted)',
   },
   amount: {

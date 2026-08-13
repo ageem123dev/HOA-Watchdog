@@ -389,13 +389,13 @@ describe('evidence the code has never met', () => {
   })
 
   it('keeps the identifying fields whatever the evidence says', () => {
+    // The row carries what the surface renders and nothing else. `findingType`
+    // and `period` were on it until the acceptance-criteria audit found that
+    // nothing read either — plumbing with no consumer, which reads like a
+    // feature until someone looks for where it is shown. The port still carries
+    // both, because they are the record's identity and story 4.6 links on them.
     const row = toFindingRow(duplicate('nonsense'))
 
-    expect(row).toMatchObject({
-      id: 'finding-1',
-      findingType: 'possible_duplicate_invoice',
-      raisedOn: '2026-04-14',
-      period: { from: '2026-04-01', until: '2026-05-01' },
-    })
+    expect(row).toMatchObject({ id: 'finding-1', raisedOn: '2026-04-14' })
   })
 })

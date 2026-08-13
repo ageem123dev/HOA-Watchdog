@@ -599,6 +599,29 @@ family reviewing its own work — so this is recorded as a gap rather than a pas
 pass in Step 6 covers `0c95659..HEAD`, which includes every line of this diff; if Argus is still
 unreachable there, it goes to the user rather than being written up as reviewed.
 
+### The acceptance-criteria audit
+
+**Seven consecutive stories now.** Two findings, and the first is the kind this pass exists for.
+
+**1. The detection date was built and never shown.** EXPERIENCE.md's State Patterns table requires
+it — *"Findings show their detection date"* — and `raised_at` was projected by the adapter, carried
+by the port as `raisedOn`, carried through `toFindingRow`, and then rendered by nothing. Every test
+passed, because every test asserted what the row *did* show. A queue whose entries carry no date
+cannot be aged by the person reading it, which is most of what a queue is for. Now rendered as
+`Noticed <time datetime="…">`, and the mutation removing it fails 2 tests.
+
+**2. Two fields reached the view with no consumer.** `FindingRow.findingType` and `.period` were
+plumbed through and read by nothing — which looks like a feature until someone goes looking for
+where it is shown. Removed from the view. The **port** keeps both, deliberately: they are the
+record's identity under migration 021's `(finding_type, subject_id, period)` key, and story 4.6
+links on them. The view carries what the surface renders; the port models the record.
+
+Everything else in the ten ACs verified against the running code rather than against its tests:
+only unreviewed rows reach the surface, the unknown type is both rendered and counted in `total`,
+the amount is absent rather than invented, both empty states are distinct and neither reassures
+without a count, the figure blocks carry no interactive element, and the ask field still precedes
+the list in the DOM.
+
 ## Change Log
 
 | Date | Change |

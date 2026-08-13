@@ -30,14 +30,12 @@ afterEach(cleanup)
 function row(overrides: Partial<FindingRow> = {}): FindingRow {
   return {
     id: 'finding-1',
-    findingType: 'possible_duplicate_invoice',
     severity: 'needs-review',
     severityLabel: 'Needs review',
     title: 'Possible duplicate invoice — Coastal Landscaping',
     evidenceLine: '1 of 3 invoices on this upload matches an earlier one on amount and date.',
     amount: '$1,450.00',
     raisedOn: '2026-04-14',
-    period: { from: '2026-04-01', until: '2026-05-01' },
     ...overrides,
   }
 }
@@ -152,6 +150,27 @@ describe('a finding row', () => {
 
     expect(screen.getByText(hostile)).toBeDefined()
     expect(document.querySelector('script')).toBeNull()
+  })
+
+  it('shows the date the finding was noticed', () => {
+    // **EXPERIENCE.md, State Patterns: "Findings show their detection date."**
+    // Found by the acceptance-criteria audit rather than by a test — the date
+    // was read by the adapter, carried by the port, carried by the view, and
+    // then never rendered. A queue whose entries have no date cannot be aged by
+    // the person reading it, which is most of what a queue is for.
+    render(<FindingsList view={findings([row()])} />)
+
+    expect(screen.getByText(/2026-04-14/)).toBeDefined()
+  })
+
+  it('marks that date up as a date', () => {
+    // A `<time>` with a machine-readable value, so the row is legible to a
+    // screen reader and to anything that reads the page rather than looks at it.
+    render(<FindingsList view={findings([row()])} />)
+
+    const when = screen.getByRole('listitem').querySelector('time')
+
+    expect(when?.getAttribute('datetime')).toBe('2026-04-14')
   })
 
   it('keeps the order it was given', () => {

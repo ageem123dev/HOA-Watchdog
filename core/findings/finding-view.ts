@@ -31,7 +31,6 @@ export type Severity = 'needs-review' | 'worth-checking'
 
 export interface FindingRow {
   readonly id: string
-  readonly findingType: string
   readonly severity: Severity
   /** UX-DR2: the tick is never the sole carrier of meaning, so this is never empty. */
   readonly severityLabel: string
@@ -40,8 +39,8 @@ export interface FindingRow {
   readonly evidenceLine: string | null
   /** Formatted, or `null` when the record supports no single figure. */
   readonly amount: string | null
+  /** The day it was noticed. EXPERIENCE.md requires every finding to show it. */
   readonly raisedOn: string
-  readonly period: UnreviewedFinding['period']
 }
 
 export const POSSIBLE_DUPLICATE_INVOICE = 'possible_duplicate_invoice'
@@ -279,13 +278,11 @@ export function toFindingRow(finding: UnreviewedFinding): FindingRow {
 
   return {
     id: finding.id,
-    findingType: finding.findingType,
     severity,
     severityLabel: SEVERITY_LABEL[severity],
     title: reading.title,
     evidenceLine: reading.evidenceLine,
     amount: reading.amount,
     raisedOn: finding.raisedOn,
-    period: finding.period,
   }
 }
