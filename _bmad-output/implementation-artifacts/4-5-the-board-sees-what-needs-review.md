@@ -1,0 +1,384 @@
+---
+baseline_commit: 0c95659
+---
+
+# Story 4.5: The board sees what needs review
+
+Status: ready-for-dev
+
+## Why this story exists
+
+Four stories have put findings into a table nobody can see. `finding` has held rows since 4.1;
+4.2, 4.3 and 4.4 fill it on every ingestion run. A treasurer signing in today gets a page that
+says "Dashboard", their email address, and a link to the quarantine queue — the same placeholder
+it has been since story 1.2.
+
+This is the story where the product becomes visible. It is also the first story in Epic 4 whose
+failure modes are about **reading**, not about arithmetic. 4.2 through 4.4 could be wrong by
+computing the wrong number; this one can be wrong by computing the right number and showing it in
+a way that misleads — which on a fiduciary surface is the worse failure of the two.
+
+### The three rules that shape every decision here
+
+- **UX-DR2 — colour is never the only channel.** The margin tick is a 3px bar in the gutter,
+  `flag` or `brass`, and it is *always* paired with a plain-language text label. Never "HIGH",
+  never "MED", never a coloured bar on its own.
+- **UX-DR23 — never imply certainty the system lacks.** The finding type is already named
+  `possible_duplicate_invoice` for this reason. The copy on this surface inherits that discipline:
+  it says what was compared, and the board decides what it means.
+- **UX-DR24 — no reassurance without a count.** An empty findings list may not say "all clear".
+  It says what was checked, and over what, or it says nothing at all. Every detector already
+  stores its denominator in the finding's evidence *specifically so this story can render it* —
+  4.2's `invoicesChecked`, 4.3's `invoicesAveraged` and `windowMonths`, 4.4's `instalmentsDue`.
+  Those fields exist for this page. Use them.
+
+### Two things this story deliberately does not do
+
+**The rows do not navigate.** UX-DR4 says the whole row is the click target for the finding
+detail surface, and the epic assigns UX-DR4 here — but the finding detail surface is story 4.6.
+Shipping a row that links to a route which does not exist puts a 404 on the board's dashboard,
+reachable by clicking the thing the page most wants them to click. So 4.5 builds the row's shape,
+semantics and copy; **4.6 makes it a link at the same moment it builds the destination**, and
+UX-DR4's "the amount is never a separate link" clause is asserted there, where there is a link to
+assert it about.
+
+This is a scope decision, not an omission. Record it in 4.6's story when that one is written, and
+raise it with the user before merging this one.
+
+**No register link.** UX-DR10 lists a register link on the dashboard; the register is story 4.7.
+Same argument. The ask field (3.6c) and the quarantine entry point (1.6d) are already on the page
+and must survive this story untouched.
+
+## Story
+
+As a board member,
+I want the dashboard to show me the findings nobody has looked at yet, each saying plainly what
+was compared and how much money it concerns,
+so that I can see what needs my attention before a payment run without asking the system anything.
+
+## Acceptance Criteria
+
+**AC1 — The dashboard lists unreviewed findings, newest first.**
+Only `state = 'unreviewed'` rows appear; a reviewed finding is absent from this surface entirely
+(EXPERIENCE.md: "The dashboard shows only unreviewed findings"). Order is `raised_at` descending
+with a deterministic tie-break, so two renders of an unchanged register agree.
+
+**AC2 — Every row carries a margin tick and a text severity label, and the label is not derived
+from the colour.**
+Two levels, per UX-DR2 and DESIGN.md: `flag` / "Needs review" and `brass` / "Worth checking".
+`finding` has no severity column, so severity is a property of the **finding type**, mapped in one
+place in `core/`. A row rendered with no colour at all still tells a reader which it is.
+
+**AC3 — A finding type the map does not know still renders, and is still counted.**
+Epic 4 adds detectors after this story. A type with no entry in the severity map must appear in
+the list with its text label and its evidence, never be silently dropped and never crash the page.
+A finding that vanishes from the board's queue because a later story added a detector is the worst
+defect this surface can have — it is indistinguishable, from the outside, from having nothing to
+report.
+
+**AC4 — Each row's evidence line states what was compared, using the count the detector stored.**
+Not flavour text (DESIGN.md: "it is the finding's justification"). One line per finding type,
+built from the evidence object:
+
+| Type | The line says, in substance |
+| --- | --- |
+| `possible_duplicate_invoice` | how many invoices on this upload matched a prior one, out of `invoicesChecked`, and on what — amount and date, or amount and number |
+| `invoice_above_vendor_average` | `percentOverAverage` above this vendor's `windowMonths`-month average of `invoicesAveraged` invoices |
+| `unit_dues_shortfall` | which unit, what was expected against what arrived, and `instalmentsDue` instalments as the denominator |
+
+Wording is the implementer's, subject to UX-DR23: state the comparison, never the conclusion.
+
+**AC5 — The amount is right-aligned, tabular, and absent rather than invented when the evidence
+has none.**
+`amount` is `string | null` in 4.2's and 4.3's evidence — an invoice whose amount could not be
+read still raises a finding. A row for one of those shows no amount. It must never show `$0.00`,
+`NaN`, `null`, or an empty currency symbol: each of those tells a board member a figure they
+would act on.
+
+**AC6 — Evidence that does not match its expected shape does not take the page down.**
+`evidence` is `jsonb` and arrives as `unknown`. A finding written by an earlier version of a
+detector, or by a detector this code has not met, must render as far as it can — type, severity
+label, whatever is legible — and never throw. The dashboard failing closed on one malformed row
+hides every other finding on it.
+
+**AC7 — Two empty states, and they are different.**
+Nothing uploaded yet is not the same as nothing found (EXPERIENCE.md, State Patterns). With no
+documents read, the surface says so and points at upload. With documents read and no unreviewed
+findings, it is affirmative *and carries the count*: nothing needs attention, N documents checked.
+Neither state may say "all clear" without that number (UX-DR24). The count is real — documents
+whose `extraction_state = 'read'`, not the number of rows on the page.
+
+**AC8 — Figure blocks are non-interactive and carry an "as of" date when the documents behind
+them predate the current period.**
+Per UX-DR3 and DESIGN.md: sans small-caps label above, serif tabular figure. Clicking does
+nothing — it is not a link, not a button, and has no click handler. When the most recent upload
+falls before the current calendar month, the block states the date it is as of; when it does not,
+it does not. Both branches are asserted, and the boundary between them is asserted.
+
+**AC9 — The ask field still comes first in the DOM, and the quarantine link still works.**
+EXPERIENCE.md requires the ask field "reachable by keyboard from the top of the dashboard without
+traversing every finding", and `app/dashboard/page.test.tsx` already carries a test whose comment
+names this story as the one that would break it. The findings list goes **after** the ask field.
+Every existing assertion in that file still passes, unmodified.
+
+**AC10 — A vendor name from a document is rendered as text.**
+AD-8: extracted strings are escaped on output, never interpolated. A vendor name containing
+markup appears on the page as those characters. No `dangerouslySetInnerHTML` anywhere on this
+surface.
+
+## Tasks / Subtasks
+
+- [x] **Task 1 — The read port** (AC: 1, 7)
+  - [x] `core/ports/finding-reader.ts`: unreviewed findings with `id`, `findingType`, `subjectId`,
+        `period`, `evidence`, `raisedAt`; plus the two counts the empty state and figure blocks
+        need — documents read, and the most recent upload date.
+  - [x] Read-only, and say why in the header the way `invoice-reader.ts` and `dues-reader.ts` do.
+        A surface that could mark a finding reviewed through the same object it lists them with is
+        one refactor from a page that clears its own queue.
+  - [x] Decide deliberately whether the counts belong on this port or a second one, and write the
+        reason down either way.
+
+- [ ] **Task 2 — The presentation rule, pure and in `core/`** (AC: 2, 3, 4, 5, 6)
+  - [ ] `core/findings/finding-view.ts` (name is the implementer's): finding → row view. Severity,
+        text label, title, evidence line, amount-or-absent. All copy lives here.
+  - [ ] In `core/` and not in the component, for the reason `core/quarantine/queue-view.ts` gives:
+        it makes the copy and the severity mapping assertable without a DOM, and it stops a second
+        surface (4.6's detail, 4.8's email) inventing a second wording for the same finding.
+  - [ ] Read `evidence` defensively — it is `unknown`. AC6 is a test, not a comment.
+  - [ ] AC3's unknown-type path is a branch with its own test, not a `default:` nobody exercised.
+
+- [ ] **Task 3 — The Postgres reader** (AC: 1, 7)
+  - [ ] `adapters/db/finding-reader-postgres.ts` + `.test.ts` under `npm run test:db`.
+  - [ ] `finding_state_recent_idx` is `(state, raised_at desc)` — the query should use it. Check
+        with `explain`; do not assert it does without looking.
+  - [ ] **Dates out of Postgres go through `to_char(… at time zone 'UTC', 'YYYY-MM-DD')`.** Story
+        4.4 shipped this bug in two readers and fixed it in both: `to_char` on a `timestamptz`
+        renders in the *session* timezone, so an upload at 18:00 Pacific files under the next day.
+        `adapters/db/pool-time-zone.ts` exists to test it — use it.
+  - [ ] Scope fixtures so tests do not share subjects. Both 4.3 and 4.4 shipped a suite that
+        passed because every test saw every other test's rows.
+
+- [ ] **Task 4 — The components** (AC: 2, 4, 5, 8, 10)
+  - [ ] Figure block and findings list under `app/dashboard/`, presentational, taking a view.
+        Follow `app/quarantine/queue-list.tsx`: the component takes data and returns markup, and
+        does not reach the database.
+  - [ ] jsdom render tests, per-file `// @vitest-environment jsdom` and `afterEach(cleanup)` —
+        `globals: true` is deliberately off (see `queue-list.test.tsx`).
+  - [ ] Styling only through custom properties. `core/design/no-raw-values.test.ts` scans `app/`
+        and fails on a raw colour or font value. The tick's width is
+        `--component-margin-tick-width`.
+  - [ ] Semantics: the list is a list; the tick is decorative and the label is the text. Currency
+        announced as currency (UX-DR20). Flexible row heights — nothing fixed-height.
+
+- [ ] **Task 5 — Wire the dashboard** (AC: 1, 7, 8, 9)
+  - [ ] `app/dashboard/page.tsx` reads through the port and renders the list after the ask field.
+  - [ ] **No component calls `new Date()`.** The page derives today once, in UTC, and passes it
+        down — the same choice the readers make, and it keeps AC8's boundary testable without
+        mocking a clock. Write down the consequence: a board west of Greenwich sees the month roll
+        over before their local midnight, which affects a label and no figure.
+  - [ ] Run the existing `page.test.tsx` unmodified. If an assertion in it needs to change, stop —
+        that is AC9 failing, not a stale test.
+  - [ ] **The auth guard runs before the read**, matching `app/quarantine/page.tsx`. A page that
+        queries findings and then redirects has already done the work an unauthenticated visitor
+        asked for.
+
+## Dev Notes
+
+### The schema, as it stands
+
+| Table | Shape that matters here |
+| --- | --- |
+| `finding` | `(id, finding_type, subject_id, period daterange, evidence jsonb, raised_at timestamptz, state, reviewed_by, reviewed_at)`; unique on `(finding_type, subject_id, period)`; index `finding_state_recent_idx (state, raised_at desc)`; `state in ('unreviewed','reviewed')` |
+| `document` | `(id, filename, uploaded_at timestamptz, extraction_state)`; `extraction_state in ('held','read','unreadable','provider_unavailable')` — **`'read'` is "checked"** |
+
+`delete` and `truncate` are revoked on `finding` from `watchdog_writer` and from `public`. Nothing
+on this surface removes a row; marking reviewed is 4.6 and it is an `update`.
+
+### Wiring, and the four traps in it
+
+- **The page imports the adapter factory; nothing else does.** `app/quarantine/page.tsx` is the
+  pattern: `import { createQuarantineQueue } from '@/adapters/db/…'` in the page, the core view
+  function from `@/core/…`, and the component takes the view. Do not reach for a container or a
+  registry — there isn't one, and adding one is this story reinventing a wheel it does not need.
+- **`core/` may not import `pg`, `next`, `next-auth`, or anything under `adapters/` or `app/`.**
+  `core/ports/boundary.test.ts` enforces it and catches wrapped imports and `require`. The view
+  function is pure TypeScript over plain data.
+- **A `daterange` does not come back from node-pg as an object.** There is no built-in parser, so
+  `select period` yields the raw literal `[2026-04-01,2026-05-01)` and any code treating it as
+  structured is reading a string that happens to have brackets in it. Project the ends explicitly
+  — `to_char(lower(period) …)` and `to_char(upper(period) …)` — which is also where AC-level
+  correctness of the UTC rule above gets settled.
+- **Nothing on this page may be statically rendered.** `auth()` reads cookies, which forces the
+  dashboard dynamic today — so this is currently true by accident rather than by decision. If the
+  read is added in a way that lets Next cache it, the board gets yesterday's queue with no
+  indication it is stale, which is the one thing a queue may never do.
+
+### How many rows, and the count that must not disagree with them
+
+The dashboard is a queue, not the register — 4.7 is where everything ever found lives. If the list
+is bounded, the figure block's count is still the **true** total of unreviewed findings, and the
+page has to say that more exist rather than letting a reader infer the number from what they can
+see. If it is not bounded, say why that is safe. Either is defensible; silently rendering 500 rows
+under a figure block reading "500" while the reader believes they have seen them all is not.
+
+### The evidence each detector writes
+
+Read the three `detect-*.ts` files rather than trusting this table, but as a starting map:
+
+- `possible_duplicate_invoice` — `{ invoicesChecked, matchRule, pairs: [{ reason, vendorName,
+  amount, invoiceNumber, issuedOn, priorDocumentId, priorInvoiceNumber, priorIssuedOn }] }`.
+  `reason` is `'same-amount-and-date'` or `'same-amount-and-number'`. Several pairs per finding:
+  the finding is keyed on the document and the month, so one upload with three duplicates is one
+  row carrying three pairs. Decide what the row's single amount means when there are several, and
+  say so on the page rather than picking one silently.
+- `invoice_above_vendor_average` — `{ invoicesChecked, thresholdPercent, windowMonths, spikes: [{
+  percentOverAverage, average, invoicesAveraged, vendorName, amount, invoiceNumber, issuedOn }] }`.
+- `unit_dues_shortfall` — `{ kind: 'not-recorded' | 'below-expected', expected, received,
+  shortfall, instalmentsDue, billingCycle, evaluatedOn, unitNumber, holderName }`. `holderName` is
+  nullable and a null one still gets a finding — the money is still short. `kind: 'not-recorded'`
+  deliberately does not mean *unpaid*; the commonest cause is a deposit nobody has uploaded yet,
+  and the copy must not say otherwise.
+
+### Severity has to be decided, and this is the argument
+
+There is no severity column and there should not be one — it would be a detector's opinion stored
+as fact. So the map lives in `core/` beside the copy:
+
+- `possible_duplicate_invoice` → **Needs review** (`flag`). The epic is called *be told before you
+  pay*, and this is the one finding where money is about to leave twice.
+- `invoice_above_vendor_average` → **Worth checking** (`brass`). A higher bill is frequently
+  legitimate; the whole point of UX-DR23 is that this is a comparison, not an accusation.
+- `unit_dues_shortfall` → **Worth checking** (`brass`). Money owed *in*, with no payment run
+  pending, and it names a person — the surface should not shout about a member by name on
+  evidence that a deposit may simply be unuploaded.
+
+That third one is a judgement rather than a derivation. Raise it with the user before merging.
+
+### What 4.2, 4.3 and 4.4 learned, and this story inherits
+
+- **A guard nothing can break is a guard to delete.** Six have gone this way across the three
+  detector stories.
+- **A test can pass for the wrong reason, and a mutation will not always tell you.** Ask of every
+  refusal or absence test: *what would this look like if the thing I am asserting were broken?* If
+  the answer is "the same", the test is worth nothing.
+- **The AC audit before the merge request has found something on six consecutive stories.** On 4.4
+  it found the detector could not detect its own headline case. Run it.
+- **A fix diff is the highest-risk diff in the story.** MR !56 needed three rounds and each one
+  found a defect in the previous round's fix.
+- **Writing a limitation down is not handling it.** Twice in 4.4. This story does it once, on
+  purpose, in the open (the deferred row link) — that is the only place it is allowed.
+- **Anything carrying a backslash goes through the editing tool**, never a shell heredoc.
+
+### Where this story differs from its three predecessors
+
+Those were Postgres semantics and exact-decimal arithmetic; this is jsdom, copy and reading order.
+The failure modes move with it: a component that renders nothing passes every assertion about what
+it does not show, an empty list satisfies "no wrong row is present", and a test that queries the
+document body without `cleanup` sees the previous test's markup. The one existing render-test file
+worth reading first is `app/quarantine/queue-list.test.tsx` — it records each of those traps as a
+comment where it was actually hit.
+
+### The shapes to copy
+
+- `core/quarantine/queue-view.ts` — domain → view in `core/`, and the argument for deciding
+  emptiness once rather than per surface.
+- `app/quarantine/queue-list.tsx` — a presentational component that takes its data and its actions
+  as props, and the reason it does.
+- `app/quarantine/queue-list.test.tsx` — jsdom opt-in, explicit `cleanup`, and the normalizer trick
+  for asserting a string was not rewritten on its way to the page.
+- `app/dashboard/page.test.tsx` — the server-component render pattern with `auth` mocked.
+- `adapters/db/dues-reader-postgres.ts` — the UTC `to_char` and the fixture scoping.
+
+### References
+
+- [Source: epics.md] — Epic 4 story spine; UX-DR2, 3, 4, 10, 20, 23, 24
+- [Source: EXPERIENCE.md] — Alert Lifecycle; Component Patterns; State Patterns
+- [Source: DESIGN.md] — Components: margin tick, figure block, finding row
+- [Source: core/design/tokens.ts] — `flag`, `brass`, `margin-tick-width`, `scale-figure`
+- [Source: 4-4-the-dues-that-did-not-arrive.md] — the review record these learnings come from
+
+## Dev Agent Record
+
+### Agent Model Used
+
+claude-opus-5[1m]
+
+### Test Design
+
+#### Task 1 — the read ports
+
+**Behaviour: the shape of what the dashboard is allowed to hold.**
+
+1. *If it ran correctly, how would I know?* The declared member list of each port — the same
+   observable `core/ports/finding.test.ts` asserts on, through `declaredMembers`.
+2. *How do I test it?* Read the source, list the members. No seam needed; these are declarations.
+3. *What else can go wrong?* Below.
+4. *Same shape elsewhere?* `FindingRegister`/`FindingReviewer` already split for this reason, and
+   `QueryLog`/`QueryLogReader` before them. This is the third instance of the same argument.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1 | The reader grows a write method, so the dashboard can review or delete what it lists | **GUARD** — assert the member list, and assert it mentions nothing about reviewing |
+| 2 | The queue returns rows with no total, so a bounded list silently reads as the whole register | **GUARD** — one method returning both, so a caller cannot obtain the rows without the count |
+| 3 | `evidence` typed as a known shape, so the view reads `.kind` off a row written by a detector that never had one | **GUARD** — typed `unknown`; the compiler refuses the careless read (AC6, made structural) |
+| 4 | Document counts hung off a *finding* port, where nothing would ever notice they drifted | **GUARD** — separate port, separate file, named for its subject |
+| 5 | A reviewed finding reaches the surface | OUT-OF-SCOPE here — not expressible in a type; it is the adapter's, tested in Task 3 |
+| 6 | The port imports `pg` or reaches into `adapters/` | OUT-OF-SCOPE — `core/ports/boundary.test.ts` already forces it, for every file in `core/` |
+
+### Completion Notes
+
+**Baseline (0c95659):** 2457 tests passing / 593 skipped, 792 db tests passing, 8 pre-existing
+`tsc --noEmit` errors — all in existing test files (`upload-limits.test.ts`, `boundary.test.ts`).
+
+#### Task 1
+
+Two ports, not one: `FindingReader` (`core/ports/finding-reader.ts`) reads the queue,
+`CheckedDocuments` (`core/ports/checked-documents.ts`) answers UX-DR24's denominator. Splitting
+them was failure mode 4 — a document count declared on a finding port is a number nobody owns.
+
+Two design choices are enforced by the type rather than remembered:
+
+- `unreviewed(limit)` returns `UnreviewedQueue { findings, total }`, so no caller can hold the
+  rows without the count. A bounded list rendered under an unqualified figure is the specific way
+  this surface could mislead, and there is now no shape in which it is expressible.
+- `evidence` is `unknown`, not `Record<string, unknown>`. The column constraint makes it an object
+  today; `unknown` is what makes AC6 a compile error instead of a promise.
+
+**Red was not achieved on the first run** — the tests failed with `ENOENT` because the files did
+not exist, which is a missing-symbol failure and not a valid red. Stubbed both interfaces empty,
+re-ran, and got five assertion failures on member lists. Then implemented.
+
+**One test was wrong and was corrected before the code was.** `not.toMatch(/review|.../)` failed
+against the *correct* design, because `review` is a substring of `unreviewed` — the one member the
+port is supposed to have. Anchored on word boundaries instead. A pattern that fails on the right
+answer is one that gets loosened until it forbids nothing.
+
+*Sensitivity:* injected `markReviewed`, `removeFinding` and `clearQueue` in turn; each failed 2
+tests. Restored, green.
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.9 · context 5/5 files ·
+1 agy call, 56,494 tokens.
+
+- **[high] the forbidden-verb regex omits `remove` while the test's own name promises it** —
+  **confirmed**, and it was exactly the defect class this project keeps finding: a guard whose name
+  claims more than its assertion. `removeFinding` would have passed it. Added `remove`, and `clear`
+  because that is EXPERIENCE.md's word ("nothing is ever deleted or cleared by disagreement").
+  Both verified by injection above.
+- **[medium] branded types for `id` / `subjectId` / `findingType`** — **disagree.** The code is as
+  described and the swap is plausible, but every port in this repo types ids as `string`.
+  Introducing brands in one new file makes it inconsistent with ~20 siblings and with every
+  adapter, and buys nothing until they all move. That is a repo-wide convention decision for the
+  user, not a patch inside this story.
+- **[medium] ×2 model failure in the return type (`Promise<T | Error>` / Result)** — **disagree.**
+  `core/ports/finding.ts` argues explicitly for the opposite: named errors that reject and must
+  not be swallowed (`AlreadyReviewedError`, `FindingNotFoundError`). A Result type here would make
+  this the only port in the codebase with a different error contract.
+
+Argus's line numbers (172, 249, 305) are diff offsets and resolve to nothing in the real files;
+each finding was judged against the actual source rather than the cited line.
+
+## Change Log
+
+| Date | Change |
+| --- | --- |
+| 2026-08-13 | Story created from Epic 4's spine. Row navigation and the register link deferred to 4.6 and 4.7 with the reasoning recorded. |
