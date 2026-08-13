@@ -207,4 +207,30 @@ describe('one failing detector does not stop the other', () => {
       expect(onError.mock.calls[0]![0]).toMatchObject({ message: `${named} detection failed` })
     },
   )
+
+  it('survives an error listener that throws on the way out', async () => {
+    // **Reporting the failure must not become the failure.** `onError` is
+    // caller-supplied — `ingest.ts` wraps its own, and a logger with a broken
+    // transport is an ordinary thing to have. Thrown from inside the catch it
+    // escapes `attempt` entirely, which costs both promises this file makes:
+    // the second detector never runs, and the exception reaches the ingestion
+    // path, so a document that really was read gets reported as failed.
+    //
+    // Raised by CodeRabbit. The shape predates this story — 4.2's catch called
+    // `onError` the same way — but the isolation it breaks is new, which is
+    // what makes it worth fixing here rather than noting.
+    const onError = vi.fn(() => {
+      throw new Error('the log stream went away')
+    })
+
+    const outcome = await runDetection('d-1', {
+      invoices: readerBreaking('priorCandidates'),
+      findings: { raise: vi.fn(async () => ({ id: 'f-1', wasAlreadyKnown: false })) },
+      onError,
+    })
+
+    expect(onError).toHaveBeenCalled()
+    expect(outcome!.duplicates).toBeNull()
+    expect(outcome!.spikes).toMatchObject({ raised: 1 })
+  })
 })

@@ -99,7 +99,16 @@ export async function runDetection(
     try {
       return await run()
     } catch (cause) {
-      deps.onError?.(new Error(`${detector} detection failed`, { cause }), documentId)
+      // **Reporting the failure must not become the failure.** `onError` is
+      // caller-supplied and a logger with a broken transport is an ordinary
+      // thing to have; thrown from here it escapes `attempt`, so the second
+      // detector never runs and the exception reaches an ingestion path that
+      // had already stored the document's records. Raised by CodeRabbit.
+      try {
+        deps.onError?.(new Error(`${detector} detection failed`, { cause }), documentId)
+      } catch {
+        // Nowhere left to report it: the thing that reports is what broke.
+      }
 
       return null
     }

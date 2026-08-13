@@ -81,9 +81,16 @@ function cents(amount: string | null): bigint | null {
   // an absent fraction — `''` becomes `'00'`. Raised by Argus.
   const value = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, '0'))
 
-  // A credit is not a spike. `total_amount` is negative for a credit to the
-  // association (migration 006), and a large one is money coming back.
-  return sign === '-' ? null : value
+  // **Nothing but a positive charge counts.** A credit is money coming back —
+  // `total_amount` is negative for a credit to the association (migration 006)
+  // — and a 0.00 invoice is a document rather than a charge. Averaging either
+  // in says the vendor charged less than they did, which drags the average down
+  // and makes the next ordinary invoice look like a spike.
+  //
+  // Zero was returning `0n` here while this function's own summary promised
+  // null for anything "not positive". CodeRabbit read the two against each
+  // other; the summary was the one that was right.
+  return sign === '-' || value === 0n ? null : value
 }
 
 /** Rounded half-up to `places`, from an exact numerator and denominator. */
@@ -120,9 +127,13 @@ export function spikeAgainst(
   const priors = history.map((prior) => cents(prior.amount)).filter((value) => value !== null)
   if (priors.length < MINIMUM_HISTORY) return null
 
+  // No guard on the sum, and that is deliberate. `cents` admits nothing below
+  // one penny, so a sum of at least `MINIMUM_HISTORY` of them cannot be zero
+  // and `ratioToDecimal` below cannot divide by it. The guard that used to
+  // stand here was unreachable the moment zero stopped parsing — and what
+  // keeps it unnecessary is a test, not a comment: *refuses a history of
+  // nothing but zero-value invoices* fails loudly if `cents` is ever loosened.
   const sum = priors.reduce((total, value) => total + value, 0n)
-  if (sum <= 0n) return null
-
   const count = BigInt(priors.length)
   const excess = amount * count - sum
 

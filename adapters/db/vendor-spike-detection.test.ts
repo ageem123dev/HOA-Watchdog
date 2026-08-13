@@ -348,7 +348,12 @@ describeWithDatabase('raising a vendor spike end to end', () => {
     const scene = vendor === undefined ? past : { ...past, vendor }
 
     for (const [index, amount] of amounts.entries()) {
-      await seedInvoice(scene, { issuedOn: `2026-03-0${index + 1}`, amount })
+      // Padded, not `0${index + 1}`: the tenth entry would otherwise be
+      // `2026-03-010`, and `::date` would reject the whole seed rather than the
+      // one row. Three amounts today, so nothing reaches it — a trap for
+      // whoever writes the fourth kind of test. Raised by CodeRabbit.
+      const day = String(index + 1).padStart(2, '0')
+      await seedInvoice(scene, { issuedOn: `2026-03-${day}`, amount })
     }
 
     return scene

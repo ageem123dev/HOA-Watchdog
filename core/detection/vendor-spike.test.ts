@@ -196,15 +196,36 @@ describe('what must not be flagged', () => {
     expect(spikeAgainst(invoice('100.00'), history)).toBeNull()
   })
 
-  it('refuses history whose amounts sum to nothing', () => {
-    // **This case used credits until Argus pointed out they never reach the
-    // sum**, so the test passed on the minimum-history guard and the divisor
-    // guard beside it was covered by nothing. Zeroes are what actually gets
-    // there: three readable priors of 0.00 — a voided or corrected invoice.
+  it('drops a zero prior rather than averaging it in', () => {
+    // **A 0.00 invoice is a document, not a charge.** Averaging it in says the
+    // vendor charged nothing that month, which drags the average down and makes
+    // the next ordinary invoice look like a spike — the same false positive the
+    // unreadable-prior rule above exists to prevent, arriving as real data.
     //
-    // Without the guard the sum is 0, every positive amount clears a threshold
-    // of zero, and `ratioToDecimal` divides by it. BigInt division by zero
-    // throws, so the finding a board member would get is a crashed ingestion.
+    // Here a fourth prior of 0.00 must leave the average at 100.00 over three,
+    // not 75.00 over four. Raised by CodeRabbit, which spotted that `cents`
+    // contradicted its own docstring: it promised null for anything "not
+    // positive" and returned zero for zero.
+    const history = [...STEADY, invoice('0.00', 'p4')]
+
+    expect(spikeAgainst(invoice('130.00'), history)).toMatchObject({
+      invoicesAveraged: 3,
+      average: '100.00',
+      percentOverAverage: '30.0',
+    })
+  })
+
+  it('refuses a history of nothing but zero-value invoices', () => {
+    // **This case is load-bearing beyond what it looks like.** Every prior is
+    // dropped, so there is no history and no finding — but it is also the only
+    // thing standing between `ratioToDecimal` and a division by zero.
+    //
+    // `spikeAgainst` has no `sum <= 0n` guard: it cannot need one while every
+    // prior is at least one cent. If `cents` is ever loosened to admit zero
+    // again, this history reaches the divisor as 0 and BigInt division throws
+    // — and this expectation turns that crash into a failing test rather than
+    // a crashed ingestion. Argus found the first version of this case passing
+    // on the minimum-history guard instead, having never reached the sum.
     const history = [invoice('0.00', 'p1'), invoice('0.00', 'p2'), invoice('0.00', 'p3')]
 
     expect(spikeAgainst(invoice('100.00'), history)).toBeNull()

@@ -25,6 +25,17 @@ import {
  * identity constraint even for the same document and month. They are separate
  * findings because they are separate sentences: one says you may have paid this
  * bill already, the other says this bill is larger than usual.
+ *
+ * ## One window query per invoice, knowingly
+ *
+ * CodeRabbit raised the N+1: this reads a trailing window per invoice rather
+ * than batching by vendor. Left as it is, because the bound is invoices *per
+ * document* — the largest in this database carries three — and
+ * `detectDuplicateInvoices` has had the same shape since 4.2, so batching one
+ * and not the other would leave the pair inconsistent for no measured gain.
+ * Batching means a reader method that takes many subjects and returns histories
+ * keyed by them, which changes the port; that is a story about detection
+ * throughput, not a review fix on a story about arithmetic.
  */
 
 /**
