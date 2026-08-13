@@ -685,6 +685,54 @@ this story.**
 *Gate on the round's diff:* three mutations, all caught; `argus_review` clean (confidence 1.0, 5/5
 files); full suite, lint, `tsc` and build re-run.
 
+#### MR !60, CodeRabbit round 2 — 1 of 1 taken, and Argus found three more in the fix
+
+`Actionable comments posted: 1` on `5c570dd..74eef48` — **the fix diff itself**, which is the
+pattern `_bmad/custom/review-gate.md` documents and which this story has now hit five times.
+
+Every finding in this round was about the *parsing inside one test*, and none about the product. The
+test is the port's null-contract property check, rewritten in round 1. Taken in order:
+
+- **CodeRabbit:** the filter selected any member *mentioning* `FindingDetail`, so it would have
+  rejected one that merely took it as a parameter, and a `Promise<readonly FindingDetail[]>` that
+  answers "none" with `[]`. The variable was even named `returningOne` while the filter never looked
+  at the return position.
+- **Argus, on that fix:** requiring `^Promise<` filtered a synchronous `latest(): FindingDetail`
+  out of the check entirely. Fixed by making the wrapper optional — and by asserting on the *null*
+  rather than on the `Promise<…>` spelling, since a synchronous `FindingDetail | null` honours the
+  contract and the suggested fix would have rejected it.
+- **Argus, on *that* fix:** slicing on `'): '` returns −1 for a **property**, so
+  `readonly latest: Promise<FindingDetail>` was dropped before the assertion saw it. This is the
+  defect shape `declared-members.ts`'s own header records five review rounds finding — a
+  function-typed property is how a capability sneaks onto a port. Also: an unanchored assertion let
+  `| null | undefined` pass, and `` finds no boundary inside `autoResolve`.
+- **Argus, on *that* fix:** an optional `latest?:` drops its `?` in the split and smuggles
+  `undefined` back in; a function-typed property keeps its arrow and was falsely rejected.
+
+**Skipped, with a reason:** `Array<FindingDetail>` is not excluded from the list filter. Every list
+in this codebase is spelled `readonly T[]` — `UnreviewedQueue.findings` included — and the
+exact-list assertion above pins the real signatures either way.
+
+*Gate:* twelve mutation shapes across the round, each checked for the outcome it *should* have
+rather than only for failure — optional, function-typed, synchronous, union-reordered,
+extra-`undefined`, array-returning, parameter-taking, acronym and snake_case verbs, and `unreviewed`
+still exempt. One of them corrected the label rather than the code: `Promise<null | FindingDetail>`
+honours the contract, so passing is right.
+
+**Round cap.** `bmad-ship-story` caps at ~3–4 rounds, and findings on this test are now hypothetical
+member syntaxes on a two-member port. The exact-list assertion is the primary guard; this property
+test is the thing that keeps biting after someone deliberately edits that list. Further parser
+hypotheticals here are declined.
+
+#### A follow-up this round produced, recorded in `sprint-status.yaml`
+
+The stray-backspace defect landed **again**, in this round, in a regex — the same position and the
+same cause as story 3.5's, which is what `docs/no-control-characters.test.ts` was written for. That
+guard reads **markdown only**, so it could not see a `.ts` file. Caught here only because the regex
+was in a *positive* assertion that failed loudly; in a negative one it would have shipped silently.
+A scan of all 396 source files found forbidden bytes in exactly two, both deliberate fixtures, so
+widening the glob is cheap — but it is a repo-wide guard change beyond this story's ACs.
+
 #### What each earlier round found — and what was refused
 
 Recorded per task above. The three worth naming here:

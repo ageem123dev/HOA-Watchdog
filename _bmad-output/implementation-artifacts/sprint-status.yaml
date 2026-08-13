@@ -122,6 +122,10 @@ development_status:
   epic-5-retrospective: optional
 
 action_items:
+  - epic: 4
+    action: "docs/no-control-characters.test.ts reads markdown only, and the defect it exists for landed again on story 4.6 in a .ts file - a word-boundary escape written through a shell heredoc became a literal backspace byte inside a regex, which then compiled fine and matched nothing. That is the same failure its own header records from story 3.5, in the same position. A scan of all 396 source files found forbidden control bytes in exactly two, both deliberate fixtures (core/extraction/tabular-roll.test.ts and the guard's own file), so widening the glob to .ts/.tsx needs only a two-entry allow-list - and the allow-list itself needs justifying so it does not become a dumping ground. Worth checking the YAML too: this entry originally carried the escape verbatim, and a double-quoted YAML scalar would have turned it into the same byte. Not done in 4.6: a repo-wide guard change beyond that story's ACs, raised at ready-to-merge"
+    owner: "Dev"
+    status: open
   - epic: 1
     action: "Restore CI after the heavy development cycle. Config is at 621d4cc:.gitlab-ci.yml; prefer a self-managed runner, which consumes no GitLab compute minutes. See AD-2 amendment"
     owner: "Matt"

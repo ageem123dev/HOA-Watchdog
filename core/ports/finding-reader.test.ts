@@ -46,20 +46,78 @@ describe('the FindingReader port', () => {
     // rejection would merge the two at the call site.
     //
     // **Written as a property over every member, not as a substring of the
-    // list.** The previous version asserted the joined list *contained* one
-    // exact signature, which the exact-list assertion above already implies —
-    // it could not fail unless that one did too. This version survives the
-    // list legitimately changing: add a `latest(): Promise<FindingDetail>` and
+    // list.** The first version asserted the joined list *contained* one exact
+    // signature, which the exact-list assertion above already implies — it
+    // could not fail unless that one did too. This survives the list
+    // legitimately changing: add a `latest(): Promise<FindingDetail>` and
     // update the array above, and this still refuses it. Raised by CodeRabbit,
-    // and it is the same argument the `cannot review` test below already makes
-    // for itself.
-    const returningOne = declaredMembers(findingSource, 'FindingReader').filter((member) =>
-      member.includes('FindingDetail'),
+    // and it is the same argument the `cannot review` test below makes for
+    // itself.
+    //
+    // **Matched on the return type, not on the whole declaration.** The second
+    // version filtered on any member *mentioning* `FindingDetail`, which is a
+    // different claim from the one the variable's name makes: it would have
+    // failed a member that merely took one as a parameter, and a
+    // `Promise<readonly FindingDetail[]>` that legitimately answers `[]` rather
+    // than null. A test that refuses a correct design is as broken as one that
+    // admits a wrong one. Also raised by CodeRabbit, in the fix for its own
+    // previous finding.
+    // **The text after the last colon**, which is the return type of a method
+    // (`byId(id: string): T`) and of a property alike (`readonly latest: T`).
+    // Slicing on `'): '` instead — the previous version — found nothing in a
+    // property, so a `readonly latest: Promise<FindingDetail>` was dropped
+    // before the assertion ever saw it. `declared-members.ts` returns *lines*
+    // precisely because a function-typed property is how a capability sneaks
+    // onto a port; its own header records five review rounds finding five such
+    // forms. Raised by Argus.
+    //
+    // Bounded, deliberately: a return type containing its own colon would
+    // confuse this, and none exists here. `declared-members.ts` refuses to grow
+    // into a type parser for the same reason, and the exact-list assertion
+    // above is what pins the signatures.
+    const returnTypeOf = (member: string): string =>
+      (member.replace(/[;,]\s*$/, '').split(':').pop() ?? '')
+        // A function-typed property (`byId: (id: string) => Promise<…>`) keeps
+        // its arrow after the split, and every check below would then read the
+        // arrow rather than the type and reject a design that is correct.
+        .replace(/^\s*\([^)]*\)\s*=>\s*/, '')
+        .trim()
+
+    // **No member is optional, and that is checked before anything else.** A
+    // `byId?:` adds `undefined` to whatever follows the colon, so the union
+    // check below would read `FindingDetail | null` and call it exact while the
+    // caller could still be handed a third thing. Asserted on the name side of
+    // the colon, where the `?` actually lives, rather than threaded through the
+    // parsing. Raised by Argus.
+    const optional = declaredMembers(findingSource, 'FindingReader').filter((member) =>
+      /\?\s*[:(]/.test(member),
     )
+    expect(optional, 'an optional member admits undefined').toEqual([])
+
+    // Anything handing back a single detail, however the union is ordered and
+    // whether or not it is awaited. An array — `Promise<readonly
+    // FindingDetail[]>` — is excluded on purpose: a list answers "none" with
+    // `[]` and owes nobody a null.
+    const returningOne = declaredMembers(findingSource, 'FindingReader')
+      .map((member) => ({ member, returns: returnTypeOf(member) }))
+      .filter(({ returns }) => /\bFindingDetail\b(?!\[)/.test(returns))
 
     expect(returningOne.length).toBeGreaterThan(0)
-    for (const member of returningOne) {
-      expect(member).toMatch(/Promise<FindingDetail \| null>/)
+
+    for (const { member, returns } of returningOne) {
+      // **The union is exactly these two.** Asserting only that `| null` is in
+      // there somewhere lets `Promise<FindingDetail | null | undefined>` pass,
+      // and `undefined` is the second absent-value this port exists to not
+      // have — "no such finding" would then arrive in two spellings and every
+      // caller would have to handle both. Raised by Argus.
+      const union = returns
+        .replace(/^Promise<\s*/, '')
+        .replace(/>\s*$/, '')
+        .split('|')
+        .map((part) => part.trim())
+        .sort()
+
+      expect(union, member).toEqual(['FindingDetail', 'null'])
     }
   })
 
@@ -78,7 +136,19 @@ describe('the FindingReader port', () => {
     // them out while the test's own name promised them, so `removeFinding` would
     // have passed the guard against removal. `clear` is EXPERIENCE.md's word:
     // "Nothing is ever deleted or cleared by disagreement."
-    expect(members).not.toMatch(/\b(mark|review|raise|remove|clear|delete|dismiss|resolve)/i)
+    // **Split at camelCase boundaries first**, because `\b` does not find one
+    // inside an identifier: `autoResolve` and `bulkDelete` both walked straight
+    // past this guard, which is the whole defect it exists to prevent wearing
+    // the casing convention every method here uses. Splitting first keeps the
+    // `unreviewed` exemption intact — there is still no boundary before
+    // `review` inside it. Raised by Argus.
+    const asWords = members
+      .replace(/_/g, ' ')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      // And inside an acronym run, so `IDRemove` splits before `Remove`.
+      .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+
+    expect(asWords).not.toMatch(/\b(mark|review|raise|remove|clear|delete|dismiss|resolve)/i)
   })
 
   it('hands back the rows and their total as one value', () => {
