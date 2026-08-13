@@ -80,9 +80,17 @@ export async function detectDuesShortfalls(
         // of reading it by containment rather than by recency.
         unitNumber: unit.unitNumber,
         holderName: unit.holderName,
-        // UX-DR24's count: how many instalments this rests on. A shortfall
-        // figure with no denominator is the reassurance that rule forbids.
-        unitsChecked: units.length,
+        // **UX-DR24's denominator is `instalmentsDue`**, which arrives above in
+        // `...shortfall`. A `unitsChecked: units.length` sat here until Argus
+        // read it against its own comment: the comment said "how many
+        // instalments this rests on" and the value was the size of the whole
+        // roll — a number about the association stored inside a finding about
+        // one unit, and one that changes every time a unit is assessed. Storing
+        // it would have amended every finding's evidence whenever the roll grew.
+        //
+        // 4.2 and 4.3 do carry a count of what was compared, and correctly:
+        // their findings are keyed on a document, so "of the 3 invoices on this
+        // upload" is about the subject. Here it is not.
       },
     })
 

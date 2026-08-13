@@ -89,8 +89,12 @@ describe('raising a shortfall', () => {
       evaluatedOn: '2026-04-01',
       unitNumber: '101',
       holderName: 'Dana Whitfield',
-      unitsChecked: 1,
     })
+
+    // The denominator UX-DR24 asks for is the one about *this unit* — how many
+    // instalments the shortfall rests on. A count of the whole roll was here
+    // until Argus noticed it contradicted its own comment.
+    expect(findings.raised[0]!.evidence).not.toHaveProperty('unitsChecked')
   })
 
   it('files one finding that changes rather than two that disagree', async () => {
