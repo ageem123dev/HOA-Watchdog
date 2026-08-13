@@ -153,6 +153,78 @@ describe('the header agrees with the dashboard row', () => {
   })
 })
 
+describe('the window the finding concerns', () => {
+  // **Found by the acceptance-criteria audit, where the Dev Notes said it would
+  // be.** `period` was read by the adapter, carried by the port and carried by
+  // the view, and rendered by nothing — the same shape 4.5's audit found for the
+  // detection date. `core/ports/finding.ts`: "a shortfall that does not say
+  // *which year* is unreadable".
+
+  it('states it inclusively, not as the half-open range the database stores', () => {
+    // `[2026-04-01, 2026-05-01)` covers April. Printed as stored, it reads as
+    // though the first of May were included — a board member checking their own
+    // records against it would be looking at the wrong month.
+    const view = toFindingDetail(
+      detail({ period: { from: '2026-04-01', until: '2026-05-01' } }),
+    )
+
+    expect(figure(view, 'Period')).toBe('2026-04-01 to 2026-04-30')
+  })
+
+  it('holds up across a year boundary', () => {
+    const view = toFindingDetail(
+      detail({ period: { from: '2026-01-01', until: '2027-01-01' } }),
+    )
+
+    expect(figure(view, 'Period')).toBe('2026-01-01 to 2026-12-31')
+  })
+
+  it('holds up across a leap day', () => {
+    const view = toFindingDetail(
+      detail({ period: { from: '2028-02-01', until: '2028-03-01' } }),
+    )
+
+    expect(figure(view, 'Period')).toBe('2028-02-01 to 2028-02-29')
+  })
+
+  it('says a single day as one day', () => {
+    const view = toFindingDetail(
+      detail({ period: { from: '2026-04-14', until: '2026-04-15' } }),
+    )
+
+    expect(figure(view, 'Period')).toBe('2026-04-14')
+  })
+
+  it('is shown for every kind of finding, because every finding has one', () => {
+    for (const finding of [duplicate(), spike(), shortfall()]) {
+      expect(figure(toFindingDetail(finding), 'Period')).toBeDefined()
+    }
+  })
+
+  it.each([
+    ['not a date', { from: 'April', until: '2026-05-01' }],
+    ['a date that does not exist', { from: '2026-02-30', until: '2026-03-01' }],
+    // **The two that actually exercise the round-trip check.** `Date.UTC` rolls
+    // an impossible date forward rather than refusing it, so 2026-02-30 becomes
+    // 2026-03-02 and 2026-13-01 becomes 2027-01-01. With an `until` far enough
+    // ahead, the range check cannot catch either — and the period would render
+    // with a start date no calendar has. The sensitivity pass found the first
+    // version of these cases passing for the wrong reason.
+    ['a February the 30th, with room to roll forward', { from: '2026-02-30', until: '2026-06-01' }],
+    ['a thirteenth month', { from: '2026-13-01', until: '2027-06-01' }],
+    ['an end that does not exist', { from: '2026-04-01', until: '2026-04-31' }],
+    ['ending before it starts', { from: '2026-05-01', until: '2026-04-01' }],
+    ['ending where it starts', { from: '2026-04-01', until: '2026-04-01' }],
+    ['missing its end', { from: '2026-04-01', until: '' }],
+  ])('shows no period at all when the range is %s', (_name, period) => {
+    // A window nobody can state is not a window to state badly. Nothing throws.
+    const view = toFindingDetail(detail({ period: period as never }))
+
+    expect(figure(view, 'Period')).toBeUndefined()
+    expect(JSON.stringify(view)).not.toMatch(/NaN|Invalid Date|undefined/)
+  })
+})
+
 describe('AC6: the finding that somebody has already reviewed', () => {
   it('offers no review message at all while the finding is unreviewed', () => {
     expect(toFindingDetail(duplicate()).reviewed).toBeNull()
@@ -379,7 +451,9 @@ describe('nothing throws, whatever the evidence holds', () => {
     const degraded = toFindingDetail(detail({ evidence }))
 
     expect(degraded.comparisons).toBeNull()
-    expect(degraded.figures).toEqual([])
+    // The period survives, because it is a column on the row rather than a
+    // field of the evidence blob. What must contribute nothing is the blob.
+    expect(degraded.figures.map((entry) => entry.label)).toEqual(['Period'])
   })
 
   it.each([
@@ -449,7 +523,7 @@ describe('nothing throws, whatever the evidence holds', () => {
       detail({ findingType: 'vendor_paid_before_approval', evidence: { anything: 'at all' } }),
     )
 
-    expect(view.figures).toEqual([])
+    expect(view.figures.map((entry) => entry.label)).toEqual(['Period'])
     expect(view.comparisons).toBeNull()
     expect(view.title).toBe('Vendor paid before approval')
   })

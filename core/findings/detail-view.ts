@@ -113,6 +113,52 @@ function percentage(value: unknown): string | null {
   return stored === null ? null : `${stored}%`
 }
 
+/** `YYYY-MM-DD`, and a date that actually exists. */
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function dayNumber(value: string): number | null {
+  const match = CALENDAR_DATE.exec(value)
+  if (match === null) return null
+
+  const [, year, month, day] = match
+  const at = Date.UTC(Number(year), Number(month) - 1, Number(day))
+
+  // `Date.UTC` rolls 2026-02-30 forward to 2026-03-02 rather than refusing it,
+  // so the only way to know the date was real is to render it back and compare.
+  return new Date(at).toISOString().slice(0, 10) === value ? at : null
+}
+
+const ONE_DAY_MS = 86_400_000
+
+/**
+ * The window a finding concerns, as a board member would state it.
+ *
+ * **Inclusive, where the database stores it half-open.** `[2026-04-01,
+ * 2026-05-01)` covers April, and printed as stored it reads as though the first
+ * of May were in it — a board member checking their own records against the
+ * finding would be looking at the wrong month. `core/ports/finding.ts` chose the
+ * half-open form because that is what Postgres canonicalises a `daterange` into;
+ * this is where it stops being a storage detail.
+ *
+ * `null` when the range is not one that can be stated. Migration 021's
+ * `finding_period_is_bounded` makes that unreachable through the ordinary path,
+ * but this reads `jsonb`-adjacent values off a row, and a window nobody can
+ * state is not a window to state badly.
+ */
+function periodLabel(period: { readonly from: string; readonly until: string }): string | null {
+  const from = typeof period?.from === 'string' ? period.from : ''
+  const until = typeof period?.until === 'string' ? period.until : ''
+
+  const start = dayNumber(from)
+  const end = dayNumber(until)
+  if (start === null || end === null || end <= start) return null
+
+  // The last day the window covers, which is the day before it ends.
+  const last = new Date(end - ONE_DAY_MS).toISOString().slice(0, 10)
+
+  return last === from ? from : `${from} to ${last}`
+}
+
 /** A count as a string, or `null` — never `"0"` manufactured from an absent field. */
 function counted(value: unknown): string | null {
   const count = whole(value)
@@ -275,6 +321,14 @@ export function toFindingDetail(finding: FindingDetail): FindingDetailView {
   const row = toFindingRow(finding)
   const laid = lay(finding.findingType, finding.evidence)
 
+  // First, and for every finding type, because every finding has a period and
+  // it frames everything below it. Added here rather than inside each `lay*`
+  // function so that a detector added later cannot forget it.
+  const figures = [
+    ...figuresOf([['Period', periodLabel(finding.period), false]]),
+    ...laid.figures,
+  ]
+
   return {
     id: row.id,
     severity: row.severity,
@@ -283,7 +337,7 @@ export function toFindingDetail(finding: FindingDetail): FindingDetailView {
     summary: row.evidenceLine,
     amount: row.amount,
     raisedOn: row.raisedOn,
-    figures: laid.figures,
+    figures,
     comparisons: laid.comparisons,
     reviewed:
       finding.reviewed === null

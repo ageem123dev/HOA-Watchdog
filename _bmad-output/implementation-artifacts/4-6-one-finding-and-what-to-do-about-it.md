@@ -4,7 +4,7 @@ baseline_commit: 26bf300
 
 # Story 4.6: One finding, and what to do about it
 
-Status: in-progress
+Status: review
 
 ## Why this story exists
 
@@ -585,6 +585,38 @@ finding, **disagreed with and recorded**:
   guard-before-read ordering legible at a glance, and that ordering is the thing a later editor is
   most likely to break.
 
+#### The acceptance-criteria audit — and it found something again, on the eighth story
+
+The Dev Notes named the place: *"`FindingReader` … already carries `subjectId` and `period` that 4.5
+does not render — **they are here for this story**."* At the end of task 5, **`period` was rendered
+by nothing** — read by the adapter, carried by the port, carried by the view, and dropped at the
+surface. The same shape 4.5's audit found for the detection date.
+
+It is now the first figure on every finding, whatever its type, added once in `toFindingDetail`
+rather than inside each `lay*` function so a detector added later cannot forget it.
+
+**Stated inclusively, where the database stores it half-open.** `[2026-04-01, 2026-05-01)` covers
+April, and printed as stored it reads as though the first of May were in it — a board member
+checking their own records against the finding would be looking at the wrong month.
+`core/ports/finding.ts` chose the half-open form because that is what Postgres canonicalises a
+`daterange` into; this is where it stops being a storage detail.
+
+*`subjectId` is deliberately still unrendered*, and that is a decision rather than the same
+oversight: it is a raw uuid identifying a document, a unit or a vendor depending on the type, there
+is no surface to link it to yet, and printing it would be machine text on a board member's page.
+
+**The sensitivity pass then caught a test of mine passing for the wrong reason.** `Date.UTC` rolls
+an impossible date *forward* rather than refusing it, so the round-trip check that catches
+`2026-02-30` had no test behind it: the case I wrote was caught by the `end <= start` range check
+instead, and removing the guard entirely left all 70 tests green. Three cases added with enough room
+to roll forward — `2026-02-30 → 2026-06-01`, a thirteenth month, and an April the 31st — and the
+mutation now fails three.
+
+*Expired premises, re-specified:* six cases asserted `figures` was empty for degraded evidence and
+for an unrecognised type. They meant *no evidence-derived figures*, and the period is a column on
+the row rather than a field of the blob. Re-specified to assert the period is the only figure, which
+keeps exactly the cover they had.
+
 ### File List
 
 **Task 1** — `core/ports/finding-reader.ts`, `core/ports/finding-reader.test.ts`,
@@ -608,6 +640,8 @@ finding, **disagreed with and recorded**:
 `app/findings/[id]/detail-panel.tsx` (new), `app/findings/[id]/detail-panel.test.tsx` (new),
 `core/auth/route-policy.ts`, `app/dashboard/findings-list.tsx`,
 `app/dashboard/findings-list.test.tsx`.
+
+**AC audit** — `core/findings/detail-view.ts`, `core/findings/detail-view.test.ts`.
 
 ## Change Log
 
