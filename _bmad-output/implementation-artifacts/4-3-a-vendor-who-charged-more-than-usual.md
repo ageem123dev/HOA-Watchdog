@@ -5,7 +5,7 @@ merge_request: 55
 
 # Story 4.3: A vendor who charged more than usual
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -281,6 +281,31 @@ ingestion.
 | Argus | **[low]** the two detectors run sequentially rather than through `Promise.all` | True, and kept. Each issues a query per invoice against a pool of five shared connections. The duplication that costs something is not the ordering: both open with `invoicesOn(documentId)`, so that query runs twice either way. Recorded in the code. |
 | CodeRabbit | **[trivial]** N+1 window query per invoice | Bounded by invoices per document — the largest here carries three — and `detectDuplicateInvoices` has had the same shape since 4.2. Batching changes the port. Recorded in the code. |
 
+### MR !55 — CodeRabbit's own review
+
+Two actionable comments, both taken.
+
+**No index covered either detector's predicate.** `priorCandidates` and `trailingInvoices` both narrow on
+`vendor_normalised_name(vendor_name)` and filter to invoices, and each was a sequential scan over every
+`extraction` row the association has stored — once per invoice per upload, on the path a treasurer waits
+for. Migration 022 adds one partial expression index serving both, so indexing one detector and not the
+other never arises.
+
+**The migration's own comment was false, and the sensitivity check is what found it.** It said what
+everyone says: that Postgres refuses an expression index over anything less than `IMMUTABLE`. Marking
+`vendor_normalised_name` `stable`, then `volatile`, and re-running the exact `create index` — accepted
+all three times. It is a SQL-language function, so Postgres inlines it and applies the rule to the
+inlined body rather than the wrapper's label. That retired a test that could not fail, and made the
+surviving one matter more: nothing in the database enforces the label, so a test is all that stands
+behind migration 009's declaration.
+
+An unused optional parameter went with it, and the README's migration count followed — caught by its own
+test.
+
+Re-reviewed clean on `c2206bb`: *"No actionable comments were generated"*, arriving as an **edit to the
+existing summary comment** rather than as a new note, which is the shape that makes a clean verdict easy
+to miss.
+
 ### What the review round cost, and what found what
 
 Argus missed both of CodeRabbit's majors; `argus_ingest` scored the round and wrote two lessons. The
@@ -296,5 +321,6 @@ indistinguishable, and the eleven db tests that shared a vendor and therefore sh
 
 | Date | Change |
 | --- | --- |
+| 2026-08-13 | MR !55 converged on c2206bb: CodeRabbit clean, gate green. Round 1 added migration 022 and corrected a migration comment that asserted something false about Postgres. |
 | 2026-08-13 | Tasks 1-5 implemented test-first across ec9f1ea, 4d33461 and 9c62dd5. Acceptance-criteria audit found the threshold stored once per spike and once per finding, and one test whose premise expired with the fix. |
 | 2026-08-13 | Story created after 4.2 merged as f676fb1. Written to reuse 4.2's rails — reader, register, wiring, and the `(document, month)` key — rather than build a second set. |
