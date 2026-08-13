@@ -343,9 +343,10 @@ describeWithDatabase('raising a vendor spike end to end', () => {
     })
 
   /** History on its own document, so `invoicesOn` does not check it as a subject too. */
-  async function withHistory(label: string, amounts: readonly string[], vendor?: string) {
-    const past = await seedDocument(`${label}-history`, '2026-03-05T09:00:00Z')
-    const scene = vendor === undefined ? past : { ...past, vendor }
+  async function withHistory(label: string, amounts: readonly string[]) {
+    // No vendor override: every caller uses the seeded one, and a parameter
+    // nobody passes is a parameter nobody maintains. Raised by CodeRabbit.
+    const scene = await seedDocument(`${label}-history`, '2026-03-05T09:00:00Z')
 
     for (const [index, amount] of amounts.entries()) {
       // Padded, not `0${index + 1}`: the tenth entry would otherwise be
