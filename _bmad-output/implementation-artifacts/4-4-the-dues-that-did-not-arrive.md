@@ -5,7 +5,7 @@ merge_request: 56
 
 # Story 4.4: The dues that did not arrive
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -239,6 +239,31 @@ the acceptance-criteria audit. Every finding verified against the real file befo
 | CodeRabbit | the port imports `ReceivedPayment` from the detection module | The shape `invoice-reader.ts` already has. Changing one without the other is worse than either. |
 | CodeRabbit | assert `duesForYear`'s argument order | Adds nothing over asserting the periods actually raised. |
 | CodeRabbit | indexes for the two dues queries | Worth having, on migration 022's argument. **Recorded as the next thing this path needs** rather than added: a migration written at the end of a story is the diff this project has learned to distrust. |
+
+### MR !56 — three rounds, and each one found a defect in the previous fix
+
+**Round 1 — a date that depended on the session timezone.** `to_char` on a `timestamptz` renders it in the
+*session's* timezone: the same instant answered `2026-07-01` on one connection and `2026-06-30` on one set
+to `America/Los_Angeles`. That value is the evaluation date, so an unnoticed connection setting would have
+moved an arrears finding by a month and named whoever held the unit in the wrong period. The comment
+directly above the query already warned about rendering an instant as a day — and the query then did it.
+The same line had shipped in 4.2's invoice reader, where it keys a duplicate finding's month; fixed there
+too.
+
+**Round 2 — the test for round 1 was a guard that proved nothing.** It set the timezone on one pooled
+connection and let the adapter check out another, so it could pass with the bug fully present. That was the
+flakiness I noticed and talked myself out of. `setPoolTimeZone` now takes every connection in the pool.
+
+**Round 3 — the helper from round 2 could strand the pool.** `Promise.all` abandons already-resolved
+clients when a later checkout rejects, and this helper asks for all of them, so one failure would leave the
+next query waiting forever rather than failing. `allSettled`, release in a `finally`, rethrow rather than
+proceed on a partial set.
+
+**Rounds 2 and 3 were both defects in the previous round's fix**, which is what the pipeline means by a fix
+diff being the highest-risk diff in a story rather than the lowest.
+
+Converged on `73329b0`: *"No actionable comments were generated"* — arriving, as it always does, as an
+**edit to the summary comment** rather than a new note. Sorting notes by creation date misses it entirely.
 
 ### Three of my own tests passed for the wrong reason
 
