@@ -1,5 +1,6 @@
 ---
 baseline_commit: b99195e
+merge_request: 56
 ---
 
 # Story 4.4: The dues that did not arrive
@@ -215,7 +216,38 @@ _To be filled by the dev agent._
 
 ## Review Findings
 
-_To be filled by the review._
+Reviewed as a whole-story diff (`main...HEAD`) by Argus three times and once by the CodeRabbit CLI, plus
+the acceptance-criteria audit. Every finding verified against the real file before being acted on.
+
+### Taken
+
+| From | Finding |
+| --- | --- |
+| AC audit | **The reader selected units from the uploaded deposit's own payments, so a unit that had paid nothing was never checked** — the first case FR-7 names. The roll is now the driving table. |
+| Argus | A count of the whole roll (`unitsChecked`) stored inside a finding about one unit, under a comment describing the instalment count. It would also have amended every finding whenever the roll grew. |
+| Argus | **A late payment never corrected the finding it settled.** Only the upload year was evaluated, and findings are one-way, so paid-off arrears stayed on the register. Every year a deposit's money is for is now evaluated. |
+| CodeRabbit | `instalmentsDue` spelled its own `dueOn <= evaluatedOn`, duplicating `expectedBy`'s boundary. One predicate now, shared. |
+| CodeRabbit | `subjectsChecked` summed per year, double-counting a unit assessed in two. |
+| CodeRabbit | `yearRange` accepted any safe integer; `padStart` does not truncate, so `99999` built a period key nothing could match. |
+
+### Refused
+
+| From | Finding | Why |
+| --- | --- | --- |
+| Argus | **[high]** `limit 1` without an `order by` in `evaluationDateFor` | The query is a primary-key lookup with neither. Hallucinated. |
+| Argus | **[high]** uncast amount inside a `json_build_object` | No such call exists; both amounts already carry `::text`. |
+| CodeRabbit | the port imports `ReceivedPayment` from the detection module | The shape `invoice-reader.ts` already has. Changing one without the other is worse than either. |
+| CodeRabbit | assert `duesForYear`'s argument order | Adds nothing over asserting the periods actually raised. |
+| CodeRabbit | indexes for the two dues queries | Worth having, on migration 022's argument. **Recorded as the next thing this path needs** rather than added: a migration written at the end of a story is the diff this project has learned to distrust. |
+
+### Three of my own tests passed for the wrong reason
+
+A float-summing mutation survived because every amount in the file happened to be float-safe. A multi-year
+test never asserted the accumulated count, so `+=` to `=` survived. And a year-range guard tested through
+the detector was never reached, because with a year no unit is assessed for the loop body never runs.
+
+**Twice on this story, writing a limitation down was mistaken for handling it** — the audit finding and
+Argus's late-payment finding are the same mistake in two places.
 
 ## Change Log
 
