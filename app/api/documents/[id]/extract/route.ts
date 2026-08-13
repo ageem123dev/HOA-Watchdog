@@ -3,6 +3,8 @@ import { createPostgresDocumentRepository } from '@/adapters/db/document-reposit
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { createGeminiExtractor } from '@/adapters/extraction/extractor-gemini'
 import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
+import { createInvoiceReader } from '@/adapters/db/invoice-reader-postgres'
+import { createFindingRegister } from '@/adapters/db/finding-postgres'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
 import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
 import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
@@ -80,6 +82,11 @@ export async function POST(
     // passes them.
     units: createUnitDirectory(),
     payments: createPaymentRepository(),
+    // Story 4.2. Absent, a document is read, stored, and never compared against
+    // what came before -- and nothing fails. `duplicate-detection-wiring.test.ts`
+    // asserts this call passes them.
+    invoices: createInvoiceReader(),
+    findings: createFindingRegister(),
     onError: (error) => {
       // The treasurer gets a state; an operator gets the cause. Discarding it
       // would make a provider outage look like a bad scan in the logs too.

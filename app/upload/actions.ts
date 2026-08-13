@@ -5,6 +5,8 @@ import { createPostgresDocumentRepository } from '@/adapters/db/document-reposit
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
 import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
+import { createInvoiceReader } from '@/adapters/db/invoice-reader-postgres'
+import { createFindingRegister } from '@/adapters/db/finding-postgres'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
 import { createRollRepository } from '@/adapters/db/roll-repository-postgres'
 import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
@@ -111,6 +113,10 @@ export async function uploadDocuments(
     // one — is where a deposit bank feed becomes payments.
     units: createUnitDirectory(),
     payments: createPaymentRepository(),
+    // Story 4.2, and the same shape of gap: absent, an uploaded invoice is
+    // stored and never compared against what came before.
+    invoices: createInvoiceReader(),
+    findings: createFindingRegister(),
     // The line that makes an assessment roll do anything at all. Without it a
     // roll is read, its extraction rows are stored, and no unit is created — so
     // every deposit uploaded afterwards is held `unknown-unit`.

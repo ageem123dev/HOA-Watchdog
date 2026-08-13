@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: '2026-08-10'
+last_updated: 2026-08-12
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -108,8 +108,8 @@ development_status:
   epic-3-retrospective: done
 
   epic-4: in-progress
-  4-1-a-finding-and-the-life-it-leads: review
-  4-2-the-same-invoice-twice: backlog
+  4-1-a-finding-and-the-life-it-leads: done
+  4-2-the-same-invoice-twice: review
   4-3-a-vendor-who-charged-more-than-usual: backlog
   4-4-the-dues-that-did-not-arrive: backlog
   4-5-the-board-sees-what-needs-review: backlog
