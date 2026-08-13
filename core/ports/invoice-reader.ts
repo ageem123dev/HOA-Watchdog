@@ -66,6 +66,20 @@ export interface InvoiceReader {
    * upload date is not a substitute: it records when we noticed the invoice,
    * not when the vendor charged.
    *
+   * ## What can still change the answer, stated rather than discovered
+   *
+   * Anchoring to the invoice's date makes the window stable; it does not make
+   * the *contents* of the window stable. A backdated invoice uploaded next
+   * month falls inside a window that was already computed, so re-running
+   * detection would compute a different average for an invoice nobody touched.
+   *
+   * That is the right behaviour rather than a leak: the second answer is the
+   * better-informed one, and `raise` amends the evidence in place instead of
+   * raising a second finding, so AD-13 holds either way. A board member sees an
+   * updated comparison, never a duplicate alert. Worth naming because the
+   * opposite assumption — "the same invoice always yields the same evidence" —
+   * is the one a later story would be tempted to build a cache on.
+   *
    * Unlike `priorCandidates`, this narrows on **nothing but** the vendor and
    * the window — the amounts are what is being averaged, so narrowing on them
    * would average the answer with itself.

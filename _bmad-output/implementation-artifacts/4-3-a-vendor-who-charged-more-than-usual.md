@@ -4,7 +4,7 @@ baseline_commit: f676fb1
 
 # Story 4.3: A vendor who charged more than usual
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -111,8 +111,8 @@ Inlining either number at the query is what the epic's decision explicitly rules
         not stop the other**, and that is a decision to make and test.
   - [x] Grow the AC7/AC8 model-path list.
 
-- [ ] **Task 5 — The gate**
-  - [ ] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`
+- [x] **Task 5 — The gate**
+  - [x] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`
         against the 8-error baseline.
 
 ## Dev Notes
@@ -220,6 +220,36 @@ Sensitivity checks run, all mutations caught except the one that led to a deleti
 | window widened to 7 months | caught (3 tests) |
 | `document_kind` filter dropped | caught |
 | null-date early return removed | **survived — guard deleted** |
+| grouping removed (raise per invoice) | caught |
+| `invoicesChecked` counts only spikes | caught |
+| threshold dropped from evidence | caught |
+| window dropped from evidence | caught |
+| amended counted as raised | caught |
+| priors leaked into the evidence | caught (8 tests) |
+| month taken from the upload, not the invoice | caught (4 tests) |
+| a failing detector stops the other | caught |
+| the error no longer names its detector | caught (3 tests) |
+| threshold put back per spike | caught |
+
+### The acceptance-criteria audit
+
+It has now found something on five consecutive stories.
+
+**AC2/AC7 — the threshold was stored twice.** `EvidenceSpike extends VendorSpike`, so each spike carried
+`thresholdPercent` *and* the evidence carried it at the top level: a document with three spikes wrote the
+same constant four times. The threshold describes the run, not each spike, so it is recorded once per
+finding and `spikeAgainst` no longer returns it.
+
+**A test's premise expired with that fix.** `reports the threshold it used, so a surface need not import
+it` asserted exactly the behaviour that turned out to be the defect. It was not vacuous — breaking the
+code failed it — which is why a mutation could never have found it. Rewritten as the record of the
+change rather than deleted.
+
+**AC1 — what can still change the answer.** Anchoring the window to the invoice's own date makes the
+*window* stable, not the *contents* of the window: a backdated invoice uploaded next month falls inside
+a window already computed. That is the better-informed answer and `raise` amends evidence in place, so
+AD-13 holds and no board member sees a duplicate alert. Recorded in the port because the opposite
+assumption is what a later story would be tempted to build a cache on.
 
 ## Review Findings
 
@@ -229,4 +259,5 @@ _To be filled by the review._
 
 | Date | Change |
 | --- | --- |
+| 2026-08-13 | Tasks 1-5 implemented test-first across ec9f1ea, 4d33461 and 9c62dd5. Acceptance-criteria audit found the threshold stored once per spike and once per finding, and one test whose premise expired with the fix. |
 | 2026-08-13 | Story created after 4.2 merged as f676fb1. Written to reuse 4.2's rails — reader, register, wiring, and the `(document, month)` key — rather than build a second set. |

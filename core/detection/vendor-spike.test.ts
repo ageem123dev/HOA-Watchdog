@@ -37,11 +37,10 @@ describe('an invoice above the trailing average', () => {
   it('is flagged when it exceeds the threshold', () => {
     const spike = spikeAgainst(invoice('130.00'), STEADY)
 
-    expect(spike).toMatchObject({
+    expect(spike).toEqual({
       percentOverAverage: '30.0',
       average: '100.00',
       invoicesAveraged: 3,
-      thresholdPercent: SPIKE_THRESHOLD_PERCENT,
     })
   })
 
@@ -149,7 +148,15 @@ describe('the constants are named, not inlined', () => {
     expect(TRAILING_WINDOW_MONTHS).toBe(6)
   })
 
-  it('reports the threshold it used, so a surface need not import it', () => {
-    expect(spikeAgainst(invoice('130.00'), STEADY)?.thresholdPercent).toBe(SPIKE_THRESHOLD_PERCENT)
+  it('leaves the threshold to whoever records the finding', () => {
+    // **This test's premise expired, and it is kept as the record of that.** It
+    // used to assert that `spikeAgainst` reported the threshold back, "so a
+    // surface need not import it". The acceptance-criteria audit found the
+    // consequence: the constant was then stored once per spike *and* once per
+    // finding, so a document with three spikes wrote it four times. The
+    // threshold describes the run, and `detect-vendor-spikes.ts` records it
+    // there — asserted in `detect-vendor-spikes.test.ts`.
+    expect(spikeAgainst(invoice('130.00'), STEADY)).not.toHaveProperty('thresholdPercent')
+    expect(SPIKE_THRESHOLD_PERCENT).toBe(20)
   })
 })

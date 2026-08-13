@@ -67,8 +67,6 @@ export interface VendorSpike {
   readonly average: string
   /** UX-DR24's count: reassurance without a denominator is what that rule forbids. */
   readonly invoicesAveraged: number
-  /** The threshold this was measured against, carried so the surface need not import it. */
-  readonly thresholdPercent: number
 }
 
 /** `'250.00'` to `25000n`. Null when the amount is absent, unreadable, or not positive. */
@@ -132,7 +130,10 @@ export function spikeAgainst(
   return {
     percentOverAverage: ratioToDecimal(excess * 100n, sum, 1),
     average: ratioToDecimal(sum, count * 100n, 2),
+    // The threshold is not repeated here. It is a property of the run, not of
+    // each spike, and `detect-vendor-spikes.ts` records it once per finding —
+    // a document with three spikes was storing the same constant four times.
+    // Found by the acceptance-criteria audit, which is what that audit is for.
     invoicesAveraged: priors.length,
-    thresholdPercent: SPIKE_THRESHOLD_PERCENT,
   }
 }
