@@ -209,6 +209,22 @@ describe('a possible duplicate invoice', () => {
     expect(toFindingRow(duplicate(duplicateEvidence)).amount).toBe('$1,450.00')
   })
 
+  it('keeps the amount when the evidence lost only its denominator', () => {
+    // **A missing count invalidates the sentence, not the figure.** The guard
+    // suppressed both together, so a finding written before `invoicesChecked`
+    // existed — or by any detector that stops storing it — rendered with no
+    // money column despite the record plainly supporting one. Raised by
+    // CodeRabbit on the merge request.
+    //
+    // The pull is in the opposite direction from AC5, which is why it is worth
+    // stating: AC5 forbids inventing a figure the record does not support, and
+    // this forbids withholding one it does.
+    const row = toFindingRow(duplicate({ pairs: duplicateEvidence.pairs }))
+
+    expect(row.amount).toBe('$1,450.00')
+    expect(row.evidenceLine).toBeNull()
+  })
+
   it('shows no amount when the pairs do not agree on one', () => {
     // **The decision AC5 forces.** Two duplicated invoices of different values
     // is one finding with two amounts, and the row has one money column.
@@ -350,29 +366,75 @@ describe('evidence the code has never met', () => {
   // older detector version, a hand-inserted row, a type from a later story.
   // The requirement is not that they render well — it is that they render, and
   // that the twenty good rows beside them still do.
-  const hostile: readonly { label: string; evidence: unknown }[] = [
-    { label: 'an empty object', evidence: {} },
-    { label: 'null', evidence: null },
-    { label: 'a string', evidence: 'invoicesChecked: 3' },
-    { label: 'an array', evidence: [1, 2, 3] },
-    { label: 'pairs as a string', evidence: { invoicesChecked: 3, pairs: 'one' } },
-    { label: 'pairs holding nulls', evidence: { invoicesChecked: 3, pairs: [null, null] } },
-    { label: 'a count that is not a number', evidence: { invoicesChecked: 'three', pairs: [] } },
-    { label: 'a nested object where a string belongs', evidence: { spikes: [{ vendorName: {} }] } },
+  // **Each fixture carries the reader whose shape it is hostile to.** The first
+  // version routed every one of them through the spike reader for the
+  // amount assertion, and all but one were duplicate-shaped: the spike reader
+  // found no `spikes` key and returned null trivially, so those cases could not
+  // have failed however the spike path behaved. Raised by CodeRabbit, and it is
+  // the same defect class as a refusal test where refused and absent look
+  // alike.
+  const hostile: readonly { label: string; evidence: unknown; through: typeof duplicate }[] = [
+    { label: 'an empty object', evidence: {}, through: duplicate },
+    { label: 'null', evidence: null, through: duplicate },
+    { label: 'a string', evidence: 'invoicesChecked: 3', through: duplicate },
+    { label: 'an array', evidence: [1, 2, 3], through: duplicate },
+    { label: 'pairs as a string', evidence: { invoicesChecked: 3, pairs: 'one' }, through: duplicate },
+    {
+      label: 'pairs holding nulls',
+      evidence: { invoicesChecked: 3, pairs: [null, null] },
+      through: duplicate,
+    },
+    {
+      label: 'a count that is not a number',
+      evidence: { invoicesChecked: 'three', pairs: [] },
+      through: duplicate,
+    },
+    {
+      label: 'a pair whose amount is an object',
+      evidence: { invoicesChecked: 2, pairs: [{ amount: { value: '10.00' } }] },
+      through: duplicate,
+    },
+    {
+      label: 'a spike whose vendor is an object',
+      evidence: { windowMonths: 6, spikes: [{ vendorName: {} }] },
+      through: spike,
+    },
+    { label: 'spikes as a number', evidence: { windowMonths: 6, spikes: 7 }, through: spike },
+    {
+      label: 'a spike with a percentage but no average',
+      evidence: { invoicesChecked: 2, windowMonths: 6, spikes: [{ percentOverAverage: '31.4' }] },
+      through: spike,
+    },
+    { label: 'a shortfall with no figures', evidence: { kind: 'below-expected' }, through: shortfall },
+    {
+      label: 'a shortfall whose amounts are numbers',
+      evidence: { kind: 'below-expected', expected: 400, received: 300, shortfall: 100 },
+      through: shortfall,
+    },
   ]
 
-  it.each(hostile)('renders rather than throwing for $label', ({ evidence }) => {
-    const row = toFindingRow(duplicate(evidence))
+  it.each(hostile)('renders rather than throwing for $label', ({ evidence, through }) => {
+    const row = toFindingRow(through(evidence))
 
     expect(row.id).toBe('finding-1')
-    expect(row.severityLabel).toBe('Needs review')
+    // UX-DR2 survives whatever the evidence is: the words are always there.
+    expect(row.severityLabel).not.toBe('')
     expect(row.title).not.toBe('')
   })
 
-  it.each(hostile)('invents no amount for $label', ({ evidence }) => {
+  it.each(hostile)('invents no amount for $label', ({ evidence, through }) => {
     // The failure this whole block guards against is not a crash — it is a
-    // plausible-looking row assembled out of nothing.
-    expect(toFindingRow(spike(evidence)).amount).toBeNull()
+    // plausible-looking row assembled out of nothing. Routed through the reader
+    // that actually parses each shape, so the assertion can fail.
+    expect(toFindingRow(through(evidence)).amount).toBeNull()
+  })
+
+  it.each(hostile)('survives every reader, not only its own, for $label', ({ evidence }) => {
+    // A finding could be stored with one type and evidence shaped for another —
+    // a detector renamed, a row written by hand. Every combination must render.
+    for (const reader of [duplicate, spike, shortfall]) {
+      expect(() => toFindingRow(reader(evidence))).not.toThrow()
+    }
   })
 
   it('falls back to a legible title when the evidence names no vendor', () => {

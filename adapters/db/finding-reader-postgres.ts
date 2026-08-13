@@ -19,6 +19,15 @@ interface CheckedRow {
 }
 
 /**
+ * The most rows one read may ask for.
+ *
+ * Not a page size — the caller still chooses that. This is the point past which
+ * a request stops being a dashboard queue and becomes a bulk export, which is
+ * story 4.7's job and belongs on a surface built to stream it.
+ */
+const MOST_ROWS = 200
+
+/**
  * The dashboard's read of the finding register.
  *
  * Three things about the SQL below are decisions rather than style.
@@ -41,15 +50,6 @@ interface CheckedRow {
  * a register that had not changed. `id desc` settles it, and uuidv7 makes that
  * agree with the primary sort rather than fight it.
  */
-/**
- * The most rows one read may ask for.
- *
- * Not a page size — the caller still chooses that. This is the point past which
- * a request stops being a dashboard queue and becomes a bulk export, which is
- * story 4.7's job and belongs on a surface built to stream it.
- */
-const MOST_ROWS = 200
-
 export function createFindingReader(): FindingReader {
   return {
     async unreviewed(limit: number): Promise<UnreviewedQueue> {

@@ -684,6 +684,56 @@ Neither was acted on. This file has now been rewritten three times in two rounds
 edit to satisfy a failure that does not occur is exactly the churn the "a fix is the highest-risk
 diff" rule warns about.
 
+### MR !59 round 1 — 10 findings, 8 taken
+
+**The two that were defects rather than polish:**
+
+- **A duplicate finding with a priced pair but no `invoicesChecked` rendered with no amount.** The
+  guard suppressed the evidence line and the figure together, but a missing denominator invalidates
+  only the sentence — the pairs still carry an amount the record supports. A finding written before
+  that field existed, or by any detector that stops storing it, would have lost its money column.
+  The pull is the exact opposite of AC5's, which is why it is worth stating: AC5 forbids inventing a
+  figure the record does not support, and this forbids withholding one it does.
+- **The hostile-evidence tests were routed through the wrong reader.** All but one fixture was
+  duplicate-shaped and the amount assertion ran them through the *spike* reader, which finds no
+  `spikes` key and returns null trivially — so those cases could not have failed however the spike
+  path behaved. Each fixture now carries the reader whose shape it is hostile to, spike- and
+  shortfall-shaped entries were added, and a third case runs every fixture through every reader,
+  because a finding can be stored with one type and evidence shaped for another.
+
+**Also taken:** the `limit` fencepost (200 accepted, 201 refused — `>` and `>=` were
+indistinguishable before); the refusal *message* rather than just the type; the port documenting the
+bounds its adapter enforces; the "as of" test requiring **both** figure blocks rather than at least
+one; the SQL docblock that had drifted onto `MOST_ROWS`; a stale comment describing a shadowing that
+no longer existed; and a `not.toMatch(/finding/i)` that sat beside an exact `toEqual` and could not
+fail — a guard that proves nothing, which is this project's most-repaired defect.
+
+**Refused — switch the read queries to `readerPool()`.** Least-privilege, and it would break the
+dashboard outright. Probed rather than argued:
+
+```
+finding  => DENIED: 42501 permission denied for table finding
+document => SELECT ok
+```
+
+Migration 021 states the intent in words: *"Nothing is granted to watchdog_reader, and the silence
+is the decision."* The reader role exists for the LLM query catalog under AD-4, not for application
+surfaces, and `dues-reader`, `invoice-reader` and `query-log-reader` all use the writer pool for the
+same reason. Routing §6 lists AD-4 as an architecture decision that is never auto-applied.
+
+**Partly disagreed — force the UTC test into a timezone behind UTC.** That fix does not work here:
+`TZ` is ignored on this Windows host, measured, with `getTimezoneOffset()` staying at 300 under
+`TZ=America/Los_Angeles`. The intent is right, though, and the previous single case was only
+decisive on a runner *behind* UTC. Added a second case at 2026-03-31T22:00Z, where UTC and any zone
+*ahead* of it disagree — between the two, one fails on any runner that is not itself at UTC, with no
+environment involved.
+
+*Sensitivity:* three mutations, all caught. Suppressing the amount again failed 1; the fencepost as
+`>=` failed 1; dropping the date from one of the two figure blocks failed 2.
+
+*Review gate on the round's diff:* `argus_review` clean — no findings, confidence 1.0, 9/9 files.
+(Two attempts again; the first returned `agy failed`.)
+
 ## Change Log
 
 | Date | Change |

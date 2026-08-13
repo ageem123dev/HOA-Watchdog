@@ -171,12 +171,20 @@ function readDuplicate(evidence: Readonly<Record<string, unknown>>): Reading {
   const vendorName = agreed(pairs.map((pair) => text(pair['vendorName'])))
   const title = named('Possible duplicate invoice', vendorName)
 
+  // **The figure and the sentence fail independently.** An empty `pairs` leaves
+  // nothing to price, so there is no amount. A missing `invoicesChecked` leaves
+  // nothing to put the count over, so there is no sentence — but the pairs
+  // still carry a figure the record supports, and withholding it would hide
+  // real money from the board. AC5 forbids inventing an amount the record does
+  // not support; this is the opposite error, and it was raised by CodeRabbit.
+  const amount = agreed(pairs.map((pair) => formatAmount(pair['amount'])))
+
   const checked = whole(evidence['invoicesChecked'])
   if (pairs.length === 0 || checked === null) {
-    // No denominator, or nothing to put over it. UX-DR24 cuts both ways: a
-    // count that was not stored may not be manufactured, and "0 of 0" is a
-    // reassurance about a comparison that did not happen.
-    return { title, evidenceLine: null, amount: null }
+    // UX-DR24 cuts both ways: a count that was not stored may not be
+    // manufactured, and "0 of 0" is a reassurance about a comparison that did
+    // not happen.
+    return { title, evidenceLine: null, amount }
   }
 
   const reasons = [
@@ -195,7 +203,7 @@ function readDuplicate(evidence: Readonly<Record<string, unknown>>): Reading {
   return {
     title,
     evidenceLine: `${pairs.length} of ${checked} invoices on this upload ${verb} an earlier one${on}.`,
-    amount: agreed(pairs.map((pair) => formatAmount(pair['amount']))),
+    amount,
   }
 }
 
@@ -254,9 +262,9 @@ function readShortfall(evidence: Readonly<Record<string, unknown>>): Reading {
 }
 
 function read(findingType: string, evidence: unknown): Reading {
-  // Not `known` — that is the module-level lookup helper, and a local of the
-  // same name shadows it here. Harmless today because nothing in this function
-  // calls it, and a bug the moment somebody does. Raised by CodeRabbit.
+  // Named `stored` rather than `known`, which is the module-level lookup
+  // helper: a local of that name would shadow it, and nothing here could then
+  // call it. Raised by CodeRabbit against the earlier name.
   const stored = fields(evidence)
 
   switch (findingType) {

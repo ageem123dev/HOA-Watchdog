@@ -243,20 +243,30 @@ describeWithDatabase('the finding reader', () => {
     expect(queue.total).toBeGreaterThan(queue.findings.length)
   })
 
-  it.each([0, -1, 2.5])('refuses a limit of %s', async (limit) => {
-    // A limit that returns no rows over a non-zero total is exactly the
-    // disagreement `dashboard-view.ts` had to be hardened against. Refused here
-    // as well, so a bad call fails where it was made rather than one layer down.
-    await expect(createFindingReader().unreviewed(limit)).rejects.toThrow(RangeError)
+  it.each([0, -1, 2.5, 201, 1_000_000])('refuses a limit of %s', async (limit) => {
+    // Both directions, and the reason differs. Below one, the call returns no
+    // rows over a non-zero total — the disagreement `dashboard-view.ts` had to
+    // be hardened against. Above the cap, the bound is not a bound: the port
+    // made `limit` required because "an optional bound is one a caller
+    // forgets", and a caller passing a million forgets it just as thoroughly
+    // with the extra step of looking deliberate.
+    //
+    // The message is asserted, not just the type, so a `RangeError` thrown for
+    // some unrelated reason cannot stand in for this refusal. Raised by
+    // CodeRabbit.
+    await expect(createFindingReader().unreviewed(limit)).rejects.toThrow(
+      /findings limit must be a whole number between 1 and 200/,
+    )
   })
 
-  it('refuses a limit large enough to be no limit at all', async () => {
-    // The port made `limit` required because "an optional bound is one a caller
-    // forgets" — and a caller passing a million forgets it just as thoroughly,
-    // with the extra step of looking deliberate. The register is a permanent
-    // append-only record, so "read all of it into a page render" is a request
-    // that gets worse every year the association runs.
-    await expect(createFindingReader().unreviewed(1_000_000)).rejects.toThrow(RangeError)
+  it('accepts the largest limit it allows', async () => {
+    // **The fencepost, and nothing tested it.** `limit > MOST_ROWS` and
+    // `limit >= MOST_ROWS` both pass every rejection case above; only the
+    // boundary itself separates them, and getting it wrong makes the documented
+    // maximum unusable. Raised by CodeRabbit.
+    const queue = await createFindingReader().unreviewed(200)
+
+    expect(queue.findings.length).toBeGreaterThan(0)
   })
 
   it('hands back the period as two calendar dates', async () => {

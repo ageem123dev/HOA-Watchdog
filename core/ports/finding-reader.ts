@@ -84,6 +84,15 @@ export interface FindingReader {
    * `limit` is required rather than optional. An optional bound is one a caller
    * forgets, and the caller that forgets is a page rendering every finding the
    * association has ever accumulated into a single response.
+   *
+   * **It must be a whole number of at least 1, and adapters bound it from above
+   * as well** — the Postgres one refuses anything over 200. Out of range, the
+   * returned promise rejects with `RangeError`; it is never clamped, because a
+   * caller who asked for more than a queue wanted something other than this,
+   * and quietly handing them a page of it answers a question they did not ask.
+   * The bound was undocumented here while the adapter enforced it, which is a
+   * contract the caller could only discover by violating it. Raised by
+   * CodeRabbit.
    */
   unreviewed(limit: number): Promise<UnreviewedQueue>
 }

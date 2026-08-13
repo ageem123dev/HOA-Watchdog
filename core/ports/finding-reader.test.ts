@@ -81,10 +81,14 @@ describe('the CheckedDocuments port', () => {
     // Failure mode 4. UX-DR24's count is about documents, so it is read through
     // a port named for documents. Hung off the finding reader it would be a
     // number nobody owns, of the kind that drifts without anything noticing.
+    // The exact list is the whole assertion. A `not.toMatch(/finding/i)` sat
+    // beside it and could not fail: `toEqual` had already pinned every member,
+    // so nothing named for a finding could be present for it to catch. A guard
+    // that proves nothing, which is this project's most-repaired defect —
+    // raised by CodeRabbit, and correctly.
     expect(declaredMembers(documentSource, 'CheckedDocuments')).toEqual([
       'checked(): Promise<DocumentsChecked>',
     ])
-    expect(declaredMembers(documentSource, 'CheckedDocuments').join(' ')).not.toMatch(/finding/i)
   })
 
   it('carries the date the most recent one arrived, and allows it to be absent', () => {

@@ -220,7 +220,12 @@ describe('the dashboard figures (story 4.5, UX-DR3)', () => {
 
     await renderDashboard()
 
-    expect(screen.getAllByText(/as of 2026-03-31/).length).toBeGreaterThan(0)
+    // **Exactly two — one per figure block.** `toBeGreaterThan(0)` passes when
+    // only one of them carries the date, which is the way this breaks: a figure
+    // stated without its "as of" is a stale number presented as current, and
+    // the page renders two figures from the same documents. Raised by
+    // CodeRabbit.
+    expect(screen.getAllByText(/as of 2026-03-31/)).toHaveLength(2)
   })
 
   it('leaves them undated while the newest document is from this month', async () => {
@@ -253,6 +258,26 @@ describe('the dashboard figures (story 4.5, UX-DR3)', () => {
 
     await renderDashboard()
 
-    expect(screen.getAllByText(/as of 2026-03-31/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/as of 2026-03-31/)).toHaveLength(2)
+  })
+
+  it('takes the day from UTC for a server sitting east of it too', async () => {
+    // The other half, and without it the pair is only decisive on a runner
+    // *behind* UTC. At 2026-03-31T22:00Z the UTC day is still 31 March, so a
+    // document from mid-March is inside the current month; read anywhere ahead
+    // of UTC the day is already 1 April and the same document looks stale.
+    //
+    // CodeRabbit asked for the timezone to be forced instead. That does not
+    // work here: `TZ` is ignored on this Windows host — measured, with
+    // `getTimezoneOffset()` staying at 300 under `TZ=America/Los_Angeles`. Two
+    // cases in opposite directions need no environment at all, and between them
+    // one of the two fails on any runner that is not itself at UTC.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T22:00:00Z'))
+    checked.mockResolvedValue({ count: 14, latestUploadOn: '2026-03-15' })
+
+    await renderDashboard()
+
+    expect(screen.queryByText(/as of/)).toBeNull()
   })
 })
