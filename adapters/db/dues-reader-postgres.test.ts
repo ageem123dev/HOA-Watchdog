@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { detectDuesShortfalls } from '../../core/detection/detect-dues-shortfalls'
 import { createFindingRegister } from './finding-postgres'
 import { createDuesReader } from './dues-reader-postgres'
+import { writerPool } from './pool'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
@@ -136,6 +137,39 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
       await owner.query(`delete from board_member where email like $1`, [`dues-reader-${RUN_PREFIX}%`])
     } finally {
       await Promise.allSettled([owner.end(), writer.end()])
+    }
+  })
+
+  it('dates a deposit the same way whatever timezone the session is set to', async () => {
+    // **`to_char` on a `timestamptz` renders it in the session's timezone.** A
+    // document uploaded at 02:00 UTC therefore answered 2026-06-30 on a
+    // connection set to America/Los_Angeles and 2026-07-01 on one set to UTC —
+    // and that day decides which instalments have fallen due, so a setting
+    // nobody thinks about would move an arrears finding by a month.
+    //
+    // Set on the shared pool rather than a private client, because the pool is
+    // what the adapter uses and a private client would prove nothing about it.
+    const { rows } = await writer.query<{ id: string }>(
+      `insert into document
+         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
+       values ($1, $2, $3, 'text/csv', 512, $4, '2026-07-01T02:00:00Z')
+       returning id`,
+      [
+        randomBytes(32).toString('hex'),
+        `${RUN_PREFIX}/tz`,
+        `${RUN_PREFIX}-tz.csv`,
+        memberId,
+      ],
+    )
+    documents.push(rows[0]!.id)
+
+    const pool = writerPool()
+    try {
+      await pool.query("set time zone 'America/Los_Angeles'")
+
+      expect(await createDuesReader().evaluationDateFor(rows[0]!.id)).toBe('2026-07-01')
+    } finally {
+      await pool.query("set time zone 'UTC'")
     }
   })
 

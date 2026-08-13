@@ -54,12 +54,19 @@ interface PaymentRow {
 export function createDuesReader(): DuesReader {
   return {
     async evaluationDateFor(documentId: string): Promise<string | null> {
-      // `to_char`, not a `Date`. A calendar day rendered from an instant is the
-      // day before for anyone west of Greenwich, and this day decides which
-      // instalments have fallen due — an off-by-one here is an arrears finding
-      // raised a month early. `invoice-reader-postgres.ts` names the same trap.
+      // **`at time zone 'UTC'`, and the cast is the whole point.** `to_char` on
+      // a `timestamptz` renders it in the *session's* timezone, so the same
+      // document answered 2026-07-01 here and 2026-06-30 on a connection set to
+      // America/Los_Angeles — measured, not reasoned about. This day decides
+      // which instalments have fallen due, so a session setting nobody thinks
+      // about would move an arrears finding by a month.
+      //
+      // Pinning it to UTC makes the answer a property of the document. Raised
+      // by CodeRabbit against a comment that already warned about rendering an
+      // instant as a day and then did it anyway.
       const { rows } = await writerPool().query<{ on: string }>(
-        `select to_char(uploaded_at, 'YYYY-MM-DD') as on from document where id = $1`,
+        `select to_char(uploaded_at at time zone 'UTC', 'YYYY-MM-DD') as on
+           from document where id = $1`,
         [documentId],
       )
 

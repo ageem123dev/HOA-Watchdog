@@ -52,7 +52,13 @@ interface Row {
  * `to_char` rather than letting `pg` hand back a `Date`: a date is a calendar
  * day and a `Date` is an instant, so midnight UTC rendered west of Greenwich is
  * the day before — an invoice filed under the wrong month in the column the
- * finding is keyed on. `::text` on the numeric for story 2.2's reason: exact
+ * finding is keyed on.
+ *
+ * **`at time zone 'UTC'` on `uploaded_at`, added in story 4.4.** `to_char` on a
+ * `timestamptz` renders it in the *session's* timezone, so this column answered
+ * a different calendar day on a connection set west of Greenwich — the trap the
+ * paragraph above warns about, reintroduced one line later by the fix for it.
+ * `issued_on` needs no cast: it is already a `date`. `::text` on the numeric for story 2.2's reason: exact
  * decimal end to end, never through a float.
  */
 const COLUMNS = `e.id,
@@ -61,7 +67,7 @@ const COLUMNS = `e.id,
        e.document_number,
        to_char(e.issued_on, 'YYYY-MM-DD') as issued_on,
        e.total_amount::text as amount,
-       to_char(d.uploaded_at, 'YYYY-MM-DD') as uploaded_at`
+       to_char(d.uploaded_at at time zone 'UTC', 'YYYY-MM-DD') as uploaded_at`
 
 function toReading(row: Row): InvoiceReading {
   return {
