@@ -69,11 +69,14 @@ export async function detectDuesShortfalls(
 
   let raised = 0
   let amended = 0
-  let subjectsChecked = 0
+  // Distinct units. A deposit spanning two years compares the same unit twice,
+  // and "subjects checked" counting it twice would overstate the roll to any
+  // surface that reports it. Raised by CodeRabbit.
+  const checked = new Set<string>()
 
   for (const year of years) {
     const units = await deps.dues.duesForYear(year, evaluatedOn)
-    subjectsChecked += units.length
+    for (const unit of units) checked.add(unit.unitId)
 
     for (const unit of units) {
       const shortfall = shortfallAgainst(unit.assessment, unit.payments, evaluatedOn)
@@ -110,5 +113,5 @@ export async function detectDuesShortfalls(
     }
   }
 
-  return { raised, amended, subjectsChecked }
+  return { raised, amended, subjectsChecked: checked.size }
 }

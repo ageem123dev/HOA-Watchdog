@@ -69,10 +69,13 @@ export function monthRange(month: string): FindingPeriod {
  * a short year quietly becoming a different period.
  */
 export function yearRange(year: number): FindingPeriod {
-  if (!Number.isSafeInteger(year)) {
-    // A fractional year yields '2026.5-01-01', which is not a date. Refused
-    // rather than passed to Postgres, where it becomes a constraint violation
-    // three layers from the mistake.
+  // Four digits, and the range migration 013 already constrains an assessment
+  // year to. `Number.isSafeInteger` alone let `-100` and `99999` through:
+  // `padStart` does not truncate, so those became `-100-01-01` and
+  // `99999-01-01` — a period key nobody would ever match again, built three
+  // layers from whatever produced the number. A fractional year yields
+  // `2026.5-01-01`, which is not a date at all. Raised by CodeRabbit.
+  if (!Number.isSafeInteger(year) || year < 1900 || year > 2200) {
     throw new RangeError(`not a calendar year: ${String(year)}`)
   }
 

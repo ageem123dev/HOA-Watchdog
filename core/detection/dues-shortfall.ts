@@ -1,4 +1,9 @@
-import { deriveSchedule, expectedBy, type AssessmentTerms } from '../assessment/schedule'
+import {
+  deriveSchedule,
+  expectedBy,
+  instalmentsDueBy,
+  type AssessmentTerms,
+} from '../assessment/schedule'
 import { fromMinorUnits, toMinorUnits } from '../assessment/minor-units'
 import type { BillingCycle } from '../assessment/billing-cycle'
 
@@ -116,7 +121,11 @@ export function shortfallAgainst(
     expected: fromMinorUnits(expected),
     received: fromMinorUnits(received),
     shortfall: fromMinorUnits(expected - received),
-    instalmentsDue: schedule.filter((instalment) => instalment.dueOn <= evaluatedOn).length,
+    // `instalmentsDueBy`, not a `dueOn <= evaluatedOn` of its own. The two
+    // spellings could drift, and a finding reading "3 instalments" beside an
+    // expected figure covering four is a number a board member cannot check.
+    // Raised by CodeRabbit.
+    instalmentsDue: instalmentsDueBy(schedule, evaluatedOn),
     billingCycle: assessment.billingCycle,
     evaluatedOn,
   }

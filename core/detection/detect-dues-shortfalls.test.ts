@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { detectDuesShortfalls, UNIT_DUES_SHORTFALL } from './detect-dues-shortfalls'
 import type { FindingRegister, RaisedFinding } from '../ports/finding'
 import type { DuesReader, UnitDues } from '../ports/dues-reader'
+import { yearRange } from './detection-run'
 
 const DOCUMENT = 'd-deposit'
 const UNIT = 'u-101'
@@ -165,7 +166,10 @@ describe('raising a shortfall', () => {
     ])
     // Accumulated across the years, not overwritten by the last one — a
     // mutation replacing `+=` with `=` survived until this line existed.
-    expect(outcome).toMatchObject({ raised: 2, subjectsChecked: 2 })
+    // One unit, two years: `subjectsChecked` counts distinct units, so it is 1
+    // and not 2. Raised by CodeRabbit — summing per year would overstate the
+    // roll to any surface that reports it.
+    expect(outcome).toMatchObject({ raised: 2, subjectsChecked: 1 })
   })
 
   it('checks the current roll even when the deposit carries no payments', async () => {
@@ -225,6 +229,25 @@ describe('raising a shortfall', () => {
       period: { from: '2024-01-01', until: '2025-01-01' },
       evidence: { evaluatedOn: '2024-09-09' },
     })
+  })
+})
+
+describe('the period a finding is filed under', () => {
+  it.each([99999, -100, 0, 2026.5])('refuses %s rather than filing a finding under it', (year) => {
+    // Tested on `yearRange` directly rather than through the detector: with a
+    // year no unit is assessed for, the loop body never runs and the guard is
+    // never reached — the first version of this case passed for that reason
+    // and proved nothing.
+    //
+    // `padStart` does not truncate, so these would have become `99999-01-01`,
+    // `-100-01-01` and `2026.5-01-01` — period keys nobody would match again,
+    // built three layers from whatever produced the number. Raised by
+    // CodeRabbit.
+    expect(() => yearRange(year)).toThrow(RangeError)
+  })
+
+  it.each([1900, 2026, 2200])('accepts %s, the range migration 013 allows', (year) => {
+    expect(yearRange(year).from).toBe(`${year}-01-01`)
   })
 })
 
