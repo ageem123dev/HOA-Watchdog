@@ -663,6 +663,26 @@ timezone is restored.
 Three versions of that assertion, each wrong differently, and the mutations now confirm both
 properties: removing the UTC cast fails 1, removing the `extraction_state` filter fails 2.
 
+### The gate on the fix commit
+
+`argus_review` on `ae21671..db9f8d8` confirmed the rewrite — the bracketing was called out as the
+right way to assert against a concurrently modified table — and raised two more, **both refuted by
+measurement rather than by argument**:
+
+- **[high] `let inLosAngeles` is implicitly `any` and fails lint/tsc.** Not reproduced.
+  `eslint` returns 0 on that file, `tsc --noEmit` stays at its 8-error baseline, and none of those
+  errors is in it. The finding's evidence was Argus's own `lint: rc=-1`, which is its verifier
+  failing to run rather than the code failing. TypeScript gives an uninitialised `let` an *evolving*
+  any and narrows it from its single assignment, which is legal under strict.
+- **[low] the non-null assertion in `controlLatestRead`.** Disagree.
+  `@typescript-eslint/no-non-null-assertion` is not configured, and `rows[0]!` appears across ten
+  sibling files in `adapters/db/`. Changing this one would make it the odd file out to satisfy a
+  rule the project has not adopted.
+
+Neither was acted on. This file has now been rewritten three times in two rounds, and a fourth
+edit to satisfy a failure that does not occur is exactly the churn the "a fix is the highest-risk
+diff" rule warns about.
+
 ## Change Log
 
 | Date | Change |
