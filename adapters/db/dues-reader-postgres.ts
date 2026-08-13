@@ -19,13 +19,16 @@ import { writerPool } from './pool'
  * make"*. Migration 012's gist exclusion on `(unit_id, held_during)` guarantees
  * at most one row matches, so this is a lookup rather than a choice.
  *
- * ## A missing assessment is a null, not a zero
+ * ## The roll is the driving table, and that was a correction
  *
- * The join is a `left join` and `annual_amount` comes back null when no
- * assessment exists for that unit and year. Turning it into `0` here would make
- * "nothing was owed" indistinguishable from "everything is missing" — and the
- * second reads as a finding against a unit whose only mistake is not being on
- * the roll yet.
+ * `from assessment`, not `from payment`. Driving off the uploaded deposit's own
+ * payments would have meant a unit that paid **nothing** — the first case FR-7
+ * names — appeared on no deposit and was never checked. Found by the
+ * acceptance-criteria audit, through an end-to-end test that could not raise the
+ * finding it was written for.
+ *
+ * A unit with no assessment for the year is therefore absent rather than present
+ * owing nothing. Nothing was owed, so nothing can be missing.
  *
  * ## The writer credential
  *
@@ -37,8 +40,8 @@ import { writerPool } from './pool'
 interface UnitRow {
   unit_id: string
   unit_number: string
-  annual_amount: string | null
-  billing_cycle: string | null
+  annual_amount: string
+  billing_cycle: string
   holder_name: string | null
 }
 
@@ -63,33 +66,25 @@ export function createDuesReader(): DuesReader {
       return rows[0]?.on ?? null
     },
 
-    async duesForDocument(
-      documentId: string,
-      year: number,
-      on: string,
-    ): Promise<readonly UnitDues[]> {
+    async duesForYear(year: number, on: string): Promise<readonly UnitDues[]> {
       // Bound parameters throughout (AD-8). `on` reaches a `::date` cast and a
       // range containment, both of which would be an injection point spelled
       // any other way.
       const { rows: units } = await writerPool().query<UnitRow>(
-        `select distinct
-                u.id            as unit_id,
+        `select u.id            as unit_id,
                 u.unit_number   as unit_number,
                 a.annual_amount::text as annual_amount,
                 a.billing_cycle as billing_cycle,
                 h.full_name     as holder_name
-           from payment p
-           join unit u on u.id = p.unit_id
-           left join assessment a
-                  on a.unit_id = u.id
-                 and a.assessment_year = $2
+           from assessment a
+           join unit u on u.id = a.unit_id
            left join unit_membership m
                   on m.unit_id = u.id
-                 and m.held_during @> $3::date
+                 and m.held_during @> $2::date
            left join unit_holder h on h.id = m.holder_id
-          where p.document_id = $1
+          where a.assessment_year = $1
           order by u.unit_number`,
-        [documentId, year, on],
+        [year, on],
       )
 
       if (units.length === 0) return []
@@ -118,18 +113,14 @@ export function createDuesReader(): DuesReader {
       return units.map((unit) => ({
         unitId: unit.unit_id,
         unitNumber: unit.unit_number,
-        // Both columns come from the same row, so one being null means the
-        // assessment is absent. `billing_cycle` is checked too rather than
-        // asserted, because a non-null amount with a null cycle would otherwise
-        // reach `deriveSchedule` and throw where returning null is the answer.
-        assessment:
-          unit.annual_amount === null || unit.billing_cycle === null
-            ? null
-            : {
-                annualAmount: unit.annual_amount,
-                billingCycle: unit.billing_cycle as BillingCycle,
-                assessmentYear: year,
-              },
+        // Not nullable, and that is structural: the query selects *from*
+        // `assessment`, so a unit without one is absent rather than present
+        // owing nothing. Both columns are `not null` on that table.
+        assessment: {
+          annualAmount: unit.annual_amount,
+          billingCycle: unit.billing_cycle as BillingCycle,
+          assessmentYear: year,
+        },
         payments: byUnit.get(unit.unit_id) ?? [],
         holderName: unit.holder_name,
       }))

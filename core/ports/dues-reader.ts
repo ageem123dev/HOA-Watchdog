@@ -4,10 +4,9 @@ import type { ReceivedPayment } from '../detection/dues-shortfall'
 /**
  * What one unit owed, what arrived, and who held it.
  *
- * `assessment` is `null` when no assessment was recorded for that unit and year.
- * **That is not a shortfall of the whole amount** — nothing was owed, so nothing
- * can be missing. The distinction has to survive out of SQL, which is why this
- * is a nullable field rather than a zero.
+ * `assessment` is never null, because a unit with no assessment for the year is
+ * never selected: nothing was owed, so nothing can be missing. Structural
+ * rather than a nullable field, so the detector cannot forget to check it.
  *
  * `holderName` is `null` when no membership covers the evaluation date. A unit
  * with no recorded holder is a gap in the roll rather than an error here, and a
@@ -17,7 +16,7 @@ export interface UnitDues {
   readonly unitId: string
   /** As a treasurer would recognise it, never the folded comparison key. */
   readonly unitNumber: string
-  readonly assessment: AssessmentTerms | null
+  readonly assessment: AssessmentTerms
   readonly payments: readonly ReceivedPayment[]
   readonly holderName: string | null
 }
@@ -58,16 +57,27 @@ export interface DuesReader {
    */
   evaluationDateFor(documentId: string): Promise<string | null>
   /**
-   * Every unit the given deposit document recorded a payment against, with what
-   * that unit owed for `year` and everything that arrived toward it.
+   * Every unit assessed for `year`, with what it owed and what arrived.
    *
-   * `payments` is **not** limited to the ones this document carried. A unit's
-   * standing is the sum of everything received for the year; a deposit that
-   * lands a second instalment must not read as though the first never arrived.
+   * ## The scope is the roll, not the deposit that triggered the check
    *
-   * `on` selects the holder — the membership covering that date — and is the
-   * same evaluation date the rule is asked to compare against, so the finding
-   * and the name it carries describe the same moment.
+   * **This is the correction the acceptance-criteria audit found**, and it went
+   * to the heart of the feature. Selecting units from the uploaded deposit's own
+   * payments looks natural — the deposit is what changed — but a unit that has
+   * paid *nothing* appears on no deposit, so the first case FR-7 names would
+   * never have been found. "Identify units with missed payments" cannot mean
+   * "among the units that paid".
+   *
+   * So a deposit upload supplies the occasion and the evaluation date, and the
+   * roll supplies the subjects.
+   *
+   * `payments` is everything received for the year, not only what one document
+   * carried — a deposit landing the second instalment must not read as though
+   * the first never arrived.
+   *
+   * `on` selects the holder, the membership covering that date, and is the same
+   * evaluation date the rule compares against, so the finding and the name it
+   * carries describe the same moment.
    */
-  duesForDocument(documentId: string, year: number, on: string): Promise<readonly UnitDues[]>
+  duesForYear(year: number, on: string): Promise<readonly UnitDues[]>
 }

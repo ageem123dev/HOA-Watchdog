@@ -107,7 +107,7 @@ describe('a missing reader silences its own detector and no other', () => {
 
   const emptyDues = (): DuesReader => ({
     evaluationDateFor: vi.fn(async () => '2026-04-01'),
-    duesForDocument: vi.fn(async () => []),
+    duesForYear: vi.fn(async () => []),
   })
 
   it('runs the invoice detectors with no dues reader', async () => {
@@ -134,7 +134,7 @@ describe('a missing reader silences its own detector and no other', () => {
       spikes: null,
       dues: { raised: 0 },
     })
-    expect(dues.duesForDocument).toHaveBeenCalled()
+    expect(dues.duesForYear).toHaveBeenCalled()
 
     // **`onError` is what makes the gate worth having.** Without it, running an
     // unwired detector anyway looks identical from the outcome — it throws on

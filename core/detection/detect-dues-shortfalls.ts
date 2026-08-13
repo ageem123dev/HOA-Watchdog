@@ -60,17 +60,12 @@ export async function detectDuesShortfalls(
   if (evaluatedOn === null) return { raised: 0, amended: 0, subjectsChecked: 0 }
 
   const year = Number(evaluatedOn.slice(0, 4))
-  const units = await deps.dues.duesForDocument(documentId, year, evaluatedOn)
+  const units = await deps.dues.duesForYear(year, evaluatedOn)
 
   let raised = 0
   let amended = 0
 
   for (const unit of units) {
-    // No assessment is not a shortfall of the whole amount. Nothing was owed,
-    // so nothing can be missing, and a unit that is simply not on the roll yet
-    // must not be reported as owing everything.
-    if (unit.assessment === null) continue
-
     const shortfall = shortfallAgainst(unit.assessment, unit.payments, evaluatedOn)
     if (shortfall === null) continue
 

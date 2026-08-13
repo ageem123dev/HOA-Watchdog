@@ -11,6 +11,8 @@ import { randomBytes } from 'node:crypto'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { detectDuesShortfalls } from '../../core/detection/detect-dues-shortfalls'
+import { createFindingRegister } from './finding-postgres'
 import { createDuesReader } from './dues-reader-postgres'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
@@ -91,8 +93,17 @@ async function seedHolder(unitId: string, name: string, during: string): Promise
   )
 }
 
-const read = (documentId: string, on = '2026-07-01') =>
-  createDuesReader().duesForDocument(documentId, YEAR, on)
+/**
+ * The reader is scoped to the *year*, not to the document.
+ *
+ * Each test therefore filters to its own unit: the roll is shared, so a query
+ * for 2026 sees every unit any test in this file assessed. Story 4.3 learned
+ * this the expensive way, with eleven tests failing on each other's fixtures.
+ */
+const readYear = (on = '2026-07-01') => createDuesReader().duesForYear(YEAR, on)
+
+const readUnit = async (unitId: string, on = '2026-07-01') =>
+  (await readYear(on)).find((unit) => unit.unitId === unitId)
 
 describeWithDatabase('reading what a unit owed and what arrived', () => {
   beforeAll(async () => {
@@ -135,7 +146,7 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await seedPayment(unit, document, '2026-01-05', '100.00')
     await seedPayment(unit, document, '2026-02-05', '100.00')
 
-    const [dues] = await read(document)
+    const dues = await readUnit(unit)
 
     expect(dues).toMatchObject({
       unitId: unit,
@@ -159,7 +170,7 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await seedPayment(unit, january, '2026-01-05', '600.00')
     await seedPayment(unit, july, '2026-07-01', '600.00')
 
-    const [dues] = await read(july)
+    const dues = await readUnit(unit)
 
     expect(dues!.payments.map((payment) => payment.amount)).toEqual(['600.00', '600.00'])
   })
@@ -172,7 +183,7 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await seedPayment(unit, document, '2025-12-31', '22.00')
     await seedPayment(unit, document, '2027-01-01', '33.00')
 
-    const [dues] = await read(document)
+    const dues = await readUnit(unit)
 
     // Both edges, and both are the first or last day of the year — the two the
     // half-open range decides.
@@ -190,8 +201,8 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await seedHolder(unit, `${RUN_PREFIX} Former Holder`, '[2026-01-01,2026-06-01)')
     await seedHolder(unit, `${RUN_PREFIX} Current Holder`, '[2026-06-01,)')
 
-    const [inMarch] = await read(document, '2026-03-01')
-    const [inJuly] = await read(document, '2026-07-01')
+    const inMarch = await readUnit(unit, '2026-03-01')
+    const inJuly = await readUnit(unit, '2026-07-01')
 
     expect(inMarch!.holderName).toBe(`${RUN_PREFIX} Former Holder`)
     expect(inJuly!.holderName).toBe(`${RUN_PREFIX} Current Holder`)
@@ -204,58 +215,64 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await seedAssessment(unit, '600.00', 'annual')
     await seedPayment(unit, document, '2026-01-05', '10.00')
 
-    const [dues] = await read(document)
+    const dues = await readUnit(unit)
 
     expect(dues).toMatchObject({ unitId: unit, holderName: null })
   })
 
-  it('returns a null assessment rather than a zero for a unit not on the roll', async () => {
-    // Nothing owed is not everything missing. A zero here would read as a
-    // shortfall of the whole amount against a unit whose only mistake is not
-    // being assessed yet.
+  it('leaves out a unit with no assessment for the year entirely', async () => {
+    // **This case used to assert a null assessment**, back when the query was
+    // driven off the deposit's payments. Now the roll is the driving table, so
+    // "nothing was owed" is expressed by the unit not being there — which is
+    // the stronger form: the detector cannot forget to check for it.
     const document = await seedDocument('unassessed')
     const unit = await seedUnit('unassessed')
     await seedPayment(unit, document, '2026-01-05', '10.00')
 
-    const [dues] = await read(document)
-
-    expect(dues).toMatchObject({ unitId: unit, assessment: null })
+    expect(await readUnit(unit)).toBeUndefined()
   })
 
-  it('ignores an assessment recorded for a different year', async () => {
+  it('leaves out a unit assessed only for a different year', async () => {
     const document = await seedDocument('other-year')
     const unit = await seedUnit('other-year')
     await seedAssessment(unit, '999.00', 'annual', YEAR - 1)
     await seedPayment(unit, document, '2026-01-05', '10.00')
 
-    const [dues] = await read(document)
-
-    expect(dues!.assessment).toBeNull()
+    expect(await readUnit(unit)).toBeUndefined()
   })
 
-  it('returns every unit the deposit touched, once each', async () => {
+  it('includes a unit that has paid nothing at all', async () => {
+    // **The case the acceptance-criteria audit found missing, and the first one
+    // FR-7 names.** A unit that has never paid appears on no deposit, so a
+    // reader scoped to the uploaded document would never have seen it — the
+    // detector would have been unable to report the very thing it exists for.
+    const unit = await seedUnit('silent')
+    await seedAssessment(unit, '1200.00', 'monthly')
+
+    const dues = await readUnit(unit)
+
+    expect(dues).toMatchObject({ unitId: unit })
+    expect(dues!.payments).toEqual([])
+  })
+
+  it('returns each assessed unit once, however many times it paid', async () => {
     const document = await seedDocument('many')
     const first = await seedUnit('many-a')
     const second = await seedUnit('many-b')
     await seedAssessment(first, '1200.00', 'monthly')
     await seedAssessment(second, '600.00', 'annual')
-    // Two payments for the same unit on one document must not duplicate it.
+    // Two payments for one unit must not duplicate it.
     await seedPayment(first, document, '2026-01-05', '100.00')
     await seedPayment(first, document, '2026-02-05', '100.00')
     await seedPayment(second, document, '2026-01-05', '600.00')
 
-    const dues = await read(document)
+    const dues = await readYear()
+    const mine = dues.filter((unit) => unit.unitId === first || unit.unitId === second)
 
-    expect(dues.map((unit) => unit.unitNumber)).toEqual([
+    expect(mine.map((unit) => unit.unitNumber)).toEqual([
       `${RUN_PREFIX}-many-a`,
       `${RUN_PREFIX}-many-b`,
     ])
-  })
-
-  it('reads nothing for a document that recorded no payments', async () => {
-    const document = await seedDocument('empty')
-
-    expect(await read(document)).toEqual([])
   })
 
   it('hands amounts back as exact decimal strings', async () => {
@@ -266,9 +283,166 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await seedAssessment(unit, '1000.00', 'monthly')
     await seedPayment(unit, document, '2026-01-05', '83.34')
 
-    const [dues] = await read(document)
+    const dues = await readUnit(unit)
 
     expect(dues!.assessment!.annualAmount).toBe('1000.00')
     expect(dues!.payments[0]!.amount).toBe('83.34')
+  })
+
+  describe('raising the shortfall end to end', () => {
+    /**
+     * **A year of its own, and that is forced by the rescope.**
+     *
+     * Detection now covers the whole roll for a year, so counts like `raised`
+     * and `subjectsChecked` are global. Sharing 2026 with the reader tests
+     * above — and with the 26 units already in this database — would make every
+     * assertion here depend on data no test in this file owns, and would leave
+     * findings on units it never seeded. A far-future year contains nothing but
+     * what these tests put in it.
+     */
+    const E2E_YEAR = 2099
+
+    async function seedDeposit(label: string): Promise<string> {
+      const { rows } = await writer.query<{ id: string }>(
+        `insert into document
+           (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
+         values ($1, $2, $3, 'text/csv', 512, $4, '2099-07-01T09:00:00Z')
+         returning id`,
+        [
+          randomBytes(32).toString('hex'),
+          `${RUN_PREFIX}/${label}`,
+          `${RUN_PREFIX}-${label}.csv`,
+          memberId,
+        ],
+      )
+      const id = rows[0]!.id
+      documents.push(id)
+
+      return id
+    }
+
+    const detect = (documentId: string) =>
+      detectDuesShortfalls(documentId, {
+        dues: createDuesReader(),
+        findings: createFindingRegister(),
+      })
+
+    async function findingsFor(unitId: string) {
+      const { rows } = await writer.query<{
+        finding_type: string
+        period: string
+        state: string
+        evidence: {
+          kind: string
+          expected: string
+          received: string
+          shortfall: string
+          holderName: string | null
+          unitNumber: string
+        }
+      }>(
+        `select finding_type, period::text, state, evidence
+           from finding where subject_id = $1 order by period`,
+        [unitId],
+      )
+
+      return rows
+    }
+
+    it('raises one finding keyed on the unit and the assessment year', async () => {
+      // Uploaded 2099-07-01, which is the evaluation date, so a monthly payer
+      // owes seven instalments of 100.00 and has paid one.
+      const document = await seedDeposit('e2e-raise')
+      const unit = await seedUnit('e2e-raise')
+      await seedAssessment(unit, '1200.00', 'monthly', E2E_YEAR)
+      await seedPayment(unit, document, '2099-01-05', '100.00')
+      await seedHolder(unit, `${RUN_PREFIX} Reese Calloway`, '[2099-01-01,)')
+
+      await detect(document)
+
+      const [finding] = await findingsFor(unit)
+      expect(finding).toMatchObject({
+        finding_type: 'unit_dues_shortfall',
+        period: '[2099-01-01,2100-01-01)',
+        state: 'unreviewed',
+      })
+      expect(finding!.evidence).toMatchObject({
+        kind: 'below-expected',
+        expected: '700.00',
+        received: '100.00',
+        shortfall: '600.00',
+        holderName: `${RUN_PREFIX} Reese Calloway`,
+      })
+    })
+
+    it('running detection again yields one finding, not two', async () => {
+      // **AC7, and the reason story 4.1 came first.** One *row*, guaranteed by
+      // `finding_identity` rather than by this code remembering what it did.
+      const document = await seedDeposit('e2e-twice')
+      const unit = await seedUnit('e2e-twice')
+      await seedAssessment(unit, '1200.00', 'annual', E2E_YEAR)
+      await seedPayment(unit, document, '2099-01-05', '400.00')
+
+      await detect(document)
+      await detect(document)
+
+      expect(await findingsFor(unit)).toHaveLength(1)
+    })
+
+    it('amends the one finding as a unit pays down its arrears', async () => {
+      // **The reason this story ships one finding type rather than two**, and
+      // the case that found the rescope: this unit appears on no deposit at all
+      // until the second half of the test, and a reader scoped to the uploaded
+      // document would never have seen it.
+      const document = await seedDeposit('e2e-amend')
+      const unit = await seedUnit('e2e-amend')
+      await seedAssessment(unit, '1200.00', 'annual', E2E_YEAR)
+
+      await detect(document)
+      expect((await findingsFor(unit))[0]!.evidence).toMatchObject({
+        kind: 'not-recorded',
+        received: '0.00',
+      })
+
+      await seedPayment(unit, document, '2099-02-05', '500.00')
+      await detect(document)
+
+      const rows = await findingsFor(unit)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.evidence).toMatchObject({
+        kind: 'below-expected',
+        received: '500.00',
+        shortfall: '700.00',
+      })
+    })
+
+    it('raises nothing for a unit that is not on the roll', async () => {
+      const document = await seedDeposit('e2e-unassessed')
+      const unit = await seedUnit('e2e-unassessed')
+      await seedPayment(unit, document, '2099-01-05', '10.00')
+
+      await detect(document)
+
+      expect(await findingsFor(unit)).toHaveLength(0)
+    })
+
+    it('never flags a unit for its billing cycle alone', async () => {
+      // **AC2 through the real database.** Same annual figure, different
+      // cycles, each having paid exactly what its own schedule expects by
+      // 1 July. Neither is a finding, and it is the criterion this story is
+      // most likely to regress on.
+      const document = await seedDeposit('e2e-cycles')
+      const monthly = await seedUnit('e2e-monthly')
+      const annual = await seedUnit('e2e-annual')
+      await seedAssessment(monthly, '1200.00', 'monthly', E2E_YEAR)
+      await seedAssessment(annual, '1200.00', 'annual', E2E_YEAR)
+      await seedPayment(monthly, document, '2099-01-05', '700.00')
+      await seedPayment(annual, document, '2099-01-05', '1200.00')
+
+      await detect(document)
+
+      expect(await findingsFor(monthly)).toHaveLength(0)
+      expect(await findingsFor(annual)).toHaveLength(0)
+    })
   })
 })

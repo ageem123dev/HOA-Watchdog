@@ -30,7 +30,7 @@ function dues(overrides: Partial<UnitDues> = {}): UnitDues {
 function reader(units: readonly UnitDues[], evaluatedOn: string | null = '2026-04-01'): DuesReader {
   return {
     evaluationDateFor: vi.fn(async () => evaluatedOn),
-    duesForDocument: vi.fn(async () => units),
+    duesForYear: vi.fn(async () => units),
   }
 }
 
@@ -172,18 +172,20 @@ describe('raising a shortfall', () => {
 })
 
 describe('when there is nothing to raise', () => {
-  it('raises nothing for a unit that is not on the roll', async () => {
-    // Nothing owed is not everything missing. A unit whose only mistake is not
-    // being assessed yet must not be reported as owing the whole year.
+  it('raises nothing when the roll has no assessed units', async () => {
+    // A unit with no assessment for the year never reaches this function: the
+    // reader selects from the roll, so "nothing owed" is expressed by absence.
+    // That used to be a null field and a check here, until the AC audit found
+    // the deeper problem the field was hiding.
     const findings = register()
 
     const outcome = await detectDuesShortfalls(DOCUMENT, {
-      dues: reader([dues({ assessment: null })]),
+      dues: reader([]),
       findings: findings.port,
     })
 
     expect(findings.port.raise).not.toHaveBeenCalled()
-    expect(outcome).toEqual({ raised: 0, amended: 0, subjectsChecked: 1 })
+    expect(outcome).toEqual({ raised: 0, amended: 0, subjectsChecked: 0 })
   })
 
   it('raises nothing for a unit that has paid what was expected', async () => {
@@ -206,7 +208,7 @@ describe('when there is nothing to raise', () => {
     const outcome = await detectDuesShortfalls(DOCUMENT, { dues: dues_, findings: findings.port })
 
     expect(outcome).toEqual({ raised: 0, amended: 0, subjectsChecked: 0 })
-    expect(dues_.duesForDocument).not.toHaveBeenCalled()
+    expect(dues_.duesForYear).not.toHaveBeenCalled()
     expect(findings.port.raise).not.toHaveBeenCalled()
   })
 })
