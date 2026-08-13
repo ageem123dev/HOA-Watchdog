@@ -18,6 +18,27 @@ export const DEFAULT_SIGNED_IN_ROUTE = '/dashboard'
 export const QUARANTINE_ROUTE = '/quarantine'
 
 /**
+ * Where one finding lives.
+ *
+ * A function rather than a constant, because the route carries the finding's id
+ * and two places need to agree on how — the dashboard row that links to it and
+ * the page that is reached. Written inline in either, they would drift the first
+ * time the segment was renamed.
+ *
+ * Deliberately **not** in `PUBLIC_ROUTES`: a finding names a vendor, an amount,
+ * and sometimes a member. The allow-list below is the only way a surface becomes
+ * public, and the absence of prefix matching is what stops `/findings/…` from
+ * being reachable because something else was allowed.
+ *
+ * The id is encoded on the way in. It comes from the register today, but story
+ * 4.8 will put these links in email, and a route built by string concatenation
+ * from a value nobody encoded is one `../` away from pointing somewhere else.
+ */
+export function findingRoute(findingId: string): string {
+  return `/findings/${encodeURIComponent(findingId)}`
+}
+
+/**
  * The complete set of routes reachable without a session. This is an allow-list,
  * and the decision below is deny-by-default: a route nobody thought about is
  * protected, not exposed. Adding to this list is how a surface becomes public —

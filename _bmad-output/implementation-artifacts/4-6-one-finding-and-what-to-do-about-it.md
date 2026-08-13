@@ -153,12 +153,12 @@ stylesheet rather than two. Recorded so its absence is a decision rather than an
         outcomes. A test that cannot tell them apart is the defect.
   - [x] Unknown id → 404 via `notFound()`.
 
-- [ ] **Task 5 — Wire it up** (AC: 1, 9)
-  - [ ] `app/findings/[id]/page.tsx`, and the dashboard row becomes a link to it.
-  - [ ] The whole row is the target; the amount is not separately focusable. Assert the link count
+- [x] **Task 5 — Wire it up** (AC: 1, 9)
+  - [x] `app/findings/[id]/page.tsx`, and the dashboard row becomes a link to it.
+  - [x] The whole row is the target; the amount is not separately focusable. Assert the link count
         per row is exactly one.
-  - [ ] Auth guard before the read, matching `app/quarantine/page.tsx` and the 4.5 dashboard.
-  - [ ] Add `FINDING_ROUTE` (or equivalent) to `core/auth/route-policy.ts` if a constant is wanted;
+  - [x] Auth guard before the read, matching `app/quarantine/page.tsx` and the 4.5 dashboard.
+  - [x] Add `FINDING_ROUTE` (or equivalent) to `core/auth/route-policy.ts` if a constant is wanted;
         `PUBLIC_ROUTES` stays an allow-list either way.
 
 ## Dev Notes
@@ -557,6 +557,34 @@ this task's diff**, pulled in as repo context. Verified anyway, since it is insi
   rows — every alternative weakens the assertion, which the hard rules forbid. Left as a known
   residual: it needs a concurrent insert and delete inside a sub-second window.
 
+#### Task 5 — wire it up
+
+**Every assertion in `app/dashboard/findings-list.test.tsx` still passes unchanged**, which is what
+AC1 asks for. The row's shape did not move to accommodate the link — the link was wrapped around the
+shape, and the grid moved onto the anchor.
+
+`findingRoute(id)` is a function on `core/auth/route-policy.ts` rather than a constant, because two
+places have to agree on how the id goes into the path. It **encodes** the id: story 4.8 will put
+these links in email, and a route built by concatenation from a value nobody encoded is one `../`
+from pointing elsewhere. `PUBLIC_ROUTES` is untouched and asserted untouched — the route is closed
+because the allow-list does not name it and does no prefix matching.
+
+The anchor states `color: inherit` and `textDecoration: none`. Unstated, twenty rows in link blue
+read as twenty destinations rather than as a register.
+
+*Sensitivity:* three mutations, all caught — read before the guard (1), drop `notFound()` (3), make
+the amount its own link (5).
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.95 · 10/10 files. One
+finding, **disagreed with and recorded**:
+
+- **[medium] "awaiting `auth()` before `params` creates a concurrency waterfall."** The code is as
+  described; the consequence is not. `params` is a promise Next has already put in flight — this
+  code does not initiate it, so there is no second round-trip to overlap and the saving is ~0. Kept
+  sequential for a positive reason too: reading `params` after the session check keeps AC9's
+  guard-before-read ordering legible at a glance, and that ordering is the thing a later editor is
+  most likely to break.
+
 ### File List
 
 **Task 1** — `core/ports/finding-reader.ts`, `core/ports/finding-reader.test.ts`,
@@ -575,6 +603,11 @@ this task's diff**, pulled in as repo context. Verified anyway, since it is insi
 `app/findings/actions.test.ts` (new), `core/findings/review.ts`, `core/findings/review.test.ts`,
 `core/findings/detail-view.ts`, `core/findings/detail-view.test.ts`,
 `adapters/db/finding-reader-postgres.ts`.
+
+**Task 5** — `app/findings/[id]/page.tsx` (new), `app/findings/[id]/page.test.tsx` (new),
+`app/findings/[id]/detail-panel.tsx` (new), `app/findings/[id]/detail-panel.test.tsx` (new),
+`core/auth/route-policy.ts`, `app/dashboard/findings-list.tsx`,
+`app/dashboard/findings-list.test.tsx`.
 
 ## Change Log
 
