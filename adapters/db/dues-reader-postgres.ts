@@ -50,6 +50,19 @@ interface PaymentRow {
 
 export function createDuesReader(): DuesReader {
   return {
+    async evaluationDateFor(documentId: string): Promise<string | null> {
+      // `to_char`, not a `Date`. A calendar day rendered from an instant is the
+      // day before for anyone west of Greenwich, and this day decides which
+      // instalments have fallen due — an off-by-one here is an arrears finding
+      // raised a month early. `invoice-reader-postgres.ts` names the same trap.
+      const { rows } = await writerPool().query<{ on: string }>(
+        `select to_char(uploaded_at, 'YYYY-MM-DD') as on from document where id = $1`,
+        [documentId],
+      )
+
+      return rows[0]?.on ?? null
+    },
+
     async duesForDocument(
       documentId: string,
       year: number,

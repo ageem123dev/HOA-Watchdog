@@ -370,7 +370,7 @@ describeWithDatabase('raising a vendor spike end to end', () => {
 
     const outcome = await detect(subjectDoc.id)
 
-    expect(outcome).toMatchObject({ raised: 1, amended: 0, invoicesChecked: 1 })
+    expect(outcome).toMatchObject({ raised: 1, amended: 0, subjectsChecked: 1 })
 
     const [finding] = await findingsFor(subjectDoc.id)
     expect(finding).toMatchObject({
@@ -432,7 +432,7 @@ describeWithDatabase('raising a vendor spike end to end', () => {
       { issuedOn: '2026-06-14', amount: '999.00' },
     )
 
-    expect(await detect(subjectDoc.id)).toMatchObject({ raised: 0, invoicesChecked: 1 })
+    expect(await detect(subjectDoc.id)).toMatchObject({ raised: 0, subjectsChecked: 1 })
     expect(await findingsFor(subjectDoc.id)).toHaveLength(0)
   })
 

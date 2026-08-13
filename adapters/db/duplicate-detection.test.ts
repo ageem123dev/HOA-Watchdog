@@ -142,7 +142,7 @@ describeWithDatabase('detecting a duplicate invoice', () => {
 
     const outcome = await detect(newer)
 
-    expect(outcome).toMatchObject({ raised: 1, amended: 0, invoicesChecked: 1 })
+    expect(outcome).toMatchObject({ raised: 1, amended: 0, subjectsChecked: 1 })
 
     const [finding] = await findingsFor(newer)
     expect(finding).toMatchObject({
@@ -214,7 +214,7 @@ describeWithDatabase('detecting a duplicate invoice', () => {
 
     const outcome = await detect(newer)
 
-    expect(outcome).toMatchObject({ raised: 0, amended: 0, invoicesChecked: 1 })
+    expect(outcome).toMatchObject({ raised: 0, amended: 0, subjectsChecked: 1 })
     expect(await findingsFor(newer)).toHaveLength(0)
   })
 
@@ -236,7 +236,7 @@ describeWithDatabase('detecting a duplicate invoice', () => {
 
     const outcome = await detect(newer)
 
-    expect(outcome).toMatchObject({ raised: 0, invoicesChecked: 1 })
+    expect(outcome).toMatchObject({ raised: 0, subjectsChecked: 1 })
     expect(await findingsFor(newer)).toHaveLength(0)
   })
 
@@ -252,7 +252,7 @@ describeWithDatabase('detecting a duplicate invoice', () => {
 
     const outcome = await detect(newer)
 
-    expect(outcome).toMatchObject({ raised: 1, invoicesChecked: 2 })
+    expect(outcome).toMatchObject({ raised: 1, subjectsChecked: 2 })
     const findings = await findingsFor(newer)
     expect(findings).toHaveLength(1)
     expect(findings[0]!.evidence.pairs).toHaveLength(2)

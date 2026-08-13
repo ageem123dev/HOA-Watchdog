@@ -133,12 +133,12 @@ real mid-year change of holder.
   - [x] `held_during @>` for the holder, never "the latest membership row".
   - [x] `test:db` for the year boundary, the mid-year change of holder, and a unit with no assessment.
 
-- [ ] **Task 3 — Raising it (AC7, AC8, AC9)**
-  - [ ] Reuse `core/detection/detection-run.ts` for the period helpers rather than adding a third
+- [x] **Task 3 — Raising it (AC7, AC8, AC9)**
+  - [x] Reuse `core/detection/detection-run.ts` for the period helpers rather than adding a third
         definition of a period.
-  - [ ] Pick `subject_id` and `period` by **probing what is stable across re-ingest**, the way 4.2 had
+  - [x] Pick `subject_id` and `period` by **probing what is stable across re-ingest**, the way 4.2 had
         to. A unit id is stable where an extraction id is not, but check rather than assume.
-  - [ ] Evidence per AC9.
+  - [x] Evidence per AC9.
 
 - [ ] **Task 4 — Wiring (AC10)**
   - [ ] `run-detection.ts` runs three detectors. The isolation contract is already there and already

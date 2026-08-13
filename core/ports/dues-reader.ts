@@ -41,6 +41,23 @@ export interface UnitDues {
  */
 export interface DuesReader {
   /**
+   * The date this deposit was taken as evidence of, as `YYYY-MM-DD`, or `null`
+   * if the document is unknown.
+   *
+   * **The detector's clock, and it is a property of the document rather than of
+   * the moment the question is asked.** Uploading a deposit is when the
+   * association's record of what has arrived is most complete, so it is the
+   * honest date to ask "what has not?" — and it does not move, so re-running
+   * detection next year gives the same answer and AD-13's no-op keeps meaning
+   * something. Story 2.3 kept the schedule clock-free for the same reason; a
+   * detector that reached for `now()` would undo it.
+   *
+   * The cost is stated rather than discovered: a deposit uploaded in January
+   * covering the previous year is evaluated against the *new* year's schedule.
+   * Re-running detection for a chosen year is the fix, not a heuristic here.
+   */
+  evaluationDateFor(documentId: string): Promise<string | null>
+  /**
    * Every unit the given deposit document recorded a payment against, with what
    * that unit owed for `year` and everything that arrived toward it.
    *
