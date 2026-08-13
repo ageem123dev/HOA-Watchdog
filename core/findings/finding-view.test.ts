@@ -127,6 +127,20 @@ describe('severity, and the words that carry it', () => {
     expect(row.title).toBe('Vendor paid before approval')
   })
 
+  it('treats a type that names an inherited property as unknown', () => {
+    // **`constructor` passes `finding_type_is_verb_noun`** — the column's check
+    // constraint is `^[a-z][a-z0-9_]*$`, and every character qualifies. A plain
+    // object literal inherits it, so `SEVERITY['constructor']` returns the
+    // `Object` function rather than `undefined`, the `??` fallback never fires,
+    // and the row's severity becomes a function: no label, no tick colour, and
+    // UX-DR2 broken on the one row that most needed AC3's promise to hold.
+    const row = toFindingRow(finding({ findingType: 'constructor' }))
+
+    expect(row.severity).toBe('worth-checking')
+    expect(row.severityLabel).toBe('Worth checking')
+    expect(row.title).toBe('Constructor')
+  })
+
   it('does not escalate a type it cannot name', () => {
     // The other half of AC3, and the half that is a judgement: an unknown
     // finding is shown, but the system does not shout about something it
@@ -171,6 +185,24 @@ describe('a possible duplicate invoice', () => {
     expect(row.evidenceLine).toBe(
       '2 of 3 invoices on this upload match an earlier one on amount and date, and on amount and invoice number.',
     )
+  })
+
+  it('ignores a match reason that names an inherited property', () => {
+    // The same defect one layer down, and this one reaches the page. `reason`
+    // comes out of `jsonb`, so it is whatever was stored; `MATCH_REASON` is an
+    // object literal, so `MATCH_REASON['constructor']` is the `Object` function
+    // rather than `undefined` — and the phrase list is joined into the sentence
+    // a board member reads. The rendered evidence line would have contained
+    // `function Object() { [native code] }`.
+    const row = toFindingRow(
+      duplicate({
+        ...duplicateEvidence,
+        pairs: [{ ...duplicateEvidence.pairs[0], reason: 'constructor' }],
+      }),
+    )
+
+    expect(row.evidenceLine).toBe('1 of 3 invoices on this upload matches an earlier one.')
+    expect(row.evidenceLine).not.toMatch(/function|native code|\[object/i)
   })
 
   it('carries the amount at stake', () => {

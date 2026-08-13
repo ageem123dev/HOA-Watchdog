@@ -158,16 +158,16 @@ surface.
   - [x] Scope fixtures so tests do not share subjects. Both 4.3 and 4.4 shipped a suite that
         passed because every test saw every other test's rows.
 
-- [ ] **Task 4 — The components** (AC: 2, 4, 5, 8, 10)
-  - [ ] Figure block and findings list under `app/dashboard/`, presentational, taking a view.
+- [x] **Task 4 — The components** (AC: 2, 4, 5, 8, 10)
+  - [x] Figure block and findings list under `app/dashboard/`, presentational, taking a view.
         Follow `app/quarantine/queue-list.tsx`: the component takes data and returns markup, and
         does not reach the database.
-  - [ ] jsdom render tests, per-file `// @vitest-environment jsdom` and `afterEach(cleanup)` —
+  - [x] jsdom render tests, per-file `// @vitest-environment jsdom` and `afterEach(cleanup)` —
         `globals: true` is deliberately off (see `queue-list.test.tsx`).
-  - [ ] Styling only through custom properties. `core/design/no-raw-values.test.ts` scans `app/`
+  - [x] Styling only through custom properties. `core/design/no-raw-values.test.ts` scans `app/`
         and fails on a raw colour or font value. The tick's width is
         `--component-margin-tick-width`.
-  - [ ] Semantics: the list is a list; the tick is decorative and the label is the text. Currency
+  - [x] Semantics: the list is a list; the tick is decorative and the label is the text. Currency
         announced as currency (UX-DR20). Flexible row heights — nothing fixed-height.
 
 - [ ] **Task 5 — Wire the dashboard** (AC: 1, 7, 8, 9)
@@ -508,6 +508,55 @@ failed 1.
   consequence. No test file in `adapters/db/` closes `writerPool()`, and the suite completes in
   ~39s every run. Vitest tears the worker down. Left consistent with its siblings rather than
   making this one file different for a hang that does not occur.
+
+#### Task 4
+
+`FigureBlock` and `FindingsList` under `app/dashboard/`, both presentational and both taking their
+data as props — the pattern `app/quarantine/queue-list.tsx` set, for the reason its header gives.
+
+`FindingsList` takes the whole `DashboardView` rather than a list of rows, so the component picks a
+branch instead of re-deriving which state applies. A page that decided emptiness for itself is how
+"nothing needs your attention" reaches a board member on the day the association signed up.
+
+**An existing design gate caught something before Argus did.** `core/design/text-pairings.test.ts`
+failed on `--color-rule`: the row separator used a token no surface declares a pairing for, so its
+contrast is measured by nothing. Every other hairline in `app/` uses `--color-rule-strong`, which is
+measured and has its shortfall recorded as a known gap. Changed to match. A separator nobody can see
+is a separator that is not there.
+
+*Sensitivity:* five mutations, all caught. Removing the severity words while leaving the tick failed
+1 — which is the UX-DR2 case that otherwise fails silently. Drawing every tick in `flag` failed 1;
+rendering an absent amount as `$0.00` failed 1; dropping the "showing the N most recent" notice
+failed 1; letting `nothing-checked` reassure failed 2.
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.95 · context 6/6 files ·
+1 agy call, 64,861 tokens.
+
+- **[medium] `TICK[row.severity]` allows prototype property access** — **confirmed, and the
+  verification moved it.** Argus pointed at the component, where `row.severity` is already a
+  validated `Severity`; the lookups that actually take untrusted keys are in
+  `core/findings/finding-view.ts`. Probed rather than reasoned about, and it was worse than
+  reported:
+
+  - `finding_type_is_verb_noun` is `^[a-z][a-z0-9_]*$`, which **`constructor` satisfies in full**.
+    `SEVERITY['constructor']` returns the `Object` function, so `?? UNKNOWN_SEVERITY` never fires
+    and the row's severity becomes a function — no label, no tick colour, on exactly the
+    unrecognised finding AC3 promises will still render. UX-DR2 broken on the one row that needed
+    the promise most.
+  - `reason` comes out of `jsonb`, so `MATCH_REASON['constructor']` put
+    `function Object() { [native code] }` into the sentence a board member reads.
+
+  Both fixed through one `known()` helper using `Object.hasOwn`, with the two regression tests
+  written first and observed failing (`expected [Function Object] to be 'worth-checking'`).
+
+- **[high] unknown `view.kind` crashes on `view.rows`** — **disagree.** `DashboardView` is a closed
+  discriminated union and the fall-through is type-narrowed to the findings variant; adding a fourth
+  kind is a compile error at `view.rows`, not a runtime crash. An explicit check plus a `never`
+  branch would add a guard no test could force, which is the shape this project has deleted six of.
+- **[medium/low] ×3 `=== null` misses `undefined`** — **disagree.** All three fields are required
+  and non-optional, produced in-process by pure functions that always assign them. Argus's premise
+  is that they arrive over JSON; they do not — `FindingsList` is a server component, so there is no
+  serialization boundary between `toDashboardView` and the render.
 
 ## Change Log
 

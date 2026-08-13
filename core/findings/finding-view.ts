@@ -89,6 +89,27 @@ const MATCH_REASON: Readonly<Record<string, string>> = {
   'same-amount-and-number': 'amount and invoice number',
 }
 
+/**
+ * A table lookup that cannot reach `Object.prototype`.
+ *
+ * **Both keys used here are untrusted strings**, and a plain `table[key]` reads
+ * inherited properties as though they were entries. `finding_type` comes from
+ * the database, whose `finding_type_is_verb_noun` check is `^[a-z][a-z0-9_]*$`
+ * — which `constructor` satisfies in full. `reason` comes out of `jsonb` and is
+ * whatever a detector stored.
+ *
+ * The consequences were not theoretical. `SEVERITY['constructor']` returned the
+ * `Object` function, so `?? UNKNOWN_SEVERITY` never fired and the row's
+ * severity became a function: no label and no tick, on exactly the unrecognised
+ * finding AC3 promises will still render. And `MATCH_REASON['constructor']` put
+ * `function Object() { [native code] }` into the sentence a board member reads.
+ * Raised by Argus against the component; the lookup it was really about is
+ * here.
+ */
+function known<T>(table: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined
+}
+
 function fields(value: unknown): Readonly<Record<string, unknown>> {
   // Arrays are objects to `typeof`, and an array reaching a field read means the
   // evidence is not the shape anything here expects. Treating it as an empty
@@ -163,7 +184,7 @@ function readDuplicate(evidence: Readonly<Record<string, unknown>>): Reading {
     ...new Set(
       pairs.flatMap((pair) => {
         const reason = text(pair['reason'])
-        const phrase = reason === null ? undefined : MATCH_REASON[reason]
+        const phrase = reason === null ? undefined : known(MATCH_REASON, reason)
         return phrase === undefined ? [] : [phrase]
       }),
     ),
@@ -253,7 +274,7 @@ function read(findingType: string, evidence: unknown): Reading {
 }
 
 export function toFindingRow(finding: UnreviewedFinding): FindingRow {
-  const severity = SEVERITY[finding.findingType] ?? UNKNOWN_SEVERITY
+  const severity = known(SEVERITY, finding.findingType) ?? UNKNOWN_SEVERITY
   const reading = read(finding.findingType, finding.evidence)
 
   return {
