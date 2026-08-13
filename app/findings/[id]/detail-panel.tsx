@@ -107,8 +107,13 @@ function Comparisons({ table }: { table: ComparisonTable }) {
             // same reasoning `answer-view.tsx` records for its result rows.
             <tr key={index}>
               {row.map((cell, column) => (
+                // Keyed by position, like the row above it and for the same
+                // reason: a cell has no identity of its own and the columns are
+                // a module constant that never reorders. The label-based key
+                // this replaced carried an `?? column` fallback that could not
+                // fire, since every row is built with the columns' own arity.
                 <td
-                  key={table.columns[column]?.label ?? column}
+                  key={column}
                   style={table.columns[column]?.numeric === true ? styles.cellNumeric : styles.cell}
                 >
                   {cell}

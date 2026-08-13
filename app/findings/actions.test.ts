@@ -24,6 +24,8 @@ const markReviewed = vi.fn<(findingId: string, reviewerId: string) => Promise<vo
   async () => undefined,
 )
 const byId = vi.fn<(id: string) => Promise<FindingDetail | null>>(async () => null)
+/** Installed once in `beforeEach` and read by the two tests that care. */
+let logged: ReturnType<typeof vi.spyOn>
 
 vi.mock('@/adapters/auth/auth', () => ({ auth: () => auth() }))
 vi.mock('@/adapters/db/finding-postgres', () => ({
@@ -55,7 +57,7 @@ beforeEach(() => {
   auth.mockResolvedValue({ user: { id: 'member-1', email: 'board@example.org' } })
   markReviewed.mockResolvedValue(undefined)
   byId.mockResolvedValue(reviewed())
-  vi.spyOn(console, 'error').mockImplementation(() => {})
+  logged = vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -163,6 +165,9 @@ describe('AC7: the three answers stay three answers', () => {
       by: null,
       on: null,
     })
+    // "Reviewed by nobody in particular" and "reviewed by someone we could not
+    // look up" are the same sentence on screen; only the log tells them apart.
+    expect(logged).toHaveBeenCalled()
   })
 
   it('still reports already-reviewed when the finding cannot be read back', async () => {
@@ -188,7 +193,6 @@ describe('AC7: the three answers stay three answers', () => {
     // only write path in the story — so it is the one that most needs a record
     // of which of them happened. The same argument `app/quarantine/actions.ts`
     // makes for its own catch.
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     markReviewed.mockRejectedValue(new Error('connection terminated unexpectedly'))
 
     await markFindingReviewed(FINDING)
@@ -197,7 +201,6 @@ describe('AC7: the three answers stay three answers', () => {
   })
 
   it('does not log a refusal, which is an ordinary answer rather than a fault', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     markReviewed.mockRejectedValue(new AlreadyReviewedError(FINDING))
 
     await markFindingReviewed(FINDING)

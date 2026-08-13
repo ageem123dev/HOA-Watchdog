@@ -14,6 +14,8 @@
  * and nothing visible from a browser would say so.
  */
 
+import type { ReactElement } from 'react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PUBLIC_ROUTES, SIGN_IN_ROUTE, findingRoute } from '@/core/auth/route-policy'
@@ -44,6 +46,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.resetModules()
 })
 
@@ -106,6 +109,30 @@ describe('AC8: an id that resolves to nothing is a 404', () => {
     byId.mockResolvedValue(null)
 
     await expect(renderPage('not-a-uuid')).rejects.toThrow('NEXT_NOT_FOUND')
+  })
+
+  it('renders the finding when there is one, and calls notFound for nothing', async () => {
+    // The success path, which nothing here asserted: every case above ends in a
+    // throw, so the page could have been wrong about the ordinary outcome and
+    // this file would still have been green. Raised by CodeRabbit.
+    byId.mockResolvedValue({
+      id: FINDING,
+      findingType: 'possible_duplicate_invoice',
+      subjectId: 'document-1',
+      period: { from: '2026-04-01', until: '2026-05-01' },
+      evidence: { invoicesChecked: 3, pairs: [{ vendorName: 'Coastal Landscaping' }] },
+      raisedOn: '2026-04-14',
+      reviewed: null,
+    })
+
+    const element = await renderPage()
+
+    expect(notFound).not.toHaveBeenCalled()
+    render(element as ReactElement)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
+      'Possible duplicate invoice — Coastal Landscaping',
+    )
+    expect(screen.queryByRole('button', { name: /mark reviewed/i })).not.toBeNull()
   })
 
   it('passes the id through to the reader exactly as the route gave it', async () => {

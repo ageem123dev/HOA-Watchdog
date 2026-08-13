@@ -22,7 +22,6 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { findingRoute } from '@/core/auth/route-policy'
 import type { DashboardView } from '@/core/findings/dashboard-view'
 import type { FindingRow } from '@/core/findings/finding-view'
 import { FindingsList } from './findings-list'
@@ -197,7 +196,12 @@ describe('AC1: the whole row is the click target, and only the row', () => {
   it('takes the reader to that finding', () => {
     render(<FindingsList view={findings([row({ id: 'finding-7' })])} />)
 
-    expect(screen.getByRole('link').getAttribute('href')).toBe(findingRoute('finding-7'))
+    // The literal, not `findingRoute('finding-7')`. Computing the expectation
+    // with the function under test asserts only that it equals itself — it
+    // would pass against a `findingRoute` returning `/wrong/finding-7`. Raised
+    // by CodeRabbit, and it is the "guard that proves nothing" shape this
+    // project keeps finding.
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/findings/finding-7')
   })
 
   it('has exactly one link per row, so the amount is not a separate target', () => {

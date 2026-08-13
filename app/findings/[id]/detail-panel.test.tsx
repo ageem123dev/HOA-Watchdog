@@ -20,6 +20,13 @@ import { FindingDetailPanel } from './detail-panel'
 
 afterEach(cleanup)
 
+// The `mark` spy below is module-scoped, so without this a call made by one
+// test is still on it in the next. Nothing asserts on it today; that is exactly
+// when this is cheap to add. Raised by CodeRabbit.
+afterEach(() => {
+  vi.clearAllMocks()
+})
+
 const mark = vi.fn(async () => ({ outcome: 'recorded' }) as const)
 
 function finding(overrides: Partial<FindingDetail> = {}): FindingDetail {

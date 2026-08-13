@@ -1,5 +1,15 @@
 import type { FindingRecord } from '../ports/finding-reader'
-import { MATCH_REASON, counted, decimal, entries, fields, known, text, whole, words } from './evidence'
+import {
+  MATCH_REASON,
+  counted,
+  entries,
+  fields,
+  known,
+  percentAbove,
+  text,
+  whole,
+  words,
+} from './evidence'
 import { formatAmount } from './money'
 
 /**
@@ -165,7 +175,7 @@ function readSpike(evidence: Readonly<Record<string, unknown>>): Reading {
 
   const [only] = spikes
   if (spikes.length === 1 && only !== undefined) {
-    const percent = decimal(only['percentOverAverage'])
+    const percent = percentAbove(only['percentOverAverage'])
     const average = formatAmount(only['average'])
     const averaged = whole(only['invoicesAveraged'])
     const line =

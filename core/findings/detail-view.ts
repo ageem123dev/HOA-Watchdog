@@ -1,5 +1,15 @@
 import type { FindingDetail } from '../ports/finding-reader'
-import { MATCH_REASON, counted, decimal, entries, fields, known, text, whole, words } from './evidence'
+import {
+  MATCH_REASON,
+  counted,
+  entries,
+  fields,
+  known,
+  percentAbove,
+  text,
+  whole,
+  words,
+} from './evidence'
 import {
   INVOICE_ABOVE_VENDOR_AVERAGE,
   POSSIBLE_DUPLICATE_INVOICE,
@@ -109,7 +119,7 @@ export interface FindingDetailView {
  * than stored with the value so that neither surface can print it twice.
  */
 function percentage(value: unknown): string | null {
-  const stored = decimal(value)
+  const stored = percentAbove(value)
   return stored === null ? null : `${stored}%`
 }
 

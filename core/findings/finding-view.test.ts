@@ -326,6 +326,12 @@ describe('an invoice above the vendor average', () => {
     ['is not a number at all', 'abc'],
     ['carries a currency mark the sentence would repeat', '$31.4'],
     ['is a number rather than the decimal string the detector stores', 31.4],
+    // A negative "above average" is a sentence that contradicts itself. The
+    // detector cannot raise one today — it only fires above the threshold — but
+    // the value comes out of `jsonb`, where it is whatever was written. Raised
+    // by CodeRabbit.
+    ['is negative, which would say -15% above an average', '-15'],
+    ['is negative with a decimal place', '-15.5'],
   ])('builds no sentence when the percentage %s', (_name, percentOverAverage) => {
     // **`abc%` on a fiduciary surface.** `percentOverAverage` comes out of
     // `jsonb`, and a non-blank-string check is not a number check — the row

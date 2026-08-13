@@ -74,7 +74,14 @@ async function whoGotThereFirst(findingId: string): Promise<ReviewOutcome> {
     const review = finding?.reviewed ?? null
 
     return { outcome: 'already-reviewed', by: review?.by ?? null, on: review?.on ?? null }
-  } catch {
+  } catch (error) {
+    // Logged, like the write path's own failure. The answer to the board member
+    // is unchanged — the review exists either way — but "reviewed by nobody in
+    // particular" and "reviewed by someone we could not look up" are the same
+    // sentence on screen, and only this line tells them apart afterwards. The
+    // refusal itself stays unlogged: that is an answer, not a fault. Raised by
+    // CodeRabbit.
+    console.error('reading who reviewed a finding failed', error)
     return { outcome: 'already-reviewed', by: null, on: null }
   }
 }

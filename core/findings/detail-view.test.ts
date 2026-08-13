@@ -368,6 +368,7 @@ describe('a spike lays out each comparison with its own figures', () => {
     ['a number rather than a decimal string', 31.4],
     ['absent', undefined],
     ['blank', '   '],
+    ['negative, which would read as below the average', '-15'],
   ])('shows no percentage when it is %s', (_name, percentOverAverage) => {
     const view = toFindingDetail(spike({ spikes: [{ ...SPIKE, percentOverAverage }] }))
 

@@ -79,6 +79,24 @@ export function decimal(value: unknown): string | null {
 }
 
 /**
+ * A percentage above an average — non-negative, or `null`.
+ *
+ * `decimal` stays signed, because negative decimals are legitimate elsewhere
+ * (money runs through `formatAmount`, which handles them). What is not
+ * legitimate is a *negative* value in a sentence that reads "N% above a
+ * 6-month average": it contradicts itself, and on this surface a sentence that
+ * cannot be true is worse than no sentence.
+ *
+ * `vendor-spike.ts` only raises above its threshold, so no detector writes one
+ * today — but the value arrives through `jsonb`, where it is whatever was
+ * stored. Raised by CodeRabbit.
+ */
+export function percentAbove(value: unknown): string | null {
+  const stored = decimal(value)
+  return stored === null || stored.startsWith('-') ? null : stored
+}
+
+/**
  * What a duplicate pair was matched on, in words.
  *
  * **One table, read by two surfaces that phrase it differently.** The dashboard
