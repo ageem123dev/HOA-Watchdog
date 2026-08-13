@@ -168,15 +168,23 @@ The test-value pass matters most *here*, because a fix diff is where a test's pr
 
 **A fix is the highest-risk diff in the story, not the lowest.** On story 1.5d, rounds 2 and 3 produced **8 findings and every one was in a fix from a previous round** — a swallowed 404, a stale read that reintroduced the bug it was fixing, a `NULL` token written against a check constraint. Fixes are written under time pressure, against a narrower model, on machinery with invariants already in place. Skipping the gate here is skipping it where it pays most.
 
+**8e-close. The close-out rides in the round's commit, not after it.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`, and the round's Review Findings — all in the **same commit and push** as the round's fixes. Not a commit of its own once the review comes back clean.
+
+Because a story with no fixes this round still has a round: if the review was clean and nothing needed changing, the close-out *is* the commit.
+
+**Why: a close-out pushed after convergence races the merge, and loses.** You announce ready-to-merge, the user merges the head they were shown, and the close-out lands on the branch behind them — so `main` keeps `Status: review`. Step 1 then picks the *finished* story again instead of the next one. That has needed a follow-up docs MR five times: stories 2.1, 2.6, 2.7, 3.2 and 4.4 (MR !57).
+
+Marking `done` before the final review returns is safe because **8c still decides convergence** and 9.3 already specifies the undo. `done` on an unmerged branch means ready-to-merge, and a further round simply amends it.
+
 **8f. Reply per thread** — Fixed (what changed) or Skipped (why). **Write bodies to files** and post with `--field "body=$(cat file)"`.
 
 **Caps:** ~3–4 rounds; only-already-skipped findings recurring counts as converged. On a rate limit, back off ~2400s and re-request rather than pushing.
 
 ### 9 — Ready-to-merge (terminal)
 
-1. **Docs first.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`. If this is the epic's last not-`done` story also set `epic-{N} = done` in the same commit; otherwise set it `in-progress` if unset. Commit and push.
-2. **Re-verify on the new head.** That push invalidated the Step 7/8 evidence. Re-run the gates, then Step 8 **including 8a's wait** — a docs-only push triggers a re-review like any other. With no pipeline, the re-run is the *whole* of the evidence, not a confirmation of it.
-3. **If that re-verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
+1. **The docs are already pushed** — 8e-close put them in the round's commit. Confirm rather than write: story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`, and `epic-{N} = done` if this was the epic's last not-`done` story (otherwise `in-progress` if unset). **If any is missing, this step is the bug** — commit and push it now, and expect step 2 to cost a re-review.
+2. **Verify on the exact head the MR points at.** No new push means the Step 7/8 evidence still stands; re-run the gates anyway, because with no pipeline that run is the *whole* of the evidence. If you did have to push in step 1, redo Step 8 **including 8a's wait** — a docs-only push triggers a re-review like any other.
+3. **If verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
 4. **Confirm the MR is still open at your head**, as in 8a, before reporting.
 5. Report MR URL, review outcome, and the **local gate results on the final head** — naming them as local, since no pipeline corroborates them. Then **"Ready to merge — leaving the merge to you."**
 6. STOP.
