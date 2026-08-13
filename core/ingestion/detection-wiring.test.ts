@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { FindingRegister } from '../ports/finding'
+import type { DuesReader } from '../ports/dues-reader'
 import type { InvoiceReader } from '../ports/invoice-reader'
 import { runDetection } from './run-detection'
 
@@ -38,6 +39,14 @@ describe.each(CALL_SITES)('$what', ({ path }) => {
 
   it('passes an invoice reader', () => {
     expect(source).toMatch(/invoices:\s*createInvoiceReader\(\)/)
+  })
+
+  it('passes a dues reader', () => {
+    // Story 4.4's detector reads through its own port. A call site wiring only
+    // the invoice reader now gets two detectors out of three and nothing fails,
+    // which is exactly the invisible gap this file exists for.
+    expect(source).toMatch(/dues:\s*createDuesReader\(\)/)
+    expect(source).toContain("from '@/adapters/db/dues-reader-postgres'")
   })
 
   it('passes a finding register', () => {
@@ -66,6 +75,89 @@ describe('when the collaborators are absent', () => {
 
     await expect(runDetection('d-1', { invoices })).resolves.toBeNull()
     expect(invoices.invoicesOn).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when there is a register but nothing to read with', async () => {
+    const findings = { raise: vi.fn() } as unknown as FindingRegister
+
+    await expect(runDetection('d-1', { findings })).resolves.toBeNull()
+    expect(findings.raise).not.toHaveBeenCalled()
+  })
+})
+
+describe('a missing reader silences its own detector and no other', () => {
+  /**
+   * **Why this is per detector rather than all-or-nothing.**
+   *
+   * Until story 4.4 there was one reader, so "no reader means do nothing" was
+   * the same sentence either way. With two, an all-or-nothing gate would mean a
+   * caller wiring only the reader it has gets *no detection at all* — the
+   * invisible gap this file exists for, produced by the check written to
+   * prevent it. Neither of these two cases fails loudly; only these tests do.
+   */
+  const register = (): FindingRegister => ({
+    raise: vi.fn(async () => ({ id: 'f-1', wasAlreadyKnown: false })),
+  })
+
+  const emptyInvoices = (): InvoiceReader => ({
+    invoicesOn: vi.fn(async () => []),
+    priorCandidates: vi.fn(async () => []),
+    trailingInvoices: vi.fn(async () => []),
+  })
+
+  const emptyDues = (): DuesReader => ({
+    evaluationDateFor: vi.fn(async () => '2026-04-01'),
+    yearsCoveredBy: vi.fn(async () => []),
+    duesForYear: vi.fn(async () => []),
+  })
+
+  it('runs the invoice detectors with no dues reader', async () => {
+    const invoices = emptyInvoices()
+
+    const outcome = await runDetection('d-1', { invoices, findings: register() })
+
+    expect(outcome).toMatchObject({
+      duplicates: { raised: 0 },
+      spikes: { raised: 0 },
+      dues: null,
+    })
+    expect(invoices.invoicesOn).toHaveBeenCalled()
+  })
+
+  it('runs dues detection with no invoice reader, and reports no failure for it', async () => {
+    const dues = emptyDues()
+    const onError = vi.fn()
+
+    const outcome = await runDetection('d-1', { dues, findings: register(), onError })
+
+    expect(outcome).toMatchObject({
+      duplicates: null,
+      spikes: null,
+      dues: { raised: 0 },
+    })
+    expect(dues.duesForYear).toHaveBeenCalled()
+
+    // **`onError` is what makes the gate worth having.** Without it, running an
+    // unwired detector anyway looks identical from the outcome — it throws on
+    // the absent reader, `attempt` catches it, and the field is `null` either
+    // way. What differs is that every upload would report two detector failures
+    // that never happened. A mutation removing the gate survived until this
+    // line existed.
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('runs all three when everything is wired', async () => {
+    const outcome = await runDetection('d-1', {
+      invoices: emptyInvoices(),
+      dues: emptyDues(),
+      findings: register(),
+    })
+
+    expect(outcome).toMatchObject({
+      duplicates: { raised: 0 },
+      spikes: { raised: 0 },
+      dues: { raised: 0 },
+    })
   })
 })
 
@@ -112,6 +204,7 @@ describe('when detection fails', () => {
     await expect(runDetection('d-1', { ...failing(), onError })).resolves.toEqual({
       duplicates: null,
       spikes: null,
+      dues: null,
     })
     expect(onError).toHaveBeenCalledWith(expect.any(Error), 'd-1')
   })

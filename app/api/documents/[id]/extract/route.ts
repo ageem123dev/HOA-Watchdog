@@ -3,6 +3,7 @@ import { createPostgresDocumentRepository } from '@/adapters/db/document-reposit
 import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
 import { createGeminiExtractor } from '@/adapters/extraction/extractor-gemini'
 import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
+import { createDuesReader } from '@/adapters/db/dues-reader-postgres'
 import { createInvoiceReader } from '@/adapters/db/invoice-reader-postgres'
 import { createFindingRegister } from '@/adapters/db/finding-postgres'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
@@ -86,6 +87,7 @@ export async function POST(
     // what came before -- and nothing fails. `duplicate-detection-wiring.test.ts`
     // asserts this call passes them.
     invoices: createInvoiceReader(),
+    dues: createDuesReader(),
     findings: createFindingRegister(),
     onError: (error) => {
       // The treasurer gets a state; an operator gets the cause. Discarding it

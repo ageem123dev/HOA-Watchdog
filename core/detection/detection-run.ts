@@ -16,8 +16,17 @@ export interface DetectionOutcome {
   readonly raised: number
   /** Findings that were already there and had their evidence amended. */
   readonly amended: number
-  /** How many invoices were compared, whether or not anything was found. */
-  readonly invoicesChecked: number
+  /**
+   * How many subjects were compared, whether or not anything was found.
+   *
+   * *Subjects*, not invoices. Story 4.4 added a detector whose subject is a
+   * unit, and a shared field named `invoicesChecked` holding a count of units
+   * is the kind of quiet lie this codebase keeps finding in review. The
+   * evidence key inside each finding keeps its own detector-specific name —
+   * that one is stored JSON which stories 4.5 and 4.8 read back, and renaming
+   * it would rewrite the meaning of findings already raised.
+   */
+  readonly subjectsChecked: number
 }
 
 /** `YYYY-MM` for the month a finding is filed under. */
@@ -45,5 +54,33 @@ export function monthRange(month: string): FindingPeriod {
   return {
     from: `${month}-01`,
     until: `${String(nextYear).padStart(4, '0')}-${String(nextIndex).padStart(2, '0')}-01`,
+  }
+}
+
+/**
+ * A whole assessment year as a half-open range, `[Jan 1, next Jan 1)`.
+ *
+ * Story 4.4's period. Here rather than in the dues detector for the reason the
+ * month rule is here: a period is half of a finding's identity, and two
+ * detectors spelling a year two ways would file the same year under two keys.
+ *
+ * Padded to four digits, as `monthRange` is. `999-01-01` sorts before every
+ * sensible date and Postgres accepts it as a year, so the padding is what stops
+ * a short year quietly becoming a different period.
+ */
+export function yearRange(year: number): FindingPeriod {
+  // Four digits, and the range migration 013 already constrains an assessment
+  // year to. `Number.isSafeInteger` alone let `-100` and `99999` through:
+  // `padStart` does not truncate, so those became `-100-01-01` and
+  // `99999-01-01` — a period key nobody would ever match again, built three
+  // layers from whatever produced the number. A fractional year yields
+  // `2026.5-01-01`, which is not a date at all. Raised by CodeRabbit.
+  if (!Number.isSafeInteger(year) || year < 1900 || year > 2200) {
+    throw new RangeError(`not a calendar year: ${String(year)}`)
+  }
+
+  return {
+    from: `${String(year).padStart(4, '0')}-01-01`,
+    until: `${String(year + 1).padStart(4, '0')}-01-01`,
   }
 }

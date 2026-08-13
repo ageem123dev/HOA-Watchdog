@@ -188,7 +188,7 @@ describe('what it reports back', () => {
       findings: findings.port,
     })
 
-    expect(outcome).toEqual({ raised: 1, amended: 0, invoicesChecked: 1 })
+    expect(outcome).toEqual({ raised: 1, amended: 0, subjectsChecked: 1 })
   })
 
   it('counts a finding already on the register as amended, not raised', async () => {
@@ -202,7 +202,7 @@ describe('what it reports back', () => {
       findings: findings.port,
     })
 
-    expect(outcome).toEqual({ raised: 0, amended: 1, invoicesChecked: 1 })
+    expect(outcome).toEqual({ raised: 0, amended: 1, subjectsChecked: 1 })
   })
 
   it('raises nothing when there is nothing to find', async () => {
@@ -214,7 +214,7 @@ describe('what it reports back', () => {
     })
 
     expect(findings.port.raise).not.toHaveBeenCalled()
-    expect(outcome).toEqual({ raised: 0, amended: 0, invoicesChecked: 1 })
+    expect(outcome).toEqual({ raised: 0, amended: 0, subjectsChecked: 1 })
   })
 
   it('still reports how many invoices were checked when none matched', async () => {
@@ -227,7 +227,7 @@ describe('what it reports back', () => {
       findings: findings.port,
     })
 
-    expect(outcome.invoicesChecked).toBe(2)
+    expect(outcome.subjectsChecked).toBe(2)
   })
 
   it('does nothing at all for a document with no invoices', async () => {
@@ -238,6 +238,6 @@ describe('what it reports back', () => {
       findings: findings.port,
     })
 
-    expect(outcome).toEqual({ raised: 0, amended: 0, invoicesChecked: 0 })
+    expect(outcome).toEqual({ raised: 0, amended: 0, subjectsChecked: 0 })
   })
 })

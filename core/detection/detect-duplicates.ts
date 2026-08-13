@@ -151,5 +151,5 @@ export async function detectDuplicateInvoices(
     else raised += 1
   }
 
-  return { raised, amended, invoicesChecked: invoices.length }
+  return { raised, amended, subjectsChecked: invoices.length }
 }

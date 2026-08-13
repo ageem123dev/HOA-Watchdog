@@ -124,6 +124,33 @@ const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/
  * the day for anyone west of UTC, changing which instalments count. Story 2.1
  * recorded the same hazard for membership dates.
  */
+/**
+ * Whether an instalment has fallen due by a date.
+ *
+ * One predicate, used by both `expectedBy` and `instalmentsDueBy`. Story 4.4
+ * counted instalments with its own `dueOn <= on` and CodeRabbit pointed out
+ * that the two could drift: a finding would then say "3 instalments" beside an
+ * expected figure covering four. `<=` and not `<` because dues are collected in
+ * advance — a unit owes January's instalment *on* 1 January.
+ */
+function hasFallenDue(instalment: Instalment, on: string): boolean {
+  return instalment.dueOn <= on
+}
+
+/**
+ * How many instalments have fallen due by a date.
+ *
+ * The count beside `expectedBy`'s figure, and deliberately not derivable from
+ * it — two instalments of 50 and one of 100 both total 100.
+ */
+export function instalmentsDueBy(schedule: readonly Instalment[], on: string): number {
+  if (typeof on !== 'string' || !CALENDAR_DATE.test(on)) {
+    throw new RangeError(`not a calendar date: ${describeValue(on)}`)
+  }
+
+  return schedule.filter((instalment) => hasFallenDue(instalment, on)).length
+}
+
 export function expectedBy(schedule: readonly Instalment[], on: string): string {
   if (typeof on !== 'string' || !CALENDAR_DATE.test(on)) {
     throw new RangeError(`not a calendar date: ${describeValue(on)}`)
@@ -133,7 +160,7 @@ export function expectedBy(schedule: readonly Instalment[], on: string): string 
   // numbers would drift, and the drift would be invisible until an arrears
   // finding was a cent out.
   const total = schedule
-    .filter((instalment) => instalment.dueOn <= on)
+    .filter((instalment) => hasFallenDue(instalment, on))
     .reduce((sum, instalment) => sum + toMinorUnits(instalment.amount), 0)
 
   return fromMinorUnits(total)

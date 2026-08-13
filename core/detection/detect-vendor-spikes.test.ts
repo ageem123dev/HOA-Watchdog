@@ -197,7 +197,7 @@ describe('raising a spike', () => {
       findings: findings.port,
     })
 
-    expect(outcome).toEqual({ raised: 0, amended: 1, invoicesChecked: 1 })
+    expect(outcome).toEqual({ raised: 0, amended: 1, subjectsChecked: 1 })
   })
 })
 
@@ -211,7 +211,7 @@ describe('when there is nothing to raise', () => {
     })
 
     expect(findings.port.raise).not.toHaveBeenCalled()
-    expect(outcome).toEqual({ raised: 0, amended: 0, invoicesChecked: 1 })
+    expect(outcome).toEqual({ raised: 0, amended: 0, subjectsChecked: 1 })
   })
 
   it('raises nothing for a vendor with too little history', async () => {
@@ -244,7 +244,7 @@ describe('when there is nothing to raise', () => {
       findings: findings.port,
     })
 
-    expect(outcome.invoicesChecked).toBe(3)
+    expect(outcome.subjectsChecked).toBe(3)
     expect(findings.raised[0]!.evidence).toMatchObject({ invoicesChecked: 3 })
   })
 })
