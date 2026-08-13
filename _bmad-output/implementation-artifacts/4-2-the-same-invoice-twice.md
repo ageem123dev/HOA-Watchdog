@@ -323,6 +323,39 @@ a board member however carefully the surrounding copy hedges. Renamed to
 
 Cheap now, expensive later: three stories read this value, and one of them mails it.
 
+### CodeRabbit, on MR !54
+
+The CLI round could not run — 401, the session still expired since story 4.1 — so the merge request was
+CodeRabbit's first look rather than its second.
+
+**Round 1 — seven findings, six accepted.**
+
+1. *(major)* **`duplicatesAmong` did not re-check the ordering** while its docblock claimed it re-checked
+   every condition the SQL narrows on. Without it one pair can match in both directions and the register
+   reports one event twice. **Claim narrowed rather than check added**: `documentUploadedAt` is a calendar
+   day and two documents uploaded on the same day cannot be ordered by one, so the SQL's
+   `(uploaded_at, id)` comparison is where the invariant lives. The docblock now says so.
+2. *(minor)* **The rewrap test passed with the rewrap removed** — mine, from the previous round's fix.
+   `deps.onError?.(error, filename)` already appears twice in `ingest.ts`'s catch blocks, so the two
+   separate assertions matched those. It now reads the argument object of the detection call, verified by
+   mutation. **Third time this story that a guard proving nothing turned up, and the first time it was one
+   I had just written.**
+3. *(trivial)* An unreachable `continue` became a `throw`: it would have dropped a pair from the evidence
+   a board member reads and reported success.
+4. *(trivial)* `missing()`'s empty-string branch had no case. Writing one caught my own error — with a
+   blank date but identical numbers the fuzzy rule fires correctly, so the case had to clear the number.
+5. *(trivial)* Unreachable `?? 0` fallbacks removed; the same file already asserted non-null for the same
+   value, holding two styles for one fact with one of them untestable.
+6. *(minor)* DB fixtures now seed a **run-scoped vendor**. Both suites used the same vendor and amounts,
+   vitest runs files in parallel, and the vendor is the column the query narrows on.
+
+**Skipped with a reason:** detection issues one query per invoice row, serially. Correctness is unaffected
+and the latency sits on a path already awaiting an extractor and an object store; bounded concurrency or a
+batched candidate query is the fix if a real document makes it matter.
+
+**Round 2 — clean.** *"No actionable comments were generated"*, for `7fbae35 → ee8fd79`, delivered as an
+edit to the summary comment rather than a new note — the pattern recorded after MR !53.
+
 ### AC audit — the rest
 
 | AC | Verdict |
