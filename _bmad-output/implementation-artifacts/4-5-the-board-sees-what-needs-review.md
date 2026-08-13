@@ -147,15 +147,15 @@ surface.
   - [x] Read `evidence` defensively — it is `unknown`. AC6 is a test, not a comment.
   - [x] AC3's unknown-type path is a branch with its own test, not a `default:` nobody exercised.
 
-- [ ] **Task 3 — The Postgres reader** (AC: 1, 7)
-  - [ ] `adapters/db/finding-reader-postgres.ts` + `.test.ts` under `npm run test:db`.
-  - [ ] `finding_state_recent_idx` is `(state, raised_at desc)` — the query should use it. Check
+- [x] **Task 3 — The Postgres reader** (AC: 1, 7)
+  - [x] `adapters/db/finding-reader-postgres.ts` + `.test.ts` under `npm run test:db`.
+  - [x] `finding_state_recent_idx` is `(state, raised_at desc)` — the query should use it. Check
         with `explain`; do not assert it does without looking.
-  - [ ] **Dates out of Postgres go through `to_char(… at time zone 'UTC', 'YYYY-MM-DD')`.** Story
+  - [x] **Dates out of Postgres go through `to_char(… at time zone 'UTC', 'YYYY-MM-DD')`.** Story
         4.4 shipped this bug in two readers and fixed it in both: `to_char` on a `timestamptz`
         renders in the *session* timezone, so an upload at 18:00 Pacific files under the next day.
         `adapters/db/pool-time-zone.ts` exists to test it — use it.
-  - [ ] Scope fixtures so tests do not share subjects. Both 4.3 and 4.4 shipped a suite that
+  - [x] Scope fixtures so tests do not share subjects. Both 4.3 and 4.4 shipped a suite that
         passed because every test saw every other test's rows.
 
 - [ ] **Task 4 — The components** (AC: 2, 4, 5, 8, 10)
@@ -450,6 +450,64 @@ failed 2.
 
 No other findings. `formatAmount`'s float-freedom and the graceful degradation of malformed
 evidence were both called out as holding.
+
+#### Task 3
+
+One statement returns the rows and the total together (`count(*) over ()`), so both describe the
+same snapshot. Two round trips could disagree if a finding were reviewed between them, and that
+disagreement is the thing the combined shape exists to prevent.
+
+**The index does not serve this query, and that was measured rather than assumed.** The story said
+to check with `explain` and not to assert it without looking, so:
+
+```
+Limit → Sort (raised_at DESC, id DESC) → WindowAgg → Seq Scan on finding (32 rows)
+```
+
+Two reasons, and only one is about table size. `count(*) over ()` has to see every unreviewed row,
+so `limit` bounds what is *returned*, not what is read — the index cannot short-circuit that at any
+size. Accepted rather than optimised: splitting into an index-scanned page plus a separate count
+would use the index and lose the shared snapshot, which is the property this surface needs. Written
+into the adapter so nobody later claims otherwise.
+
+**The ordering carries `id desc` as a tie-break.** One detection run raises several findings on the
+same `now()`, and without a second key the board's queue reshuffles between two refreshes of a
+register that has not changed.
+
+**Determinism without a run prefix.** Every other adapter test here isolates with a prefix because
+every other query narrows on something; these do not — the queue is the whole table. Three
+techniques replaced it: seed into 2099 so this file's rows sort ahead of anything else running;
+assert *relative* order within the result rather than absolute position; and cross-check the global
+counts against an independently written control query.
+
+*Sensitivity:* seven mutations, all caught. Unfiltering reviewed rows failed 2; dropping the
+tie-break failed 1; removing `at time zone 'UTC'` failed 1; returning the page size as the total
+failed 1; counting documents in every extraction state failed 3; removing the upper limit bound
+failed 1.
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.95 · context 4/4 files ·
+1 agy call, 62,129 tokens.
+
+- **[medium] the count test races other files writing findings** — **confirmed.** It compared
+  `queue.total` to one control read, which asserts that nothing else committed between two
+  statements. That is not a property of this adapter, and other files in this directory raise and
+  review findings concurrently. Rewritten to bracket the total between a control on each side:
+  exact when the table is quiet, still correct when it is not, and still fails when `total` is
+  replaced by the page size (verified by mutation).
+- **[medium] no upper bound on `limit`** — **confirmed.** The port made `limit` required because
+  "an optional bound is one a caller forgets", and a caller passing a million forgets it just as
+  thoroughly. The register is append-only and permanent, so the request gets worse every year.
+  Capped at 200 and refused rather than clamped — a caller asking for more wanted a bulk export,
+  which is story 4.7's surface. Test written first and observed failing.
+- **[high] `setPoolTimeZone` races other concurrently running test files** — **disagree**, and it
+  was worth checking rather than assuming, because it would have been serious. `writerPool()`
+  memoises per module registry, and vitest isolates modules per test file, so each file holds its
+  own pool and its own connections; a session timezone is per-connection. `dues-reader-postgres`
+  and `invoice-reader-postgres` already do this concurrently today.
+- **[medium] the pool is never closed, so the runner hangs** — **not reproduced** on the
+  consequence. No test file in `adapters/db/` closes `writerPool()`, and the suite completes in
+  ~39s every run. Vitest tears the worker down. Left consistent with its siblings rather than
+  making this one file different for a hang that does not occur.
 
 ## Change Log
 
