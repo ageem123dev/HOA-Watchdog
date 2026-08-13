@@ -5,7 +5,7 @@ merge_request: 59
 
 # Story 4.5: The board sees what needs review
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -734,8 +734,31 @@ environment involved.
 *Review gate on the round's diff:* `argus_review` clean — no findings, confidence 1.0, 9/9 files.
 (Two attempts again; the first returned `agy failed`.)
 
+### Convergence
+
+**MR !59 converged after one round.** The re-review of `32edc5f..b8d8fc3` covered all seven changed
+files and returned *"No actionable comments were generated"*. Eight of the ten threads were resolved
+by CodeRabbit; the two left open are the `readerPool` refusal, answered on its thread with the
+`42501` probe, and the docblock move, which was taken and which the clean re-review of that same file
+confirms.
+
+**It arrived as an edit to the summary comment, not as a new note** — created 16:59:26, updated
+17:40:12. Keying only on newly-posted notes would have reported this MR as awaiting review
+indefinitely. That trap is already recorded in memory; this is the second story to hit it.
+
+### The close-out was late, on the first story after the rule that exists to prevent that
+
+`8e-close` says the status change and the review record ride in the *round's* commit. Round 1's
+fixes went up without them, because the round was not known to be the last one until the re-review
+came back clean — which is precisely the reasoning the rule forbids. Recovered under Step 9.1,
+which names this as the bug and costs a re-review of the docs-only push.
+
+The rule only works if the close-out goes into **every** round's commit, not the final one, because
+which round is final is never knowable at push time. Recorded.
+
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-13 | Story created from Epic 4's spine. Row navigation and the register link deferred to 4.6 and 4.7 with the reasoning recorded. |
+| 2026-08-13 | Implemented across five tasks. MR !59 converged after one review round: 10 findings, 8 taken, `readerPool` refused with a permissions probe. |
