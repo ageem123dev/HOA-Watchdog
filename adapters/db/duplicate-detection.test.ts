@@ -34,6 +34,9 @@ if (!configured) {
 
 const RUN_PREFIX = `dup-${randomBytes(4).toString('hex')}`
 
+/** Scoped per run: vitest runs files in parallel and the query narrows on the vendor. */
+const VENDOR = `Acme ${RUN_PREFIX} Plumbing`
+
 let writer: Client
 let owner: Client
 let memberId: string
@@ -66,12 +69,13 @@ async function seedInvoice(
   await writer.query(
     `insert into extraction
        (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency)
-     values ($1, 'invoice', 'Acme Plumbing', $2, $3::date, $4::numeric, 'USD')`,
+     values ($1, 'invoice', $5, $2, $3::date, $4::numeric, 'USD')`,
     [
       documentId,
       fields.number === undefined ? 'INV-1001' : fields.number,
       fields.issuedOn === undefined ? '2026-03-14' : fields.issuedOn,
       fields.amount ?? '250.00',
+      VENDOR,
     ],
   )
 }
@@ -221,13 +225,13 @@ describeWithDatabase('detecting a duplicate invoice', () => {
     const newer = await seedDocument('null-newer', '2026-08-21T09:00:00Z')
     await writer.query(
       `insert into extraction (document_id, document_kind, vendor_name, currency)
-       values ($1, 'invoice', 'Acme Plumbing', 'USD')`,
-      [older],
+       values ($1, 'invoice', $2, 'USD')`,
+      [older, VENDOR],
     )
     await writer.query(
       `insert into extraction (document_id, document_kind, vendor_name, currency)
-       values ($1, 'invoice', 'Acme Plumbing', 'USD')`,
-      [newer],
+       values ($1, 'invoice', $2, 'USD')`,
+      [newer, VENDOR],
     )
 
     const outcome = await detect(newer)

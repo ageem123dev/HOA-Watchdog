@@ -70,14 +70,23 @@ describe('when the collaborators are absent', () => {
 })
 
 describe('the ingest path reports errors with its own vocabulary', () => {
-  it('rewraps onError so a filename is not a document id', () => {
+  it('rewraps onError so a filename is not logged as a document id', () => {
     // `ingest`'s `onError` takes a **filename**; `extract-document`'s takes a
-    // document id. Both are strings, so passing `deps` through wholesale
-    // type-checks and logs a uuid under the label `filename`. Raised by Argus.
+    // document id. Both are strings, so passing `deps` straight through
+    // type-checks and logs a uuid under the label `filename`.
+    //
+    // The first version of this test asserted the two lines separately and
+    // **passed with the rewrap removed**, because `deps.onError?.(error,
+    // filename)` already appears twice in this file's catch blocks. Raised by
+    // CodeRabbit. The assertion now reads the argument object itself, so the
+    // pre-existing lines cannot satisfy it.
     const source = read('core/ingestion/ingest.ts')
+    const call = /runDuplicateDetection\(recorded\.id, \{[\s\S]*?\}\)/.exec(source)
 
-    expect(source).toMatch(/runDuplicateDetection\(recorded\.id, \{/)
-    expect(source).toMatch(/deps\.onError\?\.\(error, filename\)/)
+    expect(call, 'the detection call should pass an explicit object').not.toBeNull()
+    expect(call![0]).toContain('onError:')
+    expect(call![0]).toContain('filename')
+    expect(call![0]).not.toMatch(/onError:\s*deps\.onError\s*[,}]/)
   })
 })
 

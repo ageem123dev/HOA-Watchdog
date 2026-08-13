@@ -35,6 +35,17 @@ if (!configured) {
 
 const RUN_PREFIX = `inv-${randomBytes(4).toString('hex')}`
 
+/**
+ * Scoped to this run, because vitest runs files in parallel.
+ *
+ * Both suites here and in `duplicate-detection.test.ts` seed the same vendor
+ * with the same amounts, so a concurrent run's rows can come back as prior
+ * candidates — adding pairs to one suite's expectations or breaking another's
+ * zero-match assertion. The vendor is the column the query narrows on, so
+ * scoping it is what isolates the runs. Raised by CodeRabbit.
+ */
+const VENDOR = `Acme ${RUN_PREFIX} Plumbing`
+
 let writer: Client
 let owner: Client
 let memberId: string
@@ -79,7 +90,7 @@ async function seedInvoice(documentLabel: string, fixture: InvoiceFixture = {}):
      returning id`,
     [
       documents.get(documentLabel),
-      fixture.vendor === undefined ? 'Acme Plumbing' : fixture.vendor,
+      fixture.vendor === undefined ? VENDOR : fixture.vendor,
       fixture.number === undefined ? 'INV-1001' : fixture.number,
       fixture.issuedOn === undefined ? '2026-03-14' : fixture.issuedOn,
       fixture.amount === undefined ? '250.00' : fixture.amount,
@@ -199,7 +210,7 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
   const subject = (overrides: Partial<Record<string, string | null>> = {}) => ({
     extractionId: 'unused',
     documentId: documents.get('newer')!,
-    vendorName: 'Acme Plumbing',
+    vendorName: VENDOR,
     documentNumber: 'INV-1001',
     issuedOn: '2026-03-14',
     amount: '250.00',
@@ -218,7 +229,7 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
   it('folds the vendor name with the database function the rest of the system uses', async () => {
     // `vendor_normalised_name` is what `vendor` and `quarantine_item` generate
     // their keys from. This asserts the detector agrees with them.
-    await seedInvoice('older', { vendor: '  acme   PLUMBING ', amount: '311.00' })
+    await seedInvoice('older', { vendor: `  ACME   ${RUN_PREFIX}   PLUMBING  `, amount: '311.00' })
 
     const found = await createInvoiceReader().priorCandidates(subject({ amount: '311.00' }))
 
@@ -275,8 +286,8 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
     // it had already paid.
     await writer.query(
       `insert into extraction (document_id, document_kind, vendor_name, total_amount, currency)
-       values ($1, 'deposit', 'Acme Plumbing', 715.00, 'USD')`,
-      [documents.get('older')],
+       values ($1, 'deposit', $2, 715.00, 'USD')`,
+      [documents.get('older'), VENDOR],
     )
 
     const found = await createInvoiceReader().priorCandidates(subject({ amount: '715.00' }))
@@ -288,7 +299,7 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
     // AD-8. A vendor name is an extracted string and the field an injection
     // payload arrives in; if this were interpolated it would end the literal.
     const found = await createInvoiceReader().priorCandidates(
-      subject({ vendorName: `Acme' or '1'='1` }),
+      subject({ vendorName: `${VENDOR}' or '1'='1` }),
     )
 
     expect(found).toHaveLength(0)

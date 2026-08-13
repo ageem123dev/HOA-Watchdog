@@ -15,9 +15,19 @@ import { sameInvoiceNumber } from './invoice-number'
  *
  * The adapter narrows the candidate set in SQL — same vendor, same amount,
  * earlier document — because that is the cheap way to ask the database. This
- * function re-checks every one of those conditions anyway. A caller that hands
- * it an unfiltered set gets the right answer rather than a plausible one, and
- * the rules stay testable without a database.
+ * function re-checks the vendor, the amount, the date and the number anyway, so
+ * a caller handing it an over-broad set still gets the right answer and the
+ * rules stay testable without a database.
+ *
+ * **Ordering is the exception, and it belongs to the reader.** `InvoiceReader`
+ * guarantees candidates come from strictly earlier documents, and this function
+ * cannot re-check it: `documentUploadedAt` is a calendar day, and two documents
+ * uploaded on the same day cannot be ordered by one. The SQL compares
+ * `(uploaded_at, id)` at full precision, which is where the invariant lives.
+ *
+ * It matters because without it one pair matches in both directions and the
+ * register reports one event twice. Raised by CodeRabbit against an earlier
+ * version of this paragraph, which claimed every condition was re-checked.
  *
  * ## The comparison a mock cannot be wrong about
  *

@@ -59,13 +59,18 @@ const LOWER_Z = 'z'.codePointAt(0)!
 const ASCII_MAX = 127
 
 function isDigit(character: string): boolean {
-  const code = character.codePointAt(0) ?? 0
+  // `codePointAt(0)!` rather than `?? 0`: every caller iterates `for (const
+  // character of raw)`, which yields one non-empty code point per step, so the
+  // fallback was unreachable — and the same file already asserts non-null for
+  // the same value. Two styles for one fact, one of them untestable. Raised by
+  // CodeRabbit.
+  const code = character.codePointAt(0)!
 
   return code >= ZERO && code <= NINE
 }
 
 function isKept(character: string): boolean {
-  const code = character.codePointAt(0) ?? 0
+  const code = character.codePointAt(0)!
 
   // Everything above ASCII is kept unchanged — see the header. Within ASCII,
   // only letters and digits survive, so punctuation of every kind is dropped

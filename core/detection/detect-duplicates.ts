@@ -150,10 +150,15 @@ export async function detectDuplicateInvoices(
 
     for (const match of matches) {
       const prior = priors.find((candidate) => candidate.extractionId === match.priorExtractionId)
-      // `prior` came from `priors`, so this cannot miss — the guard exists
-      // because `noUncheckedIndexedAccess` is on and a silent `undefined` would
-      // put nulls into the evidence a board member reads.
-      if (prior === undefined) continue
+      // `prior` came out of `priors`, so this cannot miss today. It throws
+      // rather than skipping because the two failures are not equal: `continue`
+      // would drop a pair from the evidence a board member reads and report
+      // success, where a throw reaches `run-detection.ts` and is logged. Raised
+      // by CodeRabbit — a `continue` here is a silent evidence loss waiting for
+      // whoever changes the matcher.
+      if (prior === undefined) {
+        throw new Error(`matched invoice ${match.priorExtractionId} was not among the candidates`)
+      }
 
       pairs.push(evidenceFor(invoice, match, prior))
     }

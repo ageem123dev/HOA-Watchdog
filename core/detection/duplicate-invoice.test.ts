@@ -154,6 +154,22 @@ describe('what could not be read', () => {
     expect(found).toEqual([])
   })
 
+  it('treats an empty or whitespace field as absent, not as a value', () => {
+    // `missing` covers `''` as well as null, and nothing tested that branch —
+    // removing the trim left every case green. An extractor that writes a blank
+    // string where it means "nothing" is the ordinary case, and two blanks
+    // matching each other is the same defect as two nulls matching.
+    expect(duplicatesAmong(reading({ vendorName: '   ' }), [{ ...PRIOR, vendorName: '   ' }])).toEqual([])
+    expect(duplicatesAmong(reading({ amount: '' }), [{ ...PRIOR, amount: '' }])).toEqual([])
+    // The number is cleared too, or the *fuzzy* rule fires correctly on the
+    // identical references and this stops being a test of the date branch.
+    expect(
+      duplicatesAmong(reading({ issuedOn: '  ', documentNumber: '' }), [
+        { ...PRIOR, issuedOn: '  ', documentNumber: '' },
+      ]),
+    ).toEqual([])
+  })
+
   it('still catches a duplicate when only the number is missing', () => {
     // The positive control for the three refusals above: a missing field must
     // disable the rule that needs it and no more. Amount and date are both
