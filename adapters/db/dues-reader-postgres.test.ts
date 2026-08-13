@@ -9,11 +9,12 @@
 
 import { randomBytes } from 'node:crypto'
 import { Client } from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { detectDuesShortfalls } from '../../core/detection/detect-dues-shortfalls'
 import { createFindingRegister } from './finding-postgres'
 import { createDuesReader } from './dues-reader-postgres'
+import { writerPool } from './pool'
 import { setPoolTimeZone } from './pool-time-zone'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
@@ -138,6 +139,38 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     } finally {
       await Promise.allSettled([owner.end(), writer.end()])
     }
+  })
+
+  it('gives back the connections it took when a later checkout fails', async () => {
+    // **A leak here strands the whole pool**, because this helper asks for every
+    // connection in it. `Promise.all` abandoned the ones that had already
+    // resolved, so one failed checkout would have left the next query waiting
+    // forever rather than failing. Raised by CodeRabbit.
+    //
+    // The assertion is a second call succeeding: it needs *all* the connections
+    // back, so anything stranded by the first would hang it. A "the pool still
+    // works" check would pass with four of five leaked.
+    const pool = writerPool()
+    const real = pool.connect.bind(pool)
+    let taken = 0
+    const spy = vi.spyOn(pool, 'connect').mockImplementation((() => {
+      taken += 1
+
+      return taken === 1 ? real() : Promise.reject(new Error('no connection to be had'))
+    }) as typeof pool.connect)
+
+    try {
+      await expect(setPoolTimeZone('UTC')).rejects.toThrow('no connection to be had')
+    } finally {
+      spy.mockRestore()
+    }
+
+    await expect(setPoolTimeZone('UTC')).resolves.toBeUndefined()
+  })
+
+  it('refuses a timezone that is not a zone name', async () => {
+    // `set time zone` takes no bound parameter, so the value is interpolated.
+    await expect(setPoolTimeZone("UTC'; drop table finding; --")).rejects.toThrow(RangeError)
   })
 
   it('dates a deposit the same way whatever timezone the session is set to', async () => {

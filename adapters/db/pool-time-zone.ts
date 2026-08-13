@@ -38,17 +38,29 @@ export async function setPoolTimeZone(timeZone: string): Promise<void> {
   }
 
   const pool = writerPool()
-  const clients = await Promise.all(
+
+  // **`allSettled`, not `all`.** With `Promise.all`, one rejected checkout
+  // abandons every client that had already resolved — and this function asks
+  // for *all* of them, so a single failure could strand the entire pool and
+  // deadlock the next query rather than fail it. Raised by CodeRabbit.
+  const results = await Promise.allSettled(
     Array.from({ length: pool.options.max ?? 1 }, () => pool.connect()),
   )
+  const clients = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
 
   try {
+    const failed = results.find((result) => result.status === 'rejected')
+    if (failed !== undefined) {
+      // Rethrown rather than tolerated: a partial set means some connection
+      // still carries the old timezone, and a caller told "fine" would then
+      // trust a test that silently depends on which one it gets.
+      throw failed.reason
+    }
+
     for (const client of clients) {
       await client.query(`set time zone '${timeZone}'`)
     }
   } finally {
-    // Released whatever happened: holding every connection in the pool would
-    // deadlock the next query rather than fail it.
     for (const client of clients) client.release()
   }
 }
