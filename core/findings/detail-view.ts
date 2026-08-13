@@ -150,14 +150,18 @@ const ONE_DAY_MS = 86_400_000
  * half-open form because that is what Postgres canonicalises a `daterange` into;
  * this is where it stops being a storage detail.
  *
- * `null` when the range is not one that can be stated. Migration 021's
- * `finding_period_is_bounded` makes that unreachable through the ordinary path,
- * but this reads `jsonb`-adjacent values off a row, and a window nobody can
- * state is not a window to state badly.
+ * `null` when the range is not one that can be stated — a window nobody can
+ * state is not a window to state badly. `dayNumber` is what decides that.
+ *
+ * **Read directly, unlike `evidence`.** `period` is not a `jsonb` blob: it is a
+ * typed value the adapter builds from a `NOT NULL` column that
+ * `finding_period_is_bounded` already constrains. The `typeof … === 'string'`
+ * and `?.` guards that stood here were unreachable given that, and no test
+ * could force them — a guard with no test behind it is a guess. Raised by
+ * CodeRabbit.
  */
 function periodLabel(period: { readonly from: string; readonly until: string }): string | null {
-  const from = typeof period?.from === 'string' ? period.from : ''
-  const until = typeof period?.until === 'string' ? period.until : ''
+  const { from, until } = period
 
   const start = dayNumber(from)
   const end = dayNumber(until)

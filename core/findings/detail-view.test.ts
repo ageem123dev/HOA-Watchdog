@@ -419,14 +419,36 @@ describe('a dues shortfall lays out its figures', () => {
     expect(toFindingDetail(shortfall()).comparisons).toBeNull()
   })
 
-  it.each(['expected', 'received', 'shortfall', 'instalmentsDue', 'evaluatedOn', 'unitNumber', 'holderName'])(
-    'omits the %s figure when the record does not hold it, and keeps the others',
-    (missing) => {
-      const view = toFindingDetail(shortfall({ [missing]: undefined }))
-      const labels = view.figures.map((entry) => entry.label)
+  // What each evidence field is called on the page. Kept beside the cases so
+  // the assertion below can name the figure that must go *and* the ones that
+  // must stay.
+  const SHORTFALL_FIGURES = {
+    unitNumber: 'Unit',
+    holderName: 'Held by',
+    expected: 'Expected',
+    received: 'Received',
+    shortfall: 'Shortfall',
+    instalmentsDue: 'Instalments due',
+    evaluatedOn: 'Evaluated on',
+  } as const
 
-      expect(labels.length).toBeGreaterThan(0)
-      expect(view.figures.every((entry) => entry.value.trim() !== '')).toBe(true)
+  it.each(Object.keys(SHORTFALL_FIGURES) as (keyof typeof SHORTFALL_FIGURES)[])(
+    'omits only the %s figure when the record does not hold it',
+    (missing) => {
+      // **The previous version of this test proved nothing.** It asserted that
+      // some figure existed and that no value was blank — both of which hold
+      // when `layShortfall` returns *nothing at all*, and trivially so once the
+      // period figure became unconditional. Raised by CodeRabbit, and it is the
+      // "guard that passes whether or not the thing it guards against is
+      // present" shape this project keeps finding.
+      const view = toFindingDetail(shortfall({ [missing]: undefined }))
+
+      expect(figure(view, SHORTFALL_FIGURES[missing])).toBeUndefined()
+
+      for (const [field, label] of Object.entries(SHORTFALL_FIGURES)) {
+        if (field === missing) continue
+        expect(figure(view, label)).toBeDefined()
+      }
     },
   )
 

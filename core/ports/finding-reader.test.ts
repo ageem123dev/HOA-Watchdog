@@ -38,15 +38,29 @@ describe('the FindingReader port', () => {
     ])
   })
 
-  it('answers with nothing for a finding that does not exist', () => {
+  it('answers with nothing for any finding that does not exist', () => {
     // `| null` rather than a throw, and it is a contract rather than a style.
     // "No such finding" is an ordinary outcome on a surface reached by a link
     // somebody kept — story 4.8 sends those links — and it has to be
     // distinguishable from a finding that exists and has been reviewed. A
     // rejection would merge the two at the call site.
-    expect(declaredMembers(findingSource, 'FindingReader').join(' ')).toContain(
-      'Promise<FindingDetail | null>',
+    //
+    // **Written as a property over every member, not as a substring of the
+    // list.** The previous version asserted the joined list *contained* one
+    // exact signature, which the exact-list assertion above already implies —
+    // it could not fail unless that one did too. This version survives the
+    // list legitimately changing: add a `latest(): Promise<FindingDetail>` and
+    // update the array above, and this still refuses it. Raised by CodeRabbit,
+    // and it is the same argument the `cannot review` test below already makes
+    // for itself.
+    const returningOne = declaredMembers(findingSource, 'FindingReader').filter((member) =>
+      member.includes('FindingDetail'),
     )
+
+    expect(returningOne.length).toBeGreaterThan(0)
+    for (const member of returningOne) {
+      expect(member).toMatch(/Promise<FindingDetail \| null>/)
+    }
   })
 
   it('cannot review, raise, or remove anything', () => {

@@ -658,6 +658,33 @@ tasks plus the CodeRabbit round's fixes, which per-task reviews structurally can
 An earlier whole-story pass at `731cd7b` found the pluralisation defect fixed in `b3f3d70`; this one
 is on the head the merge request points at.
 
+#### MR !60, CodeRabbit round 1 — 3 of 3 taken
+
+`Actionable comments posted: 3`, reviewed `26bf300..5c570dd` under the ASSERTIVE profile. The head
+at the time was `ee0da04`, whose only delta is `_bmad-output/**` — excluded by `.coderabbit.yaml`'s
+path filters — so the reviewed code is the code at the head.
+
+**All three were about tests that proved less than they appeared to, and two of them were mine from
+this story.**
+
+- **The shortfall omission test proved nothing.** It asserted that *some* figure existed and that no
+  value was blank — both true when `layShortfall` returns nothing at all, and trivially true once
+  the period figure became unconditional. Rewritten to name the figure that must go and every one
+  that must stay: against a `layShortfall` emitting no figures, the old version passed and the new
+  one fails seven times.
+- **`periodLabel` carried unreachable guards.** `typeof period?.from === 'string'` cannot be false
+  given the type, and no test could force it — a guard with no test behind it is a guess. `period`
+  is not a `jsonb` blob: it is a typed value the adapter builds from a `NOT NULL` column
+  `finding_period_is_bounded` already constrains. Removed; `dayNumber` still decides the format.
+- **The port's null-contract test was implied by the assertion above it.** It checked that the
+  joined member list *contained* one exact signature, which cannot fail unless the exact-list
+  assertion also fails. Rewritten as a property over every member that returns a `FindingDetail`.
+  The proof it now earns its place: add `latest(): Promise<FindingDetail>` **and** update the exact
+  list, as an author adding it would — the old test passed, the new one fails alone.
+
+*Gate on the round's diff:* three mutations, all caught; `argus_review` clean (confidence 1.0, 5/5
+files); full suite, lint, `tsc` and build re-run.
+
 #### What each earlier round found — and what was refused
 
 Recorded per task above. The three worth naming here:
