@@ -1,10 +1,11 @@
 ---
 baseline_commit: 26bf300
+merge_request: 60
 ---
 
 # Story 4.6: One finding, and what to do about it
 
-Status: review
+Status: done
 
 ## Why this story exists
 
@@ -643,8 +644,62 @@ keeps exactly the cover they had.
 
 **AC audit** — `core/findings/detail-view.ts`, `core/findings/detail-view.test.ts`.
 
+### Review Findings
+
+**Nineteen mutations run across the story; all nineteen caught.** Nine `argus_review` calls (five
+per-task, two whole-story, two on fix diffs), one local CodeRabbit CLI round, and the
+acceptance-criteria audit.
+
+#### The integration pass — `main...HEAD` at `5c570dd`
+
+`complex` · confidence 1.0 · 20/27 files · **no findings.** Reviewed the composition of all five
+tasks plus the CodeRabbit round's fixes, which per-task reviews structurally cannot see.
+
+An earlier whole-story pass at `731cd7b` found the pluralisation defect fixed in `b3f3d70`; this one
+is on the head the merge request points at.
+
+#### What each earlier round found — and what was refused
+
+Recorded per task above. The three worth naming here:
+
+1. **The held write took three rounds, because each found a defect in the previous round's fix** —
+   the pattern `_bmad/custom/review-gate.md` documents, happening again. The worst was AC5's own
+   defect one moment earlier than its obvious reading: the undo stayed live while the write was in
+   flight, so pressing it would reset the control and then flip the page to "Moved to register.",
+   having permanently recorded a review the board member had just cancelled.
+2. **The test-value pass found a guard no mutation could have found** — `text()`'s blank check was
+   unasserted in both callers, and all 115 tests passed with it removed. Later the same pass caught
+   a test of *mine* passing for the wrong reason: `Date.UTC` rolls an impossible date forward rather
+   than refusing it, so the round-trip check that catches `2026-02-30` was being satisfied by the
+   range check instead.
+3. **The AC audit found something on the eighth consecutive story** — `period`, read by the adapter,
+   carried by the port and the view, rendered by nothing.
+
+**Five findings were verified and refused**, each with its reason, rather than dropped:
+
+| Finding | Verdict |
+| --- | --- |
+| `setPoolTimeZone` breaks isolation across concurrent files | **not reproduced** — the pool is module-scoped and Vitest isolates test files; nothing is shared |
+| a connection leaks if the second `beforeAll` connect fails | **disagree** — `afterAll` ends both via `allSettled`, and the socket dies with the exiting worker |
+| `useEffect` cleanup is async, so the timer can fire first | **not reproduced** — unreachable at a five-second window; the test advances 100× it and the port is never called |
+| the timer callback should re-check the finding before `sending` | **not reproduced** — a change of finding cancels the timer, so the state is unreachable and no test could force the guard |
+| awaiting `auth()` before `params` is a concurrency waterfall | **disagree** — `params` is already in flight; and the order keeps AC9's guard-before-read legible |
+| `ReturnType<typeof vi.spyOn>` is a TypeScript compile error | **not reproduced** — `tsc` reports 8 errors, the baseline, none in that file. Argus read its own verifier's `rc=-1` as a diagnostic. The suggested fix would have *broken* the build: Vitest 4.1.10 exports `MockInstance`, not `SpyInstance` |
+
+**One residual, accepted and recorded:** the bracketed count assertions in task 1's db test can be
+straddled by a concurrent insert *and* delete, because another file's `afterAll` deletes findings and
+the count is therefore not monotonic. Not fixed — `unreviewed()` returns a **global** total by design
+and cannot be scoped to one file's rows, and every alternative weakens the assertion.
+
+#### Gates on `5c570dd`, locally — there is no CI, so this is the whole of the evidence
+
+`npm test` 2769 passed · `npm run test:db` 813 passed · `npm run lint` 0 errors (1 pre-existing
+warning) · `npx tsc --noEmit` 8 errors, matching baseline · `npm run build` compiled, with
+`/findings/[id]` registered.
+
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-13 | Story created. The EXPERIENCE.md/migration-021 conflict over undo was put to the user, who chose to hold the write rather than reverse it. |
+| 2026-08-13 | Tasks 1–5 implemented test-first. Nine Argus rounds, one local CodeRabbit round (7 of 7 taken), 19 mutations all caught. The AC audit found `period` unrendered — the eighth consecutive story it has found something. Merge request !60 opened; status `done`, meaning ready-to-merge. |
