@@ -127,11 +127,11 @@ real mid-year change of holder.
   - [x] AC2 as a test with two cycles side by side, because it is the criterion most likely to regress.
   - [x] The *late* versus *wrong amount* decision, argued in prose before it is coded.
 
-- [ ] **Task 2 — Reading what arrived and who held it (AC5, AC11)**
-  - [ ] A read-only port, following `InvoiceReader`'s shape and the reason for it: payments for a unit
+- [x] **Task 2 — Reading what arrived and who held it (AC5, AC11)**
+  - [x] A read-only port, following `InvoiceReader`'s shape and the reason for it: payments for a unit
         and year, and the holder covering a date. Bound parameters, never interpolation (AD-8).
-  - [ ] `held_during @>` for the holder, never "the latest membership row".
-  - [ ] `test:db` for the year boundary, the mid-year change of holder, and a unit with no assessment.
+  - [x] `held_during @>` for the holder, never "the latest membership row".
+  - [x] `test:db` for the year boundary, the mid-year change of holder, and a unit with no assessment.
 
 - [ ] **Task 3 — Raising it (AC7, AC8, AC9)**
   - [ ] Reuse `core/detection/detection-run.ts` for the period helpers rather than adding a third
