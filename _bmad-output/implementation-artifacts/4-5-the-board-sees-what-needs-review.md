@@ -138,14 +138,14 @@ surface.
   - [x] Decide deliberately whether the counts belong on this port or a second one, and write the
         reason down either way.
 
-- [ ] **Task 2 — The presentation rule, pure and in `core/`** (AC: 2, 3, 4, 5, 6)
-  - [ ] `core/findings/finding-view.ts` (name is the implementer's): finding → row view. Severity,
+- [x] **Task 2 — The presentation rule, pure and in `core/`** (AC: 2, 3, 4, 5, 6)
+  - [x] `core/findings/finding-view.ts` (name is the implementer's): finding → row view. Severity,
         text label, title, evidence line, amount-or-absent. All copy lives here.
-  - [ ] In `core/` and not in the component, for the reason `core/quarantine/queue-view.ts` gives:
+  - [x] In `core/` and not in the component, for the reason `core/quarantine/queue-view.ts` gives:
         it makes the copy and the severity mapping assertable without a DOM, and it stops a second
         surface (4.6's detail, 4.8's email) inventing a second wording for the same finding.
-  - [ ] Read `evidence` defensively — it is `unknown`. AC6 is a test, not a comment.
-  - [ ] AC3's unknown-type path is a branch with its own test, not a `default:` nobody exercised.
+  - [x] Read `evidence` defensively — it is `unknown`. AC6 is a test, not a comment.
+  - [x] AC3's unknown-type path is a branch with its own test, not a `default:` nobody exercised.
 
 - [ ] **Task 3 — The Postgres reader** (AC: 1, 7)
   - [ ] `adapters/db/finding-reader-postgres.ts` + `.test.ts` under `npm run test:db`.
@@ -325,6 +325,30 @@ claude-opus-5[1m]
 | 5 | A reviewed finding reaches the surface | OUT-OF-SCOPE here — not expressible in a type; it is the adapter's, tested in Task 3 |
 | 6 | The port imports `pg` or reaches into `adapters/` | OUT-OF-SCOPE — `core/ports/boundary.test.ts` already forces it, for every file in `core/` |
 
+#### Task 2 — the presentation rule
+
+Six behaviours. The four questions, answered once for the group because they share every answer:
+the observable is a returned value in all six (pure functions over plain data, no DOM and no
+clock); the seam is that they take the finding rather than fetching it; the failure modes are
+below; and the sibling shape — *a surface inventing a figure the record does not support* — is
+what AC5 exists for and is checked in all of them.
+
+| # | Behaviour | Failure mode | Class |
+| --- | --- | --- | --- |
+| 1 | `formatAmount` | Float arithmetic loses cents on a large amount | **GUARD** — string manipulation only; asserted with a value no double can hold |
+| 2 | `formatAmount` | Malformed or absent input renders as `$0.00`, `$NaN` or `$` | **GUARD** — `null` out, which the row already knows how to show as nothing |
+| 3 | `formatAmount` | Thousands grouping wrong at the 3/4-digit fencepost | **GUARD** — boundary tests either side |
+| 4 | `severityOf` | An unknown type has no entry and the row is dropped | **GUARD** — falls back, never returns null (AC3) |
+| 5 | `severityOf` | An unknown type is escalated to the loudest level | **GUARD** — falls back to *worth checking*; the system does not shout about what it cannot name |
+| 6 | `titleOf` / `evidenceLineOf` | Evidence read carelessly, so a shape change throws and the page dies | **GUARD** — every read narrows from `unknown` (AC6) |
+| 7 | `evidenceLineOf` | A count is invented when the evidence lacks one | **GUARD** — the line degrades rather than guesses |
+| 8 | `amountOf` | Several distinct amounts summed or silently reduced to one | **GUARD** — shown only when the evidence agrees on one figure |
+| 9 | `toFindingRow` | Throws on any input, taking every other row with it | **GUARD** — total, asserted against deliberately hostile evidence |
+| 10 | `toDashboardView` | "Nothing needs your attention" with no count (UX-DR24) | **GUARD** — the count is in the state, not optional |
+| 11 | `toDashboardView` | Nothing-checked and nothing-found collapse into one state | **GUARD** — a discriminated union; both branches tested |
+| 12 | A vendor name is rewritten on the way to the page | **GUARD** — asserted with an unnormalised name (AD-8, AC10) |
+| 13 | Locale changes the grouping or the decimal mark | OUT-OF-SCOPE by construction — no `Intl`, no `toLocaleString`; the formatter is pure string work |
+
 ### Completion Notes
 
 **Baseline (0c95659):** 2457 tests passing / 593 skipped, 792 db tests passing, 8 pre-existing
@@ -376,6 +400,56 @@ tests. Restored, green.
 
 Argus's line numbers (172, 249, 305) are diff offsets and resolve to nothing in the real files;
 each finding was judged against the actual source rather than the cited line.
+
+#### Task 2
+
+Three modules, because they fail in three different ways. `money.ts` turns a stored decimal into a
+figure; `finding-view.ts` turns one finding into a row; `dashboard-view.ts` decides which of three
+states the surface is in.
+
+**The rule that shaped most of it: a row makes one claim and has one money column.** Findings for
+duplicates and spikes are keyed on `(type, document, month)`, so one finding can cover several
+invoices with several amounts and several vendors. `agreed()` is the answer used in both places —
+the value is shown when the evidence holds one, and omitted when it holds several. Summing would
+state a total no record holds; taking the first would attribute one invoice's figure, or one
+vendor's name, to a finding covering three.
+
+**Severity is derived, and the mapping is a judgement.** A duplicate is *Needs review* because it
+is the one finding where money is about to leave twice. A spike and a dues shortfall are *Worth
+checking*. An unrecognised type is shown, counted, and quiet — never escalated, because a type this
+code cannot name is one it cannot describe either, and an urgent tick beside an empty sentence is
+reassurance in reverse.
+
+**AC6 is enforced by narrowing at every read.** Eight hostile evidence shapes are in the suite —
+`null`, a string, an array, pairs holding nulls, a count that is not a number — each asserted twice:
+the row renders, and it invents no amount.
+
+*Sensitivity:* five mutations, all caught. Demoting the duplicate severity failed 9; `agreed()`
+returning the first value failed 3; routing an unknown type into the duplicate reader failed 1;
+collapsing `nothing-checked` into `nothing-to-review` failed 2; `<` to `<=` on the as-of boundary
+failed 2.
+
+*Review gate — `argus_review` on the task diff:* `simple` · confidence 0.95 · context 8/8 files ·
+1 agy call, 125,774 tokens.
+
+- **[high] emptiness decided from `queue.findings.length` rather than `queue.total`** —
+  **confirmed, and it was the one defect in this task that a board member would have acted on.**
+  The rows are a bounded window and the total is the register; any disagreement between them — a
+  zero `limit`, a finding reviewed between the count and the select — rendered "nothing needs your
+  attention" over an outstanding queue. That is precisely the false reassurance UX-DR24 exists to
+  forbid, produced by the module written to enforce it.
+
+  Fixed test-first: the regression asserts `queue([], 3)` reaches the findings state, and it failed
+  against the pre-fix code with `expected 'nothing-to-review' to be 'findings'`. A findings state
+  holding no rows is visibly wrong, which is the right way for this to fail.
+
+  Worth recording *why my own tests missed it*: every one of them constructed the queue with
+  `queue(findings)`, whose `total` defaults to `findings.length`. The helper made the two numbers
+  agree by construction, so no test could distinguish them — a fixture that quietly guarantees the
+  property under test, which is the same defect shape as 4.3's eleven db tests sharing one vendor.
+
+No other findings. `formatAmount`'s float-freedom and the graceful degradation of malformed
+evidence were both called out as holding.
 
 ## Change Log
 
