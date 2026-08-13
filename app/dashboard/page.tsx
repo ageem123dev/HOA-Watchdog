@@ -1,8 +1,38 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { auth, signOut as authSignOut } from '@/adapters/auth/auth'
+import { createCheckedDocuments, createFindingReader } from '@/adapters/db/finding-reader-postgres'
 import { QUARANTINE_ROUTE, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
+import { toDashboardView } from '@/core/findings/dashboard-view'
 import { AskField } from './ask-field'
+import { FigureBlock } from './figure-block'
+import { FindingsList } from './findings-list'
+
+/**
+ * How much of the register the dashboard reads.
+ *
+ * A queue, not the archive — EXPERIENCE.md: "a queue of what nobody has looked
+ * at, not a list of everything ever found". The register is permanent and
+ * append-only, so an unbounded read gets slower every year the association
+ * runs; the list says plainly when it is showing a window, and story 4.7's
+ * register is where all of it lives.
+ */
+const MOST_RECENT_FINDINGS = 20
+
+/**
+ * Today, in UTC, as `YYYY-MM-DD`.
+ *
+ * **Derived once here and passed down; nothing below this line reads a clock.**
+ * That is what keeps the "as of" rule testable without mocking time inside a
+ * component, and it keeps one page render from straddling midnight.
+ *
+ * UTC rather than the server's zone, matching every date the readers project.
+ * The consequence is worth stating: a board west of Greenwich sees the month
+ * roll over before their local midnight. It moves a label, never a figure.
+ */
+function todayInUtc(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 
 export const metadata = { title: 'Dashboard — Fiduciary Watchdog' }
 
@@ -30,6 +60,15 @@ export default async function DashboardPage() {
   // pattern was edited carelessly.
   if (user === null) redirect(SIGN_IN_ROUTE)
 
+  // **After the guard, never before it.** A page that queries the register and
+  // then redirects has already done the work an unauthenticated visitor asked
+  // for. `app/quarantine/page.tsx` makes the same ordering explicit.
+  const [queue, checked] = await Promise.all([
+    createFindingReader().unreviewed(MOST_RECENT_FINDINGS),
+    createCheckedDocuments().checked(),
+  ])
+  const view = toDashboardView(queue, checked, todayInUtc())
+
   return (
     <main style={styles.main}>
       <p style={styles.eyebrow}>Fiduciary Watchdog</p>
@@ -46,6 +85,33 @@ export default async function DashboardPage() {
         it for the same reason.
       */}
       <AskField />
+
+      {/*
+        **After the ask field, and that is the accessibility requirement.**
+        EXPERIENCE.md wants the field "reachable by keyboard from the top of the
+        dashboard without traversing every finding", and tab order follows DOM
+        order — so this position is the rule, not a layout preference.
+      */}
+      {view.kind === 'nothing-checked' ? null : (
+        <div style={styles.figures}>
+          {/*
+            Narrowed rather than defaulted: `total` exists only on the findings
+            variant, and `nothing-to-review` reads zero because there are none.
+          */}
+          <FigureBlock
+            label="Unreviewed findings"
+            figure={view.kind === 'findings' ? String(view.total) : '0'}
+            asOf={view.asOf}
+          />
+          <FigureBlock
+            label="Documents checked"
+            figure={String(view.documentsChecked)}
+            asOf={view.asOf}
+          />
+        </div>
+      )}
+
+      <FindingsList view={view} />
 
       {/*
         Shown whether or not anything is waiting. EXPERIENCE.md lists this
@@ -100,6 +166,11 @@ const styles = {
     margin: 0,
   },
   body: { margin: 0 },
+  figures: {
+    display: 'flex',
+    gap: 'var(--space-section)',
+    flexWrap: 'wrap',
+  },
   link: { color: 'var(--color-ink)' },
   // Records action, not a call to action — never a filled button.
   control: {
