@@ -1,0 +1,53 @@
+-- Migration 022: the index both invoice detectors read through.
+--
+-- Story 4.3 made `extraction` a table detection reads *twice per invoice*:
+-- `priorCandidates` asks for a vendor's earlier invoices at one amount, and
+-- `trailingInvoices` asks for the same vendor's invoices inside a date window.
+-- Both narrow on the folded vendor name, both filter to invoices, and neither
+-- had an index to do it with — so each was a sequential scan over every
+-- extraction row this association has ever stored, once per invoice per upload.
+--
+-- Nineteen rows today, which is exactly why it is worth doing now: the table
+-- only grows, the scan is on the upload path a treasurer waits for, and the
+-- cost of the index while the table is small is nothing.
+--
+-- ## One index, both queries, and that is not a coincidence
+--
+-- `vendor_normalised_name(vendor_name)` leads, because both queries have an
+-- equality on it. `issued_on` follows, because `trailingInvoices` adds a range
+-- on it and a btree can walk a range under an equality prefix.
+-- `priorCandidates` has no issued_on predicate and still gets the leading
+-- column, which is the part that matters to it.
+--
+-- Indexing one detector and not the other would have left the pair
+-- inconsistent for no reason; they read the same table the same way.
+--
+-- ## Partial, because a non-invoice is never a candidate
+--
+-- Every query that reaches this table for detection carries
+-- `document_kind = 'invoice'`. Migration 006 allows five kinds and a bank
+-- statement's rows are the bulk of a real upload, so excluding them keeps the
+-- index to the rows anyone searches.
+--
+-- ## What Postgres checks here is *not* the IMMUTABLE label
+--
+-- The obvious thing to write in this comment — "an expression index requires an
+-- IMMUTABLE function, and migration 009 declared one" — was written, and then
+-- measured, and it is wrong. `vendor_normalised_name` is a SQL-language
+-- function, so Postgres inlines it and applies the volatility rule to the
+-- inlined body (`btrim`, `regexp_replace`, `translate`, `lower`) rather than to
+-- the wrapper's label. Marking the function `stable` and even `volatile` and
+-- re-running this exact `create index` was tried against this database: all
+-- three were accepted.
+--
+-- So the index is protected against a genuinely non-immutable *body* — rewrite
+-- it to read a table or call `now()` and this file stops applying — and not at
+-- all against a mislabelled one. The `immutable` declaration in migration 009
+-- is what the planner reads elsewhere, and nothing but that migration's own
+-- intent keeps it accurate. The test beside this file pins it for that reason,
+-- which is a weaker claim than the one this comment started with and the only
+-- one the database actually supports.
+
+create index extraction_vendor_window_idx
+  on extraction (vendor_normalised_name(vendor_name), issued_on)
+  where document_kind = 'invoice';

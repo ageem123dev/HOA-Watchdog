@@ -5,7 +5,7 @@ merge_request: 54
 
 # Story 4.2: The same invoice, twice
 
-Status: review
+Status: done
 
 ## Why this story exists
 

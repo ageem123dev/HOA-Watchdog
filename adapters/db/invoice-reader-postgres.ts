@@ -1,4 +1,5 @@
 import type { InvoiceReading } from '../../core/detection/duplicate-invoice'
+import { TRAILING_WINDOW_MONTHS } from '../../core/detection/vendor-spike'
 import type { InvoiceReader } from '../../core/ports/invoice-reader'
 import { writerPool } from './pool'
 
@@ -112,6 +113,33 @@ export function createInvoiceReader(): InvoiceReader {
                 < (select uploaded_at, id from document where id = $1)
           order by d.uploaded_at, d.id, e.id`,
         [subject.documentId, subject.amount, subject.vendorName],
+      )
+
+      return rows.map(toReading)
+    },
+
+    async trailingInvoices(subject: InvoiceReading): Promise<readonly InvoiceReading[]> {
+      // The window length is bound, not written into the SQL, so
+      // `TRAILING_WINDOW_MONTHS` is the only place it exists (AC7). The
+      // month-end case is Postgres's to decide and it clamps: six months before
+      // 2026-08-31 is 2026-02-28, not a date that does not exist.
+      //
+      // **No date, no window, and no guard for it.** A `subject.issuedOn ===
+      // null` early return stood here until a sensitivity check removed it and
+      // all fourteen tests still passed: `null::date - interval` is null, and
+      // every comparison against null is null, so the invoice gets an empty
+      // window from SQL itself. The second such guard deleted from this file —
+      // see `priorCandidates` — and for the same reason.
+      const { rows } = await writerPool().query<Row>(
+        `select ${COLUMNS}
+           from extraction e
+           join document d on d.id = e.document_id
+          where e.document_kind = 'invoice'
+            and vendor_normalised_name(e.vendor_name) = vendor_normalised_name($1)
+            and e.issued_on >= ($2::date - make_interval(months => $3::int))::date
+            and e.issued_on < $2::date
+          order by e.issued_on, e.id`,
+        [subject.vendorName, subject.issuedOn, TRAILING_WINDOW_MONTHS],
       )
 
       return rows.map(toReading)

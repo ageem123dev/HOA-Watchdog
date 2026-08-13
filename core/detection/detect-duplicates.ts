@@ -1,5 +1,6 @@
-import type { FindingRegister, FindingPeriod, RaisedFinding } from '../ports/finding'
+import type { FindingRegister, RaisedFinding } from '../ports/finding'
 import type { InvoiceReader } from '../ports/invoice-reader'
+import { monthOf, monthRange, type DetectionOutcome } from './detection-run'
 import { duplicatesAmong, type DuplicateMatch, type InvoiceReading } from './duplicate-invoice'
 import { INVOICE_MATCH_RULE } from './invoice-number'
 
@@ -50,15 +51,6 @@ export interface DuplicateDetectionDependencies {
   readonly findings: FindingRegister
 }
 
-export interface DetectionOutcome {
-  /** Findings this run put on the register for the first time. */
-  readonly raised: number
-  /** Findings that were already there and had their evidence amended. */
-  readonly amended: number
-  /** How many invoices were compared, whether or not anything was found. */
-  readonly invoicesChecked: number
-}
-
 /**
  * One pair, as the evidence records it.
  *
@@ -77,34 +69,6 @@ interface EvidencePair {
   readonly priorDocumentId: string
   readonly priorInvoiceNumber: string | null
   readonly priorIssuedOn: string | null
-}
-
-/** `YYYY-MM` for the month a finding is filed under. */
-function monthOf(invoice: InvoiceReading): string {
-  // The invoice's own date when it has one. When it does not, the month the
-  // document arrived — FR-6's fuzzy rule names no date, so requiring one would
-  // narrow the criterion, and "when this was noticed" is an honest answer for a
-  // window the invoice refuses to state.
-  return (invoice.issuedOn ?? invoice.documentUploadedAt).slice(0, 7)
-}
-
-/**
- * The month as a half-open range, `[first, first-of-next)`.
- *
- * Arithmetic on the string, never through a `Date`: `new Date('2026-03-01')` is
- * midnight UTC, and formatting it west of Greenwich gives February — a March
- * finding filed under the wrong month in the column it is keyed on.
- */
-function monthRange(month: string): FindingPeriod {
-  const year = Number(month.slice(0, 4))
-  const index = Number(month.slice(5, 7))
-  const nextYear = index === 12 ? year + 1 : year
-  const nextIndex = index === 12 ? 1 : index + 1
-
-  return {
-    from: `${month}-01`,
-    until: `${String(nextYear).padStart(4, '0')}-${String(nextIndex).padStart(2, '0')}-01`,
-  }
 }
 
 function evidenceFor(invoice: InvoiceReading, match: DuplicateMatch, prior: InvoiceReading): EvidencePair {

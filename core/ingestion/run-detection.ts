@@ -1,9 +1,11 @@
-import { detectDuplicateInvoices, type DetectionOutcome } from '../detection/detect-duplicates'
+import { detectDuplicateInvoices } from '../detection/detect-duplicates'
+import { detectVendorSpikes } from '../detection/detect-vendor-spikes'
+import type { DetectionOutcome } from '../detection/detection-run'
 import type { FindingRegister } from '../ports/finding'
 import type { InvoiceReader } from '../ports/invoice-reader'
 
 /**
- * Running duplicate detection at the end of ingestion (FR-6, story 4.2).
+ * Running detection at the end of ingestion (FR-6, stories 4.2 and 4.3).
  *
  * ## After the records are stored, and that is forced
  *
@@ -29,6 +31,36 @@ import type { InvoiceReader } from '../ports/invoice-reader'
  * makes re-running a no-op, so a re-detect entry point is safe to add whenever a
  * later story wants one; that is the fix, not a retry here.
  *
+ * ## One failing detector must not stop the other
+ *
+ * The two detectors answer different questions and share nothing but a reader.
+ * A vendor-spike query that times out is no reason to skip the check for an
+ * invoice you may already have paid — and the reverse. So each runs inside its
+ * own guard, and the outcome names them separately rather than summing them: a
+ * caller that cannot tell *which* half ran cannot tell what re-running would
+ * recover.
+ *
+ * The reported error names its detector for the same reason. A log line reading
+ * "detection failed for document X" when one of two failed tells an operator
+ * nothing they can act on.
+ *
+ * ## Sequential, deliberately
+ *
+ * The two `await`s below run one after the other rather than through
+ * `Promise.all`, and the upload does wait for both. Raised by Argus as a missed
+ * concurrency win; kept sequential because the win is smaller than it looks and
+ * the cost is not:
+ *
+ * - Each detector issues a query per invoice against a pool of five
+ *   connections shared by the whole process. Running two of them at once
+ *   doubles the checkouts per upload, and concurrent uploads multiply that.
+ * - The real duplication is not the ordering: both detectors open by calling
+ *   `invoicesOn(documentId)`, so the same query runs twice either way. Reading
+ *   the invoices once here and passing them in is the change worth making if
+ *   detection latency ever matters, and it makes the pair concurrency-safe as a
+ *   side effect. `Promise.all` on top of the duplicate read would buy the
+ *   smaller half of that.
+ *
  * ## Absent collaborators mean "do nothing", and that is a real gap
  *
  * `recordPayments` made the same choice for `units` and `payments`, and
@@ -42,18 +74,52 @@ export interface DetectionDependencies {
   readonly onError?: (error: unknown, documentId: string) => void
 }
 
-export async function runDuplicateDetection(
+/**
+ * What each detector managed, `null` where it failed.
+ *
+ * Separate fields rather than a total: "3 findings raised" out of two detectors
+ * one of which threw is a number that reads as success.
+ */
+export interface DetectionRun {
+  readonly duplicates: DetectionOutcome | null
+  readonly spikes: DetectionOutcome | null
+}
+
+export async function runDetection(
   documentId: string,
   deps: DetectionDependencies,
-): Promise<DetectionOutcome | null> {
+): Promise<DetectionRun | null> {
   const { invoices, findings } = deps
   if (invoices === undefined || findings === undefined) return null
 
-  try {
-    return await detectDuplicateInvoices(documentId, { invoices, findings })
-  } catch (error) {
-    deps.onError?.(error, documentId)
+  const attempt = async (
+    detector: string,
+    run: () => Promise<DetectionOutcome>,
+  ): Promise<DetectionOutcome | null> => {
+    try {
+      return await run()
+    } catch (cause) {
+      // **Reporting the failure must not become the failure.** `onError` is
+      // caller-supplied and a logger with a broken transport is an ordinary
+      // thing to have; thrown from here it escapes `attempt`, so the second
+      // detector never runs and the exception reaches an ingestion path that
+      // had already stored the document's records. Raised by CodeRabbit.
+      try {
+        deps.onError?.(new Error(`${detector} detection failed`, { cause }), documentId)
+      } catch {
+        // Nowhere left to report it: the thing that reports is what broke.
+      }
 
-    return null
+      return null
+    }
+  }
+
+  return {
+    duplicates: await attempt('duplicate-invoice', () =>
+      detectDuplicateInvoices(documentId, { invoices, findings }),
+    ),
+    spikes: await attempt('vendor-spike', () =>
+      detectVendorSpikes(documentId, { invoices, findings }),
+    ),
   }
 }
