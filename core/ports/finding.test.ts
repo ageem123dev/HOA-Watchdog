@@ -256,6 +256,13 @@ describe('epic 4 does not depend on epic 3', () => {
     'core/ingestion/run-detection.ts',
     'core/ports/invoice-reader.ts',
     'adapters/db/invoice-reader-postgres.ts',
+    // Story 4.3's vendor-spike half. The independence matters at least as much
+    // here: the epic's claim is that an invoice is compared against a *computed*
+    // trailing average, and a model asked to judge whether a bill "looks high"
+    // is a different product with the same screen.
+    'core/detection/vendor-spike.ts',
+    'core/detection/detect-vendor-spikes.ts',
+    'core/detection/detection-run.ts',
   ]
 
   it.each(DETECTOR)('%s reaches nothing on the model path', (file) => {

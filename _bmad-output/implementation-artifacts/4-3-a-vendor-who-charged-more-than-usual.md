@@ -100,16 +100,16 @@ Inlining either number at the query is what the epic's decision explicitly rules
   - [x] `vendor_normalised_name`, never a second rule. Bound parameters, never interpolation (AD-8).
   - [x] `test:db` for the window boundary, the nulls, and the credit.
 
-- [ ] **Task 3 — Raising it (AC2, AC5, AC6)**
-  - [ ] The same `(document, month)` key and the same grouping-before-raising that 4.2 arrived at —
+- [x] **Task 3 — Raising it (AC2, AC5, AC6)**
+  - [x] The same `(document, month)` key and the same grouping-before-raising that 4.2 arrived at —
         one finding per document per month, evidence listing each spike.
-  - [ ] Evidence: percentage, average, threshold, window, and the count of invoices averaged.
+  - [x] Evidence: percentage, average, threshold, window, and the count of invoices averaged.
 
-- [ ] **Task 4 — Wiring (AC8)**
-  - [ ] `run-detection.ts` runs both detectors. Its docblock already explains why detection runs after
+- [x] **Task 4 — Wiring (AC8)**
+  - [x] `run-detection.ts` runs both detectors. Its docblock already explains why detection runs after
         the records are stored and why a failure must not un-read a document; **one failing detector must
         not stop the other**, and that is a decision to make and test.
-  - [ ] Grow the AC7/AC8 model-path list.
+  - [x] Grow the AC7/AC8 model-path list.
 
 - [ ] **Task 5 — The gate**
   - [ ] `npm run lint`, `npm run build`, `npm test`, `npm run test:db`, `npx --no-install tsc --noEmit`

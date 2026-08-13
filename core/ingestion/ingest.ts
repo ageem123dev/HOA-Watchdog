@@ -12,7 +12,7 @@ import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
-import { runDuplicateDetection } from './run-detection'
+import { runDetection } from './run-detection'
 import { recordRoll } from './record-roll'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
@@ -249,7 +249,7 @@ async function ingestOne(
       // type-checks and logs a uuid under the label `filename`. Raised by Argus,
       // and worth the four lines: the label is the only thing that makes an
       // upload error legible to whoever reads it.
-      await runDuplicateDetection(recorded.id, {
+      await runDetection(recorded.id, {
         invoices: deps.invoices,
         findings: deps.findings,
         onError: deps.onError === undefined ? undefined : (error) => deps.onError?.(error, filename),

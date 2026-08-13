@@ -14,7 +14,7 @@ import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
-import { runDuplicateDetection } from './run-detection'
+import { runDetection } from './run-detection'
 
 /**
  * Read a document that is already held, and store what it says.
@@ -280,7 +280,7 @@ export async function extractDocument(
       // document really was read, and failing the upload for a bookkeeping step
       // would report a success as a failure. `run-detection.ts` says what that
       // costs.
-      await runDuplicateDetection(documentId, deps)
+      await runDetection(documentId, deps)
 
       return { outcome: 'read', documentId, records: result.records.length }
     } catch (error) {

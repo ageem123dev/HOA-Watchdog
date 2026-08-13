@@ -12,8 +12,10 @@ import { randomBytes } from 'node:crypto'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { detectVendorSpikes, INVOICE_ABOVE_VENDOR_AVERAGE } from '../../core/detection/detect-vendor-spikes'
 import type { InvoiceReading } from '../../core/detection/duplicate-invoice'
 import { TRAILING_WINDOW_MONTHS } from '../../core/detection/vendor-spike'
+import { createFindingRegister } from './finding-postgres'
 import { createInvoiceReader } from './invoice-reader-postgres'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
@@ -110,7 +112,15 @@ function subject(issuedOn: string | null, vendor: string | null): InvoiceReading
 
 const trailing = (invoice: InvoiceReading) => createInvoiceReader().trailingInvoices(invoice)
 
-describeWithDatabase("reading a vendor's trailing window", () => {
+/**
+ * The connection lifecycle belongs to the file, not to one suite.
+ *
+ * Both suites below seed through `writer`, and when these hooks sat inside the
+ * first of them the second ran against a client the first had already closed.
+ * Registered conditionally so a checkout without a database still skips rather
+ * than fails.
+ */
+if (configured) {
   beforeAll(async () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
@@ -138,7 +148,9 @@ describeWithDatabase("reading a vendor's trailing window", () => {
       await Promise.allSettled([owner.end(), writer.end()])
     }
   })
+}
 
+describeWithDatabase("reading a vendor's trailing window", () => {
   it("returns the vendor's earlier invoices inside the window", async () => {
     const scene = await seedDocument('inside')
     await seedInvoice(scene, { issuedOn: '2026-05-01', amount: '110.00' })
@@ -300,5 +312,136 @@ describeWithDatabase("reading a vendor's trailing window", () => {
     const history = await trailing(subject('2026-06-14', scene.vendor))
 
     expect(history.map((invoice) => invoice.amount)).toEqual(['231.00'])
+  })
+})
+
+describeWithDatabase('raising a vendor spike end to end', () => {
+  async function findingsFor(documentId: string) {
+    const { rows } = await writer.query<{
+      finding_type: string
+      period: string
+      state: string
+      evidence: {
+        invoicesChecked: number
+        thresholdPercent: number
+        windowMonths: number
+        spikes: { percentOverAverage: string; average: string; invoicesAveraged: number }[]
+      }
+    }>(
+      `select finding_type, period::text, state, evidence
+         from finding where subject_id = $1 order by period`,
+      [documentId],
+    )
+
+    return rows
+  }
+
+  const detect = (documentId: string) =>
+    detectVendorSpikes(documentId, {
+      invoices: createInvoiceReader(),
+      findings: createFindingRegister(),
+    })
+
+  /** History on its own document, so `invoicesOn` does not check it as a subject too. */
+  async function withHistory(label: string, amounts: readonly string[], vendor?: string) {
+    const past = await seedDocument(`${label}-history`, '2026-03-05T09:00:00Z')
+    const scene = vendor === undefined ? past : { ...past, vendor }
+
+    for (const [index, amount] of amounts.entries()) {
+      await seedInvoice(scene, { issuedOn: `2026-03-0${index + 1}`, amount })
+    }
+
+    return scene
+  }
+
+  it('raises one finding carrying the percentage and both constants', async () => {
+    const history = await withHistory('raise', ['100.00', '100.00', '100.00'])
+    const subjectDoc = await seedDocument('raise-subject')
+    await seedInvoice(
+      { ...subjectDoc, vendor: history.vendor },
+      { issuedOn: '2026-06-14', amount: '130.00' },
+    )
+
+    const outcome = await detect(subjectDoc.id)
+
+    expect(outcome).toMatchObject({ raised: 1, amended: 0, invoicesChecked: 1 })
+
+    const [finding] = await findingsFor(subjectDoc.id)
+    expect(finding).toMatchObject({
+      finding_type: INVOICE_ABOVE_VENDOR_AVERAGE,
+      period: '[2026-06-01,2026-07-01)',
+      state: 'unreviewed',
+    })
+    expect(finding!.evidence).toMatchObject({
+      invoicesChecked: 1,
+      thresholdPercent: 20,
+      windowMonths: 6,
+      spikes: [{ percentOverAverage: '30.0', average: '100.00', invoicesAveraged: 3 }],
+    })
+  })
+
+  it('running detection again yields one finding, not two', async () => {
+    // AC5, and the reason story 4.1 came first. One *row*, guaranteed by
+    // `finding_identity` rather than by this code remembering what it did.
+    const history = await withHistory('twice', ['100.00', '100.00', '100.00'])
+    const subjectDoc = await seedDocument('twice-subject')
+    await seedInvoice(
+      { ...subjectDoc, vendor: history.vendor },
+      { issuedOn: '2026-06-14', amount: '130.00' },
+    )
+
+    const first = await detect(subjectDoc.id)
+    const second = await detect(subjectDoc.id)
+
+    expect(first).toMatchObject({ raised: 1, amended: 0 })
+    expect(second).toMatchObject({ raised: 0, amended: 1 })
+    expect(await findingsFor(subjectDoc.id)).toHaveLength(1)
+  })
+
+  it('decides on the exact sum even when the average is not a round number', async () => {
+    // **AC9's real subject.** These three priors sum to 300.02, so the exact
+    // average is 100.00666... and the exact threshold is 120.008 — which 120.01
+    // exceeds. Rounding the average to 100.01 first puts the threshold at
+    // 120.012 and this invoice falls short. One cent, one finding, decided by
+    // where the rounding happened; here it happens after the comparison, and
+    // the values make the whole trip through `numeric(14,2)`.
+    const history = await withHistory('uneven', ['100.00', '100.00', '100.02'])
+    const subjectDoc = await seedDocument('uneven-subject')
+    await seedInvoice(
+      { ...subjectDoc, vendor: history.vendor },
+      { issuedOn: '2026-06-14', amount: '120.01' },
+    )
+
+    expect(await detect(subjectDoc.id)).toMatchObject({ raised: 1 })
+
+    const [finding] = await findingsFor(subjectDoc.id)
+    expect(finding!.evidence.spikes[0]).toMatchObject({ average: '100.01' })
+  })
+
+  it('raises nothing for a vendor with too little history', async () => {
+    const history = await withHistory('thin', ['100.00', '100.00'])
+    const subjectDoc = await seedDocument('thin-subject')
+    await seedInvoice(
+      { ...subjectDoc, vendor: history.vendor },
+      { issuedOn: '2026-06-14', amount: '999.00' },
+    )
+
+    expect(await detect(subjectDoc.id)).toMatchObject({ raised: 0, invoicesChecked: 1 })
+    expect(await findingsFor(subjectDoc.id)).toHaveLength(0)
+  })
+
+  it('raises nothing for a credit, however large', async () => {
+    // `total_amount` is negative for a credit to the association (migration
+    // 006), and money coming back is not a spike. Proven through the column
+    // rather than through a string, because the sign has to survive the trip.
+    const history = await withHistory('credit-e2e', ['100.00', '100.00', '100.00'])
+    const subjectDoc = await seedDocument('credit-subject')
+    await seedInvoice(
+      { ...subjectDoc, vendor: history.vendor },
+      { issuedOn: '2026-06-14', amount: '-5000.00' },
+    )
+
+    expect(await detect(subjectDoc.id)).toMatchObject({ raised: 0 })
+    expect(await findingsFor(subjectDoc.id)).toHaveLength(0)
   })
 })

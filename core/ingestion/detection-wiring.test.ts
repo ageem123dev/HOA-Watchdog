@@ -1,7 +1,7 @@
 /**
  * That duplicate detection is actually connected, and what it does when it fails.
  *
- * `runDuplicateDetection` treats missing collaborators as "do nothing", which is
+ * `runDetection` treats missing collaborators as "do nothing", which is
  * how every caller written before story 4.2 keeps working. That default is a real
  * gap rather than a neutral one: an invoice is read, stored, and **never compared
  * against what came before**, and nothing fails. It is the shape
@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { FindingRegister } from '../ports/finding'
 import type { InvoiceReader } from '../ports/invoice-reader'
-import { runDuplicateDetection } from './run-detection'
+import { runDetection } from './run-detection'
 
 const read = (path: string): string => readFileSync(join(process.cwd(), path), 'utf8')
 
@@ -56,7 +56,7 @@ describe('when the collaborators are absent', () => {
   it('does nothing rather than failing the ingestion', async () => {
     // The many callers written before this story keep working, which is the
     // point — and the gap the source assertions above exist to close.
-    await expect(runDuplicateDetection('d-1', {})).resolves.toBeNull()
+    await expect(runDetection('d-1', {})).resolves.toBeNull()
   })
 
   it('does nothing when only one of the two is supplied', async () => {
@@ -64,7 +64,7 @@ describe('when the collaborators are absent', () => {
     // duplicates and record none of them.
     const invoices = { invoicesOn: vi.fn(), priorCandidates: vi.fn() } as unknown as InvoiceReader
 
-    await expect(runDuplicateDetection('d-1', { invoices })).resolves.toBeNull()
+    await expect(runDetection('d-1', { invoices })).resolves.toBeNull()
     expect(invoices.invoicesOn).not.toHaveBeenCalled()
   })
 })
@@ -81,7 +81,7 @@ describe('the ingest path reports errors with its own vocabulary', () => {
     // CodeRabbit. The assertion now reads the argument object itself, so the
     // pre-existing lines cannot satisfy it.
     const source = read('core/ingestion/ingest.ts')
-    const call = /runDuplicateDetection\(recorded\.id, \{[\s\S]*?\}\)/.exec(source)
+    const call = /runDetection\(recorded\.id, \{[\s\S]*?\}\)/.exec(source)
 
     expect(call, 'the detection call should pass an explicit object').not.toBeNull()
     expect(call![0]).toContain('onError:')
@@ -109,13 +109,102 @@ describe('when detection fails', () => {
     // look broken and be fine.
     const onError = vi.fn()
 
-    await expect(runDuplicateDetection('d-1', { ...failing(), onError })).resolves.toBeNull()
+    await expect(runDetection('d-1', { ...failing(), onError })).resolves.toEqual({
+      duplicates: null,
+      spikes: null,
+    })
     expect(onError).toHaveBeenCalledWith(expect.any(Error), 'd-1')
   })
 
   it('swallows the failure even with nobody listening', async () => {
     // `onError` is optional everywhere else on this path; an absent listener
     // must not turn a swallowed failure into a thrown one.
-    await expect(runDuplicateDetection('d-1', failing())).resolves.toBeNull()
+    await expect(runDetection('d-1', failing())).resolves.toBeDefined()
   })
+
+  it('keeps the original cause rather than replacing it', async () => {
+    // The wrapper names the detector; it must not swallow what actually broke.
+    const onError = vi.fn()
+
+    await runDetection('d-1', { ...failing(), onError })
+
+    expect(onError.mock.calls[0]![0]).toMatchObject({
+      cause: expect.objectContaining({ message: 'the database went away' }),
+    })
+  })
+})
+
+describe('one failing detector does not stop the other', () => {
+  /**
+   * A reader that answers everything except the one method named.
+   *
+   * The two detectors overlap on `invoicesOn` and diverge after it, so failing
+   * `priorCandidates` fails duplicate detection alone and failing
+   * `trailingInvoices` fails spike detection alone. That is what makes the
+   * isolation testable at all.
+   */
+  function readerBreaking(method: 'priorCandidates' | 'trailingInvoices'): InvoiceReader {
+    const invoice = {
+      extractionId: 'e-1',
+      documentId: 'd-1',
+      vendorName: 'Acme Plumbing',
+      documentNumber: 'INV-1',
+      issuedOn: '2026-06-14',
+      amount: '130.00',
+      documentUploadedAt: '2026-06-20',
+    }
+    // The two queries ask different questions, so they get different answers:
+    // a duplicate is the same bill at the same amount, and a trailing window is
+    // the cheaper history that makes this bill stand out. One set of priors
+    // cannot serve both — the first version of this fake tried, and duplicate
+    // detection correctly found nothing.
+    const duplicate = { ...invoice, extractionId: 'p0', documentId: 'd-p0' }
+    const history = ['p1', 'p2', 'p3'].map((id) => ({
+      ...invoice,
+      extractionId: id,
+      documentId: `d-${id}`,
+      issuedOn: '2026-03-01',
+      amount: '100.00',
+      documentUploadedAt: '2026-03-05',
+    }))
+    const broken = async (): Promise<never> => {
+      throw new Error(`${method} went away`)
+    }
+
+    return {
+      invoicesOn: vi.fn(async () => [invoice]),
+      priorCandidates:
+        method === 'priorCandidates' ? vi.fn(broken) : vi.fn(async () => [duplicate]),
+      trailingInvoices:
+        method === 'trailingInvoices' ? vi.fn(broken) : vi.fn(async () => history),
+    }
+  }
+
+  it.each([
+    { broken: 'priorCandidates', survives: 'spikes', lost: 'duplicates', named: 'duplicate-invoice' },
+    { broken: 'trailingInvoices', survives: 'duplicates', lost: 'spikes', named: 'vendor-spike' },
+  ] as const)(
+    'still runs $survives detection when $broken fails',
+    async ({ broken, survives, lost, named }) => {
+      // **The decision this story had to make.** A vendor-spike query that
+      // times out is no reason to skip the check for an invoice you may have
+      // paid already. Both detectors see the same invoice above the same
+      // priors, so each half raises something on its own.
+      const onError = vi.fn()
+
+      const outcome = await runDetection('d-1', {
+        invoices: readerBreaking(broken),
+        findings: { raise: vi.fn(async () => ({ id: 'f-1', wasAlreadyKnown: false })) },
+        onError,
+      })
+
+      expect(outcome![lost]).toBeNull()
+      expect(outcome![survives]).toMatchObject({ raised: 1 })
+
+      // Named, because "detection failed for document d-1" tells an operator
+      // nothing about which half to re-run.
+      expect(onError).toHaveBeenCalledTimes(1)
+      expect(onError.mock.calls[0]![0]).toMatchObject({ message: `${named} detection failed` })
+    },
+  )
 })
