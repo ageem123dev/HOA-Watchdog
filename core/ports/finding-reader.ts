@@ -3,12 +3,17 @@ import type { FindingPeriod } from './finding'
 /**
  * One finding as a surface reads it.
  *
+ * Named for the record rather than for the queue, because both reads return it
+ * and only one of them is about unreviewed findings. `UnreviewedFinding` was
+ * the earlier name and became a lie the moment a detail page could show a
+ * reviewed one.
+ *
  * A separate shape from what `FindingObservation` supplies, because these are
  * opposite directions through the same row: a detector writes what it computed
  * and is deliberately unable to set the lifecycle, while a surface reads the
  * lifecycle and is deliberately unable to write anything.
  */
-export interface UnreviewedFinding {
+export interface FindingRecord {
   /** The row's id, so a later story can link to it and cite it. */
   readonly id: string
 
@@ -58,7 +63,7 @@ export interface UnreviewedFinding {
  * differ the surface has to say so; it cannot quietly report the smaller one.
  */
 export interface UnreviewedQueue {
-  readonly findings: readonly UnreviewedFinding[]
+  readonly findings: readonly FindingRecord[]
   readonly total: number
 }
 
@@ -77,6 +82,36 @@ export interface UnreviewedQueue {
  * Marking a finding reviewed is story 4.6, and it arrives through
  * `FindingReviewer`, which is a different object obtained separately.
  */
+/**
+ * Who signed a finding off, and when.
+ *
+ * `by` is nullable because `board_member.display_name` is. A reviewer who never
+ * had a name still reviewed it, and saying what is known beats inventing a name
+ * on the one surface whose whole purpose is to answer *which human*.
+ *
+ * Present as a whole or absent as a whole, which mirrors
+ * `finding_review_is_attributed` — the constraint refuses a row claiming to be
+ * reviewed without naming who did it and when. The shape says the same thing,
+ * so nothing downstream has to handle half a review.
+ */
+export interface Reviewed {
+  readonly by: string | null
+  /** The day, `YYYY-MM-DD`, in UTC like every other date this port hands out. */
+  readonly on: string
+}
+
+/**
+ * One finding, with its place in the lifecycle.
+ *
+ * `reviewed` lives here and not on `FindingRecord` because the queue returns
+ * unreviewed findings by definition — the field would be permanently null on
+ * the one surface that reads it, and a caller that started trusting it there
+ * would be trusting an accident of the query rather than a fact about the row.
+ */
+export interface FindingDetail extends FindingRecord {
+  readonly reviewed: Reviewed | null
+}
+
 export interface FindingReader {
   /**
    * The unreviewed findings, newest first, and how many there are in total.
@@ -95,4 +130,20 @@ export interface FindingReader {
    * CodeRabbit.
    */
   unreviewed(limit: number): Promise<UnreviewedQueue>
+
+  /**
+   * One finding, or `null` when there is no such row.
+   *
+   * **`null` rather than a rejection, and that is a contract.** "No such
+   * finding" is an ordinary outcome here: this surface is reached by a link
+   * somebody kept, and story 4.8 will send those links by email. A rejection
+   * would put it in the same channel as a database failure, where the surface
+   * could no longer tell "that id was never real" from "the register is down" —
+   * and those two owe a board member completely different sentences.
+   *
+   * Distinct again from a finding that exists and has been reviewed, which
+   * `core/ports/finding.ts` argues for at length: somebody got there first is
+   * ordinary, and an id from nowhere is not.
+   */
+  byId(id: string): Promise<FindingDetail | null>
 }

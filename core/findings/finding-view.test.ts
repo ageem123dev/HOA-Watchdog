@@ -19,10 +19,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { UnreviewedFinding } from '../ports/finding-reader'
+import type { FindingRecord } from '../ports/finding-reader'
 import { toFindingRow } from './finding-view'
 
-function finding(overrides: Partial<UnreviewedFinding> = {}): UnreviewedFinding {
+function finding(overrides: Partial<FindingRecord> = {}): FindingRecord {
   return {
     id: 'finding-1',
     findingType: 'possible_duplicate_invoice',

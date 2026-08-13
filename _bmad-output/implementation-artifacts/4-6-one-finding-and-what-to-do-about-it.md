@@ -118,15 +118,15 @@ stylesheet rather than two. Recorded so its absence is a decision rather than an
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Read one finding** (AC: 2, 6, 8)
-  - [ ] Extend `FindingReader` with `byId(id)`, returning the finding plus its lifecycle: state,
+- [x] **Task 1 — Read one finding** (AC: 2, 6, 8)
+  - [x] Extend `FindingReader` with `byId(id)`, returning the finding plus its lifecycle: state,
         the reviewer's display name, and the date reviewed. `null` when there is no such finding.
-  - [ ] Reading one finding is the same *capability* as reading the queue, so it belongs on the
+  - [x] Reading one finding is the same *capability* as reading the queue, so it belongs on the
         same port. The port test asserts an exact member list — update it deliberately, and keep
         the negative that forbids a write member.
-  - [ ] `adapters/db/finding-reader-postgres.ts` + db tests. **Dates through
+  - [x] `adapters/db/finding-reader-postgres.ts` + db tests. **Dates through
         `to_char(… at time zone 'UTC', 'YYYY-MM-DD')`** — the rule three readers now carry.
-  - [ ] A malformed id must not reach Postgres as a cast error the page shows. `subject_id` and
+  - [x] A malformed id must not reach Postgres as a cast error the page shows. `subject_id` and
         `id` are `uuid`; decide where the shape is checked and test it.
 
 - [ ] **Task 2 — The evidence, laid out** (AC: 2)
@@ -221,7 +221,58 @@ worth listing is a way that claim and the record come apart.
 
 ## Dev Agent Record
 
-_To be filled by the dev agent._
+### Agent Model Used
+
+claude-opus-5[1m]
+
+### Completion Notes
+
+**Baseline (1ef0b6e):** 2599 tests passing, 813 db tests, 8 pre-existing `tsc` errors.
+
+#### Task 1 — read one finding
+
+`UnreviewedFinding` was renamed to **`FindingRecord`**. The old name became a lie the moment a
+detail page could show a reviewed finding, and `FindingDetail extends FindingRecord` needs an
+honest base. Thirteen references across six files, mechanical.
+
+`reviewed` lives on `FindingDetail` and deliberately not on `FindingRecord`: the queue returns
+unreviewed findings by definition, so the field would be permanently null on the one surface that
+reads it, and a caller trusting it there would be trusting an accident of the query.
+
+`byId` returns `FindingDetail | null` rather than rejecting. "No such finding" is ordinary on a
+surface reached by a kept link — 4.8 will send those links — and a rejection would put it in the
+same channel as a database failure, where the page could no longer tell "that id was never real"
+from "the register is down".
+
+**A malformed id is refused before Postgres sees it.** `finding.id` is a `uuid`, so a bad value
+raises 22P02 on the cast, and the id comes straight off the URL path where anything is reachable by
+typing. The honest answer to "is there a finding here" is no, not a database error.
+
+**The template literal ate a backtick.** The SQL comment was first written with `` `left join` ``
+in it, which closed the string mid-query. The suite reported it as *21 tests vanishing* and `tsc`
+as **fewer** errors than baseline — neither of which reads as a syntax error. Worth knowing that a
+suddenly-smaller error count is a signal, not an improvement.
+
+*Sensitivity:* three mutations, all caught. Removing the uuid guard failed 1; reporting every
+finding as reviewed failed 1; an inner join in place of the left join failed 1.
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.95 · 9/9 files. Four
+findings, **all four confirmed and taken**:
+
+- **[medium] the nameless-reviewer test cleaned up after its assertions**, so a failure leaked the
+  row. Cleanup moved into `afterAll` and widened to delete fixture members by email prefix.
+- **[medium] `toContain([before, after])` on the two date assertions flakes under concurrency.**
+  `max` is monotonic so the answer lies between the controls, but two concurrent inserts can make
+  it an *intermediate* value equal to neither. The count assertions beside them already used
+  bounds; the dates did not. Now both do — and both mutations were re-run afterwards to confirm the
+  weaker-looking form still bites, because 4.5's fixes weakened its tests twice in a row.
+- **[low] `DetailRow extends FindingRow`** forced the single-finding query to select a dummy
+  `0 as total`, and `0` is an int4, so node-pg returned a number where the interface promised a
+  string. Declared independently.
+- **[info] the left-join comment asserted something false about SQL** — it blamed a nullable
+  `display_name`, when an inner join filters on the join condition, not on the columns selected
+  through it. The real reason is that `reviewed_by` is null on every unreviewed finding. Same defect
+  class as story 4.3's migration comment.
 
 ## Change Log
 

@@ -28,10 +28,25 @@ const findingSource = readFileSync(join(HERE, 'finding-reader.ts'), 'utf8')
 const documentSource = readFileSync(join(HERE, 'checked-documents.ts'), 'utf8')
 
 describe('the FindingReader port', () => {
-  it('declares exactly one way to read the queue', () => {
+  it('declares exactly the two reads a surface needs', () => {
+    // Reading the queue and reading one finding are the same *capability* —
+    // both are reads of the register — so they sit on one port. The split this
+    // file exists to defend is read from write, and it is asserted below.
     expect(declaredMembers(findingSource, 'FindingReader')).toEqual([
       'unreviewed(limit: number): Promise<UnreviewedQueue>',
+      'byId(id: string): Promise<FindingDetail | null>',
     ])
+  })
+
+  it('answers with nothing for a finding that does not exist', () => {
+    // `| null` rather than a throw, and it is a contract rather than a style.
+    // "No such finding" is an ordinary outcome on a surface reached by a link
+    // somebody kept — story 4.8 sends those links — and it has to be
+    // distinguishable from a finding that exists and has been reviewed. A
+    // rejection would merge the two at the call site.
+    expect(declaredMembers(findingSource, 'FindingReader').join(' ')).toContain(
+      'Promise<FindingDetail | null>',
+    )
   })
 
   it('cannot review, raise, or remove anything', () => {
@@ -58,8 +73,30 @@ describe('the FindingReader port', () => {
     // A page that renders a bounded list under a figure block reading "37"
     // must be able to say which of those two numbers it is showing.
     expect(declaredMembers(findingSource, 'UnreviewedQueue')).toEqual([
-      'readonly findings: readonly UnreviewedFinding[]',
+      'readonly findings: readonly FindingRecord[]',
       'readonly total: number',
+    ])
+  })
+
+  it('carries the lifecycle on the detail, and only on the detail', () => {
+    // The queue returns unreviewed findings by definition, so a `reviewed`
+    // field on `FindingRecord` would be a field that is always null on the one
+    // surface that reads it — and a surface that starts trusting it there would
+    // be trusting an accident. The detail is the only read that can see a
+    // reviewed finding, so it is the only shape that describes one.
+    expect(declaredMembers(findingSource, 'FindingRecord').join(' ')).not.toMatch(/reviewed/i)
+    expect(declaredMembers(findingSource, 'FindingDetail')).toEqual([
+      'readonly reviewed: Reviewed | null',
+    ])
+  })
+
+  it('names who reviewed it and allows them to be nameless', () => {
+    // `board_member.display_name` is nullable, so a reviewed finding whose
+    // reviewer never had a name still has to render. Saying what is known beats
+    // inventing a name on the one surface that answers "which human".
+    expect(declaredMembers(findingSource, 'Reviewed')).toEqual([
+      'readonly by: string | null',
+      'readonly on: string',
     ])
   })
 
@@ -70,7 +107,7 @@ describe('the FindingReader port', () => {
     // let a view reach for `.kind` on a finding raised by a detector that never
     // had one. `unknown` makes that a compile error instead of a blank row on
     // the board's dashboard.
-    expect(declaredMembers(findingSource, 'UnreviewedFinding')).toContain(
+    expect(declaredMembers(findingSource, 'FindingRecord')).toContain(
       'readonly evidence: unknown',
     )
   })

@@ -1,4 +1,4 @@
-import type { UnreviewedFinding } from '../ports/finding-reader'
+import type { FindingRecord } from '../ports/finding-reader'
 import { formatAmount } from './money'
 
 /**
@@ -283,7 +283,7 @@ function read(findingType: string, evidence: unknown): Reading {
   }
 }
 
-export function toFindingRow(finding: UnreviewedFinding): FindingRow {
+export function toFindingRow(finding: FindingRecord): FindingRow {
   const severity = known(SEVERITY, finding.findingType) ?? UNKNOWN_SEVERITY
   const reading = read(finding.findingType, finding.evidence)
 

@@ -13,13 +13,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { UnreviewedFinding, UnreviewedQueue } from '../ports/finding-reader'
+import type { FindingRecord, UnreviewedQueue } from '../ports/finding-reader'
 import type { DocumentsChecked } from '../ports/checked-documents'
 import { toDashboardView } from './dashboard-view'
 
 const TODAY = '2026-04-14'
 
-function finding(id: string, raisedOn = '2026-04-10'): UnreviewedFinding {
+function finding(id: string, raisedOn = '2026-04-10'): FindingRecord {
   return {
     id,
     findingType: 'unit_dues_shortfall',
@@ -30,7 +30,7 @@ function finding(id: string, raisedOn = '2026-04-10'): UnreviewedFinding {
   }
 }
 
-function queue(findings: readonly UnreviewedFinding[], total = findings.length): UnreviewedQueue {
+function queue(findings: readonly FindingRecord[], total = findings.length): UnreviewedQueue {
   return { findings, total }
 }
 
