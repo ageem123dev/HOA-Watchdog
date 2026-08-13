@@ -287,14 +287,21 @@ describeWithDatabase('the finding reader', () => {
     // be generous: a document that was held or could not be opened was not
     // checked, and counting it tells a board member the system examined
     // something it failed to read.
+    // **Bracketed, for the same reason the findings total is.** Half of this
+    // race was fixed when Argus raised it and this half was left comparing
+    // against a single control read — which asserts that no other file in this
+    // directory committed a document between two statements, and several of
+    // them do. It flaked once in five runs of the suite before this change.
+    const before = await controlCount(`document where extraction_state = 'read'`)
     const checked = await createCheckedDocuments().checked()
-    const read = await controlCount(`document where extraction_state = 'read'`)
+    const after = await controlCount(`document where extraction_state = 'read'`)
     const all = await controlCount('document')
 
-    expect(checked.count).toBe(read)
+    expect(checked.count).toBeGreaterThanOrEqual(Math.min(before, after))
+    expect(checked.count).toBeLessThanOrEqual(Math.max(before, after))
     // Deterministic whatever else is in the table: this file seeded a held and
     // an unreadable document, so the two counts cannot be equal.
-    expect(read).toBeLessThan(all)
+    expect(after).toBeLessThan(all)
   })
 
   it('reports the newest upload among the documents it counted', async () => {

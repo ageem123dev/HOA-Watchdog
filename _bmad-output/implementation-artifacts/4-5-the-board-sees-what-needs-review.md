@@ -4,7 +4,7 @@ baseline_commit: 0c95659
 
 # Story 4.5: The board sees what needs review
 
-Status: ready-for-dev
+Status: review
 
 ## Why this story exists
 
@@ -170,15 +170,15 @@ surface.
   - [x] Semantics: the list is a list; the tick is decorative and the label is the text. Currency
         announced as currency (UX-DR20). Flexible row heights — nothing fixed-height.
 
-- [ ] **Task 5 — Wire the dashboard** (AC: 1, 7, 8, 9)
-  - [ ] `app/dashboard/page.tsx` reads through the port and renders the list after the ask field.
-  - [ ] **No component calls `new Date()`.** The page derives today once, in UTC, and passes it
+- [x] **Task 5 — Wire the dashboard** (AC: 1, 7, 8, 9)
+  - [x] `app/dashboard/page.tsx` reads through the port and renders the list after the ask field.
+  - [x] **No component calls `new Date()`.** The page derives today once, in UTC, and passes it
         down — the same choice the readers make, and it keeps AC8's boundary testable without
         mocking a clock. Write down the consequence: a board west of Greenwich sees the month roll
         over before their local midnight, which affects a label and no figure.
-  - [ ] Run the existing `page.test.tsx` unmodified. If an assertion in it needs to change, stop —
+  - [x] Run the existing `page.test.tsx` unmodified. If an assertion in it needs to change, stop —
         that is AC9 failing, not a stale test.
-  - [ ] **The auth guard runs before the read**, matching `app/quarantine/page.tsx`. A page that
+  - [x] **The auth guard runs before the read**, matching `app/quarantine/page.tsx`. A page that
         queries findings and then redirects has already done the work an unauthenticated visitor
         asked for.
 
@@ -557,6 +557,47 @@ failed 1; letting `nothing-checked` reassure failed 2.
   and non-optional, produced in-process by pure functions that always assign them. Argus's premise
   is that they arrive over JSON; they do not — `FindingsList` is a server component, so there is no
   serialization boundary between `toDashboardView` and the render.
+
+#### Task 5
+
+The page reads both ports after the auth guard, derives `today` once in UTC, and passes it down;
+nothing below that line reads a clock. The findings list sits after the ask field, which is the
+accessibility requirement rather than a layout choice — and the existing ask-field test named this
+story as the one that would break it. Every assertion in `page.test.tsx` still passes unmodified;
+the new ones were appended.
+
+`/dashboard` builds as `ƒ` (server-rendered on demand), so the queue is never served from a cache.
+Confirmed in the build output rather than assumed from `auth()` reading cookies.
+
+Figure labels are "Unreviewed findings" and "Documents checked". Not "Needs review": that is the
+label of the *loud* severity, so a figure wearing it would read as a count of those alone — and it
+would collide with the row labels underneath it in the same breath.
+
+**A mutation caught a vacuous test of my own.** The UTC test originally used
+`latestUploadOn: '2026-04-01'`, where a UTC clock and a local one both produce no "as of" — so
+"read in UTC" and "read locally" were the same observable, which is story 4.3's defect in a new
+place. Rewritten with `'2026-03-31'` against a 2026-04-01T02:00Z clock, where the two disagree, and
+re-run against the mutation to confirm it now fails. Measured on the way: this host sits at UTC−5,
+and **the `TZ` environment variable is ignored on it** — forcing `TZ=America/Los_Angeles` left
+`getTimezoneOffset()` at 300, so TZ is not a usable lever for timezone tests on Windows.
+
+*Sensitivity:* three mutations. Moving the read above the auth guard failed 1; rendering figures
+before anything had been read failed 14; reading `today` in local time failed 1 **after** the test
+was repaired, and 0 before — which is the whole point of running it.
+
+**A flake, found by running the gate rather than by a test failing.** The db suite failed once
+during the final gate and passed on the next three runs. The mechanism was identifiable without
+catching it again: Argus's race finding on the *findings* total had been fixed, and the *documents*
+count in the same file was left comparing against a single control read — the identical race, half
+fixed. Bracketed the same way, and re-verified that it still fails when the `extraction_state`
+filter is removed. A green suite that flakes once in five is not a green suite.
+
+*Review gate — NOT SATISFIED for this task's diff.* `argus_review` failed twice with
+`agy failed: Command failed` from the `antigravity` backend. `_bmad/custom/review-gate.md` is
+explicit that falling back to the Claude subagent layers does not satisfy this gate — same model
+family reviewing its own work — so this is recorded as a gap rather than a pass. The integration
+pass in Step 6 covers `0c95659..HEAD`, which includes every line of this diff; if Argus is still
+unreachable there, it goes to the user rather than being written up as reviewed.
 
 ## Change Log
 
