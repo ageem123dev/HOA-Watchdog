@@ -137,15 +137,15 @@ stylesheet rather than two. Recorded so its absence is a decision rather than an
   - [x] Follow `app/oracle/answer-view.tsx` for evidence-table semantics if a table is used —
         UX-DR5 wants real `<table>`, `<th scope>`, tabular right-aligned numerics.
 
-- [ ] **Task 3 — The held write** (AC: 3, 4, 5)
-  - [ ] A named constant for the window, in `core/`, with the reasoning beside it.
-  - [ ] The pending state is client-side; the server action fires only when the window closes.
+- [x] **Task 3 — The held write** (AC: 3, 4, 5)
+  - [x] A named constant for the window, in `core/`, with the reasoning beside it.
+  - [x] The pending state is client-side; the server action fires only when the window closes.
         Undo clears the timer and issues nothing.
-  - [ ] **Interruption resolves to "not written"** — no `beforeunload`, no fire-on-unmount. Test it
+  - [x] **Interruption resolves to "not written"** — no `beforeunload`, no fire-on-unmount. Test it
         by unmounting.
-  - [ ] Announce the outcome in a live region (UX-DR20). Past tense once written
+  - [x] Announce the outcome in a live region (UX-DR20). Past tense once written
         (EXPERIENCE.md: *"Every action states its outcome in the past tense afterwards"*).
-  - [ ] `prefers-reduced-motion`: no countdown animation. The window is a delay, not a spectacle.
+  - [x] `prefers-reduced-motion`: no countdown animation. The window is a delay, not a spectacle.
 
 - [ ] **Task 4 — The two states that are not the ordinary one** (AC: 6, 7, 8)
   - [ ] Already-reviewed: status, reviewer, date, no action.
@@ -271,6 +271,51 @@ verified against an independent existing implementation of the same copy (`toFin
 than against a literal an author of this test chose. A reverse operation does not apply — the view
 is a projection that deliberately discards, so nothing reconstructs the evidence from it.
 
+#### Task 3 — the held write
+
+**Behaviour: a client control that holds a write for a window and issues it when the window closes.**
+The whole risk of the story is here: between the click and the write there is a state in which the
+board member believes they have acted and the database has not been told.
+
+*If it ran correctly, how would I know?* The injected action is called **exactly once, and only
+after the window elapses** — and in the undo and unmount cases, **never**. Both are assertions about
+a spy, not about a row read back: AC3 says so explicitly, because reading the row back also passes
+against an implementation that wrote and then failed to write again.
+
+*How am I going to test it?* Two seams, and neither exists by accident. The action is a **prop**, so
+the test holds the spy that proves the negative; the clock is `vi.useFakeTimers()`, so the window is
+advanced rather than waited on. A control that reached for the server action itself would make AC3
+unassertable.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | the write is issued on click | GUARD | spy not called after click; called only after the window elapses |
+| 2 | undo within the window still writes | GUARD | undo, advance past the window, spy never called |
+| 3 | unmount within the window writes | GUARD | unmount mid-window, advance, spy never called (AC4) |
+| 4 | unmount leaves the timer running | GUARD | same test — a leaked timer is what would fire |
+| 5 | double click starts two windows | GUARD | two clicks, advance, spy called **once** |
+| 6 | undo pressed twice | GUARD | idempotent; still nothing written |
+| 7 | undo offered after the write lands | GUARD | AC5 — no undo control in the settled state |
+| 8 | undo *acts* after the write lands | GUARD | the control is gone, so there is nothing to press; asserted as absence |
+| 9 | the control re-arms after a completed review | GUARD | no "mark reviewed" control once recorded |
+| 10 | copy claims the write before it lands | GUARD | pending copy offers undo; settled copy is past tense |
+| 11 | the outcome is never announced | GUARD | `role="status"` live region carries it (UX-DR20) |
+| 12 | the action rejects and the surface says it succeeded | GUARD | rejected promise → not the past-tense success copy |
+| 13 | the action throws synchronously | GUARD | same handling; no unhandled rejection |
+| 14 | a countdown animation runs under `prefers-reduced-motion` | GUARD-by-construction | **there is no animation at all**, so there is no branch to get wrong |
+| 15 | the write lands after unmount and setState warns | PROPAGATE | the row is correct; only the UI cannot update. Nothing is retried and nothing throws |
+| 16 | a backgrounded tab throttles the timer | OUT-OF-SCOPE | the write still happens, later. Browsers own this; no `beforeunload` is added to compensate — that is what AC4 forbids |
+
+**Failure mode 14 is the one worth naming.** The subtask asks for no countdown animation under
+`prefers-reduced-motion`; the cheap reading is a media query around an animation. Having **no
+animation on any path** satisfies it without a branch, and a rule enforced by the absence of code
+cannot rot. The window is a delay, not a spectacle.
+
+**Reverse-it / cross-check.** Neither applies, and the reason is the design: the whole point is that
+nothing is persisted during the window, so there is no state to read back and invert. The
+cross-check is structural instead — every negative is asserted on the injected spy, which is the
+only observer that can tell "not written" from "written and not visible".
+
 ### Completion Notes
 
 **Baseline (1ef0b6e):** 2599 tests passing, 813 db tests, 8 pre-existing `tsc` errors.
@@ -363,6 +408,70 @@ call. Two findings, **both confirmed against the real files and both taken**:
   grammatical slot, the table *makes it legible* because a cell has none — but they now read one
   table. Mutating it failed 3 tests across both callers.
 
+#### Task 3 — the held write
+
+The control takes the write as a **prop**, which is what makes AC3 assertable at all: the test holds
+the spy that proves the negative. A control reaching for the server action itself would leave
+"nothing was written" unprovable, and AC3 is explicit that reading the row back is not good enough.
+
+**No animation on any path**, so `prefers-reduced-motion` has nothing to switch off. A rule enforced
+by the absence of the mechanism cannot be dropped by a later layout change; one enforced by a media
+query can.
+
+`canRetry` is a fiduciary judgement rather than a styling detail. Three of the four outcomes are
+*answers* — it landed, somebody got there first, that finding is not on the register — and offering
+to retry an answer invites a board member to press until the register agrees with them. Only an
+unreachable register is worth a second attempt.
+
+*Sensitivity:* six mutations, all caught — drop the unmount cleanup (2), stop cancelling on undo (2),
+re-offer the control after a landed write (1), drop the in-flight guard (1), stop resetting on a
+change of finding (2), drop the generation guard (1). The stub the tests were first run against
+failed 12.
+
+*Review gate — three `argus_review` rounds on this task, because **each round found defects in the
+previous round's fix**.* That is the pattern `_bmad/custom/review-gate.md` documents, happening
+again.
+
+**Round 1** — `moderate` · confidence 0.95 · 6/6 files. Two `high`, both confirmed:
+
+- **The undo stayed live while the write was in flight.** The window closing and the register
+  answering are two moments; the control treated them as one. A board member pressing Undo in
+  between would watch the control reset and then watch the page flip to *"Moved to register."* —
+  having recorded, under their own name and permanently, a review they had just cancelled. **This
+  is AC5's defect, one moment earlier than the obvious reading of it.** Fixed with a `sending`
+  state entered *before* the call, and copy that claims nothing until the register answers.
+- **A change of finding did not cancel the window.** Next.js reuses this component across
+  `/findings/a` → `/findings/b`, so a cleanup keyed on unmount never runs while the timer's closure
+  still holds the old id — recording a review against the finding the reader just left, and
+  announcing it on the one in front of them.
+
+**Round 2** — two more, both inside round 1's fix. One confirmed `high`: the in-flight promise called
+`setState` unconditionally, so an answer for finding-1 landed on finding-2's page. One `medium`
+confirmed: resetting state in an effect resets it *after* paint, so a newly-opened finding showed
+the previous one's "Moved to register." for a frame.
+
+**Round 3** — three `high`, and **only one survived verification**:
+
+- **Confirmed: a ref was written during render.** React may discard a render, leaving the ref ahead
+  of the state it describes. Rewritten as a generation counter bumped inside `cancel` — the one
+  path every interruption already goes through — so it is only ever written from an event handler
+  or an effect cleanup.
+- **Not reproduced: "`useEffect` cleanup is asynchronous, so the timer can fire first."** The
+  mechanism is real and the consequence is not reachable at a five-second window — a passive
+  cleanup is flushed within a tick. The existing test advances **100×** the window after unmount and
+  the port is still never called, with `vi.getTimerCount()` at zero. The suggested `useLayoutEffect`
+  was declined for a second reason: it warns under SSR, and this is a client component Next.js
+  renders on the server.
+- **Not reproduced: "the timer callback should check the finding before setting `sending`."** A
+  change of finding cancels the timer, so the callback cannot run holding a stale id — the state it
+  describes is unreachable. Adding the guard would be a guard no test could force, which the
+  workflow's own rule forbids.
+
+*Not directly asserted, and recorded rather than left silent:* the **paint-flash** half of round 2's
+`medium`. Testing Library flushes effects inside `act`, so a frame rendered before effects run is
+not observable from a test, and a test that passed either way would be worth nothing. The fix (state
+adjusted during render) is applied and the *race* half is asserted.
+
 ### File List
 
 **Task 1** — `core/ports/finding-reader.ts`, `core/ports/finding-reader.test.ts`,
@@ -373,6 +482,9 @@ call. Two findings, **both confirmed against the real files and both taken**:
 **Task 2** — `core/findings/evidence.ts` (new), `core/findings/detail-view.ts` (new),
 `core/findings/detail-view.test.ts` (new), `core/findings/finding-view.ts`,
 `core/findings/finding-view.test.ts`.
+
+**Task 3** — `core/findings/review.ts` (new), `core/findings/review.test.ts` (new),
+`app/findings/review-control.tsx` (new), `app/findings/review-control.test.tsx` (new).
 
 ## Change Log
 
