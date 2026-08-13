@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { detectDuesShortfalls } from '../../core/detection/detect-dues-shortfalls'
 import { createFindingRegister } from './finding-postgres'
 import { createDuesReader } from './dues-reader-postgres'
-import { writerPool } from './pool'
+import { setPoolTimeZone } from './pool-time-zone'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
@@ -147,8 +147,12 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     // and that day decides which instalments have fallen due, so a setting
     // nobody thinks about would move an arrears finding by a month.
     //
-    // Set on the shared pool rather than a private client, because the pool is
-    // what the adapter uses and a private client would prove nothing about it.
+    // **Every pooled connection, not one of them.** The first version of this
+    // test called `pool.query("set time zone …")` and then the adapter, which
+    // checks out its own connection — so with five in the pool the setting and
+    // the read could land on different ones and the case would pass with the
+    // bug fully present. Raised by CodeRabbit, and it was the flakiness I had
+    // noticed and talked myself out of.
     const { rows } = await writer.query<{ id: string }>(
       `insert into document
          (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
@@ -163,13 +167,14 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     )
     documents.push(rows[0]!.id)
 
-    const pool = writerPool()
     try {
-      await pool.query("set time zone 'America/Los_Angeles'")
+      await setPoolTimeZone('America/Los_Angeles')
 
       expect(await createDuesReader().evaluationDateFor(rows[0]!.id)).toBe('2026-07-01')
     } finally {
-      await pool.query("set time zone 'UTC'")
+      // Reset in a `finally`, because a pool left on Los Angeles would silently
+      // change the answer for every test that runs after this one.
+      await setPoolTimeZone('UTC')
     }
   })
 

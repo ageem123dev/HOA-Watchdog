@@ -20,6 +20,7 @@ import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { createInvoiceReader } from './invoice-reader-postgres'
+import { setPoolTimeZone } from './pool-time-zone'
 
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
@@ -162,6 +163,33 @@ describeWithDatabase('reading invoices', () => {
 
     expect(invoice!.issuedOn).toBe('2026-03-14')
     expect(invoice!.amount).toBe('250.00')
+  })
+
+  it('reports the upload day the same way whatever timezone the session is set to', async () => {
+    // **Story 4.4's finding, applied back here.** `to_char` on a `timestamptz`
+    // renders it in the *session's* timezone, so this column answered a
+    // different calendar day on a connection set west of Greenwich — and
+    // `documentUploadedAt` is what `monthOf` falls back to, so a duplicate
+    // finding would have been keyed on the wrong month.
+    //
+    // Uploaded at 02:00 UTC, which is the previous day in Los Angeles. The
+    // timezone is set on every pooled connection rather than one, because the
+    // reader checks out its own; see `pool-time-zone.ts`.
+    const document = await seedDocument('tz-boundary', '2026-04-01T02:00:00Z')
+    await seedInvoice('tz-boundary', { issuedOn: '2026-03-14', amount: '99.00' })
+
+    try {
+      await setPoolTimeZone('America/Los_Angeles')
+
+      const [invoice] = await createInvoiceReader().invoicesOn(document)
+
+      expect(invoice!.documentUploadedAt).toBe('2026-04-01')
+      // The `issued_on` column needs no cast — it is already a `date`, and this
+      // pins that the fix did not quietly change it.
+      expect(invoice!.issuedOn).toBe('2026-03-14')
+    } finally {
+      await setPoolTimeZone('UTC')
+    }
   })
 
   it('keeps a null as a null rather than inventing a value', async () => {
