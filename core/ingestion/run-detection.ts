@@ -44,6 +44,23 @@ import type { InvoiceReader } from '../ports/invoice-reader'
  * "detection failed for document X" when one of two failed tells an operator
  * nothing they can act on.
  *
+ * ## Sequential, deliberately
+ *
+ * The two `await`s below run one after the other rather than through
+ * `Promise.all`, and the upload does wait for both. Raised by Argus as a missed
+ * concurrency win; kept sequential because the win is smaller than it looks and
+ * the cost is not:
+ *
+ * - Each detector issues a query per invoice against a pool of five
+ *   connections shared by the whole process. Running two of them at once
+ *   doubles the checkouts per upload, and concurrent uploads multiply that.
+ * - The real duplication is not the ordering: both detectors open by calling
+ *   `invoicesOn(documentId)`, so the same query runs twice either way. Reading
+ *   the invoices once here and passing them in is the change worth making if
+ *   detection latency ever matters, and it makes the pair concurrency-safe as a
+ *   side effect. `Promise.all` on top of the duplicate read would buy the
+ *   smaller half of that.
+ *
  * ## Absent collaborators mean "do nothing", and that is a real gap
  *
  * `recordPayments` made the same choice for `units` and `payments`, and
