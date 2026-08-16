@@ -398,6 +398,17 @@ export function createFindingReader(): FindingReader {
       // backlog, and a warning that has waited longest is the one closest to
       // being too late. `id` breaks the tie for the reason the other reads give
       // -- one detection run raises several findings on the same `now()`.
+      // **The reviewer join always matches nothing here, and it stays.** An
+      // unreviewed finding has `reviewed_by is null` -- migration 021's
+      // `finding_review_is_attributed` guarantees it -- so the join below is
+      // dead for this query. Raised by Argus, accurately.
+      //
+      // It is kept because removing it means this query can no longer use
+      // `DETAIL_COLUMNS`, and a second column list is the drift `toDetail` was
+      // extracted to make unrepresentable: two reads of one row shape are two
+      // chances for the email and the page to disagree. A left join on an
+      // always-null key is cheap, and it keeps producing correct data if the
+      // state predicate is ever revisited.
       const { rows } = await writerPool().query<DetailRow>(
         `select ${DETAIL_COLUMNS}
            from finding f
