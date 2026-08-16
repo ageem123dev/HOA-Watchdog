@@ -171,16 +171,16 @@ not the one bad message, it is the nineteen good ones behind it in the loop.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The delivery record** (AC: 1, 7)
-  - [ ] `migrations/023_finding_alert.sql`. One row per finding, `finding_id` unique and referencing
+- [x] **Task 1 — The delivery record** (AC: 1, 7)
+  - [x] `migrations/023_finding_alert.sql`. One row per finding, `finding_id` unique and referencing
         `finding (id)`. Carry `claimed_at` (defaulted), `sent_at` (nullable — null *is* the
         unsent state), `recipients` and a nullable `failure`. Revoke `delete, truncate` from
         `watchdog_writer` and from `public`; grant `watchdog_reader` nothing, and say in a comment
         that the silence is the decision.
-  - [ ] Read migration 021 first and copy its habits, not just its shape: a comment saying **why**
+  - [x] Read migration 021 first and copy its habits, not just its shape: a comment saying **why**
         each constraint exists, and a `comment on table`/`comment on column` for anything a later
         reader would otherwise have to guess at.
-  - [ ] `migrations/finding-alert.test.ts`, in the family style — the unique constraint refuses a
+  - [x] `migrations/finding-alert.test.ts`, in the family style — the unique constraint refuses a
         second row, the revokes actually bite (assert the `42501`, do not assume it), and the
         foreign key holds.
 
@@ -344,9 +344,104 @@ claude-opus-5[1m]
 
 ### Test Design
 
+#### Task 1 — the delivery record
+
+**Behaviour: migration 023 creates `finding_alert` and holds it to the rules AD-13 needs.**
+
+*If it ran correctly, how would I know?* A second alert row for the same finding is **refused by the
+database** — not merely never written by the application. A sent row can be read back naming who it
+went to and when. `watchdog_writer` can insert and update but cannot delete or truncate, and
+`watchdog_reader` cannot see the table at all.
+
+*How am I going to test it?* Two ways, and both are needed. The migration **text** is asserted with
+`executable()` so the revokes and the absent grant are checked without a database — those run in
+`npm test` on every push. The **behaviour** is asserted against the real database in
+`npm run test:db`, because a revoke that does not bite looks identical to one that does until
+something tries.
+
+*Could this happen anywhere else?* Migration 021 is the sibling and it made every one of these
+decisions first. Its defects are documented: a grant taken back by default privileges rather than
+never given, a lifecycle enforceable only by the application until a trigger was written, and a
+one-way rule that an INSERT walked straight past because the trigger fired on UPDATE alone.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | a second alert row for one finding is accepted | GUARD | unique on `finding_id`; assert `23505` |
+| 2 | `watchdog_writer` can DELETE or TRUNCATE the record of what the board was told | GUARD | revokes; assert `42501` against a real row |
+| 3 | `watchdog_reader` can SELECT it, so a catalog entry could disclose who was warned | GUARD | no grant; assert `42501` |
+| 4 | an alert references a finding that does not exist | GUARD | foreign key; assert `23503` |
+| 5 | a row claims to be sent while naming nobody it was sent to | GUARD | check constraint, mirroring `finding_review_is_attributed`; assert `23514` |
+| 6 | a row names recipients while claiming never to have been sent | GUARD | the same constraint, from the other side |
+| 7 | `recipients` is a scalar or an object masquerading as a list | GUARD | `text[]`, and a check that it is non-empty when sent |
+| 8 | a sent alert is quietly un-sent, so the record says a warning was never delivered | GUARD | trigger refusing `sent_at` non-null → null; assert `P0001` |
+| 9 | an alert is inserted already sent, bypassing the claim | GUARD | the same trigger on INSERT — 021 shipped this hole and had to fix it |
+| 10 | `failure` grows without bound from a provider echoing the request back | GUARD | length cap; assert `23514` |
+| 11 | UPDATE is revoked along with DELETE, making claim→sent unimplementable | GUARD-by-text | assert no `revoke … update … on finding_alert`; 021's sibling assertion |
+| 12 | the migration is applied twice | OUT-OF-SCOPE | `scripts/migrate.mjs` records applied migrations and skips them; not this file's contract |
+
+**Cross-check.** #5 and #6 are one property from both sides, and it is the strong one: the sent state
+and its recipients cannot disagree, which is the shape `finding_review_is_attributed` already proved
+worth having. #8 and #9 are the same about the lifecycle — 021's trigger had to be widened from
+UPDATE-only to both ends after a plain INSERT walked past it, and copying the fixed version rather
+than the original is the whole value of having a sibling.
+
 ### Completion Notes List
 
+**Task 1 — the delivery record.** `migrations/023_finding_alert.sql` and its 22-test suite.
+AD-13's "never a second alert" is now a unique constraint rather than a habit the mailer has to
+keep. The row carries both moments of an unrollbackable send — `claimed_at` and `sent_at` — because
+an email cannot be un-sent and a database write cannot be un-written, so the two can only be
+ordered, and the guarantee that buys is **at-least-once, stated rather than assumed**.
+
+*Guarded:* a second alert per finding (unique); an alert on a finding that does not exist (FK); a
+row claiming to be sent while naming nobody, an empty list, a list with a NULL in it, and a list
+with a blank string in it (one immutable function, because a CHECK may hold neither a subquery nor
+`unnest`, which was measured rather than assumed); an oversized `failure`; un-sending, re-claiming
+or re-addressing a delivered alert, and an alert inserted already sent; DELETE and TRUNCATE for
+`watchdog_writer` and `public`; any sight of the table for `watchdog_reader`.
+
+*Deliberately left mutable:* `claimed_at` and `failure` on an **unsent** row. The at-least-once
+guarantee depends on a stale claim being re-claimable, and a trigger that froze the row entirely
+would satisfy every refusal above and strand every failed send.
+
+*Out of scope:* double application of the migration — `scripts/migrate.mjs` records what it has
+applied, and that is its contract rather than this file's.
+
+*Sensitivity check:* two, both against the live schema, because a migration that is already applied
+cannot be broken by editing its file. Dropping `finding_alert_one_per_finding` failed exactly one
+test; narrowing the trigger to `before update` — migration 021's documented original hole — failed
+exactly the test written for it. Both restored and re-run green.
+
+*Adversarial review (Argus, `auto`/`gemini-3.1-pro-high`, confidence 0.95, 4/4 files, 1 call, 102k
+tokens, audit chain OK):* five findings, all verified against the real files.
+- **confirmed (high)** — `noUncheckedIndexedAccess` makes every `rows[0].x` a build error. `tsc`
+  reported 7 in this file. Fixed with the `rows[0]!` idiom `migrations/finding.test.ts` already uses.
+- **confirmed (high)** — the teardown assumed every client connected. A `beforeAll` failing after
+  the first `connect()` would throw inside `finally` while building the `allSettled` array and leak
+  the connection the `finally` exists to close. Fixed by mapping over the clients with `?.end()`.
+- **not-reproduced (medium)** — "used-before-assigned errors in closure scopes". TypeScript does not
+  perform definite-assignment analysis across closures, and `tsc` reported none. The sibling suites
+  declare the same way.
+- **confirmed (low)** — the trigger guarded `sent_at` and `recipients` while the prose beside it
+  claimed `claimed_at` and `failure` were mutable only *while unsent*. The prose was right and the
+  trigger was not; tightened to `new is distinct from old`, which also covers whatever a later
+  migration adds. Driven by two new tests that failed against the old trigger first.
+- **partly confirmed (info)** — Argus read `AC8` as a wrong ticket reference. The referent was real
+  but the citation broke the project's rule against story references in source comments; both
+  occurrences now state the property instead of pointing at the story.
+
+*Repo guard caught one thing nothing else would have:* `docs/readme.test.ts` counts the migrations,
+so adding one turned the README's "22 SQL migrations" into a lie and failed the suite. Updated.
+
+
 ### File List
+
+| File | Change |
+| --- | --- |
+| `migrations/023_finding_alert.sql` | new — the delivery record, its constraints, its lifecycle trigger and its grants |
+| `migrations/finding-alert.test.ts` | new — 22 tests: 4 over the migration text, 18 against the database |
+| `README.md` | modified — the migration count the repo guard checks |
+
 
 ### Review Findings
 
