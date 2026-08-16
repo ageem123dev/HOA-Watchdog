@@ -296,8 +296,17 @@ describe('a failed export says so, rather than looking like a finished one', () 
       expect(screen.getByRole('status').textContent).toMatch(/exporting/i)
       expect((control() as HTMLButtonElement).disabled).toBe(true)
 
+      // Just short of the deadline it is still correctly waiting, so this
+      // cannot pass by the control having failed for some other reason before
+      // the timer ever fired.
       await act(async () => {
-        vi.advanceTimersByTime(30_000)
+        vi.advanceTimersByTime(REQUEST_TIMEOUT_MS - 1)
+      })
+
+      expect(screen.getByRole('status').textContent).toMatch(/exporting/i)
+
+      await act(async () => {
+        vi.advanceTimersByTime(1)
       })
 
       expect(screen.getByRole('status').textContent).toMatch(/could not/i)

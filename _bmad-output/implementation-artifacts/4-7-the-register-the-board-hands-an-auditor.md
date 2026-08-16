@@ -719,6 +719,22 @@ matching nothing, because the files are CRLF and the patterns were not — and a
 not apply looks exactly like a test that caught it. Both were re-run against a harness that asserts
 the mutation landed before trusting the result.
 
+#### Round 2 on MR !61 — one finding, taken
+
+The timeout test advanced the clock by a literal `30_000` while importing `REQUEST_TIMEOUT_MS` two
+lines above and using it further down. Raising the constant would have failed the test for a reason
+unrelated to the behaviour; lowering it would have left the test passing while proving nothing about
+the boundary.
+
+Taken, and taken one step past the report: rather than substituting the constant, the advance is now
+split either side of the deadline — `REQUEST_TIMEOUT_MS - 1` asserting the control is *still
+waiting*, then a single millisecond asserting it fails. The deadline is pinned exactly rather than
+"eventually", which two mutations confirm: halving it fails, and multiplying it by ten fails.
+
+Argus on the fix diff raised one finding and it was **not reproduced** — it reported the timer
+advance as being outside an `act()` block, then stated in the same paragraph that it is inside one.
+It is inside one, as the line above it is.
+
 #### Gates on the final head, locally — there is no CI, so this is the whole of the evidence
 
 `npm test` 2951 passed · `npm run test:db` 846 passed · `npm run lint` 0 errors (1 pre-existing
@@ -729,6 +745,7 @@ warning) · `npx tsc --noEmit` 8 errors, matching baseline · `npm run build` co
 
 | Date | Change |
 | --- | --- |
+| 2026-08-16 | Round 2 on !61: one finding, taken — the timeout test hardcoded the deadline it already imported. Split either side of the boundary rather than merely substituting the constant, so it pins the deadline exactly. All 7 findings from round 1 resolved by CodeRabbit. |
 | 2026-08-16 | Merge-request round on !61: 7 CodeRabbit findings, 5 taken, 1 declined with a database probe, 1 widened. The print treatment printed `.on-ink` black on black. The stale premise CodeRabbit found in one docblock had three more copies. Argus on the fix diff found a non-finite total slipping past both contradiction guards. 14 mutations; the `clearTimeout` claim had no test until one was written for it. |
 | 2026-08-16 | Tasks 1-5 implemented test-first. Ten Argus rounds, one local CodeRabbit round (15 of 17 taken), 31 mutations. The AC audit found the export control naming the register total rather than the rows the file would hold — the ninth consecutive story it has found something. The whole-story pass found the page and its export reading a repeated query parameter differently. Merge request !61 opened; status `done`, meaning ready-to-merge. |
 | 2026-08-16 | Story created. The export-format conflict — EXPERIENCE.md's "as PDF" against the CSV precedent — was put to the user, who chose the print treatment as the PDF path and CSV for the download. Reading the spec against the code also found story 4.6's `overflow-x: auto` breaking EXPERIENCE.md's no-horizontal-scroll rule; fixed here as AC10. |
