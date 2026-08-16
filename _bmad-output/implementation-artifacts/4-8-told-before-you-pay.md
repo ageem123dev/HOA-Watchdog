@@ -213,18 +213,18 @@ not the one bad message, it is the nineteen good ones behind it in the loop.
   - [x] An unrecognised `finding_type` yields a message that still names the finding and still links
         to it. Test it with a type no detector produces.
 
-- [ ] **Task 4 — The adapter and its configuration** (AC: 4, 9)
-  - [ ] `adapters/mail/mail-sender-http.ts`. Read `adapters/agent/chat-client.ts` first and follow
+- [x] **Task 4 — The adapter and its configuration** (AC: 4, 9)
+  - [x] `adapters/mail/mail-sender-http.ts`. Read `adapters/agent/chat-client.ts` first and follow
         it: names as module constants, config read at call time, a bounded timeout via
         `AbortSignal.timeout`, a non-2xx treated as a failure and never as an empty success, and an
         error that carries names and never values.
-  - [ ] `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM`, `WATCHDOG_BASE_URL` in `.env.example`, with the
+  - [x] `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM`, `WATCHDOG_BASE_URL` in `.env.example`, with the
         commentary that file carries — what each is for, and what happens when it is unset.
         `.env.example` is read by `core/security/nfr2-guard.test.ts` on every run; check the new
         names against `core/security/forbidden-credentials.ts` rather than assuming they are clear.
-  - [ ] `WATCHDOG_BASE_URL` is validated as an absolute `http(s)` origin at read time. A base URL
+  - [x] `WATCHDOG_BASE_URL` is validated as an absolute `http(s)` origin at read time. A base URL
         that is a path produces links that work in development and are broken in every inbox.
-  - [ ] Unit-test the adapter against a stub `fetch`. Assert the request body and the header,
+  - [x] Unit-test the adapter against a stub `fetch`. Assert the request body and the header,
         assert the key never appears in a thrown error, and assert the timeout is armed — a
         `requestTimeout` that only logs is the shape this project has already shipped once.
 
@@ -495,7 +495,126 @@ assertion is against what the *other two surfaces* produce for the same finding,
 literal this test chose. A wording change that is legitimate updates all three together; one that is
 drift fails here.
 
+#### Task 4 — the adapter and its configuration
+
+**Behaviour A: `readMailConfig(env)` and `readBaseUrl(env)` — configuration, read at call time.**
+
+*If it ran correctly, how would I know?* Complete configuration yields the three values; incomplete
+configuration throws an error **naming the variables** and carrying none of their values.
+
+*How am I going to test it?* `env` is a parameter with a `process.env` default, the shape
+`adapters/auth/env.ts` established and for the reason it records: Next.js evaluates modules during
+`next build`, so a module-scope read that throws makes the build itself require real credentials.
+
+*What else can go wrong?* Every way a value can be present and useless.
+
+*Could this happen anywhere else?* `adapters/agent/chat-client.ts` reads two variables the same way
+and validates its base URL the same way. This is the third reader of that pattern.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | a variable is absent | GUARD | named in `missing`; the message carries no value |
+| 2 | a variable is present but blank or only whitespace | GUARD | same as absent — a blank credential is not one |
+| 3 | the error message quotes the API key | GUARD | the key is a distinctive string; asserted absent from the thrown message |
+| 4 | `MAIL_API_URL` is not a URL at all | GUARD | named as missing rather than reaching `fetch` |
+| 5 | `MAIL_API_URL` is a path, so it resolves against nothing | GUARD | absolute required |
+| 6 | `WATCHDOG_BASE_URL` is a path — links work in development and are dead in every inbox | GUARD | absolute `http`/`https` required |
+| 7 | `WATCHDOG_BASE_URL` has a trailing slash | GUARD | one link either way — asserted in Task 3, and here at the reader |
+| 8 | config is read at module scope, so `next build` needs real secrets | GUARD-by-shape | `env` is a parameter; the build gate passing is the standing proof |
+| 9 | `MAIL_API_URL` is `http:` on a public host | OUT-OF-SCOPE | the pilot may run a local relay; `WATCHDOG_BASE_URL` is the one a board member's browser follows and it accepts both for the same reason |
+
+**Behaviour B: `createHttpMailSender()` — the send.**
+
+*If it ran correctly, how would I know?* One POST, carrying the sender, the recipients, the subject
+and the text as JSON, with the key in an `Authorization` header and nowhere else. It resolves only on
+a response that says the whole list was accepted.
+
+*How am I going to test it?* `fetch` is injected. Every failure below is forced with a stub rather
+than assumed.
+
+*What else can go wrong?* The dangerous direction is **resolving when it should not**: the ledger
+writes a delivery row on a resolved send, and that row is what stops the alert ever being retried. A
+false success is permanent silence for that finding.
+
+*Could this happen anywhere else?* `chat-client.ts` makes the same argument in its own words — *"a
+caller that turns a failure into an empty answer converts 'the records could not be reached' into
+'there is nothing to report'"*. Here the cost is a warning nobody ever gets.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 10 | the network never produced a response | GUARD | stub throws; `MailNotSentError`, never a resolve |
+| 11 | a non-2xx is treated as sent | GUARD | 400, 401, 429, 500 each rejected |
+| 12 | the request has no timeout, so one unresponsive provider holds ingestion open | GUARD | the stub asserts a `signal` is present and aborts |
+| 13 | the API key reaches the thrown message | GUARD | asserted absent from every rejection |
+| 14 | the recipients reach the thrown message | GUARD | the error is read by whoever debugs; the list names directors |
+| 15 | the provider's error body is echoed into the error | GUARD | providers echo the request, and the request holds every address |
+| 16 | a 2xx whose body reports a failure is treated as sent | GUARD | `{ "error": … }` at 200 rejects |
+| 17 | an empty recipient list is sent | GUARD | refused before `fetch` — a send with nobody to send to is not a send |
+| 18 | a recipient list with a blank entry is sent | GUARD | refused; migration 023 refuses to record it either |
+| 19 | the body is form-encoded, so the provider silently sees no recipients | GUARD | `content-type: application/json`, and the parsed body asserted |
+| 20 | a partial delivery resolves | PROPAGATE-by-contract | `core/ports/mail.ts` states it; a provider that cannot confirm the whole list is a rejection |
+
+**Cross-check.** #10 through #16 are one property approached seven ways, and it is the property the
+whole task turns on: **this function resolves only when the message went.** The reverse check is #17
+and #18 — it must also refuse to try when trying could not succeed, so a delivery row is never
+written for a send that was never possible.
+
 ### Completion Notes List
+
+**Task 4 — the adapter and its configuration.** `adapters/mail/env.ts`,
+`adapters/mail/mail-sender-http.ts`, 33 tests, and the four variables in `.env.example`.
+
+*The property the whole task turns on is approached from seven directions: this resolves only when
+the message actually went.* The ledger writes a delivery row when `send` resolves, and that row is
+what stops the alert ever being retried — so a false success is not a missed email, it is permanent
+silence for that finding with a database record saying the board was warned. Guarded: a network that
+never produced a response; seven non-2xx statuses; a 2xx whose body carries an error object, which is
+the shape that most reliably becomes a delivery row for a message nobody received; a body that is not
+JSON at all.
+
+*And the reverse — it refuses to try when trying could not succeed.* An empty recipient list, a list
+with a blank in it, and a blank subject are all rejected **before** `fetch`, so no delivery row is
+written for a send that was never possible.
+
+*Nothing thrown names a recipient or the key.* The error is read by whoever is working out why a
+board was never warned, and providers echo the request back inside their error bodies — which is
+exactly where every director's address is. Asserted against an error body that deliberately contains
+both.
+
+*Two variables, two different rules, and the difference is the point.* `MAIL_API_URL` is `https:`
+only because the key travels to whatever it names. `WATCHDOG_BASE_URL` accepts `http:` because it is
+an address a director's browser follows and carries no credential. Each has a test, and each test
+names the other as its counterpart.
+
+*Sensitivity check:* four mutations, all detected. Dropping the `response.ok` check failed seven
+tests; dropping the 2xx error-object check failed one; echoing the provider's error body into the
+thrown message failed the leak test; accepting a relative base URL failed the scheme test.
+
+*One test was replaced rather than fixed.* The timeout assertion used Vitest's fake timers to advance
+past `AbortSignal.timeout`, which runs on an internal timer the fake clock does not drive — so it
+asserted a property of the signal object for reasons unrelated to the code. It is now an end-to-end
+test with a real timer and a provider that never answers, forcing the thing anybody actually cares
+about: an unresponsive provider ends as a rejection rather than as an upload that hangs while a
+treasurer watches it.
+
+*Adversarial review (Argus, `auto`/`gemini-3.1-pro-high`, confidence 0.95, 6/6 files, 1 call, 59k
+tokens, audit chain OK):* three findings, all three confirmed.
+- **confirmed (high)** — `MAIL_API_URL` permitted `http:`, which would put the bearer token on the
+  wire in plaintext. A real defect, and this project's own precedent argued against what had been
+  written: `chat-client.ts` requires `https:` for `AGENT_BASE_URL` in as many words, *"the token
+  travels to whatever this names"*. Now `https:` only, driven by a test.
+- **confirmed (medium)** — the non-2xx path threw without consuming the response body, and undici
+  holds the socket until an unread body is garbage-collected. One leaked connection per upload while
+  a provider is having a bad afternoon. The body is now **cancelled**, not read: reading it would put
+  the provider's echo of the request within reach of the error message.
+- **confirmed (low)** — a comment claimed the spread of `message.to` stopped a caller mutating the
+  list after the body was built, which misreads `JSON.stringify` as anything other than synchronous.
+  A comment asserting something untrue is the defect this repository has recorded before in a
+  migration comment; the spread and the comment are both gone.
+
+*Two repo guards fired, and both were right.* `docs/readme.test.ts` checks that every `.env.example`
+variable is named in the README **and** that the README's stated count is correct. Adding four
+variables broke both. Updated.
 
 **Task 3 — the message a board member reads.** `core/findings/alert-email.ts` and 37 tests. The
 title and the sentence are **taken** from `toFindingRow` and `toFindingDetail`, and the tests assert
@@ -644,6 +763,10 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 
 | File | Change |
 | --- | --- |
+| `adapters/mail/env.ts` | new — mail configuration and the public address, read at call time |
+| `adapters/mail/mail-sender-http.ts` + `mail-sender-http.test.ts` | new — the send, and 33 tests |
+| `.env.example` | modified — `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM`, `WATCHDOG_BASE_URL` |
+| `README.md` | modified — the migration count, and the two new variable groups |
 | `core/findings/alert-email.ts` + `alert-email.test.ts` | new — the message, and `oneLine` |
 | `core/ports/mail.ts` + `mail.test.ts` | new — the send port and the plain-text decision, enforced by the type |
 | `core/ports/finding-alert.ts` + `finding-alert.test.ts` | new — claim, record sent, record failed |
@@ -655,7 +778,6 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 | `adapters/db/finding-reader-postgres.ts` | modified — `awaitingAlert`, and `toDetail` extracted so two reads cannot disagree |
 | `migrations/023_finding_alert.sql` | new — the delivery record, its constraints, its lifecycle trigger and its grants |
 | `migrations/finding-alert.test.ts` | new — 22 tests: 4 over the migration text, 18 against the database |
-| `README.md` | modified — the migration count the repo guard checks |
 
 
 ### Review Findings

@@ -37,7 +37,7 @@ Then sign in and go to **Upload**. Start with `samples/assessment-roll.csv`; see
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env.local`. It names **fifteen** variables in seven groups:
+Copy [`.env.example`](.env.example) to `.env.local`. It names **nineteen** variables in nine groups:
 
 | Group | Variables | Why |
 | --- | --- | --- |
@@ -48,6 +48,8 @@ Copy [`.env.example`](.env.example) to `.env.local`. It names **fifteen** variab
 | Agent service | `AGENT_SERVICE_TOKEN` | The bearer token `/tools/v1/*` accepts (AD-15). Unset means the endpoint refuses everyone — and until the private network exists, this token is the only thing in front of it |
 | Chat turn | `GATEWAY_SERVICE_TOKEN`, `AGENT_BASE_URL` | How the gateway reaches the agent service (AD-17). A **different** token from `AGENT_SERVICE_TOKEN`, which is the agent's identity in the other direction — one token used both ways means either runtime's compromise grants the other's identity |
 | Reasoning model | `REASONING_API_KEY`, `REASONING_MODEL` | The agent service's own model credential (AD-11). Since AD-10's vendor clause was withdrawn on 2026-08-10, extraction and reasoning are one vendor and this separate name is the whole of the boundary — never set `GEMINI_API_KEY` in the agent's environment, or CrewAI hands the reasoning model the extraction key and everything keeps working. `REASONING_MODEL` is optional |
+| Outbound mail | `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM` | The alert email (FR-8) — the only thing this system sends, and the only thing it sends uninvited. The provider is configuration rather than code: `MAIL_API_URL` is the full endpoint, so swapping providers is a value here. `https:` only, because the key travels to whatever it names. Unset means no alert is sent and the reason is recorded against the finding — never a crash and never a delivery row |
+| Public address | `WATCHDOG_BASE_URL` | Where a board member's browser reaches this application. The alert email deep-links to a finding, and a relative path is meaningless in an inbox. `http:` is accepted here, unlike `MAIL_API_URL` — this one carries no credential |
 
 The application **builds and tests without them** — `npm run build` must never require credentials,
 or the build gate stops being runnable by anyone who lacks a populated environment. What it cannot
