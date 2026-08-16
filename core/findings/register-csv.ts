@@ -60,6 +60,15 @@ export function registerCsv(findings: readonly FindingDetail[]): string {
     ...rows.map((entry) => {
       const source = byId.get(entry.row.id)
 
+      // **Loudly, rather than as blank cells.** The map is built from the same
+      // array the view was rendered from, so a miss cannot happen today — and
+      // if it ever did, the period and the reviewer would simply be absent from
+      // that line of the board packet, which is a record quietly missing the two
+      // facts an auditor came for. Raised by CodeRabbit.
+      if (source === undefined) {
+        throw new Error(`the register produced a row for ${entry.row.id}, which it did not return`)
+      }
+
       return [
         entry.row.id,
         entry.row.title,
@@ -77,9 +86,9 @@ export function registerCsv(findings: readonly FindingDetail[]): string {
         // satisfies neither the type nor `=== null`, and the export is the
         // wrong place to discover that by writing "undefined" into a board
         // packet.
-        source?.reviewed?.on ?? '',
+        source.reviewed?.on ?? '',
         // Empty rather than invented. `board_member.display_name` is nullable.
-        source?.reviewed?.by ?? '',
+        source.reviewed?.by ?? '',
       ]
     }),
   ])
@@ -100,8 +109,8 @@ const ONE_DAY_MS = 86_400_000
  * and an export that crashed on one would take the whole board packet with it
  * rather than losing a cell. Raised by Argus.
  */
-function periodOf(finding: FindingDetail | undefined): string {
-  const period = finding?.period
+function periodOf(finding: FindingDetail): string {
+  const period = finding.period
 
   if (period == null) return ''
 
@@ -112,6 +121,14 @@ function periodOf(finding: FindingDetail | undefined): string {
   if (Number.isNaN(until)) return ''
 
   const last = new Date(until - ONE_DAY_MS).toISOString().slice(0, 10)
+
+  // **A window that ends before it starts is not a window.** `[from, from)` is
+  // empty and anything narrower is backwards, and either would print as
+  // "2026-05-01 to 2026-04-30" — a range an auditor would read as a mistake in
+  // the record rather than in the software. Migration 021 makes both
+  // unreachable; the cell is left empty rather than stating one. Raised by
+  // CodeRabbit.
+  if (last < period.from) return ''
 
   return last === period.from ? period.from : `${period.from} to ${last}`
 }

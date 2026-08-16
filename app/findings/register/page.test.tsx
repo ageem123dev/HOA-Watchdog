@@ -12,14 +12,14 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { FindingDetail } from '@/core/ports/finding-reader'
+import type { FindingDetail, RegisterFilter } from '@/core/ports/finding-reader'
 
 import { PUBLIC_ROUTES, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 
 const auth = vi.fn()
-const registerRead = vi.fn<() => Promise<{ findings: FindingDetail[]; total: number }>>(
-  async () => ({ findings: [], total: 0 }),
-)
+const registerRead = vi.fn<
+  (filter: RegisterFilter) => Promise<{ findings: FindingDetail[]; total: number }>
+>(async () => ({ findings: [], total: 0 }))
 const redirect = vi.fn((path: string) => {
   // The real `redirect` throws to unwind the render. A mock that returned would
   // let the page carry on and read the register, making this suite pass against

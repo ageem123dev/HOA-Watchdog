@@ -517,7 +517,7 @@ describeWithDatabase('the register', () => {
     const named = await registerWriter.query<{ id: string }>(
       `insert into board_member (email, password_hash, display_name)
        values ($1, 'scrypt$fixture', 'Regina Mbeki') returning id`,
-      [`${STORAGE_PREFIX}-reviewer@example.test`],
+      [`${REGISTER_PREFIX}-reviewer@example.test`],
     )
     reviewerId = named.rows[0]!.id
 
@@ -526,7 +526,7 @@ describeWithDatabase('the register', () => {
     const nameless = await registerWriter.query<{ id: string }>(
       `insert into board_member (email, password_hash, display_name)
        values ($1, 'scrypt$fixture', null) returning id`,
-      [`${STORAGE_PREFIX}-nameless@example.test`],
+      [`${REGISTER_PREFIX}-nameless@example.test`],
     )
 
     // The vendor sits *inside* the pairs array, which is where every real one
@@ -568,8 +568,10 @@ describeWithDatabase('the register', () => {
       await registerOwner.query(`delete from finding where finding_type like $1`, [
         `${REGISTER_PREFIX}%`,
       ])
+      // This block's own prefix, so the two describes cannot delete each
+      // other's fixtures while both are running. Raised by CodeRabbit.
       await registerOwner.query(`delete from board_member where email like $1`, [
-        `${STORAGE_PREFIX}-%`,
+        `${REGISTER_PREFIX}-%`,
       ])
     } finally {
       await Promise.allSettled([registerOwner.end(), registerWriter.end()])
@@ -600,18 +602,31 @@ describeWithDatabase('the register', () => {
     const registered = new Set(register.findings.map((finding) => finding.id))
     const queued = new Set(queue.findings.map((finding) => finding.id))
 
-    for (const id of [
+    const reviewedHere = [
       vendorFinding,
       unitFinding,
       typeFinding,
       namelessFinding,
       sameInstantA,
       sameInstantB,
-      unreviewedFinding,
-    ]) {
-      expect(registered.has(id) || queued.has(id), `${id} is on neither surface`).toBe(true)
-      expect(registered.has(id) && queued.has(id), `${id} is on both surfaces`).toBe(false)
+    ]
+
+    // **Completeness is asserted from the register, not from the queue.** The
+    // register read is scoped to this file's prefix, so it is exact; the queue
+    // read is global and bounded, so a fixture of this file's can legitimately
+    // fall outside its first 200 rows when other files are seeding at the same
+    // time. Requiring it there made the property flake for a reason that had
+    // nothing to do with the property. Raised by CodeRabbit — and it is the
+    // same concurrency trap the exact totals above were chosen to avoid.
+    for (const id of reviewedHere) {
+      expect(registered.has(id), `${id} is missing from the register`).toBe(true)
+      expect(queued.has(id), `${id} is on both surfaces`).toBe(false)
     }
+
+    // The other direction: an unreviewed finding is never on the register.
+    expect(registered.has(unreviewedFinding), 'an unreviewed finding reached the register').toBe(
+      false,
+    )
   })
 
   it('says who reviewed it and when', async () => {

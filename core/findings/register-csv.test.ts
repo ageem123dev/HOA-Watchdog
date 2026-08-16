@@ -28,7 +28,15 @@ function finding(overrides: Partial<FindingDetail> = {}): FindingDetail {
   }
 }
 
-/** The file split back into rows and cells, quotes removed. */
+/**
+ * The file split back into rows and cells, quotes removed.
+ *
+ * **Deliberately not a CSV parser.** It splits on the quote-comma-quote seam,
+ * which is exact for the fixtures here — every cell is quoted, so a comma or a
+ * CRLF *inside* a value never carries that seam with it. It would be wrong for
+ * arbitrary CSV, and a real parser here would be a second implementation of the
+ * thing under test. Raised by CodeRabbit.
+ */
 function parse(csv: string): string[][] {
   return csv
     .split('\r\n')
@@ -108,6 +116,14 @@ describe('what each row carries', () => {
     const record = finding({ evidence: { invoicesChecked: 3, pairs: [] } })
 
     expect(columnOf(record, 'amount')).toBe('')
+  })
+
+  it('carries the severity in the words the surface uses', () => {
+    // The ninth column, and the only one that had no assertion. "Needs review",
+    // not an enum name a board member has never seen -- DESIGN.md forbids HIGH
+    // and MED by name, and an export is where a machine word would survive
+    // longest unnoticed. Raised by CodeRabbit.
+    expect(columnOf(finding(), 'severity')).toBe('Needs review')
   })
 
   it('carries the period the finding concerns', () => {

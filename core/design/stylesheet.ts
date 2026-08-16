@@ -89,7 +89,11 @@ body {
     position: absolute;
     width: 1px;
     height: 1px;
+    margin: 0;
+    padding: 0;
     overflow: hidden;
+    /* clip is deprecated and still the only thing some older engines honour. */
+    clip: rect(0 0 0 0);
     clip-path: inset(50%);
     white-space: nowrap;
   }
@@ -140,6 +144,29 @@ body {
  * survives as well as what does not.
  */
 @media print {
+  /*
+   * **The tokens are redefined, not just the body.** Every surface here styles
+   * inline with var(--color-ink) and friends, and an inline style beats any
+   * rule in this sheet -- so setting colours on body alone left the printed
+   * page using the screen palette, and a print treatment that only appeared to
+   * work is worse than none. Redefining the custom properties reaches the
+   * inline styles, because that is where they are resolved. Raised by
+   * CodeRabbit.
+   *
+   * Ink to black and every ground to white: toner is the constraint on paper,
+   * and the stone ground exists to be easy on a screen.
+   */
+  :root {
+    --color-ink: #000;
+    --color-ink-muted: #333;
+    --color-stone: #fff;
+    --color-stone-raised: #fff;
+    --color-on-ink: #000;
+    --color-rule-strong: #767676;
+    --color-brass: #333;
+    --color-flag: #000;
+  }
+
   body {
     background: #fff;
     color: #000;

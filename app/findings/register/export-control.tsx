@@ -165,7 +165,15 @@ function save(file: Blob, filename: string): void {
 
   link.href = url
   link.download = filename
+
+  // **In the document before it is clicked.** Firefox has historically ignored
+  // a programmatic click on a detached anchor, which fails the way this whole
+  // control is written against: silently, with the board member told the export
+  // ran. Removed straight after, so the page is left as it was found. Raised by
+  // CodeRabbit.
+  document.body.append(link)
   link.click()
+  link.remove()
 
   setTimeout(() => URL.revokeObjectURL(url), HANDOVER_MS)
 }

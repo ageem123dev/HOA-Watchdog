@@ -160,6 +160,16 @@ export interface RegisterFilter {
    * Required, for the reason `unreviewed` gives at length. It applies harder
    * here: the register is permanent and append-only, so it is the one read in
    * the product that is guaranteed to grow forever.
+   *
+   * **A whole number from 1 to `MOST_REGISTER_ROWS`.** Outside that the returned
+   * promise rejects with `RangeError`; it is never clamped, because a caller who
+   * asked for more than the register hands out wanted something other than this,
+   * and quietly giving them a page of it answers a question they did not ask.
+   *
+   * Stated here rather than left to the adapter. CodeRabbit raised exactly this
+   * against `unreviewed` — a bound the adapter enforces and the port does not
+   * mention is a contract the caller can only discover by violating it — and
+   * this member arrived with the same omission.
    */
   readonly limit: number
 }
@@ -224,9 +234,13 @@ export interface FindingReader {
    * word EXPERIENCE.md uses for this artifact, it collides with nothing, and it
    * reads as the noun it is.
    *
-   * Newest review first, with a tie-break, because one review run can stamp
-   * several rows on the same `now()` and a register that reshuffles between two
-   * refreshes is one nobody can cite.
+   * **Newest review first, then by id, descending.** The tie-break is named
+   * rather than left to an adapter: one board member working a queue stamps
+   * several rows inside the same second, and a register that reshuffles between
+   * two refreshes is one nobody can cite a line of. Raised by CodeRabbit —
+   * "with a tie-break" is a requirement an adapter can satisfy two ways, and
+   * two adapters satisfying it differently is the same register disagreeing
+   * with itself.
    *
    * **This and `unreviewed` must partition the table.** EXPERIENCE.md's
    * lifecycle has exactly two live states and no third: "reviewed moves, it does

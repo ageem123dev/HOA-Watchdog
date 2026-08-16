@@ -27,7 +27,11 @@ import { ExportControl } from './export-control'
 afterEach(cleanup)
 
 afterEach(() => {
-  vi.clearAllMocks()
+  // `restoreAllMocks`, not `clearAllMocks`. These tests replace globals —
+  // `fetch`, `URL.createObjectURL`, `URL.revokeObjectURL` — and clearing only
+  // forgets the calls, leaving the replacement in place for whatever runs next.
+  // Raised by CodeRabbit.
+  vi.restoreAllMocks()
 })
 
 /** A fetch whose completion the test decides. */
