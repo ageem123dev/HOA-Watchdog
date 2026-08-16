@@ -81,11 +81,15 @@ export function FindingDetailPanel({
  */
 function Comparisons({ table }: { table: ComparisonTable }) {
   return (
-    // The one place this page can overflow horizontally — seven columns of
-    // invoice detail on a phone. It scrolls inside its own box rather than
-    // making the whole page scroll sideways.
-    <div style={styles.scroller}>
-      <table style={styles.table}>
+    // **No scroller.** The first version of this wrapped the table in
+    // `overflow-x: auto`, which EXPERIENCE.md forbids in as many words: evidence
+    // tables "do not scroll horizontally -- a table that scrolls sideways in a
+    // meeting is a table nobody reads". Below 48rem the stylesheet stacks each
+    // row into label/value groups instead, and `data-column` is what lets it
+    // name the value once the header row is out of sight. Story 4.7 owns that
+    // treatment for both surfaces.
+    <div>
+      <table className="evidence-table" style={styles.table}>
         <caption style={styles.caption}>{table.caption}</caption>
         <thead>
           <tr>
@@ -114,6 +118,10 @@ function Comparisons({ table }: { table: ComparisonTable }) {
                 // fire, since every row is built with the columns' own arity.
                 <td
                   key={column}
+                  // Read by the stacked layout below 48rem, where the header
+                  // row is hidden and CSS cannot reach the <th> above.
+                  data-column={table.columns[column]?.label ?? ''}
+                  data-numeric={String(table.columns[column]?.numeric === true)}
                   style={table.columns[column]?.numeric === true ? styles.cellNumeric : styles.cell}
                 >
                   {cell}
@@ -179,7 +187,6 @@ const styles = {
     fontVariantNumeric: 'tabular-nums',
     color: 'var(--color-ink)',
   },
-  scroller: { overflowX: 'auto', maxWidth: '100%' },
   table: { borderCollapse: 'collapse', width: '100%' },
   caption: {
     textAlign: 'left',

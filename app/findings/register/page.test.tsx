@@ -9,12 +9,17 @@
  * redirects has already put that on the wire.
  */
 
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { FindingDetail } from '@/core/ports/finding-reader'
 
 import { PUBLIC_ROUTES, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 
 const auth = vi.fn()
-const registerRead = vi.fn(async () => ({ findings: [], total: 0 }))
+const registerRead = vi.fn<() => Promise<{ findings: FindingDetail[]; total: number }>>(
+  async () => ({ findings: [], total: 0 }),
+)
 const redirect = vi.fn((path: string) => {
   // The real `redirect` throws to unwind the render. A mock that returned would
   // let the page carry on and read the register, making this suite pass against
@@ -33,6 +38,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.resetModules()
 })
 
@@ -108,5 +114,52 @@ describe('the read is given what the URL asked for', () => {
     registerRead.mockResolvedValue({ findings: [], total: 0 })
 
     await expect(renderPage()).resolves.toBeDefined()
+  })
+})
+
+describe('AC4: the export names the count of what will actually be in the file', () => {
+  beforeEach(() => {
+    auth.mockResolvedValue({ user: { id: 'member-1', email: 'board@example.org' } })
+  })
+
+  const entry = (id: string) => ({
+    id,
+    findingType: 'possible_duplicate_invoice',
+    subjectId: 'document-1',
+    period: { from: '2026-04-01', until: '2026-05-01' },
+    evidence: { invoicesChecked: 3 },
+    raisedOn: '2026-04-14',
+    reviewed: { by: 'R. Mbeki', on: '2026-04-20' },
+  })
+
+  it('names the rows the download will hold, not the whole register', async () => {
+    // **Found by the acceptance-criteria audit.** The export route reads with
+    // the *same filter*, limit included — so a register of 200 with a page of 50
+    // produces a file of 50. A control naming the register's total promises a
+    // document four times the size of the one that arrives, on the surface whose
+    // entire purpose is being handed to an auditor.
+    registerRead.mockResolvedValue({
+      findings: Array.from({ length: 50 }, (_, index) => entry(`f${index}`)),
+      total: 200,
+    })
+
+    render(await renderPage())
+
+    expect(screen.getByRole('button', { name: /export/i }).textContent).toBe(
+      'Export 50 reviewed findings as CSV',
+    )
+  })
+
+  it('names the whole register when the page holds all of it', async () => {
+    registerRead.mockResolvedValue({
+      findings: [entry('a'), entry('b')],
+      total: 2,
+    })
+
+    render(await renderPage())
+
+    expect(screen.getByRole('button', { name: /export/i }).textContent).toBe(
+      'Export 2 reviewed findings as CSV',
+    )
   })
 })

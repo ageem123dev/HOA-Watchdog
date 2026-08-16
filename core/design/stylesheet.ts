@@ -50,6 +50,124 @@ body {
 .on-stone:focus-visible,
 .on-stone > :focus-visible {
   outline-color: var(--color-ink);
+}
+
+/*
+ * Evidence tables reflow; they do not scroll (UX-DR22's companion rule).
+ *
+ * EXPERIENCE.md is unambiguous: "evidence tables reflow to stacked label/value
+ * groups, one record per group, figures still tabular. They do not scroll
+ * horizontally -- a table that scrolls sideways in a meeting is a table nobody
+ * reads." Story 4.6 shipped a horizontal scroller on the finding detail's table,
+ * which is that rule broken; story 4.7 owns the responsive treatment for both
+ * surfaces and removes it.
+ *
+ * The header row is hidden rather than deleted, and each cell names its own
+ * column from data-column. A stacked cell with no label is a figure with
+ * nothing saying what it is, which on a page about money is worse than the
+ * table it replaced -- and the label has to come from the markup, because CSS
+ * cannot reach the <th> above it.
+ *
+ * 48rem rather than pixels, so the breakpoint follows a reader's text size.
+ * The rule belongs to the same accessibility floor that requires row heights to
+ * flex for user text spacing.
+ */
+@media (max-width: 48rem) {
+  .evidence-table,
+  .evidence-table tbody,
+  .evidence-table tr,
+  .evidence-table td {
+    display: block;
+  }
+
+  /*
+   * Hidden from sight, kept for assistive technology -- the table still has a
+   * header row, and removing it would strip the association a screen reader
+   * uses to announce each cell.
+   */
+  .evidence-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .evidence-table tr {
+    padding: var(--space-row) 0;
+    border-bottom: var(--component-rule-hairline) solid var(--color-rule-strong);
+  }
+
+  .evidence-table td {
+    display: grid;
+    grid-template-columns: 40% 1fr;
+    gap: var(--space-row);
+    padding: var(--space-base) 0;
+    border: 0;
+    text-align: left;
+  }
+
+  .evidence-table td::before {
+    content: attr(data-column);
+    font-family: var(--type-sans);
+    font-size: var(--type-scale-label);
+    letter-spacing: var(--type-tracking-label);
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  /* Still tabular, which EXPERIENCE.md asks for by name. */
+  .evidence-table td[data-numeric='true'] {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * Print (UX-DR22).
+ *
+ * "Some directors read the board packet on paper; the register and finding
+ * detail carry a print treatment." One stylesheet for both, which is why story
+ * 4.6 deferred its half here rather than growing a second one.
+ *
+ * What goes: everything that only works on a screen. A button on paper is a
+ * rectangle a director cannot press, and the search form is a box they cannot
+ * type into -- both are noise between them and the record.
+ *
+ * What stays: the findings, the figures, the evidence tables, and who reviewed
+ * what and when. That is the document. A print stylesheet that hid those would
+ * produce a board packet with nothing in it, which is why the tests assert what
+ * survives as well as what does not.
+ */
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  button,
+  form,
+  nav {
+    display: none;
+  }
+
+  /*
+   * A link is text on paper. The href is not something a director can follow,
+   * and an underlined blue row reads as an unfinished document.
+   */
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /*
+   * Rows are not split across a page break. A finding whose amount landed on
+   * the next sheet is one an auditor has to reassemble by hand.
+   */
+  tr,
+  li {
+    break-inside: avoid;
+  }
 }`
 
 /** Everything the document needs: the token definitions, then the base rules. */

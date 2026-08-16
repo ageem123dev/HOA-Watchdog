@@ -106,11 +106,16 @@ export default async function RegisterPage({
         different document from the one they were looking at, and on a permanent
         record quietly a much larger one.
 
-        `total` rather than the rows: the file holds every match, so a control
-        naming the page would promise a smaller document than it delivers.
+        **And the count is the rows, not the register's total.** The route reads
+        with that same filter — *limit included* — so a register of 200 shown 50
+        at a time produces a file of 50. Naming `total` promised a document four
+        times the size of the one that arrives, on the surface whose whole
+        purpose is being handed to an auditor. Found by the acceptance-criteria
+        audit; AC4 states the rule in as many words: "the count of what will
+        actually be in the file".
       */}
       {view.kind === 'entries' ? (
-        <ExportControl total={view.total} href={exportHref(filter)} />
+        <ExportControl total={view.entries.length} href={exportHref(filter)} />
       ) : null}
     </main>
   )

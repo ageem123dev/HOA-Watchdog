@@ -160,13 +160,13 @@ argument `app/dashboard/page.tsx` already makes for the quarantine link.
   - [x] The route honours the same filter the page did, and a test proves the exported set matches
         the on-screen set.
 
-- [ ] **Task 5 — Print and reflow** (AC: 9, 10)
-  - [ ] One stylesheet serving the register and the finding detail. Decide where it lives so both
+- [x] **Task 5 — Print and reflow** (AC: 9, 10)
+  - [x] One stylesheet serving the register and the finding detail. Decide where it lives so both
         import it rather than each carrying a copy.
-  - [ ] Assert what is *absent* from print — controls, navigation, the export button — as well as
+  - [x] Assert what is *absent* from print — controls, navigation, the export button — as well as
         what survives. An assertion that only checks presence passes against a stylesheet that
         hides nothing.
-  - [ ] **Fix story 4.6's `overflow-x: auto`** on the finding detail's evidence table and give both
+  - [x] **Fix story 4.6's `overflow-x: auto`** on the finding detail's evidence table and give both
         tables the stacked reflow below 48rem.
 
 ## Dev Notes

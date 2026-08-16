@@ -101,3 +101,112 @@ describe('the layout renders it', () => {
     expect(layout).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
   })
 })
+
+/**
+ * Print and reflow (story 4.7, AC9 and AC10).
+ *
+ * UX-DR22 asks for a print treatment on the register **and** the finding
+ * detail, and story 4.6's AC10 deferred it here so the two would share one
+ * stylesheet rather than grow two. This is that stylesheet.
+ *
+ * ## What is asserted, and what cannot be
+ *
+ * jsdom does not evaluate media queries, so no test here can prove a rule
+ * *applied* on paper or at a phone width. What can be proven is that the rules
+ * exist, that they name the right things, and — the half that actually rots —
+ * that the markup carries the hooks they select on. The component tests assert
+ * that side; this asserts this one.
+ *
+ * Every assertion below is about what is **hidden** as much as what survives. A
+ * print stylesheet that hides nothing passes any check for what it keeps.
+ */
+describe('AC9: the print treatment', () => {
+  const printBlock = (): string => {
+    const css = applicationStylesheet()
+    const at = css.indexOf('@media print')
+
+    expect(at, 'there is no print treatment at all').toBeGreaterThan(-1)
+
+    // From the at-rule to the closing brace of its block. Crude, and adequate:
+    // the block is the last thing in the sheet and nothing nests inside it.
+    return css.slice(at)
+  }
+
+  it('exists', () => {
+    expect(applicationStylesheet()).toContain('@media print')
+  })
+
+  it.each([
+    ['buttons, which do nothing on paper', 'button'],
+    ['the search form', 'form'],
+    ['navigation', 'nav'],
+  ])('hides %s', (_name, selector) => {
+    const block = printBlock()
+
+    expect(block).toMatch(new RegExp(`${selector}[^{]*\\{[^}]*display:\\s*none`))
+  })
+
+  it('keeps the record itself, rather than hiding everything', () => {
+    // The failure mode opposite to the one above: a stylesheet that hid the
+    // tables would produce a board packet with no findings in it.
+    const block = printBlock()
+
+    expect(block).not.toMatch(/(^|[\s,])table[^{]*\{[^}]*display:\s*none/)
+    expect(block).not.toMatch(/(^|[\s,])dl[^{]*\{[^}]*display:\s*none/)
+  })
+
+  it('drops the ink ground, so a page is not printed as a solid block', () => {
+    expect(printBlock()).toMatch(/background:\s*(#fff|white|transparent)/)
+  })
+
+  it('shows a link as text rather than as a live affordance', () => {
+    // A register row is a link. On paper the underline is noise, and the URL is
+    // not something a director can click.
+    expect(printBlock()).toMatch(/a\b[^{]*\{[^}]*text-decoration:\s*none/)
+  })
+})
+
+describe('AC10: evidence tables reflow rather than scrolling sideways', () => {
+  const reflowBlock = (): string => {
+    const css = applicationStylesheet()
+    const at = css.indexOf('@media (max-width:')
+
+    expect(at, 'there is no narrow-viewport treatment').toBeGreaterThan(-1)
+
+    return css.slice(at, css.indexOf('@media print') === -1 ? undefined : css.indexOf('@media print'))
+  }
+
+  it('has a narrow-viewport block at the breakpoint EXPERIENCE.md names', () => {
+    // "Below 48rem" — stated in rem so it follows a reader's text size, which
+    // is the point of the rule it belongs to.
+    expect(applicationStylesheet()).toContain('@media (max-width: 48rem)')
+  })
+
+  it('turns the evidence table into stacked groups', () => {
+    const block = reflowBlock()
+
+    expect(block).toMatch(/\.evidence-table[^{]*\{[^}]*display:\s*block/)
+  })
+
+  it('labels each value with its column, since the header row is gone', () => {
+    // A stacked cell with no label is a figure with nothing saying what it is,
+    // which on a page about money is worse than the table it replaced.
+    const block = reflowBlock()
+
+    expect(block).toContain('attr(data-column)')
+  })
+
+  it('keeps figures tabular, which EXPERIENCE.md asks for by name', () => {
+    expect(reflowBlock()).toMatch(/font-variant-numeric:\s*tabular-nums/)
+  })
+
+  it('introduces no horizontal scroller of its own', () => {
+    // The stylesheet's half of the rule. **The half that mattered was inline**
+    // — story 4.6 put the scroller in a component style, not here — so the
+    // assertion that actually guards EXPERIENCE.md lives in
+    // `app/findings/[id]/detail-panel.test.tsx`, against the rendered markup.
+    const rules = applicationStylesheet().replace(/\/\*[\s\S]*?\*\//g, '')
+
+    expect(rules).not.toMatch(/overflow-x:\s*(auto|scroll)/)
+  })
+})
