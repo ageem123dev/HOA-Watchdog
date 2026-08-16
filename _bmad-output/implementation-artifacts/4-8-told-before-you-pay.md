@@ -184,20 +184,20 @@ not the one bad message, it is the nineteen good ones behind it in the loop.
         second row, the revokes actually bite (assert the `42501`, do not assume it), and the
         foreign key holds.
 
-- [ ] **Task 2 — The ports** (AC: 1, 2, 7, 8)
-  - [ ] `core/ports/mail.ts` — a `MailSender` with one method taking a message
+- [x] **Task 2 — The ports** (AC: 1, 2, 7, 8)
+  - [x] `core/ports/mail.ts` — a `MailSender` with one method taking a message
         (`to`, `subject`, `text`). Nothing about providers, nothing about HTML. Write the header
         argument for why this port is thin, the way `core/ports/finding.ts` argues for what it omits.
-  - [ ] `core/ports/finding-alert.ts` — claim, and record the outcome. **The claim is one statement,
+  - [x] `core/ports/finding-alert.ts` — claim, and record the outcome. **The claim is one statement,
         not a read followed by a write**: `insert … on conflict (finding_id) do update … returning`,
         so two runs arriving together produce one claim and the loser is told it lost. This is the
         same argument `RaisedFinding.wasAlreadyKnown` makes and it must not be re-litigated in
         application code.
-  - [ ] Extend the board-member read with "every member who is not disabled". Decide whether that
+  - [x] Extend the board-member read with "every member who is not disabled". Decide whether that
         belongs on `UserDirectory` (today: sign-in only) or on a new port, and **write the reason
         down** — `core/ports/finding.ts`'s "two ports, because these are two capabilities" is the
         precedent and it argues for the split.
-  - [ ] Port shape asserted with `declaredMembers` (`core/ports/declared-members.ts`) — the shared
+  - [x] Port shape asserted with `declaredMembers` (`core/ports/declared-members.ts`) — the shared
         helper, not one of the five copies with the `indexOf` bug.
 
 - [ ] **Task 3 — The message a board member reads** (AC: 3, 4, 5, 6, 10)
@@ -385,7 +385,88 @@ worth having. #8 and #9 are the same about the lifecycle — 021's trigger had t
 UPDATE-only to both ends after a plain INSERT walked past it, and copying the fixed version rather
 than the original is the whole value of having a sibling.
 
+#### Task 2 — the ports
+
+**Behaviour: three port declarations, and what each one refuses to let a caller do.**
+
+*If it ran correctly, how would I know?* The shapes compile against the adapters and the notifier, and
+the **absence** of the capabilities each port argues against is asserted rather than described.
+`declaredMembers` is what makes an absence testable: it returns every member line, so a write
+capability cannot arrive on a read port in a syntax an exhaustive assertion overlooks.
+
+*How am I going to test it?* Source assertions with `declaredMembers` (the shared helper, not the
+five older copies). No runtime behaviour is being tested here — these are declarations — so a test
+that instantiated a fake would be asserting the fake.
+
+*What else can go wrong?* The interesting failures are all shape failures, and each one is a
+capability arriving somewhere it lets a later refactor do something the architecture forbids.
+
+*Could this happen anywhere else?* `finding.ts` split raising from reviewing so a detector could not
+sign off its own work, and `finding-reader.ts` split reading from both. This is the third application
+of one argument.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | `MailSender` grows a read — a mailbox the gateway can poll | GUARD | exact member list; one method |
+| 2 | `MailMessage` admits a single `to` string, so a caller can send to one director and believe it sent to the board | GUARD | `readonly to: readonly string[]` asserted exactly |
+| 3 | `MailMessage` grows an `html` field, re-opening the markup decision by accident | GUARD | exact member list — the decision is enforced by the type, not by a habit |
+| 4 | the recipient read lands on `UserDirectory`, letting sign-in enumerate every address | GUARD | separate port; `UserDirectory`'s member list asserted unchanged |
+| 5 | the recipient read takes a `limit`, so a director is silently dropped from a warning | GUARD | no `limit` in the declared member, and the reason recorded |
+| 6 | the ledger grows a `delete`, `unsend` or `clear` | GUARD | exact member list; migration 023 refuses it anyway, so a method here would be one the database answers with `42501` |
+| 7 | `claim` returns `void`, so a caller cannot tell "I own this" from "somebody else does" | GUARD | return type asserted as `Promise<boolean>` |
+| 8 | `claim` takes no staleness argument and reads the clock itself | GUARD | `staleBefore: Date` in the declared member — the seam the retry test needs |
+| 9 | reading what needs alerting lands on the ledger, so one object can both choose and claim | GUARD | it goes on `FindingReader`, whose port test asserts an exact list |
+| 10 | `awaitingAlert` is unbounded | GUARD | `limit: number`, required, the rule `unreviewed` and `register` already carry |
+
+**Cross-check.** #6 is checked twice by two independent mechanisms — the port declares no way to say
+it, and migration 023 revokes the grant that would let it happen. Either alone is a convention;
+together they are a property, which is the arrangement migration 007's comment argues for.
+
 ### Completion Notes List
+
+**Task 2 — the ports, and the adapters the port change forced.** Three new ports
+(`mail.ts`, `finding-alert.ts`, `board-recipients.ts`), a fourth read on `FindingReader`, and the
+Postgres adapters for all of it. The adapters were not planned for this task: widening `FindingReader`
+made `finding-reader-postgres.ts` stop compiling, and shipping a task with a type error to be fixed
+later is the kind of debt that gets discovered by the next person.
+
+*Shapes guarded:* `MailMessage` has no `html` field and its absence is asserted, so re-opening the
+plain-text decision has to be a decision; `to` is a list, because a type that can hold one director
+invites a caller to tell one and believe it told the board; `MailSender` cannot read; the ledger
+declares no way to un-send or delete, which migration 023 refuses anyway — two statements of one
+rule, safe because something fails when they disagree; `claim` returns `boolean` rather than `void`,
+because a caller that cannot tell "I own this" from "somebody else does" sends anyway; `staleBefore`
+is handed in, so the retry window is a value a test sets rather than a date a test waits for; the
+recipient read is its own port, so sign-in does not acquire the ability to enumerate the board.
+
+*The one place this project's usual rule is deliberately not applied:* `BoardRecipients.active()`
+takes no `limit`. Every other read here is bounded because every other read is over a table that
+grows; the board is a handful of directors. And a bounded read fails in exactly the direction this
+story exists to prevent — a director silently dropped from a warning, with the alert looking sent and
+the delivery row looking complete. The reason is written into the port so a later reader does not
+"fix" it.
+
+*Sensitivity check:* the adapter tests were written before the adapter but never observed red — the
+module did not exist, so they failed on import rather than on an assertion. Three mutations stood in
+for that, each on a load-bearing clause: dropping `claim`'s `sent_at is null` failed exactly the
+test that staleness must not reopen a delivered alert; turning `awaitingAlert` into a plain
+anti-join failed three, including the one that says a claimed-but-unsent finding is still a
+candidate; dropping `disabled_at is null` failed the departed-director test. All restored, all green.
+
+*Adversarial review (Argus, `auto`/`gemini-3.1-pro-high`, confidence 0.95, 14/14 files, 1 call, 188k
+tokens, audit chain OK):* two findings, both verified.
+- **confirmed, mechanism corrected (medium)** — `recordFailure` had no `sent_at is null` guard.
+  Argus said this lets a stale worker write a failure onto a delivered alert. It does not:
+  migration 023's trigger makes that state unrepresentable and *raises*. But raising is the defect —
+  the exception escapes the loser's failure path and looks like the failure-recording itself broke.
+  Guarded, and `recordSent` guarded with it, where the collision is worse: the loser would throw
+  after having actually put an email in somebody's inbox.
+- **confirmed for a different reason (medium)** — `recordFailure` sliced its argument unguarded.
+  Argus was worried about `null` arriving from an untyped `catch`; the port types it `string`, and
+  this project trusts an internal boundary. The real hole is representable in a `string`: a blank
+  reason, which `finding_alert_failure_is_useful` refuses — so recording that the send failed would
+  itself throw, and the alert would look like one nobody had ever tried. That is the length cap's
+  defect from the other end, and `storable()` now closes both.
 
 **Task 1 — the delivery record.** `migrations/023_finding_alert.sql` and its 22-test suite.
 AD-13's "never a second alert" is now a unique constraint rather than a habit the mailer has to
@@ -438,6 +519,14 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 
 | File | Change |
 | --- | --- |
+| `core/ports/mail.ts` + `mail.test.ts` | new — the send port and the plain-text decision, enforced by the type |
+| `core/ports/finding-alert.ts` + `finding-alert.test.ts` | new — claim, record sent, record failed |
+| `core/ports/board-recipients.ts` + `board-recipients.test.ts` | new — who an alert goes to, and the split from `UserDirectory` |
+| `core/ports/finding-reader.ts` | modified — `awaitingAlert`, the fourth read |
+| `core/ports/finding-reader.test.ts` | modified — the exact member list, updated deliberately |
+| `adapters/db/finding-alert-postgres.ts` | new — the ledger and the recipient read |
+| `adapters/db/finding-alert-postgres.test.ts` | new — 20 tests against the database |
+| `adapters/db/finding-reader-postgres.ts` | modified — `awaitingAlert`, and `toDetail` extracted so two reads cannot disagree |
 | `migrations/023_finding_alert.sql` | new — the delivery record, its constraints, its lifecycle trigger and its grants |
 | `migrations/finding-alert.test.ts` | new — 22 tests: 4 over the migration text, 18 against the database |
 | `README.md` | modified — the migration count the repo guard checks |

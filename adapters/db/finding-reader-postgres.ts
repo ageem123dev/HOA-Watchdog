@@ -104,6 +104,45 @@ export function likePattern(search: string): string {
  * a register that had not changed. `id desc` settles it, and uuidv7 makes that
  * agree with the primary sort rather than fight it.
  */
+/**
+ * One `DetailRow` as the domain sees it.
+ *
+ * Extracted rather than repeated. `byId` and `awaitingAlert` select the same
+ * columns for the same reason -- the alert's text is built from the finding's
+ * own evidence -- and two mappings of one row shape are two chances for the
+ * email and the page to disagree about the same finding.
+ */
+function toDetail(row: DetailRow): FindingDetail {
+  return {
+    id: row.id,
+    findingType: row.finding_type,
+    subjectId: row.subject_id,
+    period: { from: row.period_from, until: row.period_until },
+    evidence: row.evidence,
+    raisedOn: row.raised_on,
+    // **`reviewed_at` is the discriminator, not `state`.**
+    // `finding_review_is_attributed` refuses a reviewed row without a date, so
+    // the date being present *is* the row being reviewed -- one fact read once,
+    // rather than a state string and a timestamp that could be read as
+    // disagreeing with each other.
+    reviewed: row.reviewed_on === null ? null : { by: row.reviewer_name, on: row.reviewed_on },
+  }
+}
+
+/**
+ * The columns a `FindingDetail` is built from, shared by the two reads that
+ * return one. `f` is the `finding` alias and `m` the `board_member` one.
+ */
+const DETAIL_COLUMNS = `f.id,
+                f.finding_type,
+                f.subject_id,
+                to_char(lower(f.period), 'YYYY-MM-DD')                    as period_from,
+                to_char(upper(f.period), 'YYYY-MM-DD')                    as period_until,
+                f.evidence,
+                to_char(f.raised_at at time zone 'UTC', 'YYYY-MM-DD')     as raised_on,
+                m.display_name                                            as reviewer_name,
+                to_char(f.reviewed_at at time zone 'UTC', 'YYYY-MM-DD')   as reviewed_on`
+
 export function createFindingReader(): FindingReader {
   return {
     async unreviewed(limit: number): Promise<UnreviewedQueue> {
@@ -221,20 +260,7 @@ export function createFindingReader(): FindingReader {
       const row = rows[0]
       if (row === undefined) return null
 
-      return {
-        id: row.id,
-        findingType: row.finding_type,
-        subjectId: row.subject_id,
-        period: { from: row.period_from, until: row.period_until },
-        evidence: row.evidence,
-        raisedOn: row.raised_on,
-        // **`reviewed_at` is the discriminator, not `state`.**
-        // `finding_review_is_attributed` refuses a reviewed row without a date,
-        // so the date being present *is* the row being reviewed — one fact read
-        // once, rather than a state string and a timestamp that could be read
-        // as disagreeing with each other.
-        reviewed: row.reviewed_on === null ? null : { by: row.reviewer_name, on: row.reviewed_on },
-      }
+      return toDetail(row)
     },
 
     async register(filter: RegisterFilter): Promise<ReviewedRegister> {
@@ -333,6 +359,52 @@ export function createFindingReader(): FindingReader {
       }))
 
       return { findings, total: Number(rows[0]?.total ?? 0) }
+    },
+    async awaitingAlert(limit: number): Promise<readonly FindingDetail[]> {
+      // The same refusal the two reads above make, and for the same reason: an
+      // unbounded read of a table that only ever grows is one that gets slower
+      // every year the association runs.
+      if (!Number.isInteger(limit) || limit < 1 || limit > MOST_ROWS) {
+        throw new RangeError(
+          `a findings limit must be a whole number between 1 and ${MOST_ROWS}, not ${limit}`,
+        )
+      }
+
+      // **`not exists` against a delivered alert, and nothing about claims.**
+      // A finding is a candidate when no send has *succeeded* for it. Whether a
+      // run currently holds a claim is arbitration, and arbitration belongs to
+      // `FindingAlertLedger.claim`, which settles it in one statement against a
+      // unique constraint. A read that tried to exclude live claims would be
+      // answering a question that has already changed by the time the caller
+      // acts on the answer.
+      //
+      // **`sent_at is not null` inside the subquery, not `a.finding_id is
+      // null` outside a join.** An alert row exists the moment a claim is
+      // taken, so a plain anti-join would drop every finding a previous run had
+      // claimed and failed to send -- which is exactly the set this read exists
+      // to recover.
+      //
+      // **Oldest first**, the opposite of every other read here. The others
+      // show a board member what is most recent; this one works through a
+      // backlog, and a warning that has waited longest is the one closest to
+      // being too late. `id` breaks the tie for the reason the other reads give
+      // -- one detection run raises several findings on the same `now()`.
+      const { rows } = await writerPool().query<DetailRow>(
+        `select ${DETAIL_COLUMNS}
+           from finding f
+           left join board_member m on m.id = f.reviewed_by
+          where not exists (
+                  select 1
+                    from finding_alert a
+                   where a.finding_id = f.id
+                     and a.sent_at is not null
+                )
+          order by f.raised_at asc, f.id asc
+          limit $1`,
+        [limit],
+      )
+
+      return rows.map(toDetail)
     },
   }
 }

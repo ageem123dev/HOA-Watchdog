@@ -253,4 +253,34 @@ export interface FindingReader {
    * *name* inside it is still nullable, because `board_member.display_name` is.
    */
   register(filter: RegisterFilter): Promise<ReviewedRegister>
+
+  /**
+   * The findings the board has not yet been told about, oldest first.
+   *
+   * A fourth read rather than a fourth port, for the reason the three above sit
+   * together: reading the queue, reading one finding, reading the register and
+   * reading what is unannounced are all reads of the same register. The split
+   * this interface defends is read from write, and the alert ledger is where the
+   * writing lives.
+   *
+   * **Candidates, not instructions.** A finding appears here when no delivery
+   * has succeeded for it — whether or not another run currently holds a claim.
+   * Arbitration belongs to `FindingAlertLedger.claim`, which can do it in one
+   * statement against a unique constraint; a read that tried to exclude live
+   * claims would be answering a question that has changed by the time the caller
+   * acts on it.
+   *
+   * **Oldest first**, which is the opposite of every other read here. The others
+   * show a board member what is most recent; this one works through a backlog,
+   * and a warning that has been waiting longest is the one closest to being too
+   * late.
+   *
+   * **`FindingDetail`, not an id.** The message is built from the finding's own
+   * evidence, and a second read to fetch it would be a second chance for the
+   * alert and the page to disagree about the same finding.
+   *
+   * Bounded, like the two reads above and for the same reason: a caller that
+   * forgets a limit is the one reading a table that only ever grows.
+   */
+  awaitingAlert(limit: number): Promise<readonly FindingDetail[]>
 }
