@@ -603,6 +603,53 @@ test of its own.
 happened — and it is the property the at-least-once guarantee rests on. #2 and #4 are the same for
 the batch: one bad finding must cost exactly one finding.
 
+### Review Findings
+
+#### The whole-story integration pass — `0f079cc..HEAD`
+
+Scope: every source file this story touched, **excluding `_bmad-output/`**. The story document is the
+review's spec; reviewing it as a diff reviews the prose against itself.
+
+**Argus reported no defects** (`auto`/`gemini-3.1-pro-high`, confidence 1.0, 1 call, 495k tokens,
+audit chain OK, reflection converged). That verdict is recorded with its own caveat: **selectivity was
+0.47 — it selected 18 of 37 discovered files.** A clean result from a slice under half the diff is
+weaker evidence than a clean result from all of it, and `argus-review-routing.md` says so
+explicitly: a low selectivity "raises the bar for verification in section 5". So the cross-task
+interactions were walked by hand as well, and that is what found the one defect below.
+
+#### CONFIRMED — a reviewed finding could still be emailed
+
+**`adapters/db/finding-reader-postgres.ts`, `awaitingAlert`.** The read excluded findings with a
+delivered alert and said nothing about the lifecycle state.
+
+*Why no per-task review could see it.* Task 2 wrote the query when the only caller sent an alert in
+the same request that raised the finding — so "it will always be unreviewed anyway" was true, and
+this story's own Task 3 test design wrote it down as **OUT-OF-SCOPE** with exactly that
+justification. Task 5 then falsified it by adding the retry path. The out-of-scope note and the code
+that invalidated it are in different tasks, and each review saw only one of them. This is precisely
+the interaction the integration pass exists for.
+
+*How it is reached.* Two ordinary routes. Mail unconfigured for a week while a board works through
+the dashboard, then configured — every finding they had already dealt with arrives as an email asking
+them to go and look at it. Or a send fails, the claim goes stale after fifteen minutes, and somebody
+reviews the finding in between.
+
+*Why it matters beyond noise.* The link lands on the **already-reviewed** state, so a second director
+is invited to review something the register has already answered. An alert exists to make somebody
+look; if somebody has looked, there is nothing left for it to do.
+
+*Fix.* `state = 'unreviewed'` added to the predicate, driven by a failing database test, with the
+independently-written control query updated to encode the same rule. Sensitivity confirmed: removing
+the predicate fails exactly that test. The port's contract now states the rule and why it is
+reachable.
+
+#### Verified and not acted on
+
+Nothing else. The per-task reviews had already produced fifteen findings across the six tasks, of
+which ten were confirmed and fixed, three did not reproduce, one was a disagreement on consequence,
+and one was deferred as out of scope (`ingest.ts`'s `rollRows` NUL check for the roll-only `cycle`
+and `year` fields — recorded in Task 5's notes).
+
 ### Completion Notes List
 
 **Task 6 — closing FR-8, and the audit that found three things.**

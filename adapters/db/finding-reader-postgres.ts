@@ -378,6 +378,15 @@ export function createFindingReader(): FindingReader {
       // answering a question that has already changed by the time the caller
       // acts on the answer.
       //
+      // **`state = 'unreviewed'`, and it is not redundant.** An alert exists to
+      // make somebody look; if somebody has looked, there is nothing left for
+      // it to do. Without this, mail unset for a week and then configured sends
+      // the board an email for every finding they had already worked through --
+      // and the link lands on the already-reviewed state, inviting a second
+      // director to review what the register has answered. Found by the
+      // whole-story integration pass: it is only reachable when the retry path
+      // and this read are considered together, which no per-task review sees.
+      //
       // **`sent_at is not null` inside the subquery, not `a.finding_id is
       // null` outside a join.** An alert row exists the moment a claim is
       // taken, so a plain anti-join would drop every finding a previous run had
@@ -393,7 +402,8 @@ export function createFindingReader(): FindingReader {
         `select ${DETAIL_COLUMNS}
            from finding f
            left join board_member m on m.id = f.reviewed_by
-          where not exists (
+          where f.state = 'unreviewed'
+            and not exists (
                   select 1
                     from finding_alert a
                    where a.finding_id = f.id

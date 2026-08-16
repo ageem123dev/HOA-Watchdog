@@ -263,6 +263,14 @@ export interface FindingReader {
    * this interface defends is read from write, and the alert ledger is where the
    * writing lives.
    *
+   * **Unreviewed only.** An alert exists to make somebody look, so a finding a
+   * board member has already reviewed has nothing left for one to do — and
+   * mailing it would land the reader on the already-reviewed state, inviting a
+   * second director to review what the register has answered. Reachable
+   * whenever the alert does not go out in the same request that raised the
+   * finding: a failed send that is retried, or mail configured after a period
+   * without it.
+   *
    * **Candidates, not instructions.** A finding appears here when no delivery
    * has succeeded for it — whether or not another run currently holds a claim.
    * Arbitration belongs to `FindingAlertLedger.claim`, which can do it in one

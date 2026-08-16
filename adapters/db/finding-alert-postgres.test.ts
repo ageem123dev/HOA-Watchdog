@@ -105,6 +105,10 @@ async function cleanUp(emailPrefix?: string) {
       [`${RUN_PREFIX}%`],
     )
     await owner?.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+    // The reviewer seeded by the exclusion test above, which cannot use the
+    // email prefix the recipient suite uses -- a board member is a recipient,
+    // and leaving one behind would change what a later suite reads.
+    await owner?.query(`delete from board_member where email like $1`, [`${RUN_PREFIX}%`])
     if (emailPrefix !== undefined) {
       await owner?.query(`delete from board_member where email like $1`, [`${emailPrefix}%`])
     }
@@ -170,6 +174,7 @@ describeWithDatabase('what the board has not been told about yet', () => {
       `select f.id
          from finding f
         where f.finding_type like $1
+          and f.state = 'unreviewed'
           and not exists (
                 select 1 from finding_alert a
                  where a.finding_id = f.id and a.sent_at is not null
@@ -182,6 +187,41 @@ describeWithDatabase('what the board has not been told about yet', () => {
     const mine = seeded.filter((id) => offered.has(id)).sort()
 
     expect(mine).toEqual(control)
+  })
+
+  it('excludes a finding a board member has already reviewed', async () => {
+    // **Found by the whole-story integration pass, and only reachable through
+    // two tasks interacting.** The read excludes findings with a delivered
+    // alert; it said nothing about state, and "it will always be unreviewed
+    // anyway" was true only while an alert went out in the same request that
+    // raised the finding.
+    //
+    // The retry path and the unconfigured-then-configured path both break that.
+    // Mail unset for a week, a board working through the dashboard, mail then
+    // configured -- and every finding they had already dealt with arrives as an
+    // email asking them to go and look at it. Worse than noise: the link lands
+    // on the already-reviewed state, so a second director is invited to review
+    // something the register has already answered.
+    //
+    // An alert exists to make somebody look. If somebody has looked, there is
+    // nothing left for it to do.
+    const findingId = await seedFinding('reviewed', '1990-04-01T00:00:00Z')
+
+    const { rows } = await writer.query<{ id: string }>(
+      `insert into board_member (email, password_hash)
+       values ($1, 'scrypt$1$1$1$x$y')
+       returning id`,
+      [`${RUN_PREFIX}-reviewer@example.test`],
+    )
+    await writer.query(
+      `update finding set state = 'reviewed', reviewed_by = $2, reviewed_at = now()
+        where id = $1`,
+      [findingId, rows[0]!.id],
+    )
+
+    const awaiting = await reader.awaitingAlert(ALL)
+
+    expect(awaiting.map((entry) => entry.id)).not.toContain(findingId)
   })
 
   it('carries the evidence and the dates the message is built from', async () => {
