@@ -1,9 +1,12 @@
 import type { CheckedDocuments, DocumentsChecked } from '../../core/ports/checked-documents'
-import type {
-  FindingDetail,
-  FindingReader,
-  FindingRecord,
-  UnreviewedQueue,
+import {
+  MOST_REGISTER_ROWS,
+  type FindingDetail,
+  type FindingReader,
+  type FindingRecord,
+  type RegisterFilter,
+  type ReviewedRegister,
+  type UnreviewedQueue,
 } from '../../core/ports/finding-reader'
 import { isFindingId } from '../../core/findings/finding-id'
 import { writerPool } from './pool'
@@ -51,7 +54,32 @@ interface CheckedRow {
  * a request stops being a dashboard queue and becomes a bulk export, which is
  * story 4.7's job and belongs on a surface built to stream it.
  */
-const MOST_ROWS = 200
+const MOST_ROWS = MOST_REGISTER_ROWS
+
+/**
+ * A board member's search text, as a `LIKE` pattern that matches it literally.
+ *
+ * **`%` and `_` are wildcards, and a vendor name is not a pattern.** Left
+ * unescaped, a search for `%` matches every row and reports the whole register
+ * as a hit; `_` quietly matches any single character, so `_oastal` finds
+ * `Coastal` — a search that appears to work while answering a different
+ * question. Found by the test for it, which the first version of this query
+ * failed.
+ *
+ * The backslash goes first. Escaping it after the wildcards would escape the
+ * backslashes this function just added, which turns `\%` back into a literal
+ * backslash followed by a live wildcard.
+ *
+ * Built here rather than inline in the SQL because five predicates share it, and
+ * five copies of an escape chain is five chances for one of them to drift —
+ * which is the argument story 4.6 recorded when it found the same table copied
+ * into two files.
+ */
+export function likePattern(search: string): string {
+  const literal = search.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+
+  return `%${literal}%`
+}
 
 /**
  * The dashboard's read of the finding register.
@@ -207,6 +235,104 @@ export function createFindingReader(): FindingReader {
         // as disagreeing with each other.
         reviewed: row.reviewed_on === null ? null : { by: row.reviewer_name, on: row.reviewed_on },
       }
+    },
+
+    async register(filter: RegisterFilter): Promise<ReviewedRegister> {
+      const { limit } = filter
+
+      // The same refusal `unreviewed` makes, and for the same reason: a bound
+      // that is silently corrected is one the caller never learns they got
+      // wrong.
+      if (!Number.isInteger(limit) || limit < 1 || limit > MOST_ROWS) {
+        throw new RangeError(`register limit must be a whole number from 1 to ${MOST_ROWS}: ${limit}`)
+      }
+
+      // **Absent, not empty.** A blank search box submits on every press, and a
+      // filter of `''` would narrow the register to findings matching nothing
+      // and present that as an empty register. `app/access-log/filter.ts` makes
+      // the same distinction at the URL; this is the backstop for callers that
+      // do not.
+      const wanted = filter.search?.trim()
+      const search = wanted === undefined || wanted === '' ? null : likePattern(wanted)
+
+      const { rows } = await writerPool().query<DetailRow & { total: string }>(
+        `select f.id,
+                f.finding_type,
+                f.subject_id,
+                to_char(lower(f.period), 'YYYY-MM-DD')                    as period_from,
+                to_char(upper(f.period), 'YYYY-MM-DD')                    as period_until,
+                f.evidence,
+                to_char(f.raised_at at time zone 'UTC', 'YYYY-MM-DD')     as raised_on,
+                m.display_name                                            as reviewer_name,
+                to_char(f.reviewed_at at time zone 'UTC', 'YYYY-MM-DD')   as reviewed_on,
+                count(*) over ()                                          as total
+           from finding f
+           -- Left, and here it is equivalent to an inner join today. Saying so
+           -- rather than inventing a reason: this query filters to reviewed
+           -- rows, finding_review_is_attributed guarantees those carry a
+           -- reviewed_by, and the foreign key declares no ON DELETE action --
+           -- so a referenced member cannot be deleted and the join always
+           -- matches. A nullable display_name does not change that: an inner
+           -- join filters on the join condition, not on the columns selected
+           -- through it.
+           --
+           -- Kept anyway, because both ways this stops being equivalent end
+           -- with rows silently missing from a permanent record: the filter
+           -- widening to take in unreviewed findings, or the key gaining
+           -- ON DELETE SET NULL. Left costs nothing here and fails safe there.
+           --
+           -- The sibling query above needs it for a live reason; this one does
+           -- not. Its comment was corrected once already for asserting
+           -- something false about SQL, and the first version of this one
+           -- repeated the mistake by claiming the member might have been
+           -- removed. And no backticks: the warning below is not decorative,
+           -- and this comment first carried three of them.
+           left join board_member m on m.id = f.reviewed_by
+          where f.state = 'reviewed'
+            and (
+              $2::text is null
+              or f.finding_type ilike $2 escape '\\'
+              or m.display_name ilike $2 escape '\\'
+              -- **Values, never keys.** jsonpath reaches the named display
+              -- fields at any depth, so a vendor inside the pairs array is
+              -- found; a search for "vendor" is not answered with every spike
+              -- finding because the key happens to be spelled vendorName.
+              or exists (
+                select 1
+                  from jsonb_path_query(f.evidence, 'strict $.**.vendorName') as v
+                 where v #>> '{}' ilike $2 escape '\\'
+              )
+              or exists (
+                select 1
+                  from jsonb_path_query(f.evidence, 'strict $.**.unitNumber') as v
+                 where v #>> '{}' ilike $2 escape '\\'
+              )
+              or exists (
+                select 1
+                  from jsonb_path_query(f.evidence, 'strict $.**.holderName') as v
+                 where v #>> '{}' ilike $2 escape '\\'
+              )
+            )
+          -- Newest review first. The tie-break is not decoration: one detection
+          -- run marks nothing, but a board member working through a queue
+          -- stamps several rows inside the same second, and a register that
+          -- reshuffles between two refreshes is one nobody can cite a line of.
+          order by f.reviewed_at desc, f.id desc
+          limit $1`,
+        [limit, search],
+      )
+
+      const findings: readonly FindingDetail[] = rows.map((row) => ({
+        id: row.id,
+        findingType: row.finding_type,
+        subjectId: row.subject_id,
+        period: { from: row.period_from, until: row.period_until },
+        evidence: row.evidence,
+        raisedOn: row.raised_on,
+        reviewed: row.reviewed_on === null ? null : { by: row.reviewer_name, on: row.reviewed_on },
+      }))
+
+      return { findings, total: Number(rows[0]?.total ?? 0) }
     },
   }
 }

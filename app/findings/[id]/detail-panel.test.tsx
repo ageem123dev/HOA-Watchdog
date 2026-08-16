@@ -148,6 +148,55 @@ describe('AC2: what was compared, laid out', () => {
   })
 })
 
+describe('story 4.7 AC10: the evidence table reflows, it does not scroll sideways', () => {
+  it('wraps the table in nothing that scrolls horizontally', () => {
+    // **The rule story 4.6 broke.** EXPERIENCE.md: evidence tables "reflow to
+    // stacked label/value groups... **They do not scroll horizontally** — a
+    // table that scrolls sideways in a meeting is a table nobody reads." The
+    // first version of this page put the table inside `overflow-x: auto`.
+    //
+    // Asserted against every element, because the scroller was an ancestor of
+    // the table rather than the table itself.
+    draw()
+
+    for (const element of document.querySelectorAll<HTMLElement>('*')) {
+      expect(element.style.overflowX).not.toBe('auto')
+      expect(element.style.overflowX).not.toBe('scroll')
+      expect(element.style.overflow).not.toBe('auto')
+      expect(element.style.overflow).not.toBe('scroll')
+    }
+  })
+
+  it('carries the hook the stacked layout selects on', () => {
+    draw()
+
+    expect(screen.getByRole('table').className).toContain('evidence-table')
+  })
+
+  it('labels every cell with its column, since the header row is hidden when stacked', () => {
+    // A stacked cell with no label is a figure with nothing saying what it is.
+    // CSS cannot reach the <th> above it, so the label has to be in the markup.
+    draw()
+
+    const columns = screen.getAllByRole('columnheader').map((header) => header.textContent)
+    const cells = within(screen.getAllByRole('row')[1]!).getAllByRole('cell')
+
+    expect(cells).toHaveLength(columns.length)
+    cells.forEach((cell, index) => {
+      expect(cell.getAttribute('data-column')).toBe(columns[index])
+    })
+  })
+
+  it('marks which cells are figures, so they stay tabular when stacked', () => {
+    draw()
+
+    const cells = within(screen.getAllByRole('row')[1]!).getAllByRole('cell')
+    const marked = cells.filter((cell) => cell.getAttribute('data-numeric') === 'true')
+
+    expect(marked.length).toBeGreaterThan(0)
+  })
+})
+
 describe('AC6: a finding somebody has already reviewed offers no action', () => {
   it('says who reviewed it and when', () => {
     draw(finding({ reviewed: { by: 'R. Mbeki', on: '2026-04-20' } }))

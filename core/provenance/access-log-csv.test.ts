@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { accessLogCsv, cell, COLUMNS } from './access-log-csv'
+import { accessLogCsv, COLUMNS } from './access-log-csv'
+import { cell } from '../csv/cell'
 import type { QueryLogRecord } from '../ports/query-log-reader'
 
 /**

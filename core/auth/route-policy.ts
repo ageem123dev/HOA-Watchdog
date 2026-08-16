@@ -34,6 +34,15 @@ export const QUARANTINE_ROUTE = '/quarantine'
  * 4.8 will put these links in email, and a route built by string concatenation
  * from a value nobody encoded is one `../` away from pointing somewhere else.
  */
+/**
+ * The reviewed register.
+ *
+ * Named here beside the routes it sits among, and deliberately **not** in
+ * `PUBLIC_ROUTES`: it is the association's entire reviewed history, naming
+ * vendors, amounts and — on a dues finding — a member.
+ */
+export const REGISTER_ROUTE = '/findings/register'
+
 export function findingRoute(findingId: string): string {
   return `/findings/${encodeURIComponent(findingId)}`
 }

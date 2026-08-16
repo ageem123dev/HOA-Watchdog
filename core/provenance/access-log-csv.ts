@@ -1,85 +1,18 @@
+import { cell } from '../csv/cell'
 import type { QueryLogRecord } from '../ports/query-log-reader'
 
 /**
  * The access log as a CSV a treasurer can open (story 3.8, UX-DR16).
  *
- * ## Formula injection is the reason this is a module and not a template string
+ * ## The escaping lives in `core/csv/cell.ts`
  *
- * The destination is Excel or Numbers on a board member's laptop, and a cell
- * beginning `=`, `+`, `-` or `@` is a **formula**, not text. Spreadsheets have
- * executed those on open for decades, and `=cmd|'/c calc'!A1` is the standard
- * demonstration.
- *
- * That matters here more than in most exports, because this file is built from
- * text people outside the board influenced. `parameters` holds the values bound
- * into a query — a unit number a member typed, a year they asked about — and the
- * whole point of the audit trail is that it records what *other people* did.
- * Quoting alone does not help: a spreadsheet strips the quotes and then reads
- * the formula.
- *
- * So a leading formula character is prefixed with a tab, which spreadsheets
- * treat as text and which a reader does not see as a stray quote mark.
+ * It was written here for story 3.8 and paid for twice in review — the
+ * full-width formula characters, then leading whitespace. Story 4.7 needed the
+ * same neutralisation for the register's export, and two copies of it would be
+ * two answers to "is this cell dangerous", only one of which stays correct. So
+ * it moved, and this file is now what it always described itself as: the
+ * *shape* of the access log, not the escaping.
  */
-
-/**
- * What a spreadsheet reads as the start of a formula.
- *
- * The full-width forms are here too, and they are not decoration: Excel with a
- * Japanese IME converts a leading full-width ＝ into a formula, so a payload
- * written that way walks past a filter that only knows the ASCII four. Raised by
- * CodeRabbit.
- */
-const FORMULA_LEADERS = new Set([
-  '=',
-  '+',
-  '-',
-  '@',
-  '＝',
-  '＋',
-  '－',
-  '＠',
-])
-
-/**
- * One CSV cell: neutralised, then quoted.
- *
- * The order matters. Neutralising after quoting would put the tab outside the
- * quotes, where it is a delimiter rather than part of the value.
- */
-export function cell(value: unknown): string {
-  const text = stringify(value)
-  // A tab, not an apostrophe. The apostrophe trick is more common and it is
-  // worse: Excel hides it but LibreOffice and every plain-text reader show a
-  // stray quote in front of every affected value, and this is a document people
-  // read as a record.
-  const safe = startsFormula(text) ? `\t${text}` : text
-
-  return `"${safe.replaceAll('"', '""')}"`
-}
-
-/**
- * Whether a value would be read as a formula, **after leading whitespace**.
- *
- * The first version tested `charAt(0)` and was trivially bypassed: a payload
- * written as `" =cmd|…"` or `"\r=cmd|…"` has an ordinary character first, so it
- * passed through unprefixed while spreadsheets discard the whitespace and read
- * the formula underneath. Raised by Argus.
- *
- * The check trims; **the value does not**. Prefixing the original preserves the
- * record byte for byte — this is an audit trail, and a defence that quietly
- * edited what somebody typed would be its own kind of falsification.
- */
-function startsFormula(text: string): boolean {
-  return FORMULA_LEADERS.has(text.trimStart().charAt(0))
-}
-
-function stringify(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === 'object') return JSON.stringify(value)
-
-  return String(value)
-}
 
 /** The header row, which is also the column order. */
 export const COLUMNS = [

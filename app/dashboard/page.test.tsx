@@ -14,7 +14,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { QUARANTINE_ROUTE } from '@/core/auth/route-policy'
+import { QUARANTINE_ROUTE, REGISTER_ROUTE } from '@/core/auth/route-policy'
 
 const auth = vi.fn()
 const unreviewed = vi.fn()
@@ -82,6 +82,20 @@ describe('the dashboard', () => {
     // And the constant is what the page is built from, so it has to agree with
     // the directory the route actually lives in.
     expect(QUARANTINE_ROUTE).toBe('/quarantine')
+  })
+
+  it('links to the reviewed register', async () => {
+    // **UX-DR10 lists the register as part of this surface**, and until story
+    // 4.7 there was nowhere for a reviewed finding to go. A record with no way
+    // in is one nobody learns.
+    await renderDashboard()
+
+    const link = screen.getByRole('link', { name: /reviewed register/i })
+
+    // The literal, for the reason above: comparing against the constant the
+    // page is built from compares it with itself.
+    expect(link.getAttribute('href')).toBe('/findings/register')
+    expect(REGISTER_ROUTE).toBe('/findings/register')
   })
 
   it('links there whether or not anything is waiting', async () => {
