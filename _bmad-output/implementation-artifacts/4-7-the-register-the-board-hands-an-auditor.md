@@ -152,12 +152,12 @@ argument `app/dashboard/page.tsx` already makes for the quarantine link.
   - [x] The export control states the count it will produce. The in-progress state disables it.
   - [x] The dashboard gains the link (AC11).
 
-- [ ] **Task 4 — The download** (AC: 4, 5, 6)
-  - [ ] `app/findings/register/export/route.ts`, following `app/access-log/export/route.ts`:
+- [x] **Task 4 — The download** (AC: 4, 5, 6)
+  - [x] `app/findings/register/export/route.ts`, following `app/access-log/export/route.ts`:
         auth before read, 404 for no session, BOM, `Content-Disposition`.
-  - [ ] The CSV producer lives in `core/`, reusing `access-log-csv.ts`'s `cell` neutralisation.
+  - [x] The CSV producer lives in `core/`, reusing `access-log-csv.ts`'s `cell` neutralisation.
         **Do not write a second formula-injection guard** — extract or import the first.
-  - [ ] The route honours the same filter the page did, and a test proves the exported set matches
+  - [x] The route honours the same filter the page did, and a test proves the exported set matches
         the on-screen set.
 
 - [ ] **Task 5 — Print and reflow** (AC: 9, 10)
@@ -529,6 +529,62 @@ findings:
 
 *Gate:* `npm test` 2871 · lint 0 errors · `tsc` 8 (baseline) · build compiled, `/findings/register`
 registered.
+
+#### Task 4 — the download
+
+The escaping moved to **`core/csv/cell.ts`**, imported by both exports. A findings module reaching
+into `core/provenance/access-log-csv` for its quoting would have been a dependency that reads as an
+accident, and the story forbids a second copy outright.
+
+`registerCsv` builds every value from `toRegisterView` — the same function the surface renders from
+— so the file cannot describe a finding differently from the screen it was downloaded from. An
+auditor comparing the board packet against the register is the whole scenario this story exists for.
+
+*Two tests that were wrong in useful ways:*
+
+- **The formula-injection test targeted a vendor name and found it correctly unescaped.** A vendor
+  sits *mid-title*, where a spreadsheet reads nothing. Which cell can actually begin with hostile
+  text? Not the title, which opens with a fixed phrase and whose fallback is constrained by
+  `finding_type_is_verb_noun`; not the evidence line, which opens with a count. **The reviewer's
+  display name** is the one column whose first character is a person's to choose, and it is now the
+  one asserted.
+- **The BOM assertion could never have failed.** `Response.text()` UTF-8 decodes, which *strips* a
+  leading BOM — so the test could not see one that was there. `app/access-log/export/route.test.ts`
+  records the same trap and reads `arrayBuffer()`; this now does too, and dropping the BOM fails it.
+
+*Sensitivity:* four mutations on the route, all caught — read before the guard (1), 401 instead of
+404 (4), ignore the filter (2), drop the attachment disposition (1). Plus one on the escaping.
+
+*Review gate — `argus_review` on the task diff:* the first call failed in the provider; the second
+completed. `moderate` · confidence 0.9 · 9/9 files. Four findings — **three taken, one declined:**
+
+- **[high] the formula check trimmed whitespace and nothing else — confirmed, and it is the
+  significant one.** A control character is not Unicode whitespace, so a value beginning with one
+  survived `trimStart()` with an ordinary-looking first character and walked past the check, while a
+  spreadsheet skips the byte and evaluates. This guards **both** exports and had already been
+  hardened twice — the same mistake each time: covering the characters someone thought of rather
+  than the ones a spreadsheet ignores. Now a closed class, via a **code-point scan** rather than a
+  regex, following `core/auth/route-policy.ts`'s own reasoning. Vertical tab and form feed turned
+  out to be whitespace to `trimStart` already, which is why only part of the range was reachable.
+  Postgres cannot store a NUL, so that payload cannot arrive from the database; the rest of the
+  range can, in a display name.
+- **[high] `period === undefined` misses `null`** — taken, along with a guard against an unparseable
+  date, so a bad range empties one cell rather than writing "Invalid Date" into a board packet.
+- **[high] O(N-squared) lookups** — taken as a `Map`, but **the severity is wrong**: the port's
+  ceiling is 200 rows, so three `find` calls per row is 120,000 comparisons and microseconds, not
+  the denial of service reported. Fixed because it is needless work, not because it was dangerous.
+- **[medium] stream the CSV rather than building it in memory — declined.** The same 200-row ceiling
+  bounds the file to tens of kilobytes, and `app/access-log/export/route.ts` builds its export the
+  same way. A `ReadableStream` here is complexity bought against a load the port already forbids.
+
+*And the backslash bit twice more* — five times now in this story lineage. Writing the
+control-character test cases through a shell heredoc collapsed the escapes; writing the fix's regex
+through the editing tool put **literal control bytes into a character class**, which is story 3.5's
+exact defect. The resolution was already in the codebase and is now followed: `route-policy.ts`
+refuses to use a character class for this, precisely so no control character need appear in source.
+
+*Gate:* `npm test` 2930 · lint 0 errors · `tsc` 8 (baseline) · build compiled,
+`/findings/register/export` registered.
 
 ## Change Log
 
