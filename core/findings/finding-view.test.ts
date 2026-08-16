@@ -19,10 +19,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { UnreviewedFinding } from '../ports/finding-reader'
+import type { FindingRecord } from '../ports/finding-reader'
 import { toFindingRow } from './finding-view'
 
-function finding(overrides: Partial<UnreviewedFinding> = {}): UnreviewedFinding {
+function finding(overrides: Partial<FindingRecord> = {}): FindingRecord {
   return {
     id: 'finding-1',
     findingType: 'possible_duplicate_invoice',
@@ -320,6 +320,87 @@ describe('an invoice above the vendor average', () => {
     )
 
     expect(row.title).toBe(`Invoice above average — ${said}`)
+  })
+
+  it.each([
+    ['is not a number at all', 'abc'],
+    ['carries a currency mark the sentence would repeat', '$31.4'],
+    ['is a number rather than the decimal string the detector stores', 31.4],
+    // A negative "above average" is a sentence that contradicts itself. The
+    // detector cannot raise one today — it only fires above the threshold — but
+    // the value comes out of `jsonb`, where it is whatever was written. Raised
+    // by CodeRabbit.
+    ['is negative, which would say -15% above an average', '-15'],
+    ['is negative with a decimal place', '-15.5'],
+  ])('builds no sentence when the percentage %s', (_name, percentOverAverage) => {
+    // **`abc%` on a fiduciary surface.** `percentOverAverage` comes out of
+    // `jsonb`, and a non-blank-string check is not a number check — the row
+    // interpolated it straight into the sentence a board member reads. Raised
+    // by Argus against story 4.6's detail view, which guards this; the row is
+    // the sibling that did not, and the two describing the same finding
+    // differently is what this story exists to prevent.
+    const row = toFindingRow(
+      spike({ ...spikeEvidence, spikes: [{ ...spikeEvidence.spikes[0], percentOverAverage }] }),
+    )
+
+    expect(row.evidenceLine).toBeNull()
+  })
+
+  it('does not hang a separator off a vendor name that is only whitespace', () => {
+    // A blank name is an absent one, and treating it as present produces
+    // `Invoice above average — ` with nothing after the dash: a title that
+    // looks like the extractor dropped the vendor mid-render. Found by story
+    // 4.6's test-value pass — the blank guard this rests on was carried by both
+    // callers and asserted by neither.
+    const row = toFindingRow(
+      spike({ ...spikeEvidence, spikes: [{ ...spikeEvidence.spikes[0], vendorName: '   ' }] }),
+    )
+
+    expect(row.title).toBe('Invoice above average')
+  })
+})
+
+describe('the copy counts in singulars as well as plurals', () => {
+  // Raised by Argus on the whole-story pass. "1 instalments" and "across 1
+  // invoices" are what a template with a hard-coded plural produces, and this
+  // is copy a board member reads beside a figure they are being asked to act
+  // on — the surface's credibility is most of what it has.
+
+  it('says one instalment', () => {
+    const row = toFindingRow(shortfall({ ...shortfallEvidence, instalmentsDue: 1 }))
+
+    expect(row.evidenceLine).toMatch(/across 1 instalment;/)
+    expect(row.evidenceLine).not.toMatch(/1 instalments/)
+  })
+
+  it('still says several instalments', () => {
+    const row = toFindingRow(shortfall({ ...shortfallEvidence, instalmentsDue: 3 }))
+
+    expect(row.evidenceLine).toMatch(/across 3 instalments;/)
+  })
+
+  it('says one invoice was averaged', () => {
+    const row = toFindingRow(
+      spike({ ...spikeEvidence, spikes: [{ ...spikeEvidence.spikes[0], invoicesAveraged: 1 }] }),
+    )
+
+    expect(row.evidenceLine).toMatch(/across 1 invoice\./)
+    expect(row.evidenceLine).not.toMatch(/1 invoices/)
+  })
+
+  it('says one invoice was checked', () => {
+    const row = toFindingRow(
+      duplicate({ ...duplicateEvidence, invoicesChecked: 1, pairs: [duplicateEvidence.pairs[0]] }),
+    )
+
+    expect(row.evidenceLine).toMatch(/1 of 1 invoice on this upload/)
+    expect(row.evidenceLine).not.toMatch(/1 invoices/)
+  })
+
+  it('still says several invoices were checked', () => {
+    const row = toFindingRow(duplicate(duplicateEvidence))
+
+    expect(row.evidenceLine).toMatch(/of 3 invoices on this upload/)
   })
 })
 

@@ -13,9 +13,10 @@
  * - **The list never claims to be the register.** When it shows a window, it
  *   says so.
  *
- * The rows do not navigate in this story. Story 4.6 makes the whole row the
- * click target at the same moment it builds the destination, rather than
- * shipping a link to a route that 404s.
+ * Story 4.6 added the navigation, at the moment it built the destination —
+ * **and every assertion above it still passes unchanged**, which is what AC1
+ * asks for. The row's shape did not move to accommodate the link; the link was
+ * wrapped around the shape.
  */
 
 import { cleanup, render, screen, within } from '@testing-library/react'
@@ -188,6 +189,70 @@ describe('a finding row', () => {
     render(<FindingsList view={findings([row(), row({ id: 'finding-2' })])} />)
 
     expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2)
+  })
+})
+
+describe('AC1: the whole row is the click target, and only the row', () => {
+  it('takes the reader to that finding', () => {
+    render(<FindingsList view={findings([row({ id: 'finding-7' })])} />)
+
+    // The literal, not `findingRoute('finding-7')`. Computing the expectation
+    // with the function under test asserts only that it equals itself — it
+    // would pass against a `findingRoute` returning `/wrong/finding-7`. Raised
+    // by CodeRabbit, and it is the "guard that proves nothing" shape this
+    // project keeps finding.
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/findings/finding-7')
+  })
+
+  it('has exactly one link per row, so the amount is not a separate target', () => {
+    // **UX-DR4's clause worth asserting rather than assuming.** A second link
+    // around the money would be a second tab stop with no separate meaning, and
+    // it is the one a hurried reader's cursor is nearest to — so a mis-click
+    // near the figure would do something a mis-click near the text does not.
+    render(
+      <FindingsList
+        view={findings([
+          row({ id: 'a', amount: '$1,450.00' }),
+          row({ id: 'b', amount: null }),
+        ])}
+      />,
+    )
+
+    for (const item of screen.getAllByRole('listitem')) {
+      expect(within(item).getAllByRole('link')).toHaveLength(1)
+    }
+  })
+
+  it('puts the whole row inside the link, so a click anywhere on it navigates', () => {
+    render(<FindingsList view={findings([row({ id: 'finding-7', amount: '$1,450.00' })])} />)
+
+    const link = screen.getByRole('link')
+
+    // The tick, the words, the evidence line, the date and the amount — the
+    // click target is the row, not a phrase inside it.
+    expect(link.textContent).toMatch(/Needs review/)
+    expect(link.textContent).toMatch(/Possible duplicate invoice/)
+    expect(link.textContent).toMatch(/\$1,450\.00/)
+    expect(link.querySelector('[aria-hidden="true"]')).not.toBeNull()
+    expect(link.querySelector('time')).not.toBeNull()
+  })
+
+  it('encodes the id rather than pasting it into the path', () => {
+    // Story 4.8 will send these links by email, and a route built by
+    // concatenation from a value nobody encoded is one `../` from elsewhere.
+    render(<FindingsList view={findings([row({ id: 'a/../b' })])} />)
+
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/findings/a%2F..%2Fb')
+  })
+
+  it('does not read as twenty separate destinations', () => {
+    // An unstyled anchor renders the whole row in link blue and underlines it.
+    render(<FindingsList view={findings([row()])} />)
+
+    const link = screen.getByRole('link') as HTMLElement
+
+    expect(link.style.textDecoration).toBe('none')
+    expect(link.style.color).toBe('inherit')
   })
 })
 

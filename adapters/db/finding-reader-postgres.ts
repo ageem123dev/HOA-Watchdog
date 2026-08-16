@@ -1,5 +1,11 @@
 import type { CheckedDocuments, DocumentsChecked } from '../../core/ports/checked-documents'
-import type { FindingReader, UnreviewedFinding, UnreviewedQueue } from '../../core/ports/finding-reader'
+import type {
+  FindingDetail,
+  FindingReader,
+  FindingRecord,
+  UnreviewedQueue,
+} from '../../core/ports/finding-reader'
+import { isFindingId } from '../../core/findings/finding-id'
 import { writerPool } from './pool'
 
 interface FindingRow {
@@ -11,6 +17,26 @@ interface FindingRow {
   evidence: unknown
   raised_on: string
   total: string
+}
+
+/**
+ * Declared independently rather than extending `FindingRow`.
+ *
+ * Inheriting it dragged in `total`, which forced the single-finding query to
+ * select a dummy `0 as total` — and `0` is an int4, so node-pg hands back a
+ * number where the interface promises a string. A field that is a lie is worse
+ * for being unread: the next person to use it inherits the lie. Raised by Argus.
+ */
+interface DetailRow {
+  id: string
+  finding_type: string
+  subject_id: string
+  period_from: string
+  period_until: string
+  evidence: unknown
+  raised_on: string
+  reviewer_name: string | null
+  reviewed_on: string | null
 }
 
 interface CheckedRow {
@@ -108,7 +134,7 @@ export function createFindingReader(): FindingReader {
         [limit],
       )
 
-      const findings: readonly UnreviewedFinding[] = rows.map((row) => ({
+      const findings: readonly FindingRecord[] = rows.map((row) => ({
         id: row.id,
         findingType: row.finding_type,
         subjectId: row.subject_id,
@@ -122,6 +148,65 @@ export function createFindingReader(): FindingReader {
       // there is no row to carry it, and zero is then the right answer rather
       // than a fallback: the register held nothing to count.
       return { findings, total: Number(rows[0]?.total ?? 0) }
+    },
+
+    async byId(id: string): Promise<FindingDetail | null> {
+      // **Checked here rather than let Postgres reject it.** `finding.id` is a
+      // `uuid`, so a malformed value raises 22P02 on the cast — and this id
+      // comes straight off the URL path, where anything at all is reachable by
+      // typing. A database error is the wrong answer to "is there a finding
+      // here": the honest one is no, which is what the surface turns into a
+      // 404.
+      if (!isFindingId(id)) return null
+
+      const { rows } = await writerPool().query<DetailRow>(
+        `select f.id,
+                f.finding_type,
+                f.subject_id,
+                to_char(lower(f.period), 'YYYY-MM-DD')                    as period_from,
+                to_char(upper(f.period), 'YYYY-MM-DD')                    as period_until,
+                f.evidence,
+                to_char(f.raised_at at time zone 'UTC', 'YYYY-MM-DD')     as raised_on,
+                m.display_name                                            as reviewer_name,
+                to_char(f.reviewed_at at time zone 'UTC', 'YYYY-MM-DD')   as reviewed_on
+           from finding f
+           -- Left, because f.reviewed_by is null on every unreviewed finding,
+           -- so an inner join would return no row for any of them -- which is
+           -- most of the register.
+           --
+           -- An earlier version of this comment blamed display_name being
+           -- nullable. That is false: an inner join filters on the join
+           -- condition, not on the columns selected through it, so a matched
+           -- member with no name still yields a row. Raised by Argus, and it is
+           -- the same defect as story 4.3's migration comment -- a comment
+           -- asserting something untrue about the database it sits in.
+           --
+           -- No backticks in here. This is a template literal, so one would end
+           -- the string mid-query and the file would fail to parse -- which is
+           -- how it was first written, and the suite reported it as 21 tests
+           -- vanishing rather than as a syntax error.
+           left join board_member m on m.id = f.reviewed_by
+          where f.id = $1`,
+        [id],
+      )
+
+      const row = rows[0]
+      if (row === undefined) return null
+
+      return {
+        id: row.id,
+        findingType: row.finding_type,
+        subjectId: row.subject_id,
+        period: { from: row.period_from, until: row.period_until },
+        evidence: row.evidence,
+        raisedOn: row.raised_on,
+        // **`reviewed_at` is the discriminator, not `state`.**
+        // `finding_review_is_attributed` refuses a reviewed row without a date,
+        // so the date being present *is* the row being reviewed — one fact read
+        // once, rather than a state string and a timestamp that could be read
+        // as disagreeing with each other.
+        reviewed: row.reviewed_on === null ? null : { by: row.reviewer_name, on: row.reviewed_on },
+      }
     },
   }
 }

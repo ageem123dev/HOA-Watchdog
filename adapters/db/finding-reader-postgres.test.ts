@@ -178,7 +178,9 @@ describeWithDatabase('the finding reader', () => {
     try {
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
       await owner.query(`delete from document where storage_key like $1`, [`${STORAGE_PREFIX}/%`])
-      await owner.query(`delete from board_member where id = $1`, [memberId])
+      // By prefix, not by id: individual tests seed extra members, and one that
+      // cleaned up after its own assertions would skip the cleanup on failure.
+      await owner.query(`delete from board_member where email like $1`, [`${STORAGE_PREFIX}%`])
     } finally {
       await Promise.allSettled([owner.end(), writer.end()])
     }
@@ -302,6 +304,68 @@ describeWithDatabase('the finding reader', () => {
     }
   })
 
+  it('reads one finding by its id', async () => {
+    const found = await createFindingReader().byId(newest)
+
+    expect(found).toMatchObject({
+      id: newest,
+      period: { from: '2099-04-01', until: '2099-05-01' },
+      evidence: { invoicesChecked: 3 },
+      raisedOn: '2099-04-14',
+      reviewed: null,
+    })
+  })
+
+  it('reads a reviewed finding, and names who reviewed it', async () => {
+    // The already-reviewed state (AC6) rests entirely on this read. The queue
+    // can never return this row, so nothing else in the suite exercises the
+    // reviewed branch of the join.
+    const found = await createFindingReader().byId(reviewed)
+
+    expect(found?.reviewed?.by).toBe('Finding Reader Fixture')
+    expect(found?.reviewed?.on).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('answers with nothing for an id no finding has', async () => {
+    // A well-formed uuid that is simply not there — the ordinary outcome for a
+    // link somebody kept after the finding was removed from the fixture, and
+    // the one the surface turns into a 404.
+    expect(await createFindingReader().byId(randomUUID())).toBeNull()
+  })
+
+  it('answers with nothing for an id that is not a uuid at all', async () => {
+    // **Postgres raises 22P02 on a malformed uuid cast**, which would reach the
+    // page as a database error rather than as "no such finding". The id comes
+    // straight off the URL, so this is reachable by typing.
+    expect(await createFindingReader().byId('not-a-uuid')).toBeNull()
+    expect(await createFindingReader().byId('')).toBeNull()
+  })
+
+  it('reads a reviewed finding whose reviewer has no display name', async () => {
+    // `board_member.display_name` is nullable. The finding was still reviewed,
+    // and the page has to say so without inventing a name.
+    const { rows } = await writer.query<{ id: string }>(
+      `insert into board_member (email, password_hash)
+       values ($1, 'scrypt$fixture') returning id`,
+      [`${STORAGE_PREFIX}-nameless@example.test`],
+    )
+    const nameless = rows[0]!.id
+    const finding = await seedFinding('nameless_reviewer', '2099-08-01T12:00:00Z')
+    await writer.query(
+      `update finding set state = 'reviewed', reviewed_by = $2, reviewed_at = now() where id = $1`,
+      [finding, nameless],
+    )
+
+    const found = await createFindingReader().byId(finding)
+
+    // No cleanup here on purpose. Deleting after the assertions leaks the row
+    // whenever one of them fails, which is exactly when the suite is least
+    // tidy; `afterAll` now removes every fixture member by email prefix, so
+    // this test has nothing left to remember. Raised by Argus.
+    expect(found?.reviewed).not.toBeNull()
+    expect(found?.reviewed?.by).toBeNull()
+  })
+
   it('counts the documents that were read, and not the ones that were not', async () => {
     // UX-DR24's denominator, and the one number on this surface that must not
     // be generous: a document that was held or could not be opened was not
@@ -340,8 +404,14 @@ describeWithDatabase('the finding reader', () => {
     const checked = await createCheckedDocuments().checked()
     const after = await controlLatestRead()
 
+    // Bounded rather than matched against the two endpoints. `max` is
+    // monotonic, so the adapter's answer lies between the controls — but with
+    // two concurrent inserts it can be an *intermediate* value that equals
+    // neither, and `toContain` would flake. The count assertion above already
+    // used bounds; this one did not, which is the inconsistency Argus caught.
     expect(checked.latestUploadOn).not.toBeNull()
-    expect([before, after]).toContain(checked.latestUploadOn)
+    expect(checked.latestUploadOn! >= before!).toBe(true)
+    expect(checked.latestUploadOn! <= after!).toBe(true)
     // And the control is genuinely narrower than the table: this file seeded a
     // held and an unreadable document *later* than its newest read one, so a
     // reader that counted every state would answer with one of those.

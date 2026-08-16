@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import { findingRoute } from '@/core/auth/route-policy'
 import type { DashboardView } from '@/core/findings/dashboard-view'
 import type { FindingRow, Severity } from '@/core/findings/finding-view'
 
@@ -12,14 +13,15 @@ import type { FindingRow, Severity } from '@/core/findings/finding-view'
  * — a page that decided emptiness for itself would get "nothing needs your
  * attention" on the day the association signed up.
  *
- * ## The rows do not navigate, and that is this story's one deferral
+ * ## The whole row is the click target, and there is exactly one of them
  *
- * UX-DR4 makes the whole row the click target for the finding detail surface.
- * That surface is story 4.6, and a row linking to a route which does not exist
- * puts a 404 on the board's dashboard behind the thing the page most wants them
- * to click. 4.6 adds the link at the moment it builds the destination, and
- * UX-DR4's "the amount is never a separate link" clause is asserted there,
- * where there is a link to assert it about.
+ * UX-DR4, the half story 4.5 deferred until the destination existed. The link
+ * wraps the row's entire contents — tick, words, evidence line, amount and date
+ * — so a mis-click near the money does exactly what a mis-click near the text
+ * does. **The amount is never a link of its own**, which is the clause worth
+ * asserting rather than assuming: a second link inside the row would be a
+ * second tab stop with no separate meaning, and the one nearest the figure is
+ * the one a hurried reader hits.
  */
 export function FindingsList({ view }: { view: DashboardView }) {
   if (view.kind === 'nothing-checked') {
@@ -98,40 +100,49 @@ const TICK: Readonly<Record<Severity, string>> = {
 
 function Row({ row }: { row: FindingRow }) {
   return (
-    <li style={styles.row}>
+    <li>
       {/*
-        **`aria-hidden`, because the words beside it carry the same meaning.**
-        UX-DR2 requires the tick never to be the sole channel, and the answer to
-        that is the label — announcing the bar as well would read the severity
-        twice to a screen-reader user and once to everyone else.
+        **One link, wrapping everything.** The grid moves onto the anchor rather
+        than sitting inside it, so the row's shape is unchanged and there is no
+        second focusable thing in it. `next/link` rather than a bare anchor, for
+        the reason the dashboard's other links give: an anchor triggers a full
+        document load and discards the client router's state.
       */}
-      <span aria-hidden="true" style={{ ...styles.tick, background: TICK[row.severity] }} />
-      <div style={styles.text}>
-        <p style={styles.severity}>{row.severityLabel}</p>
-        <p style={styles.title}>{row.title}</p>
+      <Link href={findingRoute(row.id)} style={styles.row}>
         {/*
-          The finding's justification, never flavour text (DESIGN.md). Absent
-          when the evidence supports no honest sentence, rather than filled with
-          a plausible one.
+          **`aria-hidden`, because the words beside it carry the same meaning.**
+          UX-DR2 requires the tick never to be the sole channel, and the answer
+          to that is the label — announcing the bar as well would read the
+          severity twice to a screen-reader user and once to everyone else.
         */}
-        {row.evidenceLine === null ? null : <p style={styles.evidence}>{row.evidenceLine}</p>}
+        <span aria-hidden="true" style={{ ...styles.tick, background: TICK[row.severity] }} />
+        <div style={styles.text}>
+          <p style={styles.severity}>{row.severityLabel}</p>
+          <p style={styles.title}>{row.title}</p>
+          {/*
+            The finding's justification, never flavour text (DESIGN.md). Absent
+            when the evidence supports no honest sentence, rather than filled
+            with a plausible one.
+          */}
+          {row.evidenceLine === null ? null : <p style={styles.evidence}>{row.evidenceLine}</p>}
+          {/*
+            **EXPERIENCE.md, State Patterns: "Findings show their detection date."**
+            A `<time>` rather than a bare string, so the value is legible to
+            anything that reads the page rather than looks at it — and so a queue
+            entry can be aged by the person reading it, which is most of what a
+            queue is for.
+          */}
+          <p style={styles.noticed}>
+            Noticed <time dateTime={row.raisedOn}>{row.raisedOn}</time>
+          </p>
+        </div>
         {/*
-          **EXPERIENCE.md, State Patterns: "Findings show their detection date."**
-          A `<time>` rather than a bare string, so the value is legible to
-          anything that reads the page rather than looks at it — and so a queue
-          entry can be aged by the person reading it, which is most of what a
-          queue is for.
+          Nothing at all where the record supports no figure — never `$0.00`, a
+          dash, or a bare currency mark. Each of those is a number a board member
+          could act on, manufactured from a record that has none.
         */}
-        <p style={styles.noticed}>
-          Noticed <time dateTime={row.raisedOn}>{row.raisedOn}</time>
-        </p>
-      </div>
-      {/*
-        Nothing at all where the record supports no figure — never `$0.00`, a
-        dash, or a bare currency mark. Each of those is a number a board member
-        could act on, manufactured from a record that has none.
-      */}
-      {row.amount === null ? null : <p style={styles.amount}>{row.amount}</p>}
+        {row.amount === null ? null : <p style={styles.amount}>{row.amount}</p>}
+      </Link>
     </li>
   )
 }
@@ -172,6 +183,11 @@ const styles = {
   // `auto` on the text column and nothing fixed on the row: UX-DR20 asks for
   // flexible row heights, so a long vendor name wraps rather than being cut.
   row: {
+    // An anchor now, so its colour and underline are stated rather than
+    // inherited from the browser. A queue rendered in link blue would read as
+    // twenty separate destinations rather than as a register.
+    color: 'inherit',
+    textDecoration: 'none',
     display: 'grid',
     gridTemplateColumns: 'var(--component-margin-tick-width) 1fr auto',
     gap: 'var(--space-row)',

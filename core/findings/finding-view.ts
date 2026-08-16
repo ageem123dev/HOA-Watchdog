@@ -1,4 +1,15 @@
-import type { UnreviewedFinding } from '../ports/finding-reader'
+import type { FindingRecord } from '../ports/finding-reader'
+import {
+  MATCH_REASON,
+  counted,
+  entries,
+  fields,
+  known,
+  percentAbove,
+  text,
+  whole,
+  words,
+} from './evidence'
 import { formatAmount } from './money'
 
 /**
@@ -83,57 +94,6 @@ const SEVERITY_LABEL: Readonly<Record<Severity, string>> = {
  */
 const UNKNOWN_SEVERITY: Severity = 'worth-checking'
 
-const MATCH_REASON: Readonly<Record<string, string>> = {
-  'same-amount-and-date': 'amount and date',
-  'same-amount-and-number': 'amount and invoice number',
-}
-
-/**
- * A table lookup that cannot reach `Object.prototype`.
- *
- * **Both keys used here are untrusted strings**, and a plain `table[key]` reads
- * inherited properties as though they were entries. `finding_type` comes from
- * the database, whose `finding_type_is_verb_noun` check is `^[a-z][a-z0-9_]*$`
- * — which `constructor` satisfies in full. `reason` comes out of `jsonb` and is
- * whatever a detector stored.
- *
- * The consequences were not theoretical. `SEVERITY['constructor']` returned the
- * `Object` function, so `?? UNKNOWN_SEVERITY` never fired and the row's
- * severity became a function: no label and no tick, on exactly the unrecognised
- * finding AC3 promises will still render. And `MATCH_REASON['constructor']` put
- * `function Object() { [native code] }` into the sentence a board member reads.
- * Raised by Argus against the component; the lookup it was really about is
- * here.
- */
-function known<T>(table: Readonly<Record<string, T>>, key: string): T | undefined {
-  return Object.hasOwn(table, key) ? table[key] : undefined
-}
-
-function fields(value: unknown): Readonly<Record<string, unknown>> {
-  // Arrays are objects to `typeof`, and an array reaching a field read means the
-  // evidence is not the shape anything here expects. Treating it as an empty
-  // record degrades every read below at once, rather than at each call site.
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : {}
-}
-
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value : null
-}
-
-function whole(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
-}
-
-function entries(value: unknown): readonly Readonly<Record<string, unknown>>[] {
-  if (!Array.isArray(value)) return []
-  return value.filter(
-    (entry): entry is Readonly<Record<string, unknown>> =>
-      typeof entry === 'object' && entry !== null && !Array.isArray(entry),
-  )
-}
-
 /**
  * The one value they all agree on, or `null`.
  *
@@ -151,9 +111,9 @@ function agreed(values: readonly (string | null)[]): string | null {
 
 /** `vendor_paid_before_approval` to `Vendor paid before approval`. */
 function humanised(findingType: string): string {
-  const words = findingType.replace(/_/g, ' ').trim()
-  if (words === '') return 'Finding'
-  return words.charAt(0).toUpperCase() + words.slice(1)
+  const spelled = words(findingType)
+  if (spelled === '') return 'Finding'
+  return spelled.charAt(0).toUpperCase() + spelled.slice(1)
 }
 
 function named(base: string, vendorName: string | null): string {
@@ -202,7 +162,7 @@ function readDuplicate(evidence: Readonly<Record<string, unknown>>): Reading {
 
   return {
     title,
-    evidenceLine: `${pairs.length} of ${checked} invoices on this upload ${verb} an earlier one${on}.`,
+    evidenceLine: `${pairs.length} of ${counted(checked, 'invoice')} on this upload ${verb} an earlier one${on}.`,
     amount,
   }
 }
@@ -215,13 +175,13 @@ function readSpike(evidence: Readonly<Record<string, unknown>>): Reading {
 
   const [only] = spikes
   if (spikes.length === 1 && only !== undefined) {
-    const percent = text(only['percentOverAverage'])
+    const percent = percentAbove(only['percentOverAverage'])
     const average = formatAmount(only['average'])
     const averaged = whole(only['invoicesAveraged'])
     const line =
       percent === null || average === null || averaged === null || windowMonths === null
         ? null
-        : `${percent}% above a ${windowMonths}-month average of ${average} across ${averaged} invoices.`
+        : `${percent}% above a ${windowMonths}-month average of ${average} across ${counted(averaged, 'invoice')}.`
 
     return { title: named('Invoice above average', vendorName), evidenceLine: line, amount }
   }
@@ -232,7 +192,7 @@ function readSpike(evidence: Readonly<Record<string, unknown>>): Reading {
   const line =
     spikes.length === 0 || checked === null || windowMonths === null
       ? null
-      : `${spikes.length} of ${checked} invoices are above a ${windowMonths}-month average for their vendor.`
+      : `${spikes.length} of ${counted(checked, 'invoice')} are above a ${windowMonths}-month average for their vendor.`
 
   return { title: named('Invoices above average', vendorName), evidenceLine: line, amount }
 }
@@ -256,7 +216,7 @@ function readShortfall(evidence: Readonly<Record<string, unknown>>): Reading {
   const evidenceLine =
     expected === null || instalments === null || evaluatedOn === null || arrival === null
       ? null
-      : `${expected} expected by ${evaluatedOn} across ${instalments} instalments; ${arrival}.`
+      : `${expected} expected by ${evaluatedOn} across ${counted(instalments, 'instalment')}; ${arrival}.`
 
   return { title, evidenceLine, amount: formatAmount(evidence['shortfall']) }
 }
@@ -283,7 +243,7 @@ function read(findingType: string, evidence: unknown): Reading {
   }
 }
 
-export function toFindingRow(finding: UnreviewedFinding): FindingRow {
+export function toFindingRow(finding: FindingRecord): FindingRow {
   const severity = known(SEVERITY, finding.findingType) ?? UNKNOWN_SEVERITY
   const reading = read(finding.findingType, finding.evidence)
 
