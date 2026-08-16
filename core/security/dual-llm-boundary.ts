@@ -185,7 +185,7 @@ export function boundaryViolations(manifest: DeployManifest): readonly BoundaryV
  * the guarantee dies with it. `readsEnvironmentVariable` states the real
  * property, and a test pins both directions.
  */
-function readsEnvironmentVariable(text: string, name: string): boolean {
+export function readsEnvironmentVariable(text: string, name: string): boolean {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
   // `process.env.NAME`, `process.env['NAME']`, `env.NAME`, `env["NAME"]`.

@@ -135,6 +135,30 @@ describe('a collaborator that is not wired means nothing happens', () => {
       await expect(notifyFindings(wired({ [absent]: undefined }))).resolves.toBeNull()
     },
   )
+
+  it.each([['mail'], ['baseUrl']])(
+    'writes no delivery row when %s is missing, not even a claim',
+    async (absent) => {
+      // **Returning `null` is not the whole of the requirement.** An
+      // unconfigured deploy must leave the ledger untouched: a claim is
+      // ownership of a send, and taking it without being able to deliver would
+      // hold every finding for the retry window on every upload, so nothing
+      // else could try either.
+      //
+      // The earlier assertion above passes against an implementation that
+      // claims first and returns `null` afterwards, which is why this one
+      // exists. Found by the acceptance-criteria audit.
+      const alerts = ledger()
+      const mail = mailer()
+
+      await notifyFindings(wired({ alerts: alerts.port, mail: mail.port, [absent]: undefined }))
+
+      expect(alerts.claimed).toEqual([])
+      expect(alerts.sent).toEqual([])
+      expect(alerts.failed).toEqual([])
+      expect(mail.sent).toEqual([])
+    },
+  )
 })
 
 describe('telling the board', () => {

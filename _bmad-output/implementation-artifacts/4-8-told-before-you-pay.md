@@ -241,13 +241,13 @@ not the one bad message, it is the nineteen good ones behind it in the loop.
         (`sent_at is null` and `claimed_at` older than the retry window) is re-claimable. State the
         window as a named constant with the reasoning beside it.
 
-- [ ] **Task 6 — Close FR-8 honestly** (AC: all)
-  - [ ] Run the AC audit: for each AC, name the test that would fail if the behaviour were removed.
+- [x] **Task 6 — Close FR-8 honestly** (AC: all)
+  - [x] Run the AC audit: for each AC, name the test that would fail if the behaviour were removed.
         It has found something on nine consecutive stories.
-  - [ ] Confirm FR-8's *first* channel — the dashboard widget from story 4.5 — is present and
+  - [x] Confirm FR-8's *first* channel — the dashboard widget from story 4.5 — is present and
         reachable. This story does not rebuild it and must not; it does have to be able to say
         truthfully that both channels now exist.
-  - [ ] `docs/as-built.md` gains the mail path: what is sent, to whom, what is recorded, and the
+  - [x] `docs/as-built.md` gains the mail path: what is sent, to whom, what is recorded, and the
         at-least-once caveat from AC8. A director asking "why did I get this" needs somewhere to
         look that is not the source.
 
@@ -605,6 +605,44 @@ the batch: one bad finding must cost exactly one finding.
 
 ### Completion Notes List
 
+**Task 6 — closing FR-8, and the audit that found three things.**
+
+*The acceptance-criteria audit has now found something on ten consecutive stories.* Naming, for each
+AC, the test that would fail if the behaviour were removed turned up three gaps — two of them real
+holes rather than missing paperwork.
+
+- **AC10 was not implemented at all.** It asks for a *structural* assertion that no model is in the
+  alerting path — *"the way `core/security/dual-llm-boundary.ts` asserts its own boundary"* — and
+  nothing did that. Epic 4's independence from Epic 3 rested on a planning sentence. Now
+  `core/security/no-model-in-alerts.test.ts` reads the six modules between a raised finding and a
+  sent email and asserts none reaches a model credential or imports a module that does, with controls
+  proving the scan can fail. The detector is `readsEnvironmentVariable`, **exported and reused** from
+  `dual-llm-boundary.ts` rather than copied — `forbidden-credentials.ts` explains why a second copy of
+  a subtle matcher is how two versions come to disagree.
+- **AC9's "no delivery row" was untested.** `does nothing at all when mail is absent` asserts only
+  that the call resolves `null`, which passes just as well against an implementation that claims every
+  finding first and returns `null` afterwards. That would hold the whole register for a retry window
+  on every upload of an unconfigured deploy. Now asserted directly: the ledger is untouched.
+- **AC4's closed-route clause was covered only by inference.** `route-policy.test.ts` asserts
+  `PUBLIC_ROUTES` is exactly `[SIGN_IN_ROUTE]`, so the finding route is closed by absence — true, but
+  nothing tied it to the link this story starts mailing out. Asserted directly now.
+
+*And the new guard immediately tripped an older one, correctly.* The control assertions in
+`no-model-in-alerts.test.ts` contained literal text like `process.env.REASONING_API_KEY` alongside a
+Gemini one — and `dual-llm-boundary.test.ts` reported the file as a module reading **both sides** of
+AD-10's boundary. It was right: to any text scanner that is what the file said. The probes are now
+built by interpolation, which is exactly what `dual-llm-boundary.test.ts` does with its own planted
+violations, and for exactly this reason.
+
+*FR-8's first channel confirmed rather than assumed:* `app/dashboard/page.tsx` renders `FindingsList`
+from `createFindingReader().unreviewed(...)`. Both channels now exist, and this story can say so
+truthfully.
+
+*`docs/as-built.md`* gains the alerting step — who receives it, why only once, why **at least once and
+not exactly once**, why plain text, what it never claims, and what happens when it is unconfigured. Two
+rows in *What is not built* said the watchdog and the duplicate-invoice findings were not built, which
+this epic made false; corrected rather than left to contradict the section above them.
+
 **Task 5 — the wiring.** `core/ingestion/notify-findings.ts`, its 23 tests, a wiring test over four
 files, and `createAlerting` in the mail adapter.
 
@@ -863,7 +901,10 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 
 | File | Change |
 | --- | --- |
-| `core/ingestion/notify-findings.ts` + `notify-findings.test.ts` | new — the loop, and 23 tests |
+| `core/security/no-model-in-alerts.test.ts` | new — AC10's structural guard, found missing by the AC audit |
+| `core/security/dual-llm-boundary.ts` | modified — `readsEnvironmentVariable` exported so the guard above reuses it |
+| `docs/as-built.md` | modified — the alerting step, and two rows this epic made false |
+| `core/ingestion/notify-findings.ts` + `notify-findings.test.ts` | new — the loop, and 25 tests |
 | `core/ingestion/alert-wiring.test.ts` | new — that four files really call it, and in the right order |
 | `core/ingestion/extract-document.ts` | modified — the notify call and its dependencies |
 | `core/ingestion/ingest.ts` | modified — the same, for the path a CSV takes |

@@ -82,6 +82,47 @@ never re-read, so payments missing after it would be silent and permanent; payme
 leave the document unsettled, re-read on the next poll, and healed. Replacement is set-replacement
 (AD-13), so the retry writes the same set rather than a second copy.
 
+### 7. Telling the board — `core/ingestion/notify-findings.ts`
+
+Detection raises a finding; this is what makes somebody hear about it. FR-8 asks for two channels and
+both now exist: the dashboard's unreviewed list, and **one email per finding** to every board member
+whose `disabled_at` is null.
+
+**Who gets it.** Every director who has not been disabled, and nobody else. There is no recipient
+model, no per-member preference and **no unsubscribe** — so the volume of findings is the volume of
+email. That was chosen rather than defaulted into; if it becomes unwelcome the answer is a recipient
+model, not a quieter detector.
+
+**Once, and only once.** `finding_alert` holds one row per finding with `finding_id` unique, which is
+what makes AD-13's *"never emits a second alert for a finding already raised"* a rule of the database
+rather than a habit of the mailer. Re-uploading the same statement re-runs detection, every detector
+amends rather than appends, and no second email goes out.
+
+**At least once, not exactly once.** An email cannot be un-sent and a write cannot be un-written, so
+the two can only be ordered. The row carries both moments: `claimed_at` when a run took ownership,
+`sent_at` when it succeeded. A send that succeeds and then fails to record its success **will be sent
+again**. That is the right way round for a fiduciary warning — a duplicate is a nuisance and a miss is
+what the product exists to prevent — and it is stated here rather than left to be discovered.
+
+**Plain text, no HTML.** AD-8: extracted values are data, never instructions. A vendor name lifted off
+a scanned invoice goes into a subject line, and the cheapest way to keep it data is to send a document
+with no markup for it to become. Every interpolated value is stripped of anything a mail agent would
+read as a line break.
+
+**What it never says.** The system holds no payment credential and can stop nothing (NFR-2), so the
+message may say what was noticed and where to look, and may not say a payment was blocked, held,
+cancelled or flagged. It says *possible* duplicate, because two payments matching on amount and date
+is a comparison rather than an accusation.
+
+**When it fails.** Nothing here can fail an upload — the document really was read. A failed send is
+recorded against the finding, the claim is left unsent, and a later run takes it over once the claim
+goes stale. **A missed alert is recovered by nothing else**, which is why it is recorded rather than
+only logged: unlike a missed detection, no later upload brings it back.
+
+**Unconfigured means silent, deliberately.** With `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM` or
+`WATCHDOG_BASE_URL` unset, no mail is sent, no claim is taken and no delivery row is written. The
+named error goes to the log once per ingestion.
+
 ## What is not built
 
 The planning artifacts describe these in the present tense. With one partial exception, noted first,
@@ -91,9 +132,9 @@ none of them exist.
 | --- | --- | --- |
 | The query catalogue and its one door | `architecture-walkthrough.html` | **Partly built** — stories 3.1 and 3.2. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze. A caller names the entry and version and the catalogue resolves it; what does not exist is anything that decides *which* entry answers a question — no intent routing, no model selection — and nothing renders an answer. Story 3.2 added `POST /tools/v1/catalog/execute`, the agent service's only way in |
 | The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Not built** — epic 3, stories 3.4–3.8 |
-| The watchdog and anomaly detection | `architecture-walkthrough.html`, `board-explainer.html` | **Not built** — epic 4 |
+| The watchdog and anomaly detection | `architecture-walkthrough.html`, `board-explainer.html` | **Built** — epic 4. Duplicate invoices, vendor spikes and dues shortfalls, each a deterministic SQL comparison with no model in the path |
 | The CrewAI agent service | `architecture-walkthrough.html` | **Not built** |
-| Duplicate-invoice and arrears findings | the PRD | **Not built** — epic 4 |
+| Duplicate-invoice and arrears findings | the PRD | **Built** — epic 4, with the dashboard queue, the finding detail, the reviewed register and the alert email above |
 
 There is also **no CI**. The GitLab pipeline was removed on 2026-08-07 and AD-2's amendment records
 it. Two controls in `security-posture.html` cite CI as their evidence; the controls still hold, and

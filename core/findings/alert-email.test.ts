@@ -25,7 +25,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { findingRoute } from '../auth/route-policy'
+import { findingRoute, isPublicRoute } from '../auth/route-policy'
 import type { FindingDetail } from '../ports/finding-reader'
 import { oneLine, toAlertEmail } from './alert-email'
 import { toFindingDetail } from './detail-view'
@@ -196,6 +196,18 @@ describe('the message a board member receives', () => {
 
     expect(email.text).toContain(expected)
     expect(() => new URL(expected)).not.toThrow()
+  })
+
+  it('links to a route that is closed, so an old link lands on sign-in', () => {
+    // The other half of AC4, asserted rather than assumed. The destination
+    // names a vendor, an amount and a unit, so it must not be public -- and a
+    // director opening a week-old email on a phone signs in and is returned
+    // there, which is the already-reviewed state EXPERIENCE.md requires.
+    //
+    // `PUBLIC_ROUTES` is an allow-list, so this holds by the route's absence
+    // from it. Checked here as well as in `route-policy.test.ts` because this is
+    // the story that starts mailing the link out.
+    expect(isPublicRoute(findingRoute('0199a0f0-0000-7000-8000-000000000001'))).toBe(false)
   })
 
   it('gives one link whether or not the base URL ends in a slash', () => {
