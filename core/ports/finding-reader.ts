@@ -113,6 +113,21 @@ export interface FindingDetail extends FindingRecord {
 }
 
 /**
+ * The most rows any single read of the findings will return.
+ *
+ * **Declared here rather than inside the adapter, because two callers have to
+ * agree about it.** The adapter refuses past this; the surface parses a
+ * `?limit=` against it. `core/ports/query-log-reader.ts` records what happens
+ * when only the adapter knows: a URL asking for 10,000 rows kept that number in
+ * the page and in the form while the database returned 500, so the reader was
+ * told they were looking at more of the record than they were.
+ *
+ * The register makes that worse than the audit log did. It is permanent and
+ * append-only, so it is the one read in the product guaranteed to grow forever.
+ */
+export const MOST_REGISTER_ROWS = 200
+
+/**
  * What the register is being asked for.
  *
  * A shape rather than two arguments, because `app/access-log/filter.ts` already

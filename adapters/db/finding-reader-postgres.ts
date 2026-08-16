@@ -1,11 +1,12 @@
 import type { CheckedDocuments, DocumentsChecked } from '../../core/ports/checked-documents'
-import type {
-  FindingDetail,
-  FindingReader,
-  FindingRecord,
-  RegisterFilter,
-  ReviewedRegister,
-  UnreviewedQueue,
+import {
+  MOST_REGISTER_ROWS,
+  type FindingDetail,
+  type FindingReader,
+  type FindingRecord,
+  type RegisterFilter,
+  type ReviewedRegister,
+  type UnreviewedQueue,
 } from '../../core/ports/finding-reader'
 import { isFindingId } from '../../core/findings/finding-id'
 import { writerPool } from './pool'
@@ -53,7 +54,7 @@ interface CheckedRow {
  * a request stops being a dashboard queue and becomes a bulk export, which is
  * story 4.7's job and belongs on a surface built to stream it.
  */
-const MOST_ROWS = 200
+const MOST_ROWS = MOST_REGISTER_ROWS
 
 /**
  * A board member's search text, as a `LIKE` pattern that matches it literally.
