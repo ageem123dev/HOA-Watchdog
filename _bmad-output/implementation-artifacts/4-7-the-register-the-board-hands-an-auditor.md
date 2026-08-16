@@ -650,6 +650,75 @@ and found it correctly unescaped, because a vendor sits mid-title where a spread
 — the reviewer's display name is the only cell whose first character a person chooses. And the BOM
 assertion could never have failed, because `Response.text()` strips a leading BOM.
 
+#### The merge-request round — CodeRabbit's 7 findings on MR !61
+
+**5 taken, 1 declined with a probe behind it, 1 taken further than it was raised.** Argus on the
+fix diff then found a third defect, and reading for it found a fourth.
+
+**The print treatment made the masthead unreadable.** `.on-ink` takes `--color-ink` for its ground
+and `--color-on-ink` for its text, and the print block set *both* to black. Neither declaration
+looked wrong alone. The token does not mean "another ink" — it means "the colour that sits against
+ink", and it is used as a **ground** as well, so blackening it also turned the sign-in field into a
+black box holding black text. Fixed in both places: the token stays light, and `.on-ink` inverts in
+print so a masthead is not a band of solid toner. The regression test resolves the cascade the way
+a browser does rather than matching strings, because the defect was invisible in the source.
+
+**The stale-premise class had four members, not one.** CodeRabbit found the export control's
+docblock still arguing for the count the AC audit had already fixed. Grepping the premise rather
+than the file found three more — `register-view.ts`'s field doc, its rows-exceed-total comment, and
+that comment's copy in the test. A fix that corrects the caller and leaves four comments teaching
+the defect is a fix with a shelf life.
+
+**The export could wait forever.** `fetch` with no deadline leaves the control disabled and reading
+"Exporting…" for as long as the page is open — no file, no failure, no second attempt. Waiting was
+the one state this control could not leave on its own; every other failure already reached the
+`catch`. Implemented with a controller rather than `AbortSignal.timeout`, which reads better and
+cannot be cancelled: its timer runs the full 30 seconds out even when the file arrived in one, and
+the suite's fake timers do not drive it — measured, not assumed.
+
+**Argus, on the fix diff: a non-finite total slips past both contradiction guards.** `NaN > 0` is
+false and `rows > NaN` is false, so a total that is not a number satisfies every check in
+`toRegisterView` and arrives at the page as the figure beside a board member's findings. Unreachable
+through the adapter, and refused anyway — the module already refuses two other unreachable
+contradictions, and this is the surface handed to an auditor.
+
+##### The finding that was declined, with the probe rather than an opinion
+
+CodeRabbit called `strict $.**.vendorName` a stability defect: a member accessor applied to a scalar
+descendant aborts the query, so one oddly-shaped evidence blob would make the register unreachable
+for everybody. Plausible, and it is a real property of strict mode — a direct `strict $.n.vendorName`
+does raise. **It is not a property of `.**`**, which suppresses exactly those structural errors. Six
+evidence shapes were measured, and `lax` proved to be the regression: it auto-unwraps arrays and
+returns the same match twice. Declined, and pinned with a test seeding the shapes it named.
+
+| Finding | Verdict |
+| --- | --- |
+| `.on-ink` prints black on black | **taken**, and widened to the token, which is used as a ground elsewhere |
+| the export control's docblock contradicts its caller | **taken**, and three further copies found by grepping the premise |
+| `fetch` is unbounded | **taken**, with the timer cleared on settle rather than left to run out |
+| `toBeLessThanOrEqual(200)` proves nothing | **taken** — it passed for clamping, for falling back, and for clamping to 1; pinned to the port's own ceiling, plus the boundary below it |
+| no test proves the anchor is attached when clicked | **taken** — the removal makes the end state identical either way, so it is asserted at the click |
+| the `JSON.stringify` assertion cannot fail | **taken** — `"reviewed":null` matches neither alternative; replaced with the rendered copy, and proved to fire |
+| `strict $.**` aborts on scalar descendants | **declined** — measured on this database; `.**` suppresses structural errors and `lax` duplicates matches |
+
+Three Argus findings were declined: `save()` after unmount (the download was explicitly asked for,
+and delivering it is the intent), and optional chaining on `register.findings` (it would remove the
+compile-time signal the guard exists to backstop — the same reasoning that declined widening
+`search` to `unknown`).
+
+##### What the sensitivity checks caught in this round
+
+Fourteen mutations, and two of them mattered beyond their own test. The `clearTimeout` survived
+its mutation, which meant the docblock claimed a release nothing could falsify — so it was made
+assertable rather than left as a comment. And the first timer test asserted a **count**, which
+failed against correct code: jsdom schedules a timer of its own when a download anchor is clicked.
+Matching the deadline by id rather than counting removed that accident from the assertion.
+
+**A mutation harness silently did nothing, twice.** Two `perl` substitutions reported success while
+matching nothing, because the files are CRLF and the patterns were not — and a mutation that does
+not apply looks exactly like a test that caught it. Both were re-run against a harness that asserts
+the mutation landed before trusting the result.
+
 #### Gates on the final head, locally — there is no CI, so this is the whole of the evidence
 
 `npm test` 2951 passed · `npm run test:db` 846 passed · `npm run lint` 0 errors (1 pre-existing
@@ -660,5 +729,6 @@ warning) · `npx tsc --noEmit` 8 errors, matching baseline · `npm run build` co
 
 | Date | Change |
 | --- | --- |
+| 2026-08-16 | Merge-request round on !61: 7 CodeRabbit findings, 5 taken, 1 declined with a database probe, 1 widened. The print treatment printed `.on-ink` black on black. The stale premise CodeRabbit found in one docblock had three more copies. Argus on the fix diff found a non-finite total slipping past both contradiction guards. 14 mutations; the `clearTimeout` claim had no test until one was written for it. |
 | 2026-08-16 | Tasks 1-5 implemented test-first. Ten Argus rounds, one local CodeRabbit round (15 of 17 taken), 31 mutations. The AC audit found the export control naming the register total rather than the rows the file would hold — the ninth consecutive story it has found something. The whole-story pass found the page and its export reading a repeated query parameter differently. Merge request !61 opened; status `done`, meaning ready-to-merge. |
 | 2026-08-16 | Story created. The export-format conflict — EXPERIENCE.md's "as PDF" against the CSV precedent — was put to the user, who chose the print treatment as the PDF path and CSV for the download. Reading the spec against the code also found story 4.6's `overflow-x: auto` breaking EXPERIENCE.md's no-horizontal-scroll rule; fixed here as AC10. |

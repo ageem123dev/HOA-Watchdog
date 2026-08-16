@@ -62,8 +62,11 @@ export type RegisterView =
       /**
        * Every finding matching the filter, which may exceed `entries.length`.
        *
-       * This is the number the export control states, because it is the number
-       * of rows the file will contain.
+       * **Not the number the export control states.** The export reads with
+       * the same `limit` the page did, so the file holds `entries.length`; this
+       * is what `showingAll` is derived from and what the page says it is
+       * showing part of. Said otherwise here until the acceptance-criteria
+       * audit found the control promising 200 rows and delivering 50.
        */
       readonly total: number
       /** False when the page is a window onto a longer register, and says so. */
@@ -100,6 +103,19 @@ export function toRegisterView(
 ): RegisterView {
   const wanted = searched(search)
 
+  // **Checked before either contradiction below, because a non-finite total
+  // silently satisfies both.** `NaN > 0` and `rows > NaN` are each false, so a
+  // total that is not a number passes every guard here and arrives at the
+  // register as the figure beside a board member's findings — "Export NaN
+  // reviewed findings as CSV" on the one surface that gets handed to an
+  // auditor. Unreachable through the adapter, which reads `count(*) over ()`
+  // and cannot produce a non-numeric string, and refused anyway for the reason
+  // the two below are: this module's job is to refuse a register that
+  // contradicts itself, not to decide which half to believe. Raised by Argus.
+  if (!Number.isInteger(register.total) || register.total < 0) {
+    throw new RangeError(`the register reported a total of ${register.total}`)
+  }
+
   if (register.findings.length === 0) {
     // **A contradiction rather than a state.** Zero rows against a non-zero
     // total means the register reported matches and handed back none, and there
@@ -118,10 +134,10 @@ export function toRegisterView(
     return wanted === null ? { kind: 'nothing-reviewed' } : { kind: 'no-matches', search: wanted }
   }
 
-  // **The mirror of the contradiction above, refused for the same reason.** The
-  // export control states this total as the number of rows the file will hold,
-  // so a register that cannot state its own size is one an auditor must not be
-  // handed. Unreachable through the adapter — `count(*) over ()` cannot be
+  // **The mirror of the contradiction above, refused for the same reason.** A
+  // register reporting fewer matches than it handed back cannot state its own
+  // size, and this is the surface an auditor is handed. Unreachable through
+  // the adapter — `count(*) over ()` cannot be
   // smaller than the rows it counted — which is why it is a refusal rather than
   // a repair: preferring the larger number would invent a count to paper over a
   // port that had already gone wrong. Raised by Argus.

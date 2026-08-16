@@ -22,7 +22,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ExportControl } from './export-control'
+import { ExportControl, REQUEST_TIMEOUT_MS } from './export-control'
 
 afterEach(cleanup)
 
@@ -241,7 +241,10 @@ describe('a failed export says so, rather than looking like a finished one', () 
     fireEvent.click(control())
     await act(async () => {})
 
-    expect(fetching).toHaveBeenCalledWith('/findings/register/export')
+    expect(fetching).toHaveBeenCalledWith(
+      '/findings/register/export',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(screen.getByRole('status').textContent).toMatch(/could not/i)
   })
 
@@ -256,7 +259,52 @@ describe('a failed export says so, rather than looking like a finished one', () 
     await act(async () => {})
 
     // The search rides along, so what downloads is what was on screen.
-    expect(fetching).toHaveBeenCalledWith('/findings/register/export?search=Coastal')
+    expect(fetching).toHaveBeenCalledWith(
+      '/findings/register/export?search=Coastal',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('gives up on a route that never answers, rather than waiting forever', async () => {
+    // **Waiting is the one state this control cannot leave on its own.** Every
+    // other failure reaches the catch and says so; a request that never
+    // settles leaves the button disabled and the status reading "Exporting…"
+    // for as long as the page is open — no file, no failure, and no way to try
+    // again. Raised by CodeRabbit.
+    //
+    // Asserted through the *default* request, because the deadline lives in
+    // `fetchCsv` and an injected download would prove nothing about it.
+    vi.useFakeTimers()
+
+    try {
+      // Never settles on its own — only the signal can end it.
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject((init.signal as AbortSignal).reason as Error)
+            })
+          }),
+      )
+
+      render(<ExportControl total={3} href="/findings/register/export" />)
+
+      fireEvent.click(control())
+      await act(async () => {})
+
+      // Still waiting, and correctly so — the deadline has not passed.
+      expect(screen.getByRole('status').textContent).toMatch(/exporting/i)
+      expect((control() as HTMLButtonElement).disabled).toBe(true)
+
+      await act(async () => {
+        vi.advanceTimersByTime(30_000)
+      })
+
+      expect(screen.getByRole('status').textContent).toMatch(/could not/i)
+      expect((control() as HTMLButtonElement).disabled).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not revoke the file before the browser has taken it', async () => {
@@ -290,6 +338,89 @@ describe('a failed export says so, rather than looking like a finished one', () 
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('drops the deadline as soon as the file arrives', async () => {
+    // The docblock claims the timer is cleared rather than left to run the
+    // full deadline out, and a claim in a comment that no test can falsify is
+    // how this project has shipped guards that do nothing. A board member
+    // exporting through an afternoon would otherwise leave a live timer per
+    // export, each holding an abort for a request that finished long ago.
+    //
+    // **Matched by id, not by counting outstanding timers.** A count is the
+    // obvious assertion and the wrong one: jsdom schedules a timer of its own
+    // when the download anchor is clicked, so any total would encode that
+    // accident alongside the deadline this is actually about.
+    vi.useFakeTimers()
+
+    const scheduled = new Map<number, number>()
+    const realSetTimeout = globalThis.setTimeout
+    const cleared: unknown[] = []
+
+    vi.stubGlobal('setTimeout', ((handler: never, delay: number, ...rest: never[]) => {
+      const id = (realSetTimeout as never as (...args: never[]) => number)(
+        handler,
+        delay as never,
+        ...rest,
+      )
+      scheduled.set(id, delay)
+      return id
+    }) as never)
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation((id) => {
+      cleared.push(id)
+    })
+
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:register')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('a,b', { status: 200 }))
+
+    try {
+      render(<ExportControl total={3} href="/findings/register/export" />)
+
+      fireEvent.click(control())
+      await act(async () => {})
+
+      const deadlines = [...scheduled].filter(([, delay]) => delay === REQUEST_TIMEOUT_MS)
+
+      // The premise, so this cannot pass by the deadline never being set.
+      expect(deadlines, 'no export deadline was scheduled at all').toHaveLength(1)
+      expect(cleared, 'the export deadline is still pending').toContain(deadlines[0]?.[0])
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('clicks an anchor that is in the document, and leaves none behind', async () => {
+    // Firefox has historically ignored a programmatic click on a *detached*
+    // anchor, and it fails the way this whole control is written against:
+    // silently, with the board member told the export ran.
+    //
+    // Asserted at the moment of the click rather than after it, for the reason
+    // the revocation test above is: "the anchor was appended at some point"
+    // holds for the broken version too, because the removal makes the end
+    // state identical either way. Raised by CodeRabbit.
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:register')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    let attachedWhenClicked: boolean | undefined
+
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      attachedWhenClicked = this.isConnected
+    })
+
+    draw(vi.fn(async () => new Blob(['csv'])))
+
+    fireEvent.click(control())
+    await act(async () => {})
+
+    expect(attachedWhenClicked, 'the anchor was clicked while detached').toBe(true)
+    expect(
+      document.querySelectorAll('a[download]'),
+      'a download anchor was left in the page',
+    ).toHaveLength(0)
   })
 
   it('survives a download that throws before it returns a promise', async () => {

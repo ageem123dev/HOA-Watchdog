@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { contrastRatio } from './contrast'
 import { BASE_CSS, applicationStylesheet } from './stylesheet'
+import { MINIMUM_TEXT_CONTRAST } from './text-pairings'
 import { tokenCustomProperties } from './tokens'
 
 /**
@@ -163,6 +165,71 @@ describe('AC9: the print treatment', () => {
     // A register row is a link. On paper the underline is noise, and the URL is
     // not something a director can click.
     expect(printBlock()).toMatch(/a\b[^{]*\{[^}]*text-decoration:\s*none/)
+  })
+
+  /**
+   * What `.on-ink` actually resolves to once the print block has had its say.
+   *
+   * Resolved rather than string-matched, because the defect this guards was
+   * invisible in the source: the print block set `--color-ink` and
+   * `--color-on-ink` to the same black, and `.on-ink` takes one for its ground
+   * and the other for its text. Neither declaration looked wrong on its own.
+   *
+   * So this walks the cascade the browser walks — the base rule's `var()`s
+   * against the print tokens, then any print override on top — and it fails
+   * for *either* regression: blackening the token again, or dropping the
+   * override that inverts the band.
+   */
+  const printedOnInk = (): { ground: string; text: string } => {
+    const block = printBlock()
+
+    const token = (name: string): string => {
+      const found = new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{3,6})`).exec(block)
+
+      expect(found, `the print block does not redefine --color-${name}`).not.toBeNull()
+      return found?.[1] ?? ''
+    }
+
+    // The base rule is what applies when the print block says nothing.
+    let ground = token('ink')
+    let text = token('on-ink')
+
+    const override = /\.on-ink\s*\{([^}]*)\}/.exec(block)
+    if (override) {
+      const declaration = (property: string): string | undefined =>
+        new RegExp(`${property}:\\s*(#[0-9a-fA-F]{3,6})`).exec(override[1] ?? '')?.[1]
+
+      ground = declaration('background') ?? ground
+      text = declaration('color') ?? text
+    }
+
+    return { ground, text }
+  }
+
+  it('keeps content on an ink ground readable on paper', () => {
+    // The whole point of the print treatment is a document somebody reads. A
+    // masthead printing black on black is not a styling blemish — it is a
+    // missing part of the board packet. Raised by CodeRabbit.
+    const { ground, text } = printedOnInk()
+
+    expect(contrastRatio(ground, text)).toBeGreaterThanOrEqual(MINIMUM_TEXT_CONTRAST)
+  })
+
+  it('spends no toner on a solid band where the screen had an ink ground', () => {
+    // The paired half of the rule above: white text on a black band satisfies
+    // contrast and still empties a cartridge across every printed page.
+    expect(printedOnInk().ground).toMatch(/^#(fff|ffffff)$/i)
+  })
+
+  it('leaves --color-on-ink meaning the light one', () => {
+    // It is used as a *ground* too — the sign-in field takes it for its
+    // background with `--color-ink` as its text — so this is not reducible to
+    // the `.on-ink` override above.
+    const found = /--color-on-ink:\s*(#[0-9a-fA-F]{3,6})/.exec(printBlock())
+
+    expect(contrastRatio(found?.[1] ?? '#000', '#000')).toBeGreaterThanOrEqual(
+      MINIMUM_TEXT_CONTRAST,
+    )
   })
 })
 

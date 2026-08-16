@@ -12,6 +12,8 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { MOST_REGISTER_ROWS } from '@/core/ports/finding-reader'
+
 import { DEFAULT_LIMIT, filterFrom } from './filter'
 
 describe('the search', () => {
@@ -73,7 +75,23 @@ describe('the limit', () => {
     // The port declares the ceiling and the adapter rejects past it. A URL
     // asking for more must not become a rejected promise on a page a board
     // member opened.
-    expect(filterFrom({ limit: '100000' }).limit).toBeLessThanOrEqual(200)
+    //
+    // **Clamped to the ceiling, not merely at or under it.** The original
+    // `toBeLessThanOrEqual` passed for three different behaviours — clamping
+    // here, falling back to the default, or clamping to 1 — and a board member
+    // who asked for everything and silently got 50 rows of a permanent record
+    // is the one this surface can least afford. Raised by CodeRabbit.
+    expect(filterFrom({ limit: '100000' }).limit).toBe(MOST_REGISTER_ROWS)
+    expect(filterFrom({ limit: '100000' }).limit).not.toBe(DEFAULT_LIMIT)
+  })
+
+  it('gives back exactly what was asked for just under the ceiling', () => {
+    // The other side of the boundary: a clamp that fired one row early would
+    // satisfy the test above and quietly shorten every large export.
+    expect(filterFrom({ limit: String(MOST_REGISTER_ROWS - 1) }).limit).toBe(
+      MOST_REGISTER_ROWS - 1,
+    )
+    expect(filterFrom({ limit: String(MOST_REGISTER_ROWS) }).limit).toBe(MOST_REGISTER_ROWS)
   })
 
   it('takes the first of a repeated parameter', () => {

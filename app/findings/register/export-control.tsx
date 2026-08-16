@@ -13,9 +13,12 @@ import { counted } from '@/core/findings/evidence'
  * what it makes is one a board member has to press to find out, and the thing
  * it makes here is handed to an auditor.
  *
- * **The count is the register's total, not the page's rows.** The file holds
- * every finding matching the current search, so a control naming the rows on
- * screen would promise a smaller document than it delivers.
+ * **The count is the rows on this page, not the register's total.** The route
+ * reads with the same filter the page did, `limit` included, so a register of
+ * 200 shown 50 at a time produces a file of 50. This doc said the opposite
+ * until the acceptance-criteria audit found the control overstating the file
+ * fourfold; the caller was fixed and the doc was left arguing for the defect.
+ * Raised by CodeRabbit.
  *
  * ## Why this is a component and not the link the access log uses
  *
@@ -121,21 +124,54 @@ export function ExportControl({
 }
 
 /**
+ * How long the export is given before it is called a failure.
+ *
+ * A judgement, not a derivation: long enough that a slow read of a capped 200
+ * rows is not cut off, short enough that a board member is told something.
+ */
+export const REQUEST_TIMEOUT_MS = 30_000
+
+/**
  * Ask the route for the file.
  *
  * A non-OK response is a failure, not a file. Without the check the body of an
  * error page is downloaded as `reviewed-findings.csv` — a board packet
  * containing an HTML error, which is worse than no download at all because it
  * looks like one that worked.
+ *
+ * **Bounded, because the only state this control cannot leave is waiting.** A
+ * route that never answers leaves the button disabled and the status reading
+ * "Exporting…" for as long as the page is open — no file, no failure, and no
+ * second attempt possible. Every other way this can go wrong ends at the
+ * `catch`; without a deadline this one ends nowhere. The abort rejects the
+ * promise, so it arrives at that same `catch` and the control says what it
+ * says for any other unreachable register. Raised by CodeRabbit.
+ *
+ * **A controller rather than `AbortSignal.timeout`**, which reads better and
+ * cannot be cancelled: its timer runs the full deadline out even when the file
+ * arrived in a second, so an afternoon of exports leaves a pending timer for
+ * each. This one is cleared as soon as the request settles. It is also the
+ * difference between a test that can prove the deadline and one that cannot —
+ * `AbortSignal.timeout` is not driven by the suite's fake timers, and a
+ * 30-second real wait is not a test anybody runs.
  */
 async function fetchCsv(href: string): Promise<Blob> {
-  const response = await fetch(href)
+  const controller = new AbortController()
+  const deadline = setTimeout(() => {
+    controller.abort(new DOMException('the register export did not answer', 'TimeoutError'))
+  }, REQUEST_TIMEOUT_MS)
 
-  if (!response.ok) {
-    throw new Error(`the register export answered ${response.status}`)
+  try {
+    const response = await fetch(href, { signal: controller.signal })
+
+    if (!response.ok) {
+      throw new Error(`the register export answered ${response.status}`)
+    }
+
+    return await response.blob()
+  } finally {
+    clearTimeout(deadline)
   }
-
-  return response.blob()
 }
 
 /**

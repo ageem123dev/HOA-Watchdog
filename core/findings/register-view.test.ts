@@ -130,7 +130,25 @@ describe('a register entry says the same things the other surfaces say', () => {
     const entry = view.kind === 'entries' ? view.entries[0] : undefined
 
     expect(entry?.reviewed).toBeNull()
-    expect(JSON.stringify(view)).not.toMatch(/null"|"undefined/)
+
+    // The second assertion here used to run `/null"|"undefined/` over
+    // `JSON.stringify(view)`, which cannot fail: the absent review serialises
+    // as `"reviewed":null` and matches neither alternative. It passed for the
+    // correct output and for the regression alike. What it was reaching for is
+    // that no *rendered* string in the row says "null" — so that is what it
+    // asserts, over the copy a board member actually reads. Raised by
+    // CodeRabbit.
+    const copy = Object.entries(entry?.row ?? {}).filter(
+      ([, value]) => typeof value === 'string',
+    )
+
+    // A loop over an empty list passes without asserting anything, and this
+    // project has shipped that shape before.
+    expect(copy.length, 'no row copy was examined').toBeGreaterThan(0)
+
+    for (const [field, value] of copy) {
+      expect(value, `the ${field} a board member reads`).not.toMatch(/\b(null|undefined)\b/i)
+    }
   })
 
   it('keeps the order the register gave them', () => {
@@ -206,12 +224,24 @@ describe('what arrives from outside the type system', () => {
 
   it('refuses a register holding more rows than it says it has', () => {
     // The mirror of the contradiction above, and refused for the same reason:
-    // the export control states this total as the number of rows the file will
-    // contain, so a register that cannot state its own size is one an auditor
-    // must not be handed. Unreachable through the adapter — `count(*) over ()`
-    // cannot be smaller than the rows it counted — which is why it is a refusal
-    // rather than a repair.
+    // a register reporting fewer matches than it handed back cannot state its
+    // own size, and this is the surface an auditor is handed. Unreachable
+    // through the adapter — `count(*) over ()` cannot be smaller than the rows
+    // it counted — which is why it is a refusal rather than a repair.
     expect(() => toRegisterView(register([finding(), finding({ id: 'b' })], 1))).toThrow(RangeError)
+  })
+
+  it.each([
+    ['not a number at all', Number.NaN],
+    ['infinite', Number.POSITIVE_INFINITY],
+    ['negative', -1],
+    ['fractional', 2.5],
+  ])('refuses a total that is %s', (_name, total) => {
+    // **These slip past both guards above rather than tripping them.**
+    // `NaN > 0` is false and `rows > NaN` is false, so a non-finite total
+    // satisfies every contradiction check and arrives at the page as the
+    // figure printed beside a board member's findings. Raised by Argus.
+    expect(() => toRegisterView(register([finding()], total))).toThrow(RangeError)
   })
 })
 

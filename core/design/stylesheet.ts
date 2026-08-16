@@ -155,19 +155,36 @@ body {
    *
    * Ink to black and every ground to white: toner is the constraint on paper,
    * and the stone ground exists to be easy on a screen.
+   *
+   * **--color-on-ink stays light.** The first version of this block set it to
+   * black along with the rest, on the reading that everything darkens for
+   * print. It does not mean "another ink" -- it means "the colour that sits
+   * against ink", and it is used as a *ground* as well as a text colour, so
+   * blackening it turned the sign-in field into a black box holding black
+   * text. Raised by CodeRabbit.
    */
   :root {
     --color-ink: #000;
     --color-ink-muted: #333;
     --color-stone: #fff;
     --color-stone-raised: #fff;
-    --color-on-ink: #000;
+    --color-on-ink: #fff;
     --color-rule-strong: #767676;
     --color-brass: #333;
     --color-flag: #000;
   }
 
   body {
+    background: #fff;
+    color: #000;
+  }
+
+  /*
+   * An ink ground is a screen affordance. On paper it is a band of solid toner
+   * across the masthead, so it inverts rather than merely keeping its text
+   * legible -- which the token above is now sufficient for on its own.
+   */
+  .on-ink {
     background: #fff;
     color: #000;
   }

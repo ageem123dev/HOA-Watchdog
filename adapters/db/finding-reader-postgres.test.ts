@@ -762,6 +762,44 @@ describeWithDatabase('the register', () => {
       expect((await find('_oastal Landscaping')).findings).toHaveLength(0)
     })
 
+    it('survives evidence holding scalars, nulls and arrays at every depth', async () => {
+      // **A search that errors takes the whole register down, not one row.**
+      // The concern raised was that `strict $.**.key` applies a member
+      // accessor to a scalar descendant and aborts the query — which would
+      // mean one oddly-shaped evidence blob makes the register unreachable for
+      // everybody.
+      //
+      // Measured on this database, it does not: `.**` suppresses the
+      // structural errors that a direct `strict $.n.vendorName` does raise.
+      // The claim was plausible enough to be worth pinning rather than
+      // arguing, so this seeds the shapes it named and asserts the search
+      // still answers. Raised by CodeRabbit; see the thread for the probe.
+      // Seeded and removed inside the test rather than in `beforeAll`, so a
+      // deliberately malformed row is never visible to the tests asserting
+      // exact totals and orders around it.
+      const hostile = await seedReviewed(
+        'hostile',
+        {
+          invoicesChecked: 3,
+          note: null,
+          tags: ['a', 'b'],
+          nested: { deeper: { count: 1 } },
+          pairs: [1, 'loose', null, { vendorName: `${REGISTER_PREFIX} Hostile Shapes` }],
+        },
+        '2099-06-01T00:00:00Z',
+      )
+
+      try {
+        // The register still reads, and the value nested under scalars is found.
+        expect(await idsOf(REGISTER_PREFIX)).toContain(hostile)
+        expect(await idsOf('Hostile Shapes')).toEqual([hostile])
+      } finally {
+        await registerOwner.query(`delete from finding where finding_type = $1`, [
+          `${REGISTER_PREFIX}_hostile`,
+        ])
+      }
+    })
+
     it.each([undefined, '', '   '])('treats %o as no search at all', async (search) => {
       // A blank box submits on every press of the button. Treating it as a
       // filter narrows the register to findings matching nothing, and presents
