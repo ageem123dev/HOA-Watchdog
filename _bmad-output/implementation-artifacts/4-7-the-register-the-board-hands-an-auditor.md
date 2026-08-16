@@ -135,11 +135,11 @@ argument `app/dashboard/page.tsx` already makes for the quarantine link.
   - [x] Decide what search searches, and write the reasoning down. It cannot be "everything": the
         evidence is `jsonb` of varying shape. Prefer the fields a board member would name.
 
-- [ ] **Task 2 — The register view** (AC: 1, 2, 3, 7)
-  - [ ] `core/findings/` gains the register's copy, reusing `toFindingRow` for the row and
+- [x] **Task 2 — The register view** (AC: 1, 2, 3, 7)
+  - [x] `core/findings/` gains the register's copy, reusing `toFindingRow` for the row and
         `reviewMessage` for the attribution sentence — 4.6 made both the single source, and a third
         wording of "already reviewed by X on Y" is exactly the drift they exist to prevent.
-  - [ ] The three states are one decision in `core/`, as `toDashboardView` is: empty, no-matches,
+  - [x] The three states are one decision in `core/`, as `toDashboardView` is: empty, no-matches,
         and rows. A surface deciding emptiness for itself gets the reassuring copy on the day the
         association signs up.
 
@@ -309,6 +309,39 @@ searchable.
 register and the queue are asserted to **partition** the table rather than each being asserted
 against a literal expectation of its own.
 
+#### Task 2 — the register view
+
+**Behaviour: `toRegisterView(register, filter)` — the register's copy and which of its states applies.**
+
+*If it ran correctly, how would I know?* Each row carries the same title, severity and sentence the
+dashboard gives the same finding, plus the attribution sentence the detail page gives it — and the
+**three states are told apart**: an empty register, a search that matched nothing, and rows.
+
+*How am I going to test it?* Pure function over a literal `ReviewedRegister`. Same as
+`toDashboardView`, which is the precedent this mirrors.
+
+**AC3 and AC7 are two different empty screens, and conflating them is the defect.** `rows.length
+=== 0` is true for both, so a surface branching on it tells a board member who searched for a vendor
+that *nothing has been reviewed yet* — reassurance about the whole record, in answer to a question
+about one vendor. `toDashboardView` was built against exactly this shape of mistake.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | empty register and no-matches told apart by `rows.length` | GUARD | zero rows **with** a search is a different state from zero rows without one |
+| 2 | the reassuring copy shown to someone who searched | GUARD | the no-matches state names the search back |
+| 3 | a fourth wording of "already reviewed by X on Y" | GUARD | cross-check: equals `reviewMessage`'s text for the same review |
+| 4 | a second wording of the row's title or sentence | GUARD | cross-check against `toFindingRow` for the same finding |
+| 5 | a reviewed row arrives with `reviewed: null` | GUARD | the port permits it; the view must not print "null" or crash |
+| 6 | the export count is taken from the page, not the total | GUARD | `total` exceeding rows must reach the surface as the export's count |
+| 7 | the surface cannot say it is showing a window | GUARD | rows fewer than total is a distinct, nameable fact |
+| 8 | search text echoed into copy unescaped | PROPAGATE | carried verbatim; React escapes it, and escaping here would double it |
+| 9 | a search of only whitespace treated as a search | GUARD | the state is "empty register", not "no matches for '   '" |
+| 10 | total disagrees with rows when rows is empty | GUARD | zero rows and a non-zero total is a contradiction the view must not present as either state |
+
+**Cross-check.** #3 and #4 are the strong ones and they are the same technique task 1 used: compare
+against the *existing* implementations of that copy rather than against literals chosen here, so the
+test fails when the surfaces drift rather than when someone reworded a fixture.
+
 ### Completion Notes
 
 **Baseline (a4d584c):** 2770 tests, 813 db tests, 8 pre-existing `tsc` errors — **and one
@@ -379,6 +412,45 @@ it as "no tests" rather than as a syntax error.
 findings**.
 
 *Gate:* `npm test` 2779 · `npm run test:db` 846 · lint 0 errors · `tsc` 8 (baseline) · build compiled.
+
+#### Task 2 — the register view
+
+`toRegisterView` returns a **three-way union**, mirroring `toDashboardView`: `nothing-reviewed`,
+`no-matches`, `entries`. The first two are both zero rows and owe opposite sentences — a surface
+branching on `rows.length` answers somebody who searched for one vendor with reassurance about the
+entire record.
+
+**Nothing here is a fourth wording.** The row copy is `toFindingRow`'s and the attribution is
+`reviewMessage`'s, both called rather than restated, and both asserted by **cross-check against
+those functions** rather than against literals — so the tests fail when the surfaces drift rather
+than when a fixture is reworded.
+
+**A register that cannot state its own size is refused, in both directions.** Zero rows against a
+non-zero total has no honest sentence; more rows than the total is the same contradiction mirrored,
+and the export control states that total as the number of rows the file will hold. Both are
+unreachable through the adapter, which is why they are refusals rather than repairs — preferring the
+larger number would invent a count to cover a port that had already gone wrong.
+
+*Sensitivity:* six mutations, all caught — collapse the two empty states (5), reword the row (1),
+reword the attribution (2), drop the contradiction guard (1), always claim to show everything (1),
+treat a blank search as a search (2).
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.95 · 4/4 files. **Three
+findings, all confirmed and taken** — every one about a value crossing into `core/` from outside the
+type system:
+
+- **[high] `search` can be an array at runtime.** `?search=a&search=b` hands Next.js a `string[]`,
+  and `.trim()` on it throws and takes the page down. Treated as absent rather than refused: a
+  read-only surface reached by a shared URL should answer a repeated parameter with the register,
+  not an error page — the call `app/access-log/filter.ts` makes for a malformed limit.
+  `core/auth/route-policy.ts` already guards its own typed parameters for the same reason.
+- **[high] `finding.reviewed === null` misses `undefined`.** A port omitting the field satisfies
+  neither the type nor a strict check, and the strict check then reads `.by` off nothing — making a
+  register row the place a disagreement between layers first appears, as a crash.
+- **[medium] more rows than the reported total** was passed through unexamined. Now refused, matching
+  the opposite contradiction.
+
+*Gate:* `npm test` 2805 · lint 0 errors · `tsc` 8 (baseline) · build compiled.
 
 ## Change Log
 
