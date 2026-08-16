@@ -606,6 +606,24 @@ the batch: one bad finding must cost exactly one finding.
 
 ### Review Findings
 
+#### MR !62, round 2 — 1 of 1 taken, and a round-1 claim corrected
+
+One Minor finding against `8bb9e29..5ebca8c`: the failure-recording description was too narrow.
+`notifyFindings` records a reason whenever processing a **claimed** finding fails — a refused send,
+but also `toAlertEmail` throwing between the claim and the record. Confirmed by reading the catch's
+scope. Both docs now say that.
+
+**And the round exposed a claim from round 1 that was not true.** Round 1's first finding named
+`.env.example` *and* `README.md`. The edit to `.env.example` never applied — its anchor assertion
+failed, and only the README was fixed afterwards, by index. The thread reply said both were done.
+`.env.example` was still carrying the original sentence a full round later, and CodeRabbit's own
+re-review is what surfaced it.
+
+The lesson is the one already written down for mutations: **a replacement that is not proven to have
+landed is not a change.** The assertion failed loudly and the failure was read as belonging to the
+next statement rather than to that one. Both files were re-checked by reading them back this time,
+not by trusting the script's exit.
+
 #### MR !62, round 1 — 8 of 8 taken
 
 CodeRabbit reviewed `0f079cc..8bb9e29`, 30 files, **Actionable comments posted: 8**. Every one
@@ -1077,4 +1095,5 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 | 2026-08-16 | Story created. |
 | 2026-08-16 | Six tasks implemented test-first; whole-story integration pass found a reviewed finding could still be emailed. |
 | 2026-08-16 | One local CodeRabbit round: 11 of 22 taken. MR !62 opened. |
-| 2026-08-16 | MR !62 round 1: 8 of 8 taken, four of them vacuous tests this story wrote. Ready to merge. |
+| 2026-08-16 | MR !62 round 1: 8 of 8 taken, four of them vacuous tests this story wrote. |
+| 2026-08-16 | MR !62 round 2: 1 of 1 taken; a round-1 edit that never applied was caught and made good. Ready to merge. |
