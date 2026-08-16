@@ -109,6 +109,13 @@ describe('the migration says what it does', () => {
     expect(sql).not.toMatch(/revoke[^;]*\bupdate\b[^;]*on\s+finding_alert/i)
   })
 
+  it('pins the search path on the function a check constraint calls', () => {
+    // A CHECK evaluated under a caller's search_path could otherwise resolve
+    // `unnest` or `btrim` to something else. A constraint that can be steered
+    // by a session setting is not a constraint.
+    expect(sql).toMatch(/set\s+search_path\s*=\s*pg_catalog/i)
+  })
+
   it('grants the reader nothing', () => {
     // Migration 021's silence, for the same reason and one step further on: a
     // catalog entry that could read this table would let a question about dues
@@ -390,6 +397,28 @@ describeWithDatabase('a delivery cannot be un-sent', () => {
       writer.query(`update finding_alert set recipients = $2 where finding_id = $1`, [
         findingId,
         ['someone-else@example.test'],
+      ]),
+    ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
+  })
+
+  it('refuses to move an unsent alert onto a different finding', async () => {
+    // The identity branch of the trigger, which nothing exercised. It matters
+    // for the same reason migration 021's does: one UPDATE could otherwise
+    // carry a delivery record from the finding it was about to a different one
+    // with its timestamps intact -- worse than a missing record, because the
+    // register still looks complete. Raised by CodeRabbit.
+    //
+    // Left unsent deliberately, so the refusal comes from the identity rule
+    // rather than from the whole-row freeze that applies once sent.
+    const first = await raiseFinding('identity_a')
+    const second = await raiseFinding('identity_b')
+
+    await writer.query(`insert into finding_alert (finding_id) values ($1)`, [first])
+
+    await expect(
+      writer.query(`update finding_alert set finding_id = $2 where finding_id = $1`, [
+        first,
+        second,
       ]),
     ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
   })

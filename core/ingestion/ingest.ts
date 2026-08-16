@@ -285,26 +285,39 @@ async function ingestOne(
       // `FindingRegister` and this wants a `FindingReader` under the same key --
       // spreading would hand the writer to the reader slot, and both are
       // objects so nothing would complain until runtime.
-      await notifyFindings({
-        findings: deps.findingReader,
-        alerts: deps.alerts,
-        recipients: deps.recipients,
-        mail: deps.mail,
-        baseUrl: deps.baseUrl,
-        // Rewrapped, as the detection callback above is and for the reason it
-        // records: this path's `onError` takes a **filename** and
-        // `notifyFindings` hands its callback a **finding id**. Both are
-        // strings, so passing it through wholesale type-checks and logs one
-        // under the other's label.
-        onError:
-          deps.onError === undefined
-            ? undefined
-            : (error, findingId) =>
-                deps.onError?.(
-                  new Error(`alerting finding ${findingId} failed`, { cause: error }),
-                  filename,
-                ),
-      })
+      // **Guarded again here, and not because `notifyFindings` throws.** It is
+      // written not to, and its tests hold it to that. But this `try` reports
+      // `figures-not-stored` -- and it sits *after* `replace` has committed, so
+      // a rejection escaping the alerting step would tell a treasurer their
+      // figures were not saved when they were, and their retry would find the
+      // document already settled. The cost of the guarantee living in one file
+      // is that the caller cannot see it; two lines here mean the caller does
+      // not have to. Raised by CodeRabbit.
+      try {
+        await notifyFindings({
+          findings: deps.findingReader,
+          alerts: deps.alerts,
+          recipients: deps.recipients,
+          mail: deps.mail,
+          baseUrl: deps.baseUrl,
+          // Rewrapped, as the detection callback above is and for the reason it
+          // records: this path's `onError` takes a **filename** and
+          // `notifyFindings` hands its callback a **finding id**. Both are
+          // strings, so passing it through wholesale type-checks and logs one
+          // under the other's label.
+          onError:
+            deps.onError === undefined
+              ? undefined
+              : (error, findingId) =>
+                  deps.onError?.(
+                    new Error(`alerting finding ${findingId} failed`, { cause: error }),
+                    filename,
+                  ),
+        })
+      } catch {
+        // Nowhere left to report it: reporting is what the step already does,
+        // through its own `onError`. Swallowed so a success stays a success.
+      }
     } catch (error) {
       deps.onError?.(error, filename)
 

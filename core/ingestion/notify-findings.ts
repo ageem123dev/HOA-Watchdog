@@ -64,6 +64,24 @@ export const ALERT_RETRY_AFTER_MS = 15 * 60_000
  */
 export const MOST_ALERTS_PER_RUN = 25
 
+/**
+ * The longest one run will spend sending, before it leaves the rest for later.
+ *
+ * **A count budget is not a time budget, and only the second one bounds what a
+ * treasurer waits for.** Twenty-five alerts against the mail adapter's
+ * fifteen-second timeout is over six minutes — spent inside the upload request
+ * that raised the findings. The count says nothing about that, and the case
+ * where it matters is precisely the case where the provider is slow.
+ *
+ * Checked **before** a finding is claimed, never in the middle of one. Work
+ * already started is always finished: a run that abandoned a finding between
+ * the mail going out and the delivery being recorded would send it again on the
+ * next pass, which is the one thing the ledger exists to bound.
+ *
+ * What is left over has no delivery row, so the next run picks it up.
+ */
+export const ALERT_RUN_BUDGET_MS = 45_000
+
 export interface NotifyDependencies {
   readonly findings?: FindingReader
   readonly alerts?: FindingAlertLedger
@@ -93,11 +111,18 @@ export interface NotifyOutcome {
   readonly failed: number
   /** Findings another run already owned. Neither a failure nor a send. */
   readonly skipped: number
-  /** At least this many were left for the next run. Zero means the batch was not full. */
-  readonly remaining: number
+  /**
+   * Whether anything was left for the next run.
+   *
+   * A boolean rather than a count, because neither of the two things that stop
+   * a run can say *how many* remain: the read is bounded, and the clock stops it
+   * partway. Reporting a number would be inventing precision. Saying nothing at
+   * all would let a caller read a truncated run as a complete one.
+   */
+  readonly more: boolean
 }
 
-const NOTHING: NotifyOutcome = { sent: 0, failed: 0, skipped: 0, remaining: 0 }
+const NOTHING: NotifyOutcome = { sent: 0, failed: 0, skipped: 0, more: false }
 
 /**
  * Report a failure without letting the report become one.
@@ -127,13 +152,19 @@ export async function notifyFindings(deps: NotifyDependencies): Promise<NotifyOu
     alerts === undefined ||
     recipients === undefined ||
     mail === undefined ||
-    baseUrl === undefined
+    // Blank as well as absent. `readBaseUrl` refuses a blank one, so it cannot
+    // arrive from the adapter -- but this is a core function anyone may call,
+    // and `new URL(route, '')` throws while `new URL(route, ' ')` is worse: a
+    // link nobody can follow, recorded as delivered. Raised by CodeRabbit.
+    baseUrl === undefined ||
+    baseUrl.trim() === ''
   ) {
     return null
   }
 
   const now = deps.now ?? (() => new Date())
-  const staleBefore = new Date(now().getTime() - ALERT_RETRY_AFTER_MS)
+  const startedAt = now().getTime()
+  const staleBefore = new Date(startedAt - ALERT_RETRY_AFTER_MS)
 
   let awaiting: readonly FindingDetail[]
   let addresses: readonly string[]
@@ -165,7 +196,15 @@ export async function notifyFindings(deps: NotifyDependencies): Promise<NotifyOu
   let failed = 0
   let skipped = 0
 
+  let ranOutOfTime = false
+
   for (const finding of awaiting) {
+    // Before the claim, never inside the work. See `ALERT_RUN_BUDGET_MS`.
+    if (now().getTime() - startedAt >= ALERT_RUN_BUDGET_MS) {
+      ranOutOfTime = true
+      break
+    }
+
     try {
       // One statement decides ownership. `false` means somebody else has it —
       // neither a failure nor a send, because counting it as either would make
@@ -213,10 +252,10 @@ export async function notifyFindings(deps: NotifyDependencies): Promise<NotifyOu
     sent,
     failed,
     skipped,
-    // A full batch means there may be more behind it. The reader is bounded and
-    // cannot say how many, so "at least one" is the honest answer — and saying
-    // nothing would let a caller read a capped run as a complete one.
-    remaining: awaiting.length === MOST_ALERTS_PER_RUN ? 1 : 0,
+    // Two ways to leave work behind: the clock stopped this run partway, or the
+    // read filled its page and there may be more behind it. Either way the
+    // remainder has no delivery row, so the next run picks it up.
+    more: ranOutOfTime || awaiting.length === MOST_ALERTS_PER_RUN,
   }
 }
 

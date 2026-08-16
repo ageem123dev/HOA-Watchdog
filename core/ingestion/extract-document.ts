@@ -313,30 +313,43 @@ export async function extractDocument(
       // says so: a missed detection is recovered by the next upload, and a
       // missed alert is recovered by nothing. That is why a failure there is
       // recorded against the finding rather than only logged.
-      await notifyFindings({
-        // Named one by one rather than spread. `deps.findings` is a
-        // `FindingRegister` and `notifyFindings` wants a `FindingReader` under
-        // the same key -- spreading would hand the writer to the reader slot,
-        // and both are objects so nothing would complain until runtime.
-        findings: deps.findingReader,
-        alerts: deps.alerts,
-        recipients: deps.recipients,
-        mail: deps.mail,
-        baseUrl: deps.baseUrl,
-        // `deps.onError` here takes a document id; `notifyFindings` hands its
-        // callback a *finding* id. Both are strings, so passing it through
-        // wholesale type-checks and logs one under the label of the other --
-        // the defect Argus caught in `ingest.ts`. Rewrapped so the line stays
-        // legible, naming both.
-        onError:
-          deps.onError === undefined
-            ? undefined
-            : (error, findingId) =>
-                deps.onError?.(
-                  new Error(`alerting finding ${findingId} failed`, { cause: error }),
-                  documentId,
-                ),
-      })
+      // **Guarded again here, and not because `notifyFindings` throws.** It is
+      // written not to, and its tests hold it to that. But this `try` reports
+      // `figures-not-stored` -- and it sits *after* `replace` has committed, so
+      // a rejection escaping the alerting step would tell a treasurer their
+      // figures were not saved when they were, and their retry would find the
+      // document already settled. The cost of the guarantee living in one file
+      // is that the caller cannot see it; two lines here mean the caller does
+      // not have to. Raised by CodeRabbit.
+      try {
+        await notifyFindings({
+          // Named one by one rather than spread. `deps.findings` is a
+          // `FindingRegister` and `notifyFindings` wants a `FindingReader` under
+          // the same key -- spreading would hand the writer to the reader slot,
+          // and both are objects so nothing would complain until runtime.
+          findings: deps.findingReader,
+          alerts: deps.alerts,
+          recipients: deps.recipients,
+          mail: deps.mail,
+          baseUrl: deps.baseUrl,
+          // `deps.onError` here takes a document id; `notifyFindings` hands its
+          // callback a *finding* id. Both are strings, so passing it through
+          // wholesale type-checks and logs one under the label of the other --
+          // the defect Argus caught in `ingest.ts`. Rewrapped so the line stays
+          // legible, naming both.
+          onError:
+            deps.onError === undefined
+              ? undefined
+              : (error, findingId) =>
+                  deps.onError?.(
+                    new Error(`alerting finding ${findingId} failed`, { cause: error }),
+                    documentId,
+                  ),
+        })
+      } catch {
+        // Nowhere left to report it: reporting is what the step already does,
+        // through its own `onError`. Swallowed so a success stays a success.
+      }
 
       return { outcome: 'read', documentId, records: result.records.length }
     } catch (error) {

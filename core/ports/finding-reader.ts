@@ -289,6 +289,14 @@ export interface FindingReader {
    *
    * Bounded, like the two reads above and for the same reason: a caller that
    * forgets a limit is the one reading a table that only ever grows.
+   *
+   * **A whole number from 1 to `MOST_REGISTER_ROWS`**, the same contract
+   * `unreviewed` and `RegisterFilter.limit` carry. Outside that the returned
+   * promise rejects with `RangeError`; it is never clamped. Stated here rather
+   * than left to the adapter, because a bound the adapter enforces and the port
+   * does not mention is a contract a caller can only discover by violating it —
+   * the point CodeRabbit made against `unreviewed`, and this member arrived
+   * with the same omission.
    */
   awaitingAlert(limit: number): Promise<readonly FindingDetail[]>
 }

@@ -1,5 +1,5 @@
 import { MailNotSentError, type MailMessage, type MailSender } from '../../core/ports/mail'
-import { readBaseUrl, readMailConfig } from './env'
+import { MailNotConfiguredError, readBaseUrl, readMailConfig } from './env'
 
 /**
  * The one place this system talks to the outside world on its own initiative.
@@ -201,6 +201,13 @@ export function createAlerting(
     return { mail: createHttpMailSender(), baseUrl: readBaseUrl() }
   } catch (error) {
     onError?.(error)
+
+    // **Only a configuration error means "not configured".** Anything else
+    // reaching here -- a constructor throwing, a bug in the reader -- would
+    // otherwise be silently indistinguishable from an unset variable, and the
+    // whole alerting path would disappear with a single log line nobody
+    // correlates. Raised by CodeRabbit.
+    if (!(error instanceof MailNotConfiguredError)) throw error
 
     // Empty rather than `undefined`, so a call site can spread it
     // unconditionally: `...alerting` contributes nothing when mail is not

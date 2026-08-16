@@ -79,6 +79,21 @@ export interface FindingAlertLedger {
    * Leaves the alert unsent on purpose. The claim stays, goes stale, and a later
    * run takes it over — which is the whole of the recovery story, and the reason
    * this is not simply a swallowed error.
+   *
+   * **What `failure` may contain**, stated here because `recordSent` states the
+   * equivalent for its recipients and the asymmetry was a real gap:
+   *
+   * - **No recipient address, credential or URL.** This column is read by
+   *   whoever is working out why a board was never warned, and a provider's
+   *   rejection routinely echoes the request back — which is where every
+   *   director's address is. `MailNotSentError` is built to carry none of them;
+   *   anything else reaching here is the caller's to keep clean.
+   * - **Non-blank, and at most 2000 characters.** Migration 023's
+   *   `finding_alert_failure_is_useful` enforces both, and refuses the row
+   *   otherwise — so an adapter that passes a longer or emptier reason straight
+   *   through would fail on *recording that the send failed*, losing the only
+   *   record that it did. The Postgres adapter normalises rather than relying on
+   *   the caller.
    */
   recordFailure(findingId: string, failure: string): Promise<void>
 }

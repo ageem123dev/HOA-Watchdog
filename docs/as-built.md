@@ -1,12 +1,13 @@
 # The system as built
 
-What exists, as of story 3.2. This describes the code; the planning artifacts in
+What exists, as of story 4.8 — the last story in epic 4. This describes the code; the planning artifacts in
 [`_bmad-output/planning-artifacts/`](../_bmad-output/planning-artifacts/) describe the intent, and
 where the two differ **this page is the one that was checked against the source**.
 
-Written because the three planning artifacts describe an architecture in the present tense, and
-roughly half of it is not built. A reader cannot tell which half from those documents. They can from
-this one.
+Written because the three planning artifacts describe an architecture in the present tense, and not
+all of it is built. A reader cannot tell which parts from those documents. They can from this one —
+and the table below is kept honest as each epic lands, rather than left to drift into describing a
+system that has moved on.
 
 ## The fork everything follows from
 
@@ -130,10 +131,10 @@ none of them exist.
 
 | Component | Where it is described | Status |
 | --- | --- | --- |
-| The query catalogue and its one door | `architecture-walkthrough.html` | **Partly built** — stories 3.1 and 3.2. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze. A caller names the entry and version and the catalogue resolves it; what does not exist is anything that decides *which* entry answers a question — no intent routing, no model selection — and nothing renders an answer. Story 3.2 added `POST /tools/v1/catalog/execute`, the agent service's only way in |
-| The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Not built** — epic 3, stories 3.4–3.8 |
+| The query catalogue and its one door | `architecture-walkthrough.html` | **Built** — epic 3. One entry (`dues_status@1`), executed under the reader role, with its provenance record and its version freeze, reached only through `POST /tools/v1/catalog/execute`. Routing, the numeric validator and the ask surface all landed in stories 3.4–3.8 |
+| The Oracle: intent routing, the numeric validator, the ask surface | `architecture-walkthrough.html` | **Built** — epic 3, stories 3.4–3.8. Never exercised outside its tests: no board member has asked it anything |
 | The watchdog and anomaly detection | `architecture-walkthrough.html`, `board-explainer.html` | **Built** — epic 4. Duplicate invoices, vendor spikes and dues shortfalls, each a deterministic SQL comparison with no model in the path |
-| The CrewAI agent service | `architecture-walkthrough.html` | **Not built** |
+| The CrewAI agent service | `architecture-walkthrough.html` | **Built** — epic 3, story 3.3, on the pinned Python 3.13 AD-15 requires |
 | Duplicate-invoice and arrears findings | the PRD | **Built** — epic 4, with the dashboard queue, the finding detail, the reviewed register and the alert email above |
 
 There is also **no CI**. The GitLab pipeline was removed on 2026-08-07 and AD-2's amendment records
@@ -157,6 +158,9 @@ review.
 | A published catalog entry version cannot be edited (AD-14) | `catalog/published-versions.test.ts` |
 | The tool endpoint rejects any caller that is not the agent service (AD-15) | `core/tools/service-token.test.ts`, `app/tools/v1/catalog/execute/route.test.ts` |
 | The tool endpoint is the catalog's only door (AD-15) | `core/tools/sole-data-path.test.ts` |
+| No model is in the alerting path (FR-8) | `core/security/no-model-in-alerts.test.ts` |
+| One alert per finding, and no second one ever (AD-13) | `migrations/finding-alert.test.ts`, `adapters/db/finding-alert-postgres.test.ts` |
+| An alert is never sent without something recording who it went to | `migrations/finding-alert.test.ts` |
 | The written upload contract matches the code | `docs/upload-contract.test.ts` |
 | The README matches this tree | `docs/readme.test.ts` |
 

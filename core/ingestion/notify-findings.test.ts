@@ -28,7 +28,12 @@ import type { FindingAlertLedger } from '../ports/finding-alert'
 import type { FindingDetail, FindingReader } from '../ports/finding-reader'
 import { MailNotSentError, type MailMessage, type MailSender } from '../ports/mail'
 import { POSSIBLE_DUPLICATE_INVOICE } from '../findings/finding-view'
-import { ALERT_RETRY_AFTER_MS, MOST_ALERTS_PER_RUN, notifyFindings } from './notify-findings'
+import {
+  ALERT_RETRY_AFTER_MS,
+  ALERT_RUN_BUDGET_MS,
+  MOST_ALERTS_PER_RUN,
+  notifyFindings,
+} from './notify-findings'
 
 const BASE = 'https://watchdog.example.test'
 const NOW = new Date('2026-03-11T09:00:00Z')
@@ -136,6 +141,23 @@ describe('a collaborator that is not wired means nothing happens', () => {
     },
   )
 
+  it('treats a blank base URL as absent rather than building a relative link', async () => {
+    // `readBaseUrl` refuses a blank, so this cannot arrive from the adapter —
+    // but `notifyFindings` is a core function and its gate checked only for
+    // `undefined`. A blank one would produce `new URL(route, '')`, and a
+    // delivery row recorded against a link nobody can follow. Raised by
+    // CodeRabbit.
+    const alerts = ledger()
+    const mail = mailer()
+
+    await expect(
+      notifyFindings(wired({ alerts: alerts.port, mail: mail.port, baseUrl: '   ' })),
+    ).resolves.toBeNull()
+
+    expect(alerts.claimed).toEqual([])
+    expect(mail.sent).toEqual([])
+  })
+
   it.each([['mail'], ['baseUrl']])(
     'writes no delivery row when %s is missing, not even a claim',
     async (absent) => {
@@ -169,7 +191,7 @@ describe('telling the board', () => {
       wired({ alerts: alerts.port, mail: mail.port, recipients: recipients(['a@example.test', 'b@example.test']).port }),
     )
 
-    expect(outcome).toEqual({ sent: 1, failed: 0, skipped: 0, remaining: 0 })
+    expect(outcome).toEqual({ sent: 1, failed: 0, skipped: 0, more: false })
     expect(alerts.claimed.map((claim) => claim.id)).toEqual(['f-1'])
     expect(mail.sent).toHaveLength(1)
     expect(mail.sent[0]!.to).toEqual(['a@example.test', 'b@example.test'])
@@ -217,7 +239,45 @@ describe('telling the board', () => {
     expect(outcome!.sent).toBe(MOST_ALERTS_PER_RUN)
     // A full page means there may be more behind it; the reader is bounded and
     // cannot say how many, so "at least one" is the honest answer.
-    expect(outcome!.remaining).toBeGreaterThan(0)
+    expect(outcome!.more).toBe(true)
+  })
+
+  it('stops when the run has spent its time, leaving the rest for the next one', async () => {
+    // **A count budget is not a time budget.** Twenty-five alerts against a
+    // fifteen-second send timeout is over six minutes, spent inside an upload a
+    // treasurer is watching — and the count says nothing about that. Raised by
+    // CodeRabbit.
+    //
+    // The clock is stepped forward by the fake mailer, so the deadline is
+    // reached deterministically rather than by making the test slow.
+    let ticks = 0
+    const clock = () => new Date(NOW.getTime() + ticks * (ALERT_RUN_BUDGET_MS / 2))
+
+    const alerts = ledger()
+    const slowMail: MailSender = {
+      async send() {
+        ticks += 1
+      },
+    }
+
+    const outcome = await notifyFindings(
+      wired({
+        findings: reader([finding('f-1'), finding('f-2'), finding('f-3'), finding('f-4')]).port,
+        alerts: alerts.port,
+        mail: slowMail,
+        now: clock,
+      }),
+    )
+
+    // Work already started is always finished — the budget is checked before a
+    // finding is claimed, never in the middle of one, so no send is abandoned
+    // between the mail going out and the delivery being recorded.
+    expect(outcome!.sent).toBeLessThan(4)
+    expect(outcome!.sent).toBeGreaterThan(0)
+    expect(outcome!.more).toBe(true)
+    expect(alerts.sent).toHaveLength(outcome!.sent)
+    // Nothing was claimed and then abandoned: every claim became a send.
+    expect(alerts.claimed).toHaveLength(outcome!.sent)
   })
 
   it('computes the staleness boundary from the injected clock', async () => {
@@ -241,7 +301,7 @@ describe('an empty board', () => {
       wired({ alerts: alerts.port, mail: mail.port, recipients: recipients([]).port }),
     )
 
-    expect(outcome).toEqual({ sent: 0, failed: 0, skipped: 0, remaining: 0 })
+    expect(outcome).toEqual({ sent: 0, failed: 0, skipped: 0, more: false })
     expect(alerts.claimed).toEqual([])
     expect(mail.sent).toEqual([])
   })
@@ -260,7 +320,7 @@ describe('one finding must cost exactly one finding', () => {
       }),
     )
 
-    expect(outcome).toEqual({ sent: 2, failed: 1, skipped: 0, remaining: 0 })
+    expect(outcome).toEqual({ sent: 2, failed: 1, skipped: 0, more: false })
     expect(alerts.sent.map((entry) => entry.id)).toEqual(['f-1', 'f-3'])
     expect(alerts.failed.map((entry) => entry.id)).toEqual(['f-2'])
   })
@@ -292,7 +352,7 @@ describe('one finding must cost exactly one finding', () => {
 
     const outcome = await notifyFindings(wired({ alerts: alerts.port, mail: mail.port }))
 
-    expect(outcome).toEqual({ sent: 0, failed: 0, skipped: 1, remaining: 0 })
+    expect(outcome).toEqual({ sent: 0, failed: 0, skipped: 1, more: false })
     expect(mail.sent).toEqual([])
     expect(alerts.sent).toEqual([])
     expect(alerts.failed).toEqual([])
@@ -326,7 +386,7 @@ describe('nothing here may fail an upload that succeeded', () => {
       sent: 0,
       failed: 0,
       skipped: 0,
-      remaining: 0,
+      more: false,
     })
   })
 

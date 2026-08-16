@@ -79,7 +79,12 @@
 -- the same answer every time; nothing here reads the row, the clock, or a
 -- setting.
 create function finding_alert_recipients_are_named(addresses text[]) returns boolean
-language sql immutable as $$
+language sql immutable
+-- Pinned, so a CHECK evaluated under a caller's search_path cannot resolve
+-- `unnest` or `btrim` to something else. A constraint that can be steered by a
+-- session setting is not a constraint. Raised by CodeRabbit.
+set search_path = pg_catalog
+as $$
   select coalesce(bool_and(address is not null and btrim(address) <> ''), false)
     from unnest(addresses) as address
 $$;

@@ -56,7 +56,13 @@ const duplicate = (overrides: Partial<FindingDetail> = {}): FindingDetail => ({
 
 describe('a value that came off a document cannot carry structure', () => {
   it('keeps an ordinary name exactly as it is', () => {
-    expect(oneLine(`Coast${String.fromCodePoint(0x0b)}al`, 200)).toBe('Coast al')
+    // Pass-through, which is what the name promises. An earlier edit clobbered
+    // this assertion with a copy of the control-character case below, so the
+    // test kept its name and stopped testing the thing -- the single most
+    // valuable case here, because every other assertion in this block is about
+    // *changing* the input.
+    expect(oneLine('Coastal Landscaping', 200)).toBe('Coastal Landscaping')
+    expect(oneLine('Unit 4B — $1,240.00', 200)).toBe('Unit 4B — $1,240.00')
   })
 
   /**
