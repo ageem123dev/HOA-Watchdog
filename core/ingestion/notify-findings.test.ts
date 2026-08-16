@@ -410,9 +410,17 @@ describe('nothing here may fail an upload that succeeded', () => {
       throw new Error('the ledger was unreachable')
     }
 
-    await expect(
-      notifyFindings(wired({ alerts: alerts.port, onError })),
-    ).resolves.toBeDefined()
+    // **Counted as sent, and asserted so.** The email really went; the row that
+    // would stop it being sent again did not get written. Moving `sent += 1`
+    // inside the inner `try` would make this `sent: 0` — a different and
+    // defensible decision — and the first version of this test could not tell
+    // the two apart. Raised by CodeRabbit.
+    await expect(notifyFindings(wired({ alerts: alerts.port, onError }))).resolves.toEqual({
+      sent: 1,
+      failed: 0,
+      skipped: 0,
+      more: false,
+    })
     expect(onError).toHaveBeenCalled()
   })
 

@@ -59,6 +59,13 @@ const ALERTING_PATH = [
   'core/ingestion/notify-findings.ts',
   'adapters/mail/mail-sender-http.ts',
   'adapters/mail/env.ts',
+  // The two adapters behind the ports `notifyFindings` calls. Omitting them was
+  // a real hole: this file claimed to cover every module from a finding to an
+  // email while the implementations of two of the four collaborators went
+  // unread, so a credential read in either passed the guard. Raised by
+  // CodeRabbit on the merge request.
+  'adapters/db/finding-reader-postgres.ts',
+  'adapters/db/finding-alert-postgres.ts',
 ] as const
 
 /**
@@ -86,6 +93,31 @@ const sources = ALERTING_PATH.map((path) => ({
 }))
 
 describe('the alerting path can actually fail this check', () => {
+  it('covers every module an alert passes through', () => {
+    // **The coverage list itself is asserted**, because the checks below are
+    // generated from it: dropping an entry removes its cases rather than
+    // failing anything, so the guard can silently shrink to nothing. Found by
+    // the sensitivity pass on the round that added the two adapters -- removing
+    // one of them changed 19 passing tests into 17 passing tests.
+    //
+    // Four collaborators reach an alert, and each has an implementation: the
+    // reader that chooses, the ledger that claims and records, the recipients,
+    // and the sender. Two of those live in one adapter file, which is why this
+    // is six paths and not seven.
+    expect([...ALERTING_PATH].sort()).toEqual(
+      [
+        'adapters/db/finding-alert-postgres.ts',
+        'adapters/db/finding-reader-postgres.ts',
+        'adapters/mail/env.ts',
+        'adapters/mail/mail-sender-http.ts',
+        'core/findings/alert-email.ts',
+        'core/findings/detail-view.ts',
+        'core/findings/finding-view.ts',
+        'core/ingestion/notify-findings.ts',
+      ].sort(),
+    )
+  })
+
   it('reads every module it names, and none of them is empty', () => {
     // The control. A path that silently read nothing would report no violations
     // for the best possible reason and the worst possible one, and they look

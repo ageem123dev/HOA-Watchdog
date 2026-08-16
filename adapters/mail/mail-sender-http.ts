@@ -145,23 +145,64 @@ export function createHttpMailSender(options: HttpMailSenderOptions = {}): MailS
       // that shape is the one that most reliably becomes a delivery row for a
       // message nobody received. An unreadable body is treated the same way: a
       // success this cannot confirm is not one it may record.
-      const payload = await readJson(response)
+      // An **empty** body is a success, and treating it as a failure was a real
+      // defect: SendGrid answers `202 Accepted` with nothing at all, so a
+      // correctly delivered warning was recorded as failed and re-sent on every
+      // sweep once its claim went stale. The endpoint is configuration here, so
+      // that is not a hypothetical provider. Raised by CodeRabbit.
+      //
+      // The distinction that keeps this honest: nothing at all is a provider
+      // saying yes tersely; half a JSON document is a provider -- or a proxy --
+      // saying something went wrong, and that still rejects.
+      // **Read failures are not empty bodies.** `.catch(() => '')` here made a
+      // connection reset mid-body indistinguishable from a provider's terse
+      // yes, so a send whose outcome is genuinely unknown would be recorded as
+      // delivered and never retried -- the exact false success this adapter
+      // exists to refuse, arriving through the fix for a different one. Raised
+      // by Argus on the fix diff, which is where this project keeps finding
+      // them.
+      let body: string
+      try {
+        body = (await response.text()).trim()
+      } catch (error) {
+        throw new MailNotSentError('the mail provider answer could not be read to the end', {
+          cause: error,
+        })
+      }
+
+      // Nothing at all is a provider saying yes tersely. Load-bearing: without
+      // this line `parseObject('')` fails to parse and the send is reported as
+      // failed, which is exactly the SendGrid defect.
+      if (body === '') return
+
+      const payload = parseObject(body)
       if (payload === null) {
         throw new MailNotSentError('the mail provider answered with something that was not JSON')
       }
-      if ('error' in payload && payload.error !== null && payload.error !== undefined) {
+
+      // `false` is not an error, and neither is `null`. Only a value that says
+      // something went wrong does.
+      const reported = payload['error']
+      if (reported !== undefined && reported !== null && reported !== false) {
         throw new MailNotSentError('the mail provider reported an error alongside a success status')
       }
     },
   }
 }
 
-async function readJson(response: Response): Promise<Record<string, unknown> | null> {
+/**
+ * The body as an object, or `null` if it is not one.
+ *
+ * Text is read at the call site rather than through `response.json()`, because
+ * that cannot tell an empty body from a malformed one -- both throw -- and that
+ * difference is the whole point: one is a success and the other is not.
+ */
+function parseObject(body: string): Record<string, unknown> | null {
   try {
-    const parsed: unknown = await response.json()
+    const parsed: unknown = JSON.parse(body)
 
-    // An array or a scalar is not an object, and `'error' in payload` throws on
-    // a scalar — so the narrowing happens here rather than at the check.
+    // An array or a scalar is not an object, and `payload['error']` on one is
+    // meaningless -- so the narrowing happens here rather than at the check.
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null

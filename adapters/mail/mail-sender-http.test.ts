@@ -269,6 +269,58 @@ describe('sending', () => {
     await expect(sender.send(message)).rejects.toBeInstanceOf(MailNotSentError)
   })
 
+  it('accepts a 202 with an empty body, which is how SendGrid says yes', async () => {
+    // A provider that answers "accepted" with no body was being recorded as a
+    // failure, and the alert retried once the claim went stale -- so a
+    // correctly delivered warning would be sent again on every sweep. The
+    // endpoint is configuration, so this is not a hypothetical provider.
+    // Raised by CodeRabbit.
+    const { doFetch } = stubFetch(() => new Response(null, { status: 202 }))
+    const sender = createHttpMailSender({ env: env(), fetch: doFetch })
+
+    await expect(sender.send(message)).resolves.toBeUndefined()
+  })
+
+  it('accepts a body that says error is false', async () => {
+    // `false` is not an error. The first version checked only for `null` and
+    // `undefined`, so a provider reporting success this way was rejected.
+    const { doFetch } = stubFetch(() => ok({ error: false }))
+    const sender = createHttpMailSender({ env: env(), fetch: doFetch })
+
+    await expect(sender.send(message)).resolves.toBeUndefined()
+  })
+
+  it('rejects when the response body cannot be read to the end', async () => {
+    // **The failure mode the empty-body fix introduced.** Swallowing a stream
+    // error into `''` makes a truncated read indistinguishable from SendGrid's
+    // terse yes -- so a send whose outcome is genuinely unknown is recorded as
+    // delivered and never retried. That is the exact false success this whole
+    // adapter is written to refuse, arriving through the fix for a different
+    // one. Raised by Argus on the fix diff.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('connection reset mid-body'))
+      },
+    })
+
+    const { doFetch } = stubFetch(() => new Response(body, { status: 200 }))
+    const sender = createHttpMailSender({ env: env(), fetch: doFetch })
+
+    await expect(sender.send(message)).rejects.toBeInstanceOf(MailNotSentError)
+  })
+
+  it('still rejects a body that is malformed rather than empty', async () => {
+    // The distinction that keeps the relaxation honest: nothing at all is a
+    // provider saying yes tersely; half a JSON document is a provider, or a
+    // proxy, saying something went wrong.
+    const { doFetch } = stubFetch(
+      () => new Response('{"id": ', { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+    const sender = createHttpMailSender({ env: env(), fetch: doFetch })
+
+    await expect(sender.send(message)).rejects.toBeInstanceOf(MailNotSentError)
+  })
+
   it('resolves on a 200 that reports nothing wrong', async () => {
     const { doFetch } = stubFetch(() => ok())
     const sender = createHttpMailSender({ env: env(), fetch: doFetch })

@@ -227,9 +227,19 @@ describe('the message a board member receives', () => {
   })
 
   it('states the figures the detector recorded', () => {
-    const email = toAlertEmail(duplicate(), BASE)
+    // **Cross-checked against `toFindingDetail`, not against a substring.** The
+    // first version asserted `toContain('12')` -- and the fixture's amount is
+    // `1240.00`, which contains `12`, so it passed with the figures block
+    // deleted entirely. Raised by CodeRabbit; the same shape as the ordering
+    // test in the alert adapter suite, found in the same review.
+    const finding = duplicate()
+    const email = toAlertEmail(finding, BASE)
+    const figures = toFindingDetail(finding).figures
 
-    expect(email.text).toContain('12')
+    expect(figures.length).toBeGreaterThan(0)
+    for (const figure of figures) {
+      expect(email.text).toContain(`${figure.label}: ${figure.value}`)
+    }
   })
 
   it('says why it arrived, because there is no unsubscribe', () => {

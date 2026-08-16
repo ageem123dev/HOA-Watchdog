@@ -5,7 +5,7 @@ merge_request: 62
 
 # Story 4.8: Told before you pay
 
-Status: ready-for-dev
+Status: done
 
 ## Why this story exists
 
@@ -606,6 +606,52 @@ the batch: one bad finding must cost exactly one finding.
 
 ### Review Findings
 
+#### MR !62, round 1 — 8 of 8 taken
+
+CodeRabbit reviewed `0f079cc..8bb9e29`, 30 files, **Actionable comments posted: 8**. Every one
+verified against the real code and every one confirmed.
+
+**Four of the eight were vacuous tests this story wrote**, which is the finding that matters more
+than any individual fix. The test-value pass ran on every task and caught none of them:
+
+- `answers in a stable order across two reads` compared two identical queries against an unchanged
+  table. Those agree whatever the planner does, so it passed with `order by email` deleted. Rewritten
+  to assert the order itself — and the fixture had to be widened to three members inserted
+  last-first, because a fixture seeded in sorted order makes the assertion pass either way.
+- `states the figures the detector recorded` asserted `toContain('12')`. The fixture's amount is
+  `1240.00`, which contains `12`, so it passed with the figures block deleted entirely. Now
+  cross-checked against `toFindingDetail`, in the style this file already uses for the title.
+- `cannot let the alert fail the upload` asserted the symbol was present, which the preceding test
+  already proved. Now asserts the call is wrapped by a non-rethrowing `catch` immediately around it.
+- The `recordSent`-throws test asserted only that the call resolved. Moving `sent += 1` inside the
+  inner `try` would flip the accounting silently; it is pinned now.
+
+**And a real hole in this story's own security guard.** `ALERTING_PATH` claimed to cover every module
+between a finding and an email while omitting both database adapters — so a credential read in either
+passed the check. Both added.
+
+**A real interoperability defect.** SendGrid answers `202 Accepted` with an empty body, and that was
+recorded as a failure: a correctly delivered warning would be re-sent on every sweep once its claim
+went stale. The endpoint is configuration, so that is not a hypothetical provider. `{"error": false}`
+was rejected for the same reason.
+
+Also taken: `byId` kept its own column list identical to `DETAIL_COLUMNS` after adopting `toDetail`,
+so one of three projections could still drift; and `.env.example` and `README.md` both claimed unset
+mail configuration records a reason against the finding — it does not, because nothing is ever
+claimed.
+
+**The fix diff then produced a high-severity defect of its own, which is the case the review gate
+exists for.** Argus on this round's diff found that `response.text().catch(() => '')` makes a
+connection reset mid-body indistinguishable from a provider's terse yes — so a send whose outcome is
+genuinely unknown would be recorded as delivered and never retried. That is the exact false success
+the adapter is written to refuse, arriving through the fix for a different one. Now a rejection.
+
+**The sensitivity pass on this round caught two more before Argus saw them.** The first empty-body
+implementation used a `Symbol` sentinel, and removing the early return changed nothing — indexing a
+symbol yields `undefined`, so the branch was dead and the test passed for the wrong reason;
+restructured so the line is load-bearing. And dropping an entry from `ALERTING_PATH` failed nothing,
+because the checks are generated from the list — the list is now asserted exhaustively.
+
 #### The one local CodeRabbit round — `a7bfc4b`
 
 `review_completed`, **22 findings**, **32 of 32** changed files reviewed with nothing unreconciled in
@@ -1029,3 +1075,6 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 | Date | Change |
 | --- | --- |
 | 2026-08-16 | Story created. |
+| 2026-08-16 | Six tasks implemented test-first; whole-story integration pass found a reviewed finding could still be emailed. |
+| 2026-08-16 | One local CodeRabbit round: 11 of 22 taken. MR !62 opened. |
+| 2026-08-16 | MR !62 round 1: 8 of 8 taken, four of them vacuous tests this story wrote. Ready to merge. |

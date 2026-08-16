@@ -107,7 +107,7 @@ development_status:
   3-8-the-access-log: done
   epic-3-retrospective: done
 
-  epic-4: in-progress
+  epic-4: done
   4-1-a-finding-and-the-life-it-leads: done
   4-2-the-same-invoice-twice: done
   4-3-a-vendor-who-charged-more-than-usual: done
@@ -115,7 +115,7 @@ development_status:
   4-5-the-board-sees-what-needs-review: done
   4-6-one-finding-and-what-to-do-about-it: done
   4-7-the-register-the-board-hands-an-auditor: done
-  4-8-told-before-you-pay: in-progress
+  4-8-told-before-you-pay: done
   epic-4-retrospective: optional
 
   epic-5: backlog

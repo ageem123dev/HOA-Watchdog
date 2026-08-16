@@ -438,10 +438,16 @@ describeWithDatabase('who an alert goes to', () => {
     enabled = `${EMAIL_PREFIX}-enabled@example.test`
     disabled = `${EMAIL_PREFIX}-disabled@example.test`
 
-    await writer.query(
-      `insert into board_member (email, password_hash) values ($1, 'scrypt$1$1$1$x$y')`,
-      [enabled],
-    )
+    // **Inserted last-first**, so physical order and sorted order disagree. A
+    // fixture seeded in alphabetical order makes an ordering assertion pass
+    // whether or not the query sorts, which is the defect the test below was
+    // rewritten for.
+    for (const address of [`${EMAIL_PREFIX}-z@example.test`, enabled, `${EMAIL_PREFIX}-a@example.test`]) {
+      await writer.query(
+        `insert into board_member (email, password_hash) values ($1, 'scrypt$1$1$1$x$y')`,
+        [address],
+      )
+    }
     await writer.query(
       `insert into board_member (email, password_hash, disabled_at)
        values ($1, 'scrypt$1$1$1$x$y', now())`,
@@ -462,12 +468,20 @@ describeWithDatabase('who an alert goes to', () => {
     await expect(recipients.active()).resolves.not.toContain(disabled)
   })
 
-  it('answers in a stable order across two reads', async () => {
+  it('answers in a defined order, not merely a repeatable one', async () => {
+    // **Two identical reads of an unchanged table agree whatever the planner
+    // does**, so comparing them proves nothing: the first version of this test
+    // passed with `order by email` deleted. Raised by CodeRabbit, and it is the
+    // shape this project keeps finding -- a guard that holds whether or not the
+    // thing it guards is there.
+    //
     // The addresses are written into the delivery record, and a record whose
-    // order shuffles between reads is one nobody can diff against another.
-    const first = await recipients.active()
-    const second = await recipients.active()
+    // order depends on the planner is one nobody can diff against another. So
+    // assert the order itself.
+    const active = await recipients.active()
+    const ours = active.filter((address) => address.startsWith(EMAIL_PREFIX))
 
-    expect(first).toEqual(second)
+    expect(ours).toEqual([...ours].sort())
+    expect(ours.length).toBeGreaterThan(1)
   })
 })

@@ -107,10 +107,14 @@ export function likePattern(search: string): string {
 /**
  * One `DetailRow` as the domain sees it.
  *
- * Extracted rather than repeated. `byId` and `awaitingAlert` select the same
- * columns for the same reason -- the alert's text is built from the finding's
- * own evidence -- and two mappings of one row shape are two chances for the
- * email and the page to disagree about the same finding.
+ * Extracted rather than repeated. **Three** reads return one -- `byId`, the
+ * register and `awaitingAlert` -- and three mappings of one row shape are three
+ * chances for the page, the board packet and the email to disagree about the
+ * same finding.
+ *
+ * It said "two" when it was written, and `byId` kept its own identical column
+ * list for a round after adopting this mapping: the doc understated the sharing
+ * and one of the three projections could still drift. Raised by CodeRabbit.
  */
 function toDetail(row: DetailRow): FindingDetail {
   return {
@@ -130,7 +134,7 @@ function toDetail(row: DetailRow): FindingDetail {
 }
 
 /**
- * The columns a `FindingDetail` is built from, shared by the two reads that
+ * The columns a `FindingDetail` is built from, shared by all three reads that
  * return one. `f` is the `finding` alias and `m` the `board_member` one.
  */
 const DETAIL_COLUMNS = `f.id,
@@ -227,15 +231,7 @@ export function createFindingReader(): FindingReader {
       if (!isFindingId(id)) return null
 
       const { rows } = await writerPool().query<DetailRow>(
-        `select f.id,
-                f.finding_type,
-                f.subject_id,
-                to_char(lower(f.period), 'YYYY-MM-DD')                    as period_from,
-                to_char(upper(f.period), 'YYYY-MM-DD')                    as period_until,
-                f.evidence,
-                to_char(f.raised_at at time zone 'UTC', 'YYYY-MM-DD')     as raised_on,
-                m.display_name                                            as reviewer_name,
-                to_char(f.reviewed_at at time zone 'UTC', 'YYYY-MM-DD')   as reviewed_on
+        `select ${DETAIL_COLUMNS}
            from finding f
            -- Left, because f.reviewed_by is null on every unreviewed finding,
            -- so an inner join would return no row for any of them -- which is

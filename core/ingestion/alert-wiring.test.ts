@@ -94,10 +94,28 @@ describe.each(INGESTION_PATHS)('$what calls it after detection', ({ path }) => {
     expect(notify).toBeGreaterThan(detect)
   })
 
-  it('cannot let the alert fail the upload', () => {
-    // `notifyFindings` resolves rather than throwing, and `extract-document.ts`
-    // relies on that. This asserts the reliance is deliberate: the call is
-    // inside the same guarded region detection is, not after it.
-    expect(source).toContain('notifyFindings')
+  it('cannot let the alert fail the upload, even if notifyFindings breaks its contract', () => {
+    // **The first version asserted the symbol was present**, which the test
+    // above already proves -- so it passed with the guard deleted. Raised by
+    // CodeRabbit.
+    //
+    // `notifyFindings` resolves rather than throwing and its own suite holds it
+    // to that, but this `try` reports a persistence failure *after* the write
+    // committed. A rejection escaping here would tell a treasurer their figures
+    // were not saved when they were. So the call is wrapped, and this asserts
+    // the wrapping rather than the call.
+    const call = source.indexOf('await notifyFindings(')
+    expect(call).toBeGreaterThan(-1)
+
+    const before = source.slice(0, call)
+    const after = source.slice(call)
+
+    // Opened immediately before the call, and closed by a catch immediately
+    // after it — not by some outer block that also covers the persistence.
+    expect(before.trimEnd().endsWith('try {')).toBe(true)
+    // The binding is optional: `catch {` today, `catch (error) {` the moment
+    // somebody logs it. A guard that fails on a legitimate change is one that
+    // gets loosened until it forbids nothing. Raised by Argus.
+    expect(after).toMatch(/\}\s*catch\s*(?:\([^)]*\)\s*)?\{/)
   })
 })
