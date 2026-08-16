@@ -228,16 +228,16 @@ not the one bad message, it is the nineteen good ones behind it in the loop.
         assert the key never appears in a thrown error, and assert the timeout is armed — a
         `requestTimeout` that only logs is the shape this project has already shipped once.
 
-- [ ] **Task 5 — The wiring** (AC: 1, 8, 9)
-  - [ ] `core/ingestion/notify-findings.ts`, called from `extract-document.ts` **after**
+- [x] **Task 5 — The wiring** (AC: 1, 8, 9)
+  - [x] `core/ingestion/notify-findings.ts`, called from `extract-document.ts` **after**
         `runDetection` and inside the same fail-soft discipline. Read `run-detection.ts`'s header in
         full before writing this — it has already made every decision this file faces (absent
         collaborators mean do nothing; one failure must not stop the rest; reporting the failure
         must not become the failure), and the reasons are written out.
-  - [ ] A wiring test in the shape of `core/ingestion/detection-wiring.test.ts`. That file exists
+  - [x] A wiring test in the shape of `core/ingestion/detection-wiring.test.ts`. That file exists
         because a step that is silently never called *fails nothing* — which is precisely the risk
         for a mailer nobody is watching.
-  - [ ] Order and claim semantics: oldest unnotified finding first, bounded limit, and a stale claim
+  - [x] Order and claim semantics: oldest unnotified finding first, bounded limit, and a stale claim
         (`sent_at is null` and `claimed_at` older than the retry window) is re-claimable. State the
         window as a named constant with the reasoning beside it.
 
@@ -559,7 +559,107 @@ whole task turns on: **this function resolves only when the message went.** The 
 and #18 — it must also refuse to try when trying could not succeed, so a delivery row is never
 written for a send that was never possible.
 
+#### Task 5 — the wiring
+
+**Behaviour: `notifyFindings(deps)` — everything the board has not been told about, told.**
+
+*If it ran correctly, how would I know?* Every finding with no successful delivery is claimed once,
+mailed once, and recorded — and the count returned says how many went, how many failed, and how many
+another run already owned. Nothing it does can fail an upload.
+
+*How am I going to test it?* Every collaborator is a port, so all of them are fakes. The clock is a
+seam (`now`), because the staleness boundary is computed from it and a test cannot wait fifteen
+minutes. `run-detection.ts` is the model for the whole shape and it has already argued each choice.
+
+*What else can go wrong?* The failure that costs money is **silence**: an alert that is never sent
+looks exactly like a month with no findings, because the dashboard still shows the finding and
+nothing is broken enough to notice. So the guards are mostly about not stopping.
+
+*Could this happen anywhere else?* `run-detection.ts` and `record-payments.ts` are the two siblings,
+and `detection-wiring.test.ts` exists because a step that is silently never called *fails nothing*.
+That is precisely the risk for a mailer nobody is watching, which is why this task carries a wiring
+test of its own.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | a collaborator is absent, so alerts silently never happen and nothing fails | GUARD | returns `null`, and the wiring test asserts both call sites pass them |
+| 2 | one finding's send failure stops the rest of the batch | GUARD | a fake that throws on the second of three; the first and third still go |
+| 3 | a lost claim is treated as a failure, or as a send | GUARD | `claim` returning `false` counts as skipped and no mail is sent |
+| 4 | the whole run throws and fails an upload that succeeded | GUARD | every collaborator throwing; resolves, never rejects |
+| 5 | reporting the failure becomes the failure | GUARD | an `onError` that itself throws — the defect `run-detection.ts` fixed |
+| 6 | a send that failed is recorded as sent | GUARD | `recordSent` never called on the throwing path |
+| 7 | a send that succeeded is recorded as failed | GUARD | `recordFailure` never called on the success path |
+| 8 | `recordSent` failing after a successful send loses the record, and the alert sends again | PROPAGATE-by-design | reported through `onError`; at-least-once is the stated contract, and this is the case that spends it |
+| 9 | an empty board is treated as a send with no recipients | GUARD | no claim, no mail, no delivery row — migration 023 refuses that row anyway |
+| 10 | the recipient list is read once per finding | GUARD | read once per run; asserted by call count |
+| 11 | the staleness boundary is read from the wall clock | GUARD | `now` is injected; a test moves it rather than waiting |
+| 12 | a stale claim is never retried, so a failed send is silence forever | GUARD | second run with a later clock re-claims and sends |
+| 13 | the run is unbounded, so one upload sends hundreds of emails | GUARD | a cap, and the remainder is left for the next run |
+| 14 | the cap silently drops findings with nothing saying so | GUARD | the outcome reports what was left |
+| 15 | mail is unconfigured and the loop claims every finding anyway | GUARD | configuration is checked at the call site, so absent config is an absent collaborator |
+| 16 | `onError` is handed the wrong kind of string | GUARD | it takes a finding id and says so — `ingest.ts` logged a uuid under the label `filename` and Argus caught it |
+
+**Cross-check.** #6 and #7 are one property from both sides — the record must agree with what
+happened — and it is the property the at-least-once guarantee rests on. #2 and #4 are the same for
+the batch: one bad finding must cost exactly one finding.
+
 ### Completion Notes List
+
+**Task 5 — the wiring.** `core/ingestion/notify-findings.ts`, its 23 tests, a wiring test over four
+files, and `createAlerting` in the mail adapter.
+
+*Both ingestion paths, not one.* A CSV is parsed at upload and never reaches the provider, so
+`ingest.ts` and `extract-document.ts` are two different routes to a raised finding — wiring only the
+deferred one would have alerted on scanned slips and stayed silent for the bank feeds the pilot
+actually uploads. That is the mistake story 2.5 recorded making, one epic earlier, and the wiring
+test now asserts the ordering (`notifyFindings` after `runDetection`) in both.
+
+*Where this departs from `run-detection.ts`, deliberately.* That file swallows a failure and accepts
+that the finding is missed until detection runs again — safe, because AD-13 makes re-running a no-op.
+The same posture here would be wrong: a missed detection is recovered by the next upload, and a
+missed alert is recovered by nothing. So a failure is **recorded against the finding** as well as
+reported, the claim is left unsent, and a later run takes it over once it goes stale.
+
+*Guarded:* an absent collaborator means do nothing rather than throw; one finding's failure costs
+exactly one finding; a lost claim is neither a failure nor a send; an empty board claims nothing,
+because taking ownership of a send that cannot happen would silence the association for a retry
+window; the recipient list is read once per run; the run is bounded and the outcome says what it
+left; reporting a failure cannot become the failure; and nothing here can fail an upload whose
+document really was read.
+
+*Configuration is resolved at the call site, not in `core/`.* `core/` imports nothing outward, so it
+cannot read the environment — and `notifyFindings` already treats an absent collaborator as "do
+nothing". `createAlerting` returns an empty object when mail is unconfigured, which a call site
+spreads unconditionally. The alternative was letting the configuration error escape from the first
+send, which would have claimed every finding before discovering it could deliver none.
+
+*Sensitivity check:* four mutations, all detected. Recording a send that threw failed three tests;
+treating a lost claim as a send failed five; letting one failure end the batch failed five; claiming
+against an empty board failed one.
+
+*Adversarial review (Argus, `auto`/`gemini-3.1-pro-high`, confidence 0.95, 14/14 files, 2 calls, 426k
+tokens, audit chain OK):* four findings. Two were about `core/ingestion/ingest.ts`, which this story
+only touched to add the notify call — the engine reviewed the neighbourhood.
+- **confirmed, mechanism corrected (high)** — `fetch` follows redirects by default, which Argus said
+  would leak the `Authorization` header to a third party. **Measured rather than argued:** a probe
+  against two local servers on this runtime shows Node 24 strips `Authorization` across origins, so
+  that mechanism does not hold. The real exposure is the **body** — it names a vendor, an amount and
+  a unit, and following a redirect POSTs an association's finding to a host nobody configured.
+  `redirect: 'error'` now makes a `MAIL_API_URL` that redirects fail loudly rather than deliver
+  quietly to the wrong place. Right fix, better reason.
+- **disagree (medium)** — `AbortSignal.timeout` was said to leak timers in the event loop. Probed: the
+  timer is **unref'd** and does not hold the loop. At one association's upload rate a 15-second
+  unref'd timer per send is not a leak worth an `AbortController` and a `finally`, and the
+  replacement would be a code path with no test to justify it.
+- **not-reproduced (high)** — *"`extractions.replace` throws a `RangeError` for assessment rolls,
+  where `records` is empty."* It is not empty: `core/extraction/tabular.ts` pushes into **both**
+  `records` and `rollRows` for every roll row, so a valid roll always has records. If this were true,
+  story 2.7's roll upload would always have reported `figures-not-stored`.
+- **deferred, narrow (high)** — *"`rollRows` is not checked for NUL bytes."* The overlapping fields
+  are covered by the checks that do run: `holderName` and `unitNumber` come from the same cells as
+  the record's `vendorName` and `unitReference`, and a roll row only exists alongside a valid record.
+  What is genuinely unguarded is the roll-only `cycle` and `year`. Out of this story's scope — it is
+  `ingest.ts`'s validation, not the alert path — and recorded as follow-up rather than fixed here.
 
 **Task 4 — the adapter and its configuration.** `adapters/mail/env.ts`,
 `adapters/mail/mail-sender-http.ts`, 33 tests, and the four variables in `.env.example`.
@@ -763,6 +863,11 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 
 | File | Change |
 | --- | --- |
+| `core/ingestion/notify-findings.ts` + `notify-findings.test.ts` | new — the loop, and 23 tests |
+| `core/ingestion/alert-wiring.test.ts` | new — that four files really call it, and in the right order |
+| `core/ingestion/extract-document.ts` | modified — the notify call and its dependencies |
+| `core/ingestion/ingest.ts` | modified — the same, for the path a CSV takes |
+| `app/upload/actions.ts`, `app/api/documents/[id]/extract/route.ts` | modified — the wiring and `createAlerting` |
 | `adapters/mail/env.ts` | new — mail configuration and the public address, read at call time |
 | `adapters/mail/mail-sender-http.ts` + `mail-sender-http.test.ts` | new — the send, and 33 tests |
 | `.env.example` | modified — `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM`, `WATCHDOG_BASE_URL` |

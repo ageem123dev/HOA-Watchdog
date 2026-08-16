@@ -223,6 +223,24 @@ describe('sending', () => {
     await expect(sender.send(message)).rejects.toBeInstanceOf(MailNotSentError)
   })
 
+  it('refuses to follow a redirect rather than posting the finding somewhere else', async () => {
+    // **The risk is the body, not the key.** Measured on this runtime: Node 24's
+    // `fetch` strips `Authorization` across origins, so a redirect cannot carry
+    // the credential away -- which is what Argus raised and it does not hold.
+    //
+    // What a redirect *would* carry is the message, and the message names a
+    // vendor, an amount and a unit. Following one silently POSTs an
+    // association's finding to a host nobody configured. `redirect: 'error'`
+    // turns a `MAIL_API_URL` that points at something redirecting into a loud
+    // failure instead of a quiet delivery to the wrong place.
+    const { calls, doFetch } = stubFetch(() => ok())
+    const sender = createHttpMailSender({ env: env(), fetch: doFetch })
+
+    await sender.send(message)
+
+    expect(calls[0]!.init.redirect).toBe('error')
+  })
+
   it('rejects when the network never produced a response', async () => {
     const { doFetch } = stubFetch(() => {
       throw new TypeError('fetch failed')

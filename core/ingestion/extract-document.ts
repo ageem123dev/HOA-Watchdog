@@ -15,6 +15,7 @@ import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
+import { notifyFindings, type NotifyDependencies } from './notify-findings'
 import { runDetection } from './run-detection'
 
 /**
@@ -99,6 +100,25 @@ export interface ExtractDocumentDependencies {
   readonly invoices?: InvoiceReader
   readonly dues?: DuesReader
   readonly findings?: FindingRegister
+
+  /**
+   * Telling the board about what detection just found (story 4.8).
+   *
+   * Optional for the same reason and with the same gap: absent, a finding is
+   * raised and nobody is told, and nothing fails. `alert-wiring.test.ts` is
+   * what keeps that honest.
+   *
+   * **`findingReader`, not `findings`.** The two are different capabilities and
+   * `core/ports/finding.ts` argues why they must stay apart: `findings` raises,
+   * this one reads, and one object holding both is a detector that could sign
+   * off its own work. Naming them alike here would invite exactly that merge.
+   */
+  readonly findingReader?: NotifyDependencies['findings']
+  readonly alerts?: NotifyDependencies['alerts']
+  readonly recipients?: NotifyDependencies['recipients']
+  readonly mail?: NotifyDependencies['mail']
+  readonly baseUrl?: string
+
   readonly onError?: (error: unknown, documentId: string) => void
 }
 
@@ -283,6 +303,40 @@ export async function extractDocument(
       // would report a success as a failure. `run-detection.ts` says what that
       // costs.
       await runDetection(documentId, deps)
+
+      // **After detection, and it cannot be anywhere else:** a finding cannot be
+      // mailed before it is raised. Same guarantee as the line above -- it
+      // resolves rather than throwing, because the document really was read and
+      // an unsent warning must not report a success as a failure.
+      //
+      // The cost is different from detection's, though, and `notify-findings.ts`
+      // says so: a missed detection is recovered by the next upload, and a
+      // missed alert is recovered by nothing. That is why a failure there is
+      // recorded against the finding rather than only logged.
+      await notifyFindings({
+        // Named one by one rather than spread. `deps.findings` is a
+        // `FindingRegister` and `notifyFindings` wants a `FindingReader` under
+        // the same key -- spreading would hand the writer to the reader slot,
+        // and both are objects so nothing would complain until runtime.
+        findings: deps.findingReader,
+        alerts: deps.alerts,
+        recipients: deps.recipients,
+        mail: deps.mail,
+        baseUrl: deps.baseUrl,
+        // `deps.onError` here takes a document id; `notifyFindings` hands its
+        // callback a *finding* id. Both are strings, so passing it through
+        // wholesale type-checks and logs one under the label of the other --
+        // the defect Argus caught in `ingest.ts`. Rewrapped so the line stays
+        // legible, naming both.
+        onError:
+          deps.onError === undefined
+            ? undefined
+            : (error, findingId) =>
+                deps.onError?.(
+                  new Error(`alerting finding ${findingId} failed`, { cause: error }),
+                  documentId,
+                ),
+      })
 
       return { outcome: 'read', documentId, records: result.records.length }
     } catch (error) {

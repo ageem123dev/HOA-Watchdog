@@ -8,6 +8,12 @@ import { createPaymentRepository } from '@/adapters/db/payment-repository-postgr
 import { createDuesReader } from '@/adapters/db/dues-reader-postgres'
 import { createInvoiceReader } from '@/adapters/db/invoice-reader-postgres'
 import { createFindingRegister } from '@/adapters/db/finding-postgres'
+import {
+  createBoardRecipients,
+  createFindingAlertLedger,
+} from '@/adapters/db/finding-alert-postgres'
+import { createFindingReader } from '@/adapters/db/finding-reader-postgres'
+import { createAlerting } from '@/adapters/mail/mail-sender-http'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
 import { createRollRepository } from '@/adapters/db/roll-repository-postgres'
 import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
@@ -102,6 +108,15 @@ export async function uploadDocuments(
     })),
   )
 
+  // Resolved once per request. Empty when mail is not configured, which
+  // `notifyFindings` treats as "do nothing" -- so an unconfigured deploy
+  // sends nothing and, importantly, claims nothing either. The named error
+  // goes to the log rather than being swallowed: a mailer that is silently
+  // absent is indistinguishable from one that had nothing to send.
+  const alerting = createAlerting((error) => {
+    console.error('[upload] alerting is not configured', error)
+  })
+
   const outcomes = await ingest(files, uploaderId, {
     store: documentStore,
     repository: documentRepository,
@@ -119,6 +134,17 @@ export async function uploadDocuments(
     invoices: createInvoiceReader(),
     dues: createDuesReader(),
     findings: createFindingRegister(),
+    // Story 4.8. Absent, a finding is raised and nobody is told -- and
+    // nothing fails. `alert-wiring.test.ts` asserts this call passes them.
+    //
+    // `alerting` is spread because it is empty when mail is not configured,
+    // which `notifyFindings` already treats as "do nothing". That keeps the
+    // configuration decision at this boundary, where the environment is
+    // readable, rather than inside `core/`, which imports nothing outward.
+    findingReader: createFindingReader(),
+    alerts: createFindingAlertLedger(),
+    recipients: createBoardRecipients(),
+    ...alerting,
     // The line that makes an assessment roll do anything at all. Without it a
     // roll is read, its extraction rows are stored, and no unit is created — so
     // every deposit uploaded afterwards is held `unknown-unit`.

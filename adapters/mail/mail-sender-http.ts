@@ -1,5 +1,5 @@
 import { MailNotSentError, type MailMessage, type MailSender } from '../../core/ports/mail'
-import { readMailConfig } from './env'
+import { readBaseUrl, readMailConfig } from './env'
 
 /**
  * The one place this system talks to the outside world on its own initiative.
@@ -98,6 +98,16 @@ export function createHttpMailSender(options: HttpMailSenderOptions = {}): MailS
             subject: message.subject,
             text: message.text,
           }),
+          // **Never follow a redirect.** Measured on this runtime: Node strips
+          // `Authorization` across origins, so a redirect cannot carry the key
+          // away -- which is what was raised in review and it does not hold.
+          //
+          // The body is the reason. It names a vendor, an amount and a unit,
+          // and following a redirect would POST an association's finding to a
+          // host nobody configured. A `MAIL_API_URL` pointing at something that
+          // redirects is a misconfiguration, and this makes it fail loudly
+          // rather than deliver quietly to the wrong place.
+          redirect: 'error',
           signal: AbortSignal.timeout(timeoutMs),
         })
       } catch (error) {
@@ -157,5 +167,44 @@ async function readJson(response: Response): Promise<Record<string, unknown> | n
       : null
   } catch {
     return null
+  }
+}
+
+/**
+ * The alerting collaborators, or nothing at all.
+ *
+ * **Configuration is resolved here rather than inside `core/`, and that is the
+ * boundary doing its job.** `core/` imports nothing outward, so it cannot read
+ * the environment — and `notifyFindings` already treats an absent collaborator
+ * as "do nothing". Turning absent configuration into an absent collaborator
+ * therefore needs no new mechanism, and in particular no error class crossing
+ * the boundary to be matched on by name.
+ *
+ * The alternative was letting `MailNotConfiguredError` escape from the first
+ * send. That would claim every finding first, so an unconfigured deploy would
+ * take ownership of alerts it could never deliver and hold them for the retry
+ * window — an acceptance criterion says explicitly that not being configured
+ * means no delivery row at all.
+ *
+ * `onError` receives the named error when configuration is incomplete, because
+ * a mailer that is silently absent is indistinguishable from one that had
+ * nothing to send. It is reported once per ingestion rather than per finding.
+ */
+export function createAlerting(
+  onError?: (error: unknown) => void,
+): { mail: MailSender; baseUrl: string } | Record<string, never> {
+  try {
+    // Read before anything is constructed, so an incomplete environment is a
+    // named error rather than a sender that fails on its first use.
+    readMailConfig()
+
+    return { mail: createHttpMailSender(), baseUrl: readBaseUrl() }
+  } catch (error) {
+    onError?.(error)
+
+    // Empty rather than `undefined`, so a call site can spread it
+    // unconditionally: `...alerting` contributes nothing when mail is not
+    // configured, and there is no second branch to forget.
+    return {}
   }
 }
