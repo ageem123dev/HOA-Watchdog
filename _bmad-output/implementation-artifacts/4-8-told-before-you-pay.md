@@ -200,17 +200,17 @@ not the one bad message, it is the nineteen good ones behind it in the loop.
   - [x] Port shape asserted with `declaredMembers` (`core/ports/declared-members.ts`) — the shared
         helper, not one of the five copies with the `indexOf` bug.
 
-- [ ] **Task 3 — The message a board member reads** (AC: 3, 4, 5, 6, 10)
-  - [ ] `core/findings/alert-email.ts`. Builds subject and body from `toFindingRow` /
+- [x] **Task 3 — The message a board member reads** (AC: 3, 4, 5, 6, 10)
+  - [x] `core/findings/alert-email.ts`. Builds subject and body from `toFindingRow` /
         `toFindingDetail` plus the absolute link. **Import them; do not re-read `evidence`.**
-  - [ ] The control-character strip and the length cap are one function, used on every interpolated
+  - [x] The control-character strip and the length cap are one function, used on every interpolated
         value, and tested on the subject specifically. Look at `core/csv/cell.ts` before writing it:
         that module solved the sibling problem (a value that becomes a formula) and its structure —
         one narrow neutraliser, heavily commented, reused everywhere — is what this should look like.
         **Do not extend `cell.ts` itself**; a CSV formula guard and a header-injection guard are
         different rules and merging them makes both harder to reason about.
-  - [ ] Assert the forbidden vocabulary of AC6 as a negative over the rendered text.
-  - [ ] An unrecognised `finding_type` yields a message that still names the finding and still links
+  - [x] Assert the forbidden vocabulary of AC6 as a negative over the rendered text.
+  - [x] An unrecognised `finding_type` yields a message that still names the finding and still links
         to it. Test it with a type no detector produces.
 
 - [ ] **Task 4 — The adapter and its configuration** (AC: 4, 9)
@@ -422,7 +422,132 @@ of one argument.
 it, and migration 023 revokes the grant that would let it happen. Either alone is a convention;
 together they are a property, which is the arrangement migration 007's comment argues for.
 
+#### Task 3 — the message a board member reads
+
+**Behaviour A: `oneLine(value, cap)` — every extracted value, made unable to carry structure.**
+
+*If it ran correctly, how would I know?* Whatever goes in, what comes out is a single line, no longer
+than the cap, and non-empty only if the input held something. The strong check is the **property**:
+for arbitrary input the result contains no character that any mail agent treats as a line break.
+
+*How am I going to test it?* Pure function, no seams needed. Property-style assertions over a table
+of hostile inputs, plus the ordinary case.
+
+*What else can go wrong?* This is the AD-8 boundary, so the failure modes are the injection surface
+itself — and the interesting ones are the spellings of "newline" that are not `
+`.
+
+*Could this happen anywhere else?* `core/csv/cell.ts` is the sibling: the same problem — a value from
+a document becoming syntax — in a different output format. Its structure is what this copies. It is
+deliberately **not** extended: a formula guard and a header-injection guard are different rules, and
+merging them makes both harder to reason about.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | `
+` in a vendor name forges a mail header | GUARD | the canonical injection; assert one line out |
+| 2 | a bare `` or bare `
+` does the same | GUARD | both alone — agents differ on which they honour |
+| 3 | ` ` / ` ` are line breaks to some parsers and invisible here | GUARD | asserted by code point, not by eyeballing |
+| 4 | other C0 controls, `DEL`, and C1 (`` is NEL, a line break) | GUARD | a table of code points |
+| 5 | a tab shifts the label/value layout | GUARD | collapsed to a space |
+| 6 | leading or trailing whitespace makes a value look absent or misaligned | GUARD | trimmed |
+| 7 | a value that is only whitespace becomes `''` and the caller renders an empty label | GUARD | returns `''`, and the caller is asserted to drop the line |
+| 8 | an oversized value pushes a subject past what an agent will show | GUARD | cap, with the truncation visible |
+| 9 | the cap splits a surrogate pair and produces a lone surrogate | GUARD | an astral character at the boundary; the result must still be valid |
+| 10 | stripping is done with a regex that eats the character *after* the control | GUARD | a value where the control sits mid-word |
+
+**Behaviour B: `toAlertEmail(finding, baseUrl)` — the message itself.**
+
+*If it ran correctly, how would I know?* A subject naming the finding, a body carrying the sentence
+the dashboard shows for it, the figures the detector recorded, and an absolute link that resolves to
+that finding's page. Nothing in it claims the system did anything.
+
+*How am I going to test it?* Pure function over a `FindingDetail`. The link is checked by
+construction against `findingRoute`, never against a literal path — a second spelling of the detail
+route is the dead link this story would be discovered by.
+
+*What else can go wrong?* Everything that makes the email disagree with the page, plus everything
+that makes it claim more than the system knows.
+
+*Could this happen anywhere else?* The dashboard row and the detail page are the two surfaces that
+already describe a finding. This is the third, and the whole arrangement of `finding-view.ts` exists
+so it cannot say something different.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 11 | the email writes its own title and drifts from the page | GUARD | asserted equal to `toFindingRow`'s, not to a literal |
+| 12 | the email writes its own sentence | GUARD | asserted equal to `toFindingDetail`'s `summary`, verbatim |
+| 13 | the link is relative, so it is meaningless in an inbox | GUARD | absolute, and parses as a URL |
+| 14 | the link is a second spelling of the detail path | GUARD | built from `findingRoute`; asserted against it |
+| 15 | a base URL with a trailing slash produces `//findings/…` | GUARD | both spellings give one URL |
+| 16 | the subject carries a newline from a vendor name | GUARD | behaviour A, applied to the composed subject |
+| 17 | the message claims the payment was blocked, held, stopped, cancelled or flagged | GUARD | a negative over the whole rendered text — the system holds no payment credential and can stop nothing |
+| 18 | the message says "duplicate" rather than "possible duplicate" | GUARD | UX-DR23; asserted through the reused title rather than re-checked here |
+| 19 | an unrecognised `finding_type` throws, so nineteen good messages behind it never send | GUARD | a type no detector produces; still names and links the finding |
+| 20 | evidence of the wrong shape throws | GUARD | `jsonb` written by whichever detector version ran; the view layer already degrades and this must not undo that |
+| 21 | a figure with no value renders as `0` or `undefined` | GUARD | absent stays absent — the rule `detail-view.ts` already states |
+| 22 | the body says nothing about why this arrived, so a director cannot tell it is not spam | GUARD | asserted present; there is no unsubscribe, so this line is the whole of the explanation |
+| 23 | the message reads as reviewed when it is not, or vice versa | OUT-OF-SCOPE | an alert is only ever sent for an unalerted finding, which is unreviewed by construction; the trigger in 021 refuses a finding raised already reviewed |
+
+**Cross-check.** #11 and #12 are the strong ones and they are cross-checks by construction: the
+assertion is against what the *other two surfaces* produce for the same finding, not against a
+literal this test chose. A wording change that is legitimate updates all three together; one that is
+drift fails here.
+
 ### Completion Notes List
+
+**Task 3 — the message a board member reads.** `core/findings/alert-email.ts` and 37 tests. The
+title and the sentence are **taken** from `toFindingRow` and `toFindingDetail`, and the tests assert
+them against those functions rather than against literals — so a legitimate wording change updates
+all four surfaces together and drift fails here rather than in a board packet.
+
+*Guarded:* twelve spellings of "newline" flattened to a space, never removed — removing joins the
+words on either side and a board member reads a vendor that does not exist; truncation by code point
+so the cap cannot split a surrogate pair; the ellipsis inside the cap rather than added to it; a
+value that flattens to nothing drops its whole line rather than printing a label with nothing after
+it; the link built from `findingRoute` and resolved with `new URL`, so a base with or without a
+trailing slash gives one link; a subject asserted to be a single line whatever it was built from; an
+unrecognised finding type and evidence of any shape degrade rather than throw.
+
+*The negative assertions are the load-bearing ones.* AC6 forbids claiming an action the architecture
+cannot take, and every positive assertion in this file passes against copy that *also* says
+something false. So the whole rendered message is checked for "blocked", "on hold", "stopped",
+"cancelled", "flagged to", "approved", "prevented", "frozen" — and for the UX-DR23 upgrade from
+"possible duplicate" to a certainty.
+
+*The control-character fixtures are built from code points, not typed as literals.* Three attempts
+to write them as literals produced raw bytes in the source — a carriage return and a line feed
+written as escapes in a tool argument arrive as the real bytes — which is the defect that has
+reached this repository's source three times and which `docs/no-control-characters.test.ts` cannot
+see, because it reads markdown only. Both files were verified byte-clean afterwards. The Bash tool
+itself refused one of the attempts, which is the clearest possible statement of the problem.
+
+*Sensitivity check:* three mutations. Stripping structure instead of replacing it with a space
+failed three tests; writing the subject here instead of taking it from the row failed two. **The
+third mutation — slicing by code unit — was not detected, and that is the finding.** The fixture
+used an odd cap, so the cut landed cleanly between two emoji and produced no lone surrogate: the
+test passed against the exact bug it was written for. Fixed to an even cap, re-run, and the mutation
+now fails it. This is precisely what the review gate says the sensitivity pass is for — catching a
+vacuous test that looked healthy.
+
+*Adversarial review (Argus, `auto`/`gemini-3.1-pro-high`, confidence 0.95, 4/4 files, 1 call, 65k
+tokens, audit chain OK):* five findings.
+- **not-reproduced (four of them, all "high")** — every one argued that `undefined` bypasses a
+  `=== null` check because the data originates in `jsonb`. It does not: `toFindingDetail` is the
+  narrowing boundary and its types are `| null`, never `| undefined`. Verified in the real file
+  rather than assumed — `table()` returns `ComparisonTable | null`, and `figuresOf` drops null
+  values entirely so `Figure.value` is always a real string. The four evidence-shape tests
+  (scalar, array, string, null) already exercise that path and pass. Loosening to `== null` would
+  defend against a violation of a contract the type system enforces, and would mask it if
+  `toFindingDetail` ever did return `undefined`.
+- **confirmed (medium)** — the separator between comparison groups was an empty string interleaved
+  *before* the null filter, and an empty string is not null. A table whose every record was
+  unreadable therefore still looked non-empty and rendered its caption over blank lines — a heading
+  promising evidence that is not there. Reachable, because `table()` returns null only when there
+  are no rows at all. Row separation moved inside `block`, where it can see what actually survived;
+  two tests drive it, including the one that stops the over-correction of dropping a block because
+  *some* cell was missing.
 
 **Task 2 — the ports, and the adapters the port change forced.** Three new ports
 (`mail.ts`, `finding-alert.ts`, `board-recipients.ts`), a fourth read on `FindingReader`, and the
@@ -519,6 +644,7 @@ so adding one turned the README's "22 SQL migrations" into a lie and failed the 
 
 | File | Change |
 | --- | --- |
+| `core/findings/alert-email.ts` + `alert-email.test.ts` | new — the message, and `oneLine` |
 | `core/ports/mail.ts` + `mail.test.ts` | new — the send port and the plain-text decision, enforced by the type |
 | `core/ports/finding-alert.ts` + `finding-alert.test.ts` | new — claim, record sent, record failed |
 | `core/ports/board-recipients.ts` + `board-recipients.test.ts` | new — who an alert goes to, and the split from `UserDirectory` |
