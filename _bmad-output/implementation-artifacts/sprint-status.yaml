@@ -116,12 +116,36 @@ development_status:
   4-6-one-finding-and-what-to-do-about-it: done
   4-7-the-register-the-board-hands-an-auditor: done
   4-8-told-before-you-pay: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
   epic-5: backlog
   epic-5-retrospective: optional
 
 action_items:
+  - epic: 4
+    action: "Add `* text=auto` to .gitattributes and run `git add --renormalize .`. The file exists but covers only samples/* binaries, so every source file is still index-LF / worktree-CRLF with no attribute declaring it, and every commit in epics 3 and 4 emitted CRLF warnings. Not cosmetic: scripted edits repeatedly failed to match anchors written with \n, and on story 4.8 one such failure silently did not apply and was then reported as fixed on a review thread. CodeRabbit's round-2 re-review is what caught it"
+    owner: "Dev"
+    status: open
+  - epic: 4
+    action: "Scope migrations/roles.test.ts's unbounded update and delete by RUN_PREFIX and replace the TRUNCATE probe with an information_schema assertion - the exact change already made in query-log.test.ts. THIRD epic of asking; it was epic 3's highest-consequence open item and was carried untouched through epic 4. On the one run where the reader grant has regressed, this test is the thing that rewrites or empties board_member"
+    owner: "Dev"
+    status: open
+  - epic: 4
+    action: "Extend the test-value pass in _bmad/custom/review-gate.md 2a: for EVERY assertion added or changed in a round, name the mutation that would fail it - including FIXTURE mutations, not only production ones. Story 4.8 shipped five tests that proved nothing and the sensitivity check caught one; the four that escaped were fixture-vacuous (an amount containing the substring asserted, two reads of an unchanged table, an assertion restating its neighbour), which mutating production code cannot surface. Third epic this class has appeared"
+    owner: "Dev"
+    status: open
+  - epic: 4
+    action: "Migrate the last two declaredMembers copies (assessment-directory.test.ts, roll-repository.test.ts) to core/ports/declared-members.ts"
+    owner: "Dev"
+    status: open
+  - epic: 4
+    action: "DECISION NEEDED before epic 5 can be planned: epic 5 (connected document sources) has no story breakdown and carries a blocking prerequisite - AD-1 says data enters exclusively through user upload, which epic 5 makes false, and the spine requires the amendment to land BEFORE the epic starts. Separately: epics 1-4 are complete and the product has never been run by a board member, so epic 5 adds a second intake channel to a first one that has never been used in anger. Amend AD-1, deploy and pilot what exists, or re-sequence"
+    owner: "Matt"
+    status: open
+  - epic: 4
+    action: "Commit or discard the three tooling files carried uncommitted across two epics: .gitignore (.argus/ entry), .mcp.json (Argus path), and .claude/commands/argus-review.md - the last of which carries the known $ARGUMENTS shell injection that is itself an open action item"
+    owner: "Matt"
+    status: open
   - epic: 4
     action: "docs/no-control-characters.test.ts reads markdown only, and the defect it exists for landed again on story 4.6 in a .ts file - a word-boundary escape written through a shell heredoc became a literal backspace byte inside a regex, which then compiled fine and matched nothing. That is the same failure its own header records from story 3.5, in the same position. A scan of all 396 source files found forbidden control bytes in exactly two, both deliberate fixtures (core/extraction/tabular-roll.test.ts and the guard's own file), so widening the glob to .ts/.tsx needs only a two-entry allow-list - and the allow-list itself needs justifying so it does not become a dumping ground. Worth checking the YAML too: this entry originally carried the escape verbatim, and a double-quoted YAML scalar would have turned it into the same byte. Not done in 4.6: a repo-wide guard change beyond that story's ACs, raised at ready-to-merge"
     owner: "Dev"
@@ -195,9 +219,9 @@ action_items:
     owner: "Dev"
     status: open
   - epic: 3
-    action: "The declaredMembers helper is copied into five core/ports/*.test.ts files (unit-directory, assessment-directory, quarantine-queue, roll-repository, vendor-resolution). Story 3.1 extracted a shared core/ports/declared-members.ts and used it for the new port test only. All five copies carry a bug the shared one now fixes: the interface is found with indexOf, so a lookup for `Foo` matches `FooEntry` and the test silently reads a neighbouring interface's body. Migrate the five to the shared helper in one sweep."
+    action: "The declaredMembers helper is copied into five core/ports/*.test.ts files (unit-directory, assessment-directory, quarantine-queue, roll-repository, vendor-resolution). Story 3.1 extracted a shared core/ports/declared-members.ts and used it for the new port test only. All five copies carry a bug the shared one now fixes: the interface is found with indexOf, so a lookup for `Foo` matches `FooEntry` and the test silently reads a neighbouring interface's body. Migrate the five to the shared helper in one sweep. EPIC 4 RETRO: three migrated and every new epic-4 port test used the shared helper; assessment-directory.test.ts and roll-repository.test.ts still carry local copies."
     owner: "Dev"
-    status: open
+    status: in-progress
   - epic: 3
     action: "AD-14's freeze is anchored in-repo: catalog/published-versions.json is read from the same checkout as the entry it pins, so one commit can change both and the tests still pass. Raised by CodeRabbit on MR !35, which proposed protected GitLab releases or a signed external manifest consumed by CI. Declined for story 3.1 - the mechanism needs CI, removed 2026-08-07 for cost, and externalising the anchor is a new AD rather than a story fix. The pilot's threat model is an honest team plus review, and the committed digest is what puts a change in the diff. Revisit with the CI action item."
     owner: "Matt"
@@ -209,7 +233,7 @@ action_items:
   - epic: 3
     action: "Shared connection pool - one change across all ten module-scoped adapters. DECIDED at the epic 3 retro: do this BEFORE epic 4. Three epics carried, one real test:db flake now mitigated by a load-bearing workaround, and Argus raised the disposal half again on story 3.8"
     owner: "Dev"
-    status: done  # 14 pools (not 10) consolidated to 2; test:db back to one invocation
+    status: done  # 14 pools (not 10) consolidated to 2; test:db back to one invocation. CONFIRMED still holding at the epic 4 retro
   - epic: 3
     action: "migrations/roles.test.ts proves the reader cannot write by running unbounded update and delete with no WHERE. On the one run where the grant has regressed, the test wipes the table it is checking. Story 3.1 fixed the identical shape in query-log.test.ts by scoping to RUN_PREFIX - Postgres checks the privilege before matching rows, so the assertion is unchanged. Rank above the rest of the backlog"
     owner: "Dev"
