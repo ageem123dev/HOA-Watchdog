@@ -46,7 +46,9 @@ function draw(
   download: () => Promise<Blob> = vi.fn(async () => new Blob(['csv'])),
   total = 17,
 ) {
-  const view = render(<ExportControl total={total} download={download} />)
+  const view = render(
+    <ExportControl total={total} href="/findings/register/export" download={download} />,
+  )
 
   return { ...view, download }
 }
@@ -216,6 +218,74 @@ describe('a failed export says so, rather than looking like a finished one', () 
     })
 
     expect((control() as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('treats a non-OK response as a failure, not as a file', async () => {
+    // **Without this the error page is downloaded as the board packet.** A
+    // 500's HTML body is a perfectly good blob, and a file named
+    // reviewed-findings.csv containing an error page is worse than no download
+    // at all, because it looks like one that worked.
+    //
+    // Exercises the *default* request — the one production uses — rather than
+    // the injected one every test above hands in.
+    const fetching = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('<html>error</html>', { status: 500 }))
+
+    render(<ExportControl total={3} href="/findings/register/export" />)
+
+    fireEvent.click(control())
+    await act(async () => {})
+
+    expect(fetching).toHaveBeenCalledWith('/findings/register/export')
+    expect(screen.getByRole('status').textContent).toMatch(/could not/i)
+  })
+
+  it('asks the route the page pointed it at', async () => {
+    const fetching = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('a,b', { status: 200 }))
+
+    render(<ExportControl total={3} href="/findings/register/export?search=Coastal" />)
+
+    fireEvent.click(control())
+    await act(async () => {})
+
+    // The search rides along, so what downloads is what was on screen.
+    expect(fetching).toHaveBeenCalledWith('/findings/register/export?search=Coastal')
+  })
+
+  it('does not revoke the file before the browser has taken it', async () => {
+    // **Revoking synchronously after `click()` aborts the download** in
+    // browsers that process the click asynchronously — Firefox and Safari — and
+    // the failure is silent: the control reports success and no file arrives,
+    // or an empty one does. Raised by Argus.
+    //
+    // Asserted as *not yet revoked* at the moment the click returns, then
+    // revoked once the timers run, because "it revokes eventually" holds for
+    // the broken version too.
+    vi.useFakeTimers()
+
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:register')
+    const revoked = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    try {
+      draw(vi.fn(async () => new Blob(['csv'])))
+
+      fireEvent.click(control())
+      await act(async () => {})
+
+      expect(created).toHaveBeenCalled()
+      expect(revoked).not.toHaveBeenCalled()
+
+      await act(async () => {
+        vi.runAllTimers()
+      })
+
+      expect(revoked).toHaveBeenCalledWith('blob:register')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('survives a download that throws before it returns a promise', async () => {

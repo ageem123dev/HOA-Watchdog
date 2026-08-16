@@ -38,11 +38,23 @@ type State =
 
 export function ExportControl({
   total,
-  download,
+  href,
+  download = () => fetchCsv(href),
   filename = 'reviewed-findings.csv',
 }: {
   readonly total: number
-  readonly download: () => Promise<Blob>
+  /** Where the file comes from. A string, because this crosses the server boundary. */
+  readonly href: string
+  /**
+   * How the file is fetched.
+   *
+   * Defaulted rather than required, and that is the whole reason this prop
+   * exists: a bound function cannot be passed from a server component to a
+   * client one, so the page hands over a URL and the component knows how to
+   * ask for it. Tests hand over the request itself, because "the control is
+   * disabled *during*" can only be asserted while one is in flight.
+   */
+  readonly download?: () => Promise<Blob>
   readonly filename?: string
 }) {
   const [state, setState] = useState<State>({ kind: 'idle' })
@@ -109,11 +121,43 @@ export function ExportControl({
 }
 
 /**
+ * Ask the route for the file.
+ *
+ * A non-OK response is a failure, not a file. Without the check the body of an
+ * error page is downloaded as `reviewed-findings.csv` — a board packet
+ * containing an HTML error, which is worse than no download at all because it
+ * looks like one that worked.
+ */
+async function fetchCsv(href: string): Promise<Blob> {
+  const response = await fetch(href)
+
+  if (!response.ok) {
+    throw new Error(`the register export answered ${response.status}`)
+  }
+
+  return response.blob()
+}
+
+/**
+ * How long the object URL is left alive after the click.
+ *
+ * It has to outlive the click, and only just. Named because it is a judgement
+ * about somebody else's event loop rather than a derivation.
+ */
+const HANDOVER_MS = 1_000
+
+/**
  * Hand the file to the browser.
  *
- * The object URL is revoked immediately after the click: it pins the blob in
- * memory until it is, and a board member exporting repeatedly through an
- * afternoon would accumulate every copy.
+ * The object URL pins the blob in memory until it is revoked, so a board member
+ * exporting repeatedly through an afternoon would otherwise accumulate every
+ * copy — but **revoking it synchronously after `click()` aborts the download**
+ * in browsers that process the click asynchronously, which Firefox and Safari
+ * do. The failure is the silent kind: the control reports success and either no
+ * file arrives or an empty one does.
+ *
+ * So the revoke is deferred just past the handover. Raised by Argus, and the
+ * first version of this function had it exactly wrong.
  */
 function save(file: Blob, filename: string): void {
   const url = URL.createObjectURL(file)
@@ -123,7 +167,7 @@ function save(file: Blob, filename: string): void {
   link.download = filename
   link.click()
 
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), HANDOVER_MS)
 }
 
 const styles = {

@@ -143,14 +143,14 @@ argument `app/dashboard/page.tsx` already makes for the quarantine link.
         and rows. A surface deciding emptiness for itself gets the reassuring copy on the day the
         association signs up.
 
-- [ ] **Task 3 — The surface** (AC: 1, 2, 3, 4, 7, 8, 11)
-  - [ ] `app/findings/register/page.tsx`, guarded **before** the read, matching
+- [x] **Task 3 — The surface** (AC: 1, 2, 3, 4, 7, 8, 11)
+  - [x] `app/findings/register/page.tsx`, guarded **before** the read, matching
         `app/findings/[id]/page.tsx`.
-  - [ ] Search as a GET form, so the URL is shareable and the back button works —
+  - [x] Search as a GET form, so the URL is shareable and the back button works —
         `app/access-log/` is the precedent, including `filter.ts` living in its own module so the
         suite can test it without pulling `next-auth` in.
-  - [ ] The export control states the count it will produce. The in-progress state disables it.
-  - [ ] The dashboard gains the link (AC11).
+  - [x] The export control states the count it will produce. The in-progress state disables it.
+  - [x] The dashboard gains the link (AC11).
 
 - [ ] **Task 4 — The download** (AC: 4, 5, 6)
   - [ ] `app/findings/register/export/route.ts`, following `app/access-log/export/route.ts`:
@@ -342,6 +342,42 @@ about one vendor. `toDashboardView` was built against exactly this shape of mist
 against the *existing* implementations of that copy rather than against literals chosen here, so the
 test fails when the surfaces drift rather than when someone reworded a fixture.
 
+#### Task 3 — the surface
+
+Three pieces, and the middle one is where the design decision is.
+
+**`filter.ts` — the URL, narrowed.** A pure module for the reason `app/access-log/filter.ts` states:
+importing the page pulls in `auth` and therefore `next-auth`, and the suite cannot load the file.
+It inherits two defects that file already paid for — a repeated parameter arriving as an array, and
+a `limit` that must be truncated *before* it is range-checked, since the other order turns
+`?limit=0.5` into a limit the adapter then clamps up to 1.
+
+**`export-control.tsx` — and AC8 is why it is a client component.** The access log's export is a
+plain `<a href>`, which cannot have an in-progress state at all: the browser navigates and the page
+never learns what happened. EXPERIENCE.md requires *"named progress, count stated, control disabled
+during"*, so the register fetches the CSV, names what it is doing while it does it, and turns the
+result into a download.
+
+**The fetch is a prop**, for the reason story 4.6 made its write a prop: it is the only way to
+assert the disabled state *while the request is in flight*, and "the control is disabled during"
+is the whole of AC8.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | a repeated `?search=` arrives as an array | GUARD | first value taken, page renders |
+| 2 | `?limit=0.5` becomes 1 after the adapter clamps | GUARD | truncate before the range check |
+| 3 | a bad `limit` errors the page | GUARD | falls back to the default; this is a URL people edit |
+| 4 | a blank search box filters to nothing | GUARD | `''` is absent, not a filter |
+| 5 | the export ignores the search | GUARD | the link carries the same filter the page read |
+| 6 | the export control does not say what it will produce | GUARD | UX-DR8: the count, and the format, before producing it |
+| 7 | the count comes from the page rather than the total | GUARD | the file holds every match, so the control names `total` |
+| 8 | the control stays live during the export | GUARD | **disabled while in flight** — asserted mid-request, not after |
+| 9 | a second export can be started | GUARD | the same assertion from the other side |
+| 10 | a failed export reports success, or nothing | GUARD | says it failed, and re-enables |
+| 11 | the control is smaller than 24×24 CSS px | GUARD | UX-DR8's minimum target |
+| 12 | the search box loses its value on a soft navigation | GUARD | uncontrolled input keyed on the value — Argus's finding on the access log |
+| 13 | the limit is dropped when the search form submits | GUARD | a GET form submits only what it contains — the same Argus finding |
+
 ### Completion Notes
 
 **Baseline (a4d584c):** 2770 tests, 813 db tests, 8 pre-existing `tsc` errors — **and one
@@ -451,6 +487,48 @@ type system:
   the opposite contradiction.
 
 *Gate:* `npm test` 2805 · lint 0 errors · `tsc` 8 (baseline) · build compiled.
+
+#### Task 3 — the surface
+
+`MOST_REGISTER_ROWS` moved onto the port, because the adapter refuses past it and the surface parses
+`?limit=` against it — two callers that have to agree, which is what
+`core/ports/query-log-reader.ts` records fixing after a URL asking for 10,000 rows kept that number
+in the page while the database returned 500.
+
+**The export control is a client component, and AC8 is why.** The access log exports with a plain
+anchor, which cannot have an in-progress state at all: the browser navigates and the page never
+learns what happened. EXPERIENCE.md wants named progress, the count stated, and the control disabled
+during — so this one runs the request and turns the result into a download.
+
+**A bound function cannot cross the server boundary**, so the page hands over a URL and the
+component knows how to ask for it; the request stays injectable because "disabled *during*" can only
+be asserted while one is in flight. The default path — the one production runs — is tested too,
+including that a **non-OK response is a failure rather than a file**: a 500's HTML body is a
+perfectly good blob, and `reviewed-findings.csv` containing an error page is worse than no download,
+because it looks like one that worked.
+
+*Sensitivity:* five mutations, four caught. The fifth found a **guard with no test behind it** — the
+re-entrancy ref was redundant under `fireEvent`, which flushes a re-render between clicks so
+`disabled` already stops the second. The case it actually covers is three clicks batched *before*
+any re-render, which needed an `act()` block to force. Written; the mutation now fails.
+
+*Review gate — `argus_review` on the task diff:* `moderate` · confidence 0.9 · 12/12 files. Two
+findings:
+
+- **[medium] `URL.revokeObjectURL` immediately after `click()` — confirmed and fixed.** Revoking
+  synchronously aborts the download in browsers that process the click asynchronously (Firefox,
+  Safari), and the failure is silent: the control reports success and either no file arrives or an
+  empty one does. Deferred past the handover. Asserted as *not yet revoked* when the click returns
+  and revoked once timers run — "it revokes eventually" holds for the broken version too.
+- **[medium] the dashboard's guard checks the user, not the user id — not reproduced as described.**
+  The claim was that the page crashes when adapters query with a missing id; the dashboard's reads
+  (`unreviewed`, `checked`) take no user id at all, so it does not. The inconsistency with the
+  register page and the access log is real, but that guard is pre-existing and outside this story's
+  ACs — recorded rather than changed, since editing an unrelated guard at this point risks a
+  regression for no acceptance criterion.
+
+*Gate:* `npm test` 2871 · lint 0 errors · `tsc` 8 (baseline) · build compiled, `/findings/register`
+registered.
 
 ## Change Log
 

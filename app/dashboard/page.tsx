@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { auth, signOut as authSignOut } from '@/adapters/auth/auth'
 import { createCheckedDocuments, createFindingReader } from '@/adapters/db/finding-reader-postgres'
-import { QUARANTINE_ROUTE, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
+import { QUARANTINE_ROUTE, REGISTER_ROUTE, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { toDashboardView } from '@/core/findings/dashboard-view'
 import { AskField } from './ask-field'
 import { FigureBlock } from './figure-block'
@@ -133,6 +133,16 @@ export default async function DashboardPage() {
       */}
       <Link href={QUARANTINE_ROUTE} style={styles.link}>
         Waiting on you
+      </Link>
+      {/*
+        **UX-DR10 lists the register as part of this surface**, and story 4.7
+        built it. Shown unconditionally, for the reason the quarantine link
+        above is: a link that appears only when there is something behind it
+        cannot be learned, and its absence is indistinguishable from having
+        forgotten where the page was.
+      */}
+      <Link href={REGISTER_ROUTE} style={styles.link}>
+        Reviewed register
       </Link>
       <form action={signOut}>
         <button type="submit" style={styles.control}>
