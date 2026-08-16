@@ -1,10 +1,11 @@
 ---
 baseline_commit: 69fe6c7
+merge_request: 61
 ---
 
 # Story 4.7: The register the board hands an auditor
 
-Status: in-progress
+Status: done
 
 ## Why this story exists
 
@@ -586,8 +587,78 @@ refuses to use a character class for this, precisely so no control character nee
 *Gate:* `npm test` 2930 · lint 0 errors · `tsc` 8 (baseline) · build compiled,
 `/findings/register/export` registered.
 
+### Review Findings
+
+**Ten `argus_review` calls, one local CodeRabbit round, and the acceptance-criteria audit.
+Thirty-one mutations run across the story; every one caught, after the tests that missed them were
+rewritten.**
+
+#### The integration pass — `main...HEAD` at the head the merge request points at
+
+`complex` · confidence 1.0 · 26/33 files · **no findings.** This is the pass that sees the
+composition of all five tasks, and it is where the parameter-parsing defect below was found on the
+run before this one.
+
+#### The four findings worth reading the commits for
+
+1. **The acceptance-criteria audit found a defect, on the ninth consecutive story.** AC4 requires the
+   export control to name "the count of what will actually be in the file". It named the register's
+   *total* — but the route reads with the same filter, `limit` included, so a register of 200 shown
+   50 at a time promised 200 and delivered 50.
+
+2. **The CSV formula-injection defence was still bypassable, and it guards both exports.** It
+   trimmed whitespace before checking for a formula leader; a control character is not whitespace,
+   so a value beginning with one survived the trim looking ordinary while a spreadsheet skips the
+   byte and evaluates. Hardened twice before, the same mistake each time — covering the characters
+   someone thought of rather than the ones a spreadsheet ignores. Now a closed class, via a
+   code-point scan.
+
+3. **The page and its export read a repeated query parameter differently.** Next.js hands a page
+   every value as an array and `filterFrom` takes the first; `Object.fromEntries` keeps the last. So
+   `?search=a&search=b` showed findings matching "a" and offered a download of findings matching
+   "b". Neither task's tests could see it: the page was right about arrays and the route was right
+   about strings, and only reading them together showed they were right about different things.
+
+4. **The print treatment did not reach the page.** Every surface styles inline with
+   `var(--color-ink)`, and an inline style beats any rule in the sheet — so colours on `body` alone
+   left the printed page using the screen palette. The tokens are redefined inside `@media print`,
+   where they resolve.
+
+#### Findings verified and refused, with reasons rather than silence
+
+| Finding | Verdict |
+| --- | --- |
+| stream the CSV instead of building it in memory | **declined, twice** — the port caps the read at 200 rows, so the file is tens of kilobytes, and `app/access-log/export/route.ts` builds its export the same way |
+| a GIN index for the jsonpath search | **declined** — performance work on that same capped read, and a migration besides |
+| widen `search` to `unknown` | **declined** — it would remove the compile-time signal the runtime guard exists to backstop |
+| `ReturnType<typeof vi.spyOn>` is a compile error | **not reproduced** — `tsc` reports 8, the baseline, none in that file; Argus read its own verifier's `rc=-1` as a diagnostic, as it did on story 4.6 |
+| `searchParamsOf` returns arrays where Next returns strings | **not reproduced** — `filterFrom` normalises with `Array.isArray(value) ? value[0] : value`, which is the mechanism of the fix |
+| the dashboard guard checks the user, not the user id | **not reproduced as described** — the dashboard's reads take no user id, so it cannot crash; the inconsistency is real, pre-existing, and outside this story |
+| O(N²) lookups are a denial of service | **severity corrected** — 200 rows makes it 120,000 comparisons and microseconds; fixed as needless work, not as a hazard |
+| an inner join would drop the nameless reviewer | **not reproduced** — `reviewed_by` declares no `ON DELETE`, so a referenced member cannot be deleted; **the comment claiming otherwise was mine, and was corrected** |
+
+#### What the sensitivity checks caught that the tests did not
+
+Three times a mutation passed and exposed a test that proved nothing: the tie-break test asserted
+*stability* rather than order, so dropping `id desc` left the suite green; the export control's
+re-entrancy guard was redundant under `fireEvent`, which flushes a render between clicks; and
+`text()`'s blank guard in story 4.6's shared helper was covered by nothing at all. Each was rewritten
+until the mutation failed.
+
+Two of my own tests were wrong in useful ways: the formula-injection test targeted a **vendor name**
+and found it correctly unescaped, because a vendor sits mid-title where a spreadsheet reads nothing
+— the reviewer's display name is the only cell whose first character a person chooses. And the BOM
+assertion could never have failed, because `Response.text()` strips a leading BOM.
+
+#### Gates on the final head, locally — there is no CI, so this is the whole of the evidence
+
+`npm test` 2951 passed · `npm run test:db` 846 passed · `npm run lint` 0 errors (1 pre-existing
+warning) · `npx tsc --noEmit` 8 errors, matching baseline · `npm run build` compiled, with
+`/findings/register` and `/findings/register/export` registered.
+
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-16 | Tasks 1-5 implemented test-first. Ten Argus rounds, one local CodeRabbit round (15 of 17 taken), 31 mutations. The AC audit found the export control naming the register total rather than the rows the file would hold — the ninth consecutive story it has found something. The whole-story pass found the page and its export reading a repeated query parameter differently. Merge request !61 opened; status `done`, meaning ready-to-merge. |
 | 2026-08-16 | Story created. The export-format conflict — EXPERIENCE.md's "as PDF" against the CSV precedent — was put to the user, who chose the print treatment as the PDF path and CSV for the download. Reading the spec against the code also found story 4.6's `overflow-x: auto` breaking EXPERIENCE.md's no-horizontal-scroll rule; fixed here as AC10. |
