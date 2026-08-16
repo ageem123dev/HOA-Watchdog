@@ -111,6 +111,25 @@ describe('AC4: what downloads is what was on screen', () => {
     expect(registerRead).toHaveBeenCalledWith({ limit: 50 })
   })
 
+  it('reads a repeated parameter the same way the page does', async () => {
+    // **Found by the whole-story review, and invisible to either task alone.**
+    // Next.js hands the page an *array* for a repeated parameter, and
+    // `filterFrom` takes the first of it. `Object.fromEntries(searchParams)`
+    // keeps only the **last**. So `?search=a&search=b` showed the reader
+    // findings matching "a" and offered them a download of findings matching
+    // "b" — the page and its export quietly disagreeing, which is the one thing
+    // AC4 exists to prevent.
+    await get('https://watchdog.test/findings/register/export?search=Coastal&search=Harbour')
+
+    expect(registerRead).toHaveBeenCalledWith({ search: 'Coastal', limit: 50 })
+  })
+
+  it('reads a repeated limit the same way too', async () => {
+    await get('https://watchdog.test/findings/register/export?limit=25&limit=200')
+
+    expect(registerRead).toHaveBeenCalledWith({ limit: 25 })
+  })
+
   it('reads the filter the same way the page does', async () => {
     // Same module, so a URL cannot mean one thing to the page and another to
     // the file it offers — which is how an export comes to hold a different

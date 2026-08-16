@@ -47,7 +47,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const url = new URL(request.url)
-  const filter = filterFrom(Object.fromEntries(url.searchParams))
+  const filter = filterFrom(searchParamsOf(url))
 
   const register = await createFindingReader().register(filter)
 
@@ -70,4 +70,28 @@ export async function GET(request: Request): Promise<Response> {
       'cache-control': 'no-store',
     },
   })
+}
+
+/**
+ * The query string in the shape the page receives it.
+ *
+ * **`Object.fromEntries` is wrong here, and quietly.** It keeps the *last* value
+ * of a repeated key, while Next.js hands a page every value as an array and
+ * `filterFrom` takes the *first*. So `?search=a&search=b` showed a reader
+ * findings matching "a" and offered them a download of findings matching "b" —
+ * the page and its own export disagreeing, which is the single thing AC4 exists
+ * to prevent.
+ *
+ * Neither task's tests could see it: the page was right about arrays and the
+ * route was right about strings, and only reading them together showed that
+ * they were right about different things. Raised by the whole-story review.
+ */
+function searchParamsOf(url: URL): Record<string, string | string[]> {
+  const params: Record<string, string | string[]> = {}
+
+  for (const key of new Set(url.searchParams.keys())) {
+    params[key] = url.searchParams.getAll(key)
+  }
+
+  return params
 }
