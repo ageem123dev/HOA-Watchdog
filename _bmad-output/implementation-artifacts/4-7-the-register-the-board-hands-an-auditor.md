@@ -4,7 +4,7 @@ baseline_commit: 69fe6c7
 
 # Story 4.7: The register the board hands an auditor
 
-Status: ready-for-dev
+Status: in-progress
 
 ## Why this story exists
 
@@ -121,18 +121,18 @@ argument `app/dashboard/page.tsx` already makes for the quarantine link.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Read the register** (AC: 1, 2, 3)
-  - [ ] Extend `FindingReader` with a reviewed read taking a filter — search text and a required
+- [x] **Task 1 — Read the register** (AC: 1, 2, 3)
+  - [x] Extend `FindingReader` with a reviewed read taking a filter — search text and a required
         `limit`, the shape `QueryLogFilter` uses and for the same reason: a register grows without
         bound and the caller that forgets a limit is the one that renders a page which never
         finishes loading. Return the rows **and the total**, as `UnreviewedQueue` does, so a caller
         cannot hold the rows without the count.
-  - [ ] The port test asserts an exact member list. Update it deliberately, and keep the negative
+  - [x] The port test asserts an exact member list. Update it deliberately, and keep the negative
         that forbids a write member — the property check story 4.6 hardened is now the thing that
         judges the new member's return type, so read what it demands before adding one.
-  - [ ] `adapters/db/finding-reader-postgres.ts` + db tests. **Dates through
+  - [x] `adapters/db/finding-reader-postgres.ts` + db tests. **Dates through
         `to_char(… at time zone 'UTC', 'YYYY-MM-DD')`** — the rule every reader here carries.
-  - [ ] Decide what search searches, and write the reasoning down. It cannot be "everything": the
+  - [x] Decide what search searches, and write the reasoning down. It cannot be "everything": the
         evidence is `jsonb` of varying shape. Prefer the fields a board member would name.
 
 - [ ] **Task 2 — The register view** (AC: 1, 2, 3, 7)
@@ -257,9 +257,128 @@ dispute by someone who does not use the product.
 
 claude-opus-5[1m]
 
+### Test Design
+
+#### Task 1 — read the register
+
+**Behaviour: `reviewed(filter)` on `FindingReader`, and its Postgres adapter.**
+
+*If it ran correctly, how would I know?* It returns **only** reviewed findings, newest review first,
+each carrying who reviewed it and when — and a `total` that counts every match, not the page. The
+strong check is the **partition**: `unreviewed()` and `reviewed()` over the same table must be
+disjoint and, together, complete. That is a property assertable against the database rather than a
+restatement of the query.
+
+*How am I going to test it?* Port shape by source assertion (`declaredMembers`, as story 4.6
+hardened it); behaviour by db tests against real rows, prefixed per run as every db test here is.
+
+*Could this happen anywhere else?* The queue read is the sibling and its defects are documented:
+an unbounded read, a total that disagrees with the rows, a missing tie-break that reshuffles
+between refreshes, and dates rendered in the session timezone.
+
+**What search searches — decided, and verified against the database.** The naive
+`evidence::text ILIKE '%q%'` matches **key names**: a board member searching "vendor" would get
+every spike finding because the key is spelled `vendorName`, and uuid fragments would match too.
+Postgres here is **18.4**, so jsonpath is available and `strict $.**.vendorName` reaches values at
+any depth — including inside the `pairs` and `spikes` arrays — without ever touching a key.
+
+So a search matches, case-insensitively: the **finding type**, the **reviewer's display name**, and
+the values of **`vendorName`, `unitNumber`, `holderName`** anywhere in the evidence. Those are the
+three things a board member would actually type. Ids, keys and internal slugs are deliberately not
+searchable.
+
+| # | Failure mode | Class | Forced by |
+| --- | --- | --- | --- |
+| 1 | an unreviewed finding appears in the register | GUARD | seeded unreviewed row absent; and the partition property |
+| 2 | a reviewed finding is missing from it | GUARD | the partition property — the two reads together cover the table |
+| 3 | `limit` absent, zero, negative, fractional, or huge | GUARD | `RangeError`, never clamped — the contract `unreviewed` already states |
+| 4 | `total` counts the page rather than every match | GUARD | seed more than the limit; total exceeds `findings.length` |
+| 5 | `total` ignores the search while the rows honour it | GUARD | a search matching a strict subset; both must narrow together |
+| 6 | two reviews stamped on the same `now()` reshuffle between reads | GUARD | tie-break on `id`, asserted by reading twice |
+| 7 | dates rendered in the session timezone | GUARD | `to_char(… at time zone 'UTC')`; two zones in opposite directions, since `TZ` is ignored on this host |
+| 8 | search matches a **key** name, not a value | GUARD | evidence containing `vendorName`; searching `vendorname` returns nothing |
+| 9 | search matches a uuid or internal slug | GUARD | searching a fragment of `subject_id` returns nothing |
+| 10 | search misses a vendor nested inside `pairs`/`spikes` | GUARD | the arrays are where every vendor name actually lives |
+| 11 | search is case-sensitive | GUARD | `coastal` finds `Coastal Landscaping` |
+| 12 | `%` or `_` in the search term act as wildcards | GUARD | a literal `%` matches nothing rather than everything |
+| 13 | a reviewer with no display name breaks the row | GUARD | `by: null`, and the row still renders |
+| 14 | search term is blank or whitespace | GUARD | treated as no filter, not as a filter matching nothing (`app/access-log/filter.ts`'s rule) |
+| 15 | the read is pointed at `readerPool()` | GUARD-by-note | it would fail on grants; see the Dev Notes — the dangerous repair is granting SELECT |
+
+**Cross-check.** #1 and #2 are one property tested from both sides, and it is the strong one: the
+register and the queue are asserted to **partition** the table rather than each being asserted
+against a literal expectation of its own.
+
 ### Completion Notes
 
-_(to be filled by the dev workflow)_
+**Baseline (a4d584c):** 2770 tests, 813 db tests, 8 pre-existing `tsc` errors — **and one
+unidentified intermittent failure**. The first baseline run failed a single test; the next ten
+passed. The branch adds only a markdown file, so it is pre-existing on `main` at roughly 1-in-11.
+It could not be named within bounded effort because the failing run scrolled past uncaptured. Every
+gate run in this story now writes full output to a file so the next occurrence is identified. With
+CI removed this suite *is* the gate, and an unnamed flake is one that gets re-run away.
+
+#### Task 1 — read the register
+
+`register(filter)`, not `reviewed(filter)`, **and the port's own guard is why**. The test forbidding
+`mark|review|raise|…` on this interface fired on the first name — it exists so a *write* capability
+cannot arrive quietly. Widening it to admit a read would have spent a real protection on a naming
+preference. `register` is EXPERIENCE.md's own word for this artifact and collides with nothing.
+
+**Then the guard fired again on the *return type*** — `ReviewedRegister` splits to `Reviewed
+Register`. A capability is something the port can be asked to do, and it is *named*, so the guard now
+matches the member **name** rather than the whole declaration. Six mutations confirm nothing was
+lost: `markReviewed(id)`, `readonly dismiss: (id) => void`, `resolve?(id)`, `autoResolve`,
+`auto_clear` and `byIDRemove` are all still caught. A guard that rejects a correct design is as
+broken as one that admits a wrong one.
+
+**What search matches, decided and verified against the database.** Postgres here is **18.4**, so
+`strict $.**.vendorName` reaches values at any depth — including inside the `pairs` and `spikes`
+arrays. So a search matches the finding type, the reviewer's display name, and the values of
+`vendorName`, `unitNumber` and `holderName`. **Never keys**: the naive `evidence::text ilike`
+answers "vendor" with every spike finding, because the key is spelled `vendorName`. Asserted as a
+non-match.
+
+**Totals here are exact, not bracketed.** 4.6's queue tests had to bracket counts between control
+reads and recorded the residual that a concurrent insert *and* delete can straddle the bracket.
+Scoping every search to this run's prefix makes the total exactly what the file seeded. A test that
+can be exact should not be approximate.
+
+*Two defects the tests caught before review:*
+
+- **`_` was an unescaped wildcard**, so `_oastal` matched `Coastal` — a search that appears to work
+  while answering a different question.
+- **The fix for it silently did nothing.** `escape '\'` inside a JS *template literal* renders at
+  runtime as `escape ''` — the backslash escapes the quote, leaving no escape character. Nine tests
+  named it. The escaping now lives in `likePattern`, built once in TypeScript rather than as five
+  copies of a `replace` chain in SQL, **and has its own unit test** — `npm test` skips the db suite,
+  so the load-bearing logic was otherwise guarded only by tests most runs never execute.
+
+*Sensitivity:* four mutations. Two caught immediately (register returning unreviewed rows; the date
+without its UTC cast). **Two were not, and both were worth the run:**
+
+- **The tie-break test asserted stability, not order.** Dropping `id desc` left the suite green,
+  because Postgres given no tie-break is *free* to reshuffle and mostly does not bother. Re-specified
+  to assert the exact expected order — `id desc` on time-ordered uuidv7 puts the later insert first
+  — and the mutation now fails.
+- **An inner join changed nothing, because my comment was false.** I wrote that the reviewer "may
+  have been removed"; `reviewed_by` declares no `ON DELETE` action, so a referenced member cannot be
+  deleted, and `finding_review_is_attributed` guarantees the column is set. The left join is
+  *equivalent here today*. No test was invented for an unreachable state — the comment was corrected
+  to say what is true, and why the join is kept anyway (both ways it stops being equivalent end with
+  rows missing from a permanent record). **This is the third comment in this file to assert
+  something untrue about the database**, after story 4.3's migration comment and 4.6's own left-join
+  comment, which Argus corrected for the same query.
+
+*And the backslash bit a fourth time.* The corrected comment used backticks around
+`finding_review_is_attributed` — inside a template literal, which ended the SQL string mid-query.
+The warning against exactly that sits **three lines below** where I wrote it, and the suite reported
+it as "no tests" rather than as a syntax error.
+
+*Review gate — `argus_review` on the task diff:* `complex` · confidence 1.0 · 7/7 files · **no
+findings**.
+
+*Gate:* `npm test` 2779 · `npm run test:db` 846 · lint 0 errors · `tsc` 8 (baseline) · build compiled.
 
 ## Change Log
 

@@ -450,3 +450,331 @@ describeWithDatabase('the finding reader', () => {
     expect([inUtc.latestUploadOn, utcAgain.latestUploadOn]).toContain(inLosAngeles.latestUploadOn)
   })
 })
+
+/**
+ * The register (story 4.7, AC1–AC3).
+ *
+ * ## Every total here is exact, and that is deliberate
+ *
+ * Story 4.6's queue tests bracket their counts between two control reads,
+ * because other files in this directory raise and review findings concurrently
+ * and a bare `toBe(n)` asserts that nobody else committed between two
+ * statements. Argus raised it there, and the bracket was the fix — but a bracket
+ * can still be straddled by a concurrent insert *and* delete, which 4.6 recorded
+ * as an accepted residual.
+ *
+ * The register does not need it. `search` narrows to this file's own rows, so
+ * every assertion below scopes to its prefix and the total is exactly what was
+ * seeded. A test that can be exact should not be approximate.
+ */
+describeWithDatabase('the register', () => {
+  let registerWriter: Client
+  let registerOwner: Client
+
+  /** Scopes every search to this file's findings, which is what makes totals exact. */
+  const REGISTER_PREFIX = `${RUN_PREFIX}_reg`
+
+  let reviewerId: string
+  let vendorFinding: string
+  let unitFinding: string
+  let typeFinding: string
+  let namelessFinding: string
+  let sameInstantA: string
+  let sameInstantB: string
+  let unreviewedFinding: string
+
+  async function seedReviewed(
+    suffix: string,
+    evidence: unknown,
+    reviewedAt: string,
+    reviewer?: string,
+  ): Promise<string> {
+    const { rows } = await registerWriter.query<{ id: string }>(
+      `insert into finding (finding_type, subject_id, period, evidence, raised_at)
+       values ($1, $2, daterange('2099-04-01'::date, '2099-05-01'::date, '[)'), $3::jsonb, now())
+       returning id`,
+      [`${REGISTER_PREFIX}_${suffix}`, randomUUID(), JSON.stringify(evidence)],
+    )
+    const id = rows[0]!.id
+
+    // Raised unreviewed and then reviewed, because migration 021's lifecycle
+    // trigger refuses a row claiming to have been born reviewed.
+    await registerWriter.query(
+      `update finding set state = 'reviewed', reviewed_by = $2, reviewed_at = $3::timestamptz
+        where id = $1`,
+      [id, reviewer ?? reviewerId, reviewedAt],
+    )
+
+    return id
+  }
+
+  beforeAll(async () => {
+    registerWriter = new Client({ connectionString: writerUrl })
+    registerOwner = new Client({ connectionString: adminUrl })
+    await registerWriter.connect()
+    await registerOwner.connect()
+
+    const named = await registerWriter.query<{ id: string }>(
+      `insert into board_member (email, password_hash, display_name)
+       values ($1, 'scrypt$fixture', 'Regina Mbeki') returning id`,
+      [`${STORAGE_PREFIX}-reviewer@example.test`],
+    )
+    reviewerId = named.rows[0]!.id
+
+    // A reviewer with no display name. Nullable by schema, and the finding must
+    // still reach the register rather than being dropped along with the name.
+    const nameless = await registerWriter.query<{ id: string }>(
+      `insert into board_member (email, password_hash, display_name)
+       values ($1, 'scrypt$fixture', null) returning id`,
+      [`${STORAGE_PREFIX}-nameless@example.test`],
+    )
+
+    // The vendor sits *inside* the pairs array, which is where every real one
+    // sits — a search reaching only top-level keys would find none of them.
+    vendorFinding = await seedReviewed(
+      'vendor',
+      { invoicesChecked: 3, pairs: [{ vendorName: 'Coastal Landscaping', amount: '1450.00' }] },
+      '2099-08-01T10:00:00Z',
+    )
+    unitFinding = await seedReviewed(
+      'unit',
+      { unitNumber: '12B', holderName: 'Dana Whitfield', shortfall: '100.00' },
+      '2099-08-02T10:00:00Z',
+    )
+    typeFinding = await seedReviewed('dupkind', { invoicesChecked: 1 }, '2099-08-03T10:00:00Z')
+    namelessFinding = await seedReviewed(
+      'nameless',
+      { invoicesChecked: 2 },
+      '2099-08-04T10:00:00Z',
+      nameless.rows[0]!.id,
+    )
+
+    sameInstantA = await seedReviewed('tiea', {}, '2099-09-01T09:00:00Z')
+    sameInstantB = await seedReviewed('tieb', {}, '2099-09-01T09:00:00Z')
+
+    // Seeded and left unreviewed, so the partition has something to be wrong
+    // about in both directions.
+    const raised = await registerWriter.query<{ id: string }>(
+      `insert into finding (finding_type, subject_id, period, evidence, raised_at)
+       values ($1, $2, daterange('2099-04-01'::date, '2099-05-01'::date, '[)'), '{}'::jsonb, now())
+       returning id`,
+      [`${REGISTER_PREFIX}_unreviewed`, randomUUID()],
+    )
+    unreviewedFinding = raised.rows[0]!.id
+  })
+
+  afterAll(async () => {
+    try {
+      await registerOwner.query(`delete from finding where finding_type like $1`, [
+        `${REGISTER_PREFIX}%`,
+      ])
+      await registerOwner.query(`delete from board_member where email like $1`, [
+        `${STORAGE_PREFIX}-%`,
+      ])
+    } finally {
+      await Promise.allSettled([registerOwner.end(), registerWriter.end()])
+    }
+  })
+
+  const ALL = 200
+
+  /** This file's register rows, scoped by the search that makes totals exact. */
+  const mine = () => createFindingReader().register({ search: REGISTER_PREFIX, limit: ALL })
+
+  it('returns the reviewed findings and nothing else', async () => {
+    const register = await mine()
+    const ids = register.findings.map((finding) => finding.id)
+
+    expect(ids).toContain(vendorFinding)
+    expect(ids).not.toContain(unreviewedFinding)
+  })
+
+  it('partitions the table with the queue — every finding on exactly one surface', async () => {
+    // **The property, from both sides.** EXPERIENCE.md's lifecycle has two live
+    // states and no third: a finding on neither has vanished from a record meant
+    // to be permanent, and one on both is counted twice by the two figures a
+    // board member reads side by side.
+    const register = await mine()
+    const queue = await createFindingReader().unreviewed(ALL)
+
+    const registered = new Set(register.findings.map((finding) => finding.id))
+    const queued = new Set(queue.findings.map((finding) => finding.id))
+
+    for (const id of [
+      vendorFinding,
+      unitFinding,
+      typeFinding,
+      namelessFinding,
+      sameInstantA,
+      sameInstantB,
+      unreviewedFinding,
+    ]) {
+      expect(registered.has(id) || queued.has(id), `${id} is on neither surface`).toBe(true)
+      expect(registered.has(id) && queued.has(id), `${id} is on both surfaces`).toBe(false)
+    }
+  })
+
+  it('says who reviewed it and when', async () => {
+    const register = await mine()
+
+    expect(register.findings.find((finding) => finding.id === unitFinding)?.reviewed).toEqual({
+      by: 'Regina Mbeki',
+      on: '2099-08-02',
+    })
+  })
+
+  it('keeps a finding whose reviewer has no display name', async () => {
+    // Dropping the row to tidy a missing name would lose a line from a
+    // permanent record, which is the worst trade available here.
+    const register = await mine()
+
+    expect(register.findings.find((finding) => finding.id === namelessFinding)?.reviewed).toEqual({
+      by: null,
+      on: '2099-08-04',
+    })
+  })
+
+  it('orders newest review first', async () => {
+    const register = await mine()
+    const ids = register.findings.map((finding) => finding.id)
+
+    expect(ours(ids, [namelessFinding, typeFinding, unitFinding, vendorFinding])).toEqual([
+      namelessFinding,
+      typeFinding,
+      unitFinding,
+      vendorFinding,
+    ])
+  })
+
+  it('settles two reviews in one instant by id, newest first', async () => {
+    // A board member working through the queue stamps several rows inside the
+    // same second. A register that reshuffles between two refreshes is one
+    // nobody can cite a line of.
+    //
+    // **Asserted as the exact order, not as "the same twice".** Stability was
+    // the first version and the sensitivity check killed it: dropping
+    // `id desc` left the suite green, because Postgres given no tie-break is
+    // *free* to reshuffle and mostly does not bother. `id desc` on uuidv7 —
+    // which is time-ordered — puts the later insert first, so the expected
+    // order is knowable rather than merely repeatable.
+    const first = await mine()
+    const second = await mine()
+    const order = (rows: readonly { id: string }[]) =>
+      ours(
+        rows.map((row) => row.id),
+        [sameInstantA, sameInstantB],
+      )
+
+    expect(order(first.findings)).toEqual([sameInstantB, sameInstantA])
+    expect(order(second.findings)).toEqual([sameInstantB, sameInstantA])
+  })
+
+  it('counts every match, not the page', async () => {
+    const all = await mine()
+    const page = await createFindingReader().register({ search: REGISTER_PREFIX, limit: 2 })
+
+    expect(page.findings).toHaveLength(2)
+    expect(page.total).toBe(all.total)
+    expect(page.total).toBeGreaterThan(page.findings.length)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, 201])(
+    'refuses a limit of %s rather than clamping it',
+    async (limit) => {
+      await expect(createFindingReader().register({ limit })).rejects.toThrow(RangeError)
+    },
+  )
+
+  describe('what search matches', () => {
+    const find = (search: string) => createFindingReader().register({ search, limit: ALL })
+    const idsOf = async (search: string) =>
+      (await find(search)).findings.map((finding) => finding.id)
+
+    it('matches a vendor name nested inside the pairs array', async () => {
+      expect(await idsOf('Coastal Landscaping')).toContain(vendorFinding)
+    })
+
+    it('matches a unit number, and the person who holds it', async () => {
+      expect(await idsOf('12B')).toContain(unitFinding)
+      expect(await idsOf('Dana Whitfield')).toContain(unitFinding)
+    })
+
+    it('matches the finding type', async () => {
+      expect(await idsOf(`${REGISTER_PREFIX}_dupkind`)).toContain(typeFinding)
+    })
+
+    it('matches the reviewer by name', async () => {
+      const ids = await idsOf('Regina Mbeki')
+
+      expect(ids).toContain(vendorFinding)
+      expect(ids).not.toContain(namelessFinding)
+    })
+
+    it('is case-insensitive, because nobody types a vendor as the invoice spelled it', async () => {
+      expect(await idsOf('coastal landscaping')).toContain(vendorFinding)
+    })
+
+    it('narrows the total as well as the rows', async () => {
+      // A total that ignored the filter would tell a board member the register
+      // holds more than the search found — and the export control beside it
+      // states a count taken from the same number.
+      const narrowed = await find('Coastal Landscaping')
+
+      expect(narrowed.total).toBe(narrowed.findings.length)
+      expect(narrowed.findings.every((finding) => finding.id === vendorFinding)).toBe(true)
+    })
+
+    it('never matches a key of the evidence object', async () => {
+      // **The reason this is jsonpath rather than a text search over the blob.**
+      // The key is spelled `vendorName`, so `evidence::text ilike` answers a
+      // search for "vendor" with every finding that has one at all — including
+      // those whose vendor is nothing like what was typed.
+      expect(await idsOf('vendorName')).not.toContain(vendorFinding)
+    })
+
+    it('never matches an id', async () => {
+      expect(await idsOf(vendorFinding)).not.toContain(vendorFinding)
+    })
+
+    it('treats % as a character a vendor might be named with, not a wildcard', async () => {
+      // Unescaped, `%` matches everything — so a board member searching for a
+      // vendor with a percent sign in its name is handed the whole register and
+      // told it matched.
+      expect((await find('%')).findings).toHaveLength(0)
+    })
+
+    it('treats _ the same way', async () => {
+      expect((await find('_oastal Landscaping')).findings).toHaveLength(0)
+    })
+
+    it.each([undefined, '', '   '])('treats %o as no search at all', async (search) => {
+      // A blank box submits on every press of the button. Treating it as a
+      // filter narrows the register to findings matching nothing, and presents
+      // that to a board member as an empty register.
+      const register = await createFindingReader().register({ search, limit: ALL })
+      const scoped = await mine()
+
+      expect(register.total).toBeGreaterThanOrEqual(scoped.total)
+      expect(register.findings.map((finding) => finding.id)).toContain(vendorFinding)
+    })
+  })
+
+  it('reads the review date as the same calendar day in any session timezone', async () => {
+    // Story 4.4's defect, guarded in a fourth read. `to_char` on a `timestamptz`
+    // renders in the session timezone, and a review stamped at 02:00Z is the
+    // previous day in Los Angeles.
+    const crossingReview = await seedReviewed('crossing', {}, '2099-10-02T02:00:00Z')
+
+    await setPoolTimeZone('America/Los_Angeles')
+
+    try {
+      const register = await mine()
+
+      expect(register.findings.find((finding) => finding.id === crossingReview)?.reviewed?.on).toBe(
+        '2099-10-02',
+      )
+    } finally {
+      await setPoolTimeZone('UTC')
+    }
+  })
+})

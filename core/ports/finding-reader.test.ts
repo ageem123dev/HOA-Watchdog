@@ -28,13 +28,42 @@ const findingSource = readFileSync(join(HERE, 'finding-reader.ts'), 'utf8')
 const documentSource = readFileSync(join(HERE, 'checked-documents.ts'), 'utf8')
 
 describe('the FindingReader port', () => {
-  it('declares exactly the two reads a surface needs', () => {
-    // Reading the queue and reading one finding are the same *capability* —
-    // both are reads of the register — so they sit on one port. The split this
-    // file exists to defend is read from write, and it is asserted below.
+  it('declares exactly the three reads a surface needs', () => {
+    // `register`, not `reviewed`: the guard below forbids `review` on this
+    // interface so a write capability cannot arrive quietly, and it fired on
+    // the first name. Renaming was the honest resolution — widening the guard
+    // to admit a read would have spent a real protection on a preference.
+    // Reading the queue, reading one finding and reading the register are the
+    // same *capability* — all three are reads of the register — so they sit on
+    // one port. The split this file exists to defend is read from write, and it
+    // is asserted below.
     expect(declaredMembers(findingSource, 'FindingReader')).toEqual([
       'unreviewed(limit: number): Promise<UnreviewedQueue>',
       'byId(id: string): Promise<FindingDetail | null>',
+      'register(filter: RegisterFilter): Promise<ReviewedRegister>',
+    ])
+  })
+
+  it('hands the register back with its total, as it does the queue', () => {
+    // The same argument `UnreviewedQueue` makes, and it applies harder here: a
+    // register is longer than a page by construction, so a caller able to hold
+    // the rows without the count could show fifty and let a board member
+    // believe that was the whole record the auditor is asking about.
+    expect(declaredMembers(findingSource, 'ReviewedRegister')).toEqual([
+      'readonly findings: readonly FindingDetail[]',
+      'readonly total: number',
+    ])
+  })
+
+  it('bounds the register read, and makes search optional', () => {
+    // `limit` required for the reason `unreviewed` states — a register grows
+    // without bound and the caller that forgets is the one rendering a page
+    // that never finishes. `search` optional because no search is the ordinary
+    // case, and `app/access-log/filter.ts` already establishes that a blank box
+    // is *absent*, not a filter matching nothing.
+    expect(declaredMembers(findingSource, 'RegisterFilter')).toEqual([
+      'readonly search?: string',
+      'readonly limit: number',
     ])
   })
 
@@ -144,7 +173,22 @@ describe('the FindingReader port', () => {
     // Not a restatement of the assertion above. That one pins the exact line;
     // this names *what the list being one long buys* — so an edit adding
     // `markReviewed` here has to argue with a test that says what it costs.
-    const members = declaredMembers(findingSource, 'FindingReader').join(' ')
+    // **The member *names*, not the whole declarations.** A capability is
+    // something this port can be asked to do, and it is named — so that is what
+    // has to be forbidden. Matching the whole line also caught the *return
+    // type*, and refused `register(filter): Promise<ReviewedRegister>`: a read
+    // whose result is, accurately, a register of reviewed findings. A test that
+    // rejects a correct design is as broken as one that admits a wrong one, and
+    // this project has now hit that direction three times.
+    //
+    // Nothing is lost. Every way a capability can be added carries its name on
+    // the left: `markReviewed(id)`, `readonly dismiss: (id) => void`,
+    // `resolve?(id)`. The mutations in this story's notes force each of them.
+    const names = declaredMembers(findingSource, 'FindingReader')
+      .map((member) => (member.split(/[(:?]/)[0] ?? '').trim())
+      .join(' ')
+
+    const members = names
 
     // Anchored on word boundaries, because the bare substring `review` is
     // inside `unreviewed` — the one member this port is *supposed* to have. An

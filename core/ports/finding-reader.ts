@@ -112,6 +112,57 @@ export interface FindingDetail extends FindingRecord {
   readonly reviewed: Reviewed | null
 }
 
+/**
+ * What the register is being asked for.
+ *
+ * A shape rather than two arguments, because `app/access-log/filter.ts` already
+ * showed where this goes: a surface with a search box grows a second filter, and
+ * a positional argument list grows a `null` in the middle that every caller has
+ * to pass.
+ */
+export interface RegisterFilter {
+  /**
+   * Narrow to findings matching this text, case-insensitively.
+   *
+   * **Absent is not the same as empty**, and the distinction is load-bearing: a
+   * blank search box submits on every press of the button, and treating `''` as
+   * a filter would narrow the register to findings matching nothing — presented
+   * to a board member as "your register is empty". `filter.ts` makes the same
+   * argument for the access log and this port relies on callers doing the same.
+   *
+   * **What it matches is a decision, not an omission.** The finding's type, the
+   * reviewer's display name, and the vendor, unit and holder names stored in the
+   * evidence. Not ids, not internal slugs, and — the one that takes work to
+   * avoid — not the *keys* of the evidence object: a naive text search over the
+   * blob answers a search for "vendor" with every spike finding, because the key
+   * is spelled `vendorName`.
+   */
+  readonly search?: string
+
+  /**
+   * How many rows at most.
+   *
+   * Required, for the reason `unreviewed` gives at length. It applies harder
+   * here: the register is permanent and append-only, so it is the one read in
+   * the product that is guaranteed to grow forever.
+   */
+  readonly limit: number
+}
+
+/**
+ * The register, and how much of it there is.
+ *
+ * `total` counts every finding matching the filter, not the rows returned. The
+ * same argument `UnreviewedQueue` makes, and it binds harder: a register is
+ * longer than a page by construction, so a surface that could not tell the two
+ * apart would show fifty rows to somebody who came to find out what the board
+ * knew — and let them believe that was all of it.
+ */
+export interface ReviewedRegister {
+  readonly findings: readonly FindingDetail[]
+  readonly total: number
+}
+
 export interface FindingReader {
   /**
    * The unreviewed findings, newest first, and how many there are in total.
@@ -146,4 +197,31 @@ export interface FindingReader {
    * ordinary, and an id from nowhere is not.
    */
   byId(id: string): Promise<FindingDetail | null>
+
+  /**
+   * The reviewed findings — the register an auditor is handed.
+   *
+   * **Named `register`, not `reviewed`, and the port's own guard is why.** The
+   * test forbidding `mark|review|raise|…` on this interface exists so a *write*
+   * capability cannot arrive quietly, and it fired on `reviewed(filter)` — a
+   * read named after the state it returns. Widening the guard to admit it would
+   * have traded a real protection for a naming preference. `register` is the
+   * word EXPERIENCE.md uses for this artifact, it collides with nothing, and it
+   * reads as the noun it is.
+   *
+   * Newest review first, with a tie-break, because one review run can stamp
+   * several rows on the same `now()` and a register that reshuffles between two
+   * refreshes is one nobody can cite.
+   *
+   * **This and `unreviewed` must partition the table.** EXPERIENCE.md's
+   * lifecycle has exactly two live states and no third: "reviewed moves, it does
+   * not close". A finding on neither surface has vanished from a record that is
+   * supposed to be permanent; a finding on both is being counted twice by the
+   * two figures a board member reads side by side.
+   *
+   * Every row carries `reviewed` populated — `finding_review_is_attributed`
+   * refuses a reviewed row that does not name who did it and when — but the
+   * *name* inside it is still nullable, because `board_member.display_name` is.
+   */
+  register(filter: RegisterFilter): Promise<ReviewedRegister>
 }
