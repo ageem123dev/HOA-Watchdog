@@ -1,5 +1,6 @@
 ---
 baseline_commit: 0f079cc
+merge_request: 62
 ---
 
 # Story 4.8: Told before you pay
@@ -604,6 +605,54 @@ happened — and it is the property the at-least-once guarantee rests on. #2 and
 the batch: one bad finding must cost exactly one finding.
 
 ### Review Findings
+
+#### The one local CodeRabbit round — `a7bfc4b`
+
+`review_completed`, **22 findings**, **32 of 32** changed files reviewed with nothing unreconciled in
+either direction. Ingested against `a7bfc4b` before any fix was applied, so the comparison scores the
+reviewed commit rather than the response to it: 2 missed by Argus, 3 Argus-only, 20 filtered below
+the severity floor, 2 lessons written.
+
+**Taken — 11.**
+
+- **A test that had stopped testing its own name.** An earlier byte-level edit in this story matched
+  the first occurrence of a pattern rather than the intended one, so `keeps an ordinary name exactly
+  as it is` was asserting a control-character case identical to the test sixty lines below it — and
+  the only pass-through assertion in that block was gone. This is exactly what the test-value pass
+  exists to catch, and a reviewer caught it instead.
+- **A count budget is not a time budget.** `MOST_ALERTS_PER_RUN` bounds how many alerts a run sends
+  and says nothing about how long that takes: twenty-five against a fifteen-second send timeout is
+  over six minutes, spent inside an upload a treasurer is watching. `ALERT_RUN_BUDGET_MS` now bounds
+  the run, checked **before** a finding is claimed so work already started is always finished and
+  nothing is abandoned between the mail going out and the delivery being recorded.
+- `remaining: number` became `more: boolean` with it. Neither of the two things that stop a run can
+  say how many are left, and a number would be inventing precision.
+- A blank `baseUrl` is now absent rather than a link nobody can follow, recorded as delivered.
+- `notifyFindings` is wrapped at both call sites, so a rejection cannot reach the `catch` that
+  reports `figures-not-stored` **after** the write committed.
+- `createAlerting` rethrows anything that is not `MailNotConfiguredError`, so a real fault cannot
+  masquerade as an unset variable and silently remove the whole alerting path.
+- The CHECK function pins `search_path`, because a constraint steerable by a session setting is not
+  a constraint.
+- The trigger's identity branch gained the test nothing exercised.
+- `recordFailure` and `awaitingAlert` document contracts their siblings already stated.
+- `.env.example` stopped saying `MAIL_API_URL` accepts `http:`, which the https-only fix made false.
+- `docs/as-built.md`: the heading said *"as of story 3.2"*, and four rows in *What is not built*
+  described things epics 3 and 4 have since built. The two new guards joined the invariants table.
+
+**Declined — 11**, each with a reason.
+
+- **not-reproduced** — *"omit comparison entries whose column label is empty."* Both column lists are
+  hard-coded literals with non-empty labels and rows are built to match them, so `?? ''` is
+  unreachable. The test written for it **passed without any change**, which is why it was deleted
+  rather than kept: a test that cannot fail is worse than none.
+- Nine test-structure suggestions — a shared suite helper, `__dirname` over `process.cwd()`, generic
+  typing of the `wired` override, tightening `mentionsModelModule`'s slash handling, positional
+  assertions in the wiring test. Each is defensible and none changes what is proven. Taking them
+  would diverge these files from siblings that do the same thing the same way.
+- One asking `extract-document.ts` to import the four port types directly rather than through
+  `NotifyDependencies[...]`. The indexed form is deliberate: it makes the dependency list follow
+  `notifyFindings`'s contract automatically rather than by two places agreeing.
 
 #### The whole-story integration pass — `0f079cc..HEAD`
 
