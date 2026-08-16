@@ -282,15 +282,7 @@ export function createFindingReader(): FindingReader {
       const search = wanted === undefined || wanted === '' ? null : likePattern(wanted)
 
       const { rows } = await writerPool().query<DetailRow & { total: string }>(
-        `select f.id,
-                f.finding_type,
-                f.subject_id,
-                to_char(lower(f.period), 'YYYY-MM-DD')                    as period_from,
-                to_char(upper(f.period), 'YYYY-MM-DD')                    as period_until,
-                f.evidence,
-                to_char(f.raised_at at time zone 'UTC', 'YYYY-MM-DD')     as raised_on,
-                m.display_name                                            as reviewer_name,
-                to_char(f.reviewed_at at time zone 'UTC', 'YYYY-MM-DD')   as reviewed_on,
+        `select ${DETAIL_COLUMNS},
                 count(*) over ()                                          as total
            from finding f
            -- Left, and here it is equivalent to an inner join today. Saying so
@@ -348,15 +340,13 @@ export function createFindingReader(): FindingReader {
         [limit, search],
       )
 
-      const findings: readonly FindingDetail[] = rows.map((row) => ({
-        id: row.id,
-        findingType: row.finding_type,
-        subjectId: row.subject_id,
-        period: { from: row.period_from, until: row.period_until },
-        evidence: row.evidence,
-        raisedOn: row.raised_on,
-        reviewed: row.reviewed_on === null ? null : { by: row.reviewer_name, on: row.reviewed_on },
-      }))
+      // Through the shared mapping, like the two reads either side of it.
+      // Raised by Argus, which noticed this file had grown a comment arguing
+      // that two mappings of one row shape are two chances to disagree while
+      // leaving a third in place. `toDetail` and `DETAIL_COLUMNS` were
+      // extracted by the story that added `awaitingAlert`; this read was the
+      // one they missed.
+      const findings: readonly FindingDetail[] = rows.map(toDetail)
 
       return { findings, total: Number(rows[0]?.total ?? 0) }
     },
