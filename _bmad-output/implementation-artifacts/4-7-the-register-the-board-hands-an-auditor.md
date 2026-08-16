@@ -1,0 +1,268 @@
+---
+baseline_commit: 69fe6c7
+---
+
+# Story 4.7: The register the board hands an auditor
+
+Status: ready-for-dev
+
+## Why this story exists
+
+Story 4.6 built the one action in the pilot: a board member marks a finding reviewed and it leaves
+the dashboard. **It leaves for somewhere that does not exist yet.** EXPERIENCE.md is explicit about
+where:
+
+> *"Reviewed moves, it does not close. Marking a finding reviewed relocates it from the dashboard
+> into the register, where it remains searchable and exportable forever."*
+
+Right now it relocates into nothing. A reviewed finding is a row nobody can reach — the dashboard
+filters it out by design, and there is no other surface that reads it. **The product currently
+loses the record at the exact moment it claims to have preserved it**, which is the reverse of what
+the register is for.
+
+And the register is not a listing screen. It is *the* fiduciary artifact:
+
+> *"The register is the fiduciary artifact. It answers 'what did the board know, and when.' Export
+> from here feeds the board packet."*
+
+That sentence is why this story carries an export and a print treatment rather than deferring them:
+a record an auditor cannot be handed is not the thing being described.
+
+### The decision that shapes the export (taken 2026-08-16)
+
+**EXPERIENCE.md's example copy and this codebase's only precedent disagreed, and the user resolved
+it.**
+
+The export control's specimen wording is *"Export 17 reviewed findings as PDF"* (Component
+Patterns). The only export the product has — the access log, story 3.8 — is **CSV**, and generating
+a PDF server-side means a new heavyweight dependency with no precedent here.
+
+The accessibility review is what breaks the tie, because it ties the two requirements together
+directly: it raises the missing print stylesheet *because* "the register's whole purpose is
+producing a board-packet export".
+
+**Resolution: the print treatment is the PDF path, and the export control produces CSV.** A director
+who wants paper or a PDF prints the register — UX-DR22's treatment is what makes that legible — and
+the download is CSV, matching `app/access-log/export/route.ts` byte for byte in its conventions. No
+new dependency, and both UX-DR8 and UX-DR22 are satisfied by the thing each was actually written
+about.
+
+## Story
+
+As a board member,
+I want a permanent, searchable register of every reviewed finding that I can print or download,
+so that when an auditor asks what the board knew and when, I can hand them the answer.
+
+## Acceptance Criteria
+
+**AC1 — The register lists reviewed findings, and only reviewed ones.**
+The mirror of the dashboard's queue, and the two must partition the register between them: a
+finding is on exactly one of the two surfaces, never both and never neither. Newest review first,
+with a tie-break so two renders of an unchanged register agree — the rule
+`adapters/db/finding-reader-postgres.ts` already carries for the queue.
+
+**AC2 — Each row says who reviewed it and when, not merely that it was reviewed.**
+The register answers *which human* and *when*. `finding_review_is_attributed` guarantees both are
+present on a reviewed row, so the surface may rely on it — but `board_member.display_name` is
+nullable, and a reviewer who never had a name still reviewed it. Say what is known; never invent a
+name and never print `null`.
+
+**AC3 — Search narrows the register, and says what it narrowed to.**
+UX-DR14's search. A search that matches nothing says so as an ordinary outcome — never an error,
+and never the empty state of AC7, which means something different. The count shown must be the
+count of what is displayed, and where the register is longer than the page, the surface says so
+rather than letting a reader believe they have seen all of it (the rule story 4.5 established for
+the dashboard).
+
+**AC4 — The export states what it will produce before producing it, with a count.**
+UX-DR8: *"Export 17 reviewed findings as CSV"*, never a bare "Export". **The count is the count of
+what will actually be in the file**, so it agrees with the search that is applied — an export that
+silently ignored the filter would hand a reader a different document from the one on screen, which
+is the defect `app/access-log/export/route.ts` records having fixed.
+
+**AC5 — The download is CSV, and it is safe to open in a spreadsheet.**
+`core/provenance/access-log-csv.ts` already solved this and its reasoning transfers exactly: a cell
+beginning `=`, `+`, `-`, `@` or their full-width forms is a **formula** to Excel, and this file is
+built from vendor names and unit numbers lifted off documents the association received. Reuse that
+module's neutralisation rather than writing a second one. The UTF-8 BOM is written for the same
+reason it is there.
+
+**AC6 — The export route authenticates before it reads, and a missing session is a 404.**
+A route handler is not covered by a page's guard. This one returns the association's entire
+reviewed history — the single most attractive request in the product to an unauthenticated caller.
+404 rather than 401: this endpoint's existence is not something an anonymous caller needs confirmed.
+Asserted by the reader never being called, not only by the status code.
+
+**AC7 — The empty register explains itself rather than reporting a fault.**
+EXPERIENCE.md names the copy: *"Nothing has been reviewed yet."* — and requires it explain that
+findings arrive here **after review**, rather than presenting it as an error. Distinct from AC3's
+no-search-results state, which a reader reaches a different way and must be told about differently.
+
+**AC8 — The export-in-progress state is named, counted, and the control is disabled during it.**
+EXPERIENCE.md, State Patterns: *"Named progress, count stated, control disabled during."* The
+control that is disabled must be the one that would start a second export.
+
+**AC9 — Print treatment for the register *and* the finding detail, in one stylesheet.**
+UX-DR22, and story 4.6's AC10 deferred it here precisely so the two would share one treatment
+rather than grow two. What must not survive onto paper: navigation, controls, and the export button
+itself. What must: the figures, who reviewed what and when, and the evidence tables.
+
+**AC10 — Evidence tables reflow below 48rem; they do not scroll sideways.**
+EXPERIENCE.md is unambiguous: *"evidence tables reflow to stacked label/value groups, one record per
+group, figures still tabular. **They do not scroll horizontally** — a table that scrolls sideways in
+a meeting is a table nobody reads."* **Story 4.6 shipped `overflow-x: auto` on the finding detail's
+evidence table**, which is that rule broken. This story owns the responsive treatment for both
+surfaces, so it is fixed here rather than recorded as someone else's problem.
+
+**AC11 — The dashboard reaches the register.**
+UX-DR10 lists the register link as part of the dashboard surface. A surface with no way in is one
+nobody learns, and its absence is indistinguishable from having forgotten where it was — the
+argument `app/dashboard/page.tsx` already makes for the quarantine link.
+
+## Tasks / Subtasks
+
+- [ ] **Task 1 — Read the register** (AC: 1, 2, 3)
+  - [ ] Extend `FindingReader` with a reviewed read taking a filter — search text and a required
+        `limit`, the shape `QueryLogFilter` uses and for the same reason: a register grows without
+        bound and the caller that forgets a limit is the one that renders a page which never
+        finishes loading. Return the rows **and the total**, as `UnreviewedQueue` does, so a caller
+        cannot hold the rows without the count.
+  - [ ] The port test asserts an exact member list. Update it deliberately, and keep the negative
+        that forbids a write member — the property check story 4.6 hardened is now the thing that
+        judges the new member's return type, so read what it demands before adding one.
+  - [ ] `adapters/db/finding-reader-postgres.ts` + db tests. **Dates through
+        `to_char(… at time zone 'UTC', 'YYYY-MM-DD')`** — the rule every reader here carries.
+  - [ ] Decide what search searches, and write the reasoning down. It cannot be "everything": the
+        evidence is `jsonb` of varying shape. Prefer the fields a board member would name.
+
+- [ ] **Task 2 — The register view** (AC: 1, 2, 3, 7)
+  - [ ] `core/findings/` gains the register's copy, reusing `toFindingRow` for the row and
+        `reviewMessage` for the attribution sentence — 4.6 made both the single source, and a third
+        wording of "already reviewed by X on Y" is exactly the drift they exist to prevent.
+  - [ ] The three states are one decision in `core/`, as `toDashboardView` is: empty, no-matches,
+        and rows. A surface deciding emptiness for itself gets the reassuring copy on the day the
+        association signs up.
+
+- [ ] **Task 3 — The surface** (AC: 1, 2, 3, 4, 7, 8, 11)
+  - [ ] `app/findings/register/page.tsx`, guarded **before** the read, matching
+        `app/findings/[id]/page.tsx`.
+  - [ ] Search as a GET form, so the URL is shareable and the back button works —
+        `app/access-log/` is the precedent, including `filter.ts` living in its own module so the
+        suite can test it without pulling `next-auth` in.
+  - [ ] The export control states the count it will produce. The in-progress state disables it.
+  - [ ] The dashboard gains the link (AC11).
+
+- [ ] **Task 4 — The download** (AC: 4, 5, 6)
+  - [ ] `app/findings/register/export/route.ts`, following `app/access-log/export/route.ts`:
+        auth before read, 404 for no session, BOM, `Content-Disposition`.
+  - [ ] The CSV producer lives in `core/`, reusing `access-log-csv.ts`'s `cell` neutralisation.
+        **Do not write a second formula-injection guard** — extract or import the first.
+  - [ ] The route honours the same filter the page did, and a test proves the exported set matches
+        the on-screen set.
+
+- [ ] **Task 5 — Print and reflow** (AC: 9, 10)
+  - [ ] One stylesheet serving the register and the finding detail. Decide where it lives so both
+        import it rather than each carrying a copy.
+  - [ ] Assert what is *absent* from print — controls, navigation, the export button — as well as
+        what survives. An assertion that only checks presence passes against a stylesheet that
+        hides nothing.
+  - [ ] **Fix story 4.6's `overflow-x: auto`** on the finding detail's evidence table and give both
+        tables the stacked reflow below 48rem.
+
+## Dev Notes
+
+### What already exists and must not be rebuilt
+
+| Thing | Where | Note |
+| --- | --- | --- |
+| `FindingReader`, `FindingDetail`, `Reviewed` | `core/ports/finding-reader.ts` | `Reviewed { by: string \| null; on: string }` is already the shape this story lists. |
+| Row copy, severity, `formatAmount`, `toFindingRow` | `core/findings/finding-view.ts` | Reuse. Three surfaces describe one finding; this is the fourth. |
+| `reviewMessage({ outcome: 'already-reviewed', by, on })` | `core/findings/review.ts` | **The attribution sentence already exists.** 4.6 made the page and the refusal share it; the register is the third caller. |
+| `toFindingDetail`, the evidence tables | `core/findings/detail-view.ts` | The detail page's layout, and what the print treatment must carry. |
+| CSV cell neutralisation, the BOM, the export route shape | `core/provenance/access-log-csv.ts`, `app/access-log/export/route.ts` | **The whole export problem is solved once already.** Read both before writing anything. |
+| Filter-from-URL, tested as a pure function | `app/access-log/filter.ts` | Including *why* it is a separate module. |
+| Deny-by-default routing, `findingRoute(id)` | `core/auth/route-policy.ts` | `PUBLIC_ROUTES` is an allow-list; a register route is closed without being listed. |
+
+### Use `writerPool()` for this read, and do not "correct" it
+
+Every finding reader here uses `writerPool()`, and on a story about a **read-only permanent record**
+that looks exactly like an oversight worth tidying — AD-4 says the reader role is SELECT-only, so
+surely a register belongs on `readerPool()`.
+
+**It does not, and migration 021 says why in as many words:**
+
+> *"Nothing is granted to watchdog_reader, and the silence is the decision — migration 003 revoked
+> its blanket SELECT so that read access became explicit per table. Findings are read by the gateway
+> on behalf of a board member, and the LLM-driven query path has no business reading them: a catalog
+> entry that returned findings would let a question about dues surface an unreviewed accusation
+> about a member."*
+
+`readerPool()` is the role the catalog executes as. Pointing the register at it fails with a
+permission error — and the dangerous repair is the obvious one: granting `watchdog_reader` SELECT on
+`finding`, which silently hands every finding to the Oracle's query path. **That grant is the thing
+migration 021 exists to withhold.** If this genuinely needs revisiting it is an architecture decision
+for the user, not a story fix.
+
+### The one query worth thinking about before writing it
+
+The dashboard reads `state = 'unreviewed'`; this reads `state = 'reviewed'`. **Those two must
+partition the table** — AC1 — and the cheapest way to get that wrong is to write a second query
+whose predicate drifts from the first. Migration 021 constrains `state`, so check what values it
+actually admits before assuming there are two.
+
+Ordering is `reviewed_at desc`, and it needs the same tie-break argument the queue's `raised_at
+desc, id desc` records: one review run can stamp several rows on the same `now()`.
+
+### What 4.6 learned, and this story inherits
+
+- **The AC audit has found something on eight consecutive stories.** On 4.6 it found `period` read
+  by the adapter, carried by the port and the view, and rendered by nothing. Run it, and run it
+  against this story's ACs rather than against the code you just wrote.
+- **A fix is the highest-risk diff.** 4.6's held-write took three review rounds because each round
+  found a defect in the previous round's fix.
+- **Ask of every refusal test: what would this look like if the refusal did not happen?** AC6 is a
+  refusal test.
+- **The test-value pass finds what mutation cannot** — on 4.6 it found a guard covered by nothing
+  (all 115 tests passed with it removed) and a test passing for the wrong reason.
+- **`Date.UTC` rolls an impossible date forward rather than refusing it.** If this story does date
+  arithmetic, round-trip the result and compare.
+- **A stray backspace has now reached source three times, most recently in 4.6.**
+  `docs/no-control-characters.test.ts` reads **markdown only**, so it did not see the `.ts` one.
+  **Anything carrying a backslash goes through the editing tool, never a shell heredoc** — and
+  widening that guard is an open action item this story may pick up if it touches the area.
+- **Never truncate a gate's output past its verdict.** `npm test | tail -3` hides the pass count,
+  and a red suite was pushed on 4.6 because of it.
+- **A clean CodeRabbit verdict arrives as an *edit* to the summary comment**, not a new note.
+- **The close-out rides in every review round's commit**, not the last one.
+
+### Where this story is unlike its predecessors
+
+It is the first surface that is **an artifact rather than a workflow**. The dashboard is a queue you
+work through; the register is a document you hand to somebody. That is why print and export are
+acceptance criteria rather than polish, and why the copy has to survive being read aloud in a
+dispute by someone who does not use the product.
+
+### References
+
+- [Source: epics.md] — Epic 4 spine, row 4.7; UX-DR8, UX-DR14, UX-DR22
+- [Source: EXPERIENCE.md] — Alert Lifecycle (the register as fiduciary artifact); Component
+  Patterns (export control); State Patterns (register empty, export in progress); Accessibility
+  Floor (print is a supported output); Responsive & Platform (tables do not scroll horizontally)
+- [Source: app/access-log/] — the export, filter and CSV precedent, in full
+- [Source: 4-6-one-finding-and-what-to-do-about-it.md] — the review record these learnings come from
+
+## Dev Agent Record
+
+### Agent Model Used
+
+claude-opus-5[1m]
+
+### Completion Notes
+
+_(to be filled by the dev workflow)_
+
+## Change Log
+
+| Date | Change |
+| --- | --- |
+| 2026-08-16 | Story created. The export-format conflict — EXPERIENCE.md's "as PDF" against the CSV precedent — was put to the user, who chose the print treatment as the PDF path and CSV for the download. Reading the spec against the code also found story 4.6's `overflow-x: auto` breaking EXPERIENCE.md's no-horizontal-scroll rule; fixed here as AC10. |
