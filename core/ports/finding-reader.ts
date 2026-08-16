@@ -253,4 +253,50 @@ export interface FindingReader {
    * *name* inside it is still nullable, because `board_member.display_name` is.
    */
   register(filter: RegisterFilter): Promise<ReviewedRegister>
+
+  /**
+   * The findings the board has not yet been told about, oldest first.
+   *
+   * A fourth read rather than a fourth port, for the reason the three above sit
+   * together: reading the queue, reading one finding, reading the register and
+   * reading what is unannounced are all reads of the same register. The split
+   * this interface defends is read from write, and the alert ledger is where the
+   * writing lives.
+   *
+   * **Unreviewed only.** An alert exists to make somebody look, so a finding a
+   * board member has already reviewed has nothing left for one to do — and
+   * mailing it would land the reader on the already-reviewed state, inviting a
+   * second director to review what the register has answered. Reachable
+   * whenever the alert does not go out in the same request that raised the
+   * finding: a failed send that is retried, or mail configured after a period
+   * without it.
+   *
+   * **Candidates, not instructions.** A finding appears here when no delivery
+   * has succeeded for it — whether or not another run currently holds a claim.
+   * Arbitration belongs to `FindingAlertLedger.claim`, which can do it in one
+   * statement against a unique constraint; a read that tried to exclude live
+   * claims would be answering a question that has changed by the time the caller
+   * acts on it.
+   *
+   * **Oldest first**, which is the opposite of every other read here. The others
+   * show a board member what is most recent; this one works through a backlog,
+   * and a warning that has been waiting longest is the one closest to being too
+   * late.
+   *
+   * **`FindingDetail`, not an id.** The message is built from the finding's own
+   * evidence, and a second read to fetch it would be a second chance for the
+   * alert and the page to disagree about the same finding.
+   *
+   * Bounded, like the two reads above and for the same reason: a caller that
+   * forgets a limit is the one reading a table that only ever grows.
+   *
+   * **A whole number from 1 to `MOST_REGISTER_ROWS`**, the same contract
+   * `unreviewed` and `RegisterFilter.limit` carry. Outside that the returned
+   * promise rejects with `RangeError`; it is never clamped. Stated here rather
+   * than left to the adapter, because a bound the adapter enforces and the port
+   * does not mention is a contract a caller can only discover by violating it —
+   * the point CodeRabbit made against `unreviewed`, and this member arrived
+   * with the same omission.
+   */
+  awaitingAlert(limit: number): Promise<readonly FindingDetail[]>
 }

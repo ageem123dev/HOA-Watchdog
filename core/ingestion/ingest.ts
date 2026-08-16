@@ -13,6 +13,7 @@ import type { UnitDirectory } from '../ports/unit-directory'
 import type { VendorDirectory } from '../ports/vendor-directory'
 import { holdUnknownVendors, unstorableName } from './hold-unknown-vendors'
 import { recordPayments, unstorableUnitReference } from './record-payments'
+import { notifyFindings, type NotifyDependencies } from './notify-findings'
 import { runDetection } from './run-detection'
 import { recordRoll } from './record-roll'
 import { type RejectionReason, assess } from './acceptance'
@@ -111,6 +112,23 @@ export interface IngestDependencies {
   readonly invoices?: InvoiceReader
   readonly dues?: DuesReader
   readonly findings?: FindingRegister
+
+  /**
+   * Telling the board about what detection just found (story 4.8).
+   *
+   * Optional with the same gap the three above carry: absent, a finding is
+   * raised and nobody is told, and nothing fails.
+   *
+   * **`findingReader`, not `findings`.** They are different capabilities and
+   * `core/ports/finding.ts` argues for keeping them apart -- `findings` raises,
+   * this one reads, and one object holding both is a detector that could sign
+   * off its own work.
+   */
+  readonly findingReader?: NotifyDependencies['findings']
+  readonly alerts?: NotifyDependencies['alerts']
+  readonly recipients?: NotifyDependencies['recipients']
+  readonly mail?: NotifyDependencies['mail']
+  readonly baseUrl?: string
   /**
    * Asked which unit a deposit reference names. Never asked to create one.
    *
@@ -257,6 +275,49 @@ async function ingestOne(
         findings: deps.findings,
         onError: deps.onError === undefined ? undefined : (error) => deps.onError?.(error, filename),
       })
+
+      // After detection, because a finding cannot be mailed before it is
+      // raised, and inside the same guard for the same reason: the document
+      // really was ingested, and an unsent warning must not report that as a
+      // failure. `notify-findings.ts` records what the failure costs instead.
+      //
+      // Named one by one rather than spread. `deps.findings` is a
+      // `FindingRegister` and this wants a `FindingReader` under the same key --
+      // spreading would hand the writer to the reader slot, and both are
+      // objects so nothing would complain until runtime.
+      // **Guarded again here, and not because `notifyFindings` throws.** It is
+      // written not to, and its tests hold it to that. But this `try` reports
+      // `figures-not-stored` -- and it sits *after* `replace` has committed, so
+      // a rejection escaping the alerting step would tell a treasurer their
+      // figures were not saved when they were, and their retry would find the
+      // document already settled. The cost of the guarantee living in one file
+      // is that the caller cannot see it; two lines here mean the caller does
+      // not have to. Raised by CodeRabbit.
+      try {
+        await notifyFindings({
+          findings: deps.findingReader,
+          alerts: deps.alerts,
+          recipients: deps.recipients,
+          mail: deps.mail,
+          baseUrl: deps.baseUrl,
+          // Rewrapped, as the detection callback above is and for the reason it
+          // records: this path's `onError` takes a **filename** and
+          // `notifyFindings` hands its callback a **finding id**. Both are
+          // strings, so passing it through wholesale type-checks and logs one
+          // under the other's label.
+          onError:
+            deps.onError === undefined
+              ? undefined
+              : (error, findingId) =>
+                  deps.onError?.(
+                    new Error(`alerting finding ${findingId} failed`, { cause: error }),
+                    filename,
+                  ),
+        })
+      } catch {
+        // Nowhere left to report it: reporting is what the step already does,
+        // through its own `onError`. Swallowed so a success stays a success.
+      }
     } catch (error) {
       deps.onError?.(error, filename)
 

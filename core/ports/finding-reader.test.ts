@@ -28,19 +28,26 @@ const findingSource = readFileSync(join(HERE, 'finding-reader.ts'), 'utf8')
 const documentSource = readFileSync(join(HERE, 'checked-documents.ts'), 'utf8')
 
 describe('the FindingReader port', () => {
-  it('declares exactly the three reads a surface needs', () => {
+  it('declares exactly the four reads a surface needs', () => {
     // `register`, not `reviewed`: the guard below forbids `review` on this
     // interface so a write capability cannot arrive quietly, and it fired on
     // the first name. Renaming was the honest resolution — widening the guard
     // to admit a read would have spent a real protection on a preference.
-    // Reading the queue, reading one finding and reading the register are the
-    // same *capability* — all three are reads of the register — so they sit on
-    // one port. The split this file exists to defend is read from write, and it
-    // is asserted below.
+    // Reading the queue, reading one finding, reading the register and reading
+    // what the board has not been told about yet are the same *capability* —
+    // all four are reads of the register — so they sit on one port. The split
+    // this file exists to defend is read from write, and it is asserted below.
+    //
+    // `awaitingAlert` passes the write guard on its own merits rather than by
+    // exemption: split at camelCase it is "awaiting alert", and neither word is
+    // on the deny-list. Choosing what to alert on is a read; claiming it and
+    // recording the delivery are writes, and they live on
+    // `core/ports/finding-alert.ts`.
     expect(declaredMembers(findingSource, 'FindingReader')).toEqual([
       'unreviewed(limit: number): Promise<UnreviewedQueue>',
       'byId(id: string): Promise<FindingDetail | null>',
       'register(filter: RegisterFilter): Promise<ReviewedRegister>',
+      'awaitingAlert(limit: number): Promise<readonly FindingDetail[]>',
     ])
   })
 

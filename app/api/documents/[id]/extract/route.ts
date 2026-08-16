@@ -6,6 +6,12 @@ import { createPaymentRepository } from '@/adapters/db/payment-repository-postgr
 import { createDuesReader } from '@/adapters/db/dues-reader-postgres'
 import { createInvoiceReader } from '@/adapters/db/invoice-reader-postgres'
 import { createFindingRegister } from '@/adapters/db/finding-postgres'
+import {
+  createBoardRecipients,
+  createFindingAlertLedger,
+} from '@/adapters/db/finding-alert-postgres'
+import { createFindingReader } from '@/adapters/db/finding-reader-postgres'
+import { createAlerting } from '@/adapters/mail/mail-sender-http'
 import { createQuarantine } from '@/adapters/db/quarantine-postgres'
 import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
 import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
@@ -70,6 +76,15 @@ export async function POST(
     return Response.json({ error: 'not a document id' }, { status: 400 })
   }
 
+  // Resolved once per request. Empty when mail is not configured, which
+  // `notifyFindings` treats as "do nothing" -- so an unconfigured deploy
+  // sends nothing and, importantly, claims nothing either. The named error
+  // goes to the log rather than being swallowed: a mailer that is silently
+  // absent is indistinguishable from one that had nothing to send.
+  const alerting = createAlerting((error) => {
+    console.error('[extract] alerting is not configured', error)
+  })
+
   const result = await extractDocument(id, {
     repository: documentRepository,
     store: documentStore,
@@ -89,6 +104,17 @@ export async function POST(
     invoices: createInvoiceReader(),
     dues: createDuesReader(),
     findings: createFindingRegister(),
+    // Story 4.8. Absent, a finding is raised and nobody is told -- and
+    // nothing fails. `alert-wiring.test.ts` asserts this call passes them.
+    //
+    // `alerting` is spread because it is empty when mail is not configured,
+    // which `notifyFindings` already treats as "do nothing". That keeps the
+    // configuration decision at this boundary, where the environment is
+    // readable, rather than inside `core/`, which imports nothing outward.
+    findingReader: createFindingReader(),
+    alerts: createFindingAlertLedger(),
+    recipients: createBoardRecipients(),
+    ...alerting,
     onError: (error) => {
       // The treasurer gets a state; an operator gets the cause. Discarding it
       // would make a provider outage look like a bad scan in the logs too.
