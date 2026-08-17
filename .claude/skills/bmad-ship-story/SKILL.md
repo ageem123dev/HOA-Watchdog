@@ -115,6 +115,7 @@ Cheap and mechanical. Do not skip it because the story felt thorough — that is
 2. Else write the description to a scratch file `{description_file}` and run `glab mr create --source-branch {branch} --target-branch main --title "{story_id}: {title}" --description "$(cat {description_file})" --yes`. **The body must come from a file** — backticks in a double-quoted bash string get command-substituted. `--title` is exposed the same way and is not file-backed: strip or escape backtick, `$`, `"` and `\` in `{title}` before interpolating it. `{description_file}` is a scratch path you choose, not `story_file` and not a literal `file`.
 3. **Must target `main`.** `.coderabbit.yaml` sets `auto_review.base_branches: [main]`; any other target gets no review at all.
 4. Record `mr_iid`/`mr_url`, report the URL, and write `merge_request: {mr_iid}` into the story frontmatter — the epic loop uses it to verify the merge rather than trusting a status word.
+5. **Request the review** when `{review_trigger}` is manual: `glab mr note create {mr_iid} --message "@coderabbitai review"`. Nothing reviews the MR until you do, and an unreviewed MR looks exactly like a clean one.
 
 ### 6 — Local adversarial review: the **integration** pass
 
@@ -140,7 +141,7 @@ Report it as what it is: "gates green locally on `<sha>`".
 
 ### 8 — CodeRabbit loop (the `/loop` tick)
 
-**8a. Wait first.** A review takes ~20 min on a new MR, ~4 after a fix push; checking earlier cannot succeed. Time it from the MR's `created_at`, or from the push that made the current head. Under `/loop` that wait is the next `ScheduleWakeup`; standalone, say when the review is due and STOP.
+**8a. Request, then wait.** Where `{review_trigger}` is manual, **no review happens until it is asked for** — time the wait from *your request*, not from `created_at` or the push. A review takes ~20 min on a new MR, ~4 after a fix push; checking earlier cannot succeed. Under `/loop` that wait is the next `ScheduleWakeup`; standalone, say when the review is due and STOP.
 
 **On waking, before reading anything:** confirm the MR is still `opened` and its `sha` is still yours. A merge can land while you sleep — that happened on story 1.5 — and 8e would then push fixes to a branch about to be deleted. If either changed, stop and move any unmerged commits to a fresh branch and MR.
 
@@ -169,7 +170,9 @@ Converged = the local gates green on the current head AND every finding **fixed*
 
 **8e. Apply — one commit and one push per round.** Fix **every** finding in the round first, then **run the review gate on the whole round's diff before pushing** — sensitivity check, **test-value pass**, and one `argus_review` scoped to what the round touched (`_bmad/custom/review-gate.md`). Then **one** commit, **one** push.
 
-**A push does not reliably trigger a review, and batching does not change that.** CodeRabbit pauses automatic reviews after `auto_pause_after_reviewed_commits` (`{auto_pause}` here, default 5), and a paused branch stays paused until asked. So after every push: **confirm a review body exists for the current head**; if none arrives, post `@coderabbitai review` and wait for it. A pause is indistinguishable from a clean review from the outside — which is the false-clean 8c exists to refuse.
+**A push does not trigger a review.** Where `{review_trigger}` is manual it never does; where it is automatic, CodeRabbit still pauses after `auto_pause_after_reviewed_commits` (`{auto_pause}` here, default 5) and stays paused until asked. Either way the rule is the same: **after every push, request a review and then confirm a review body exists for the current head.** An unrequested MR, a paused branch and a clean review are indistinguishable from outside — the false-clean 8c exists to refuse.
+
+Post it with `glab mr note create`, never `glab api --field`: a body starting with `@` is read as a filename and the request silently posts nothing. `@coderabbitai review` covers the latest changes; `@coderabbitai full review` re-reviews everything.
 
 **Not a commit per finding.** Story 1.6b answered 4 rounds with 12 commits, and each one cost a re-review and a place in CodeRabbit's `auto_pause_after_reviewed_commits` budget — it paused itself mid-story twice, which from outside is indistinguishable from a clean review. Batching also gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
 
@@ -227,6 +230,7 @@ Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a
 | `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part) |
 | `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
 | `{auto_pause}` | 25 |
+| `{review_trigger}` | **manual** — *"Reviews should be triggered manually for repositories with fewer than 10 stars"*. Every MR and every fix push needs `@coderabbitai review`. Becomes automatic at 10 stars or on a plan that does not gate it, and then only the pause above applies |
 | `{ci}` | **none** — removed 2026-08-07, per-minute billing (AD-2's amendment). `.github/workflows/ci.yml` is vestigial |
 | `{tsc_baseline}` | 8 pre-existing errors |
 
