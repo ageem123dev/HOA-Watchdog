@@ -105,7 +105,8 @@ mechanical**:
 
 | Defect | Symptom | Mutation finds it? |
 | --- | --- | --- |
-| **Vacuous** | Passes whether or not the code is right | **Yes** — break the code, the test stays green |
+| **Vacuous (production)** | Passes whether or not the code is right | **Yes** — break the code, the test stays green |
+| **Vacuous (fixture)** | The *fixture* satisfies the assertion, whatever the code does | **No** |
 | **Expired premise** | Asserts what a *later* decision made wrong | **No** |
 
 **A mutation cannot see an expired premise, and this is the whole reason the step exists.** Such a
@@ -117,7 +118,13 @@ the other by CodeRabbit. Neither by the suite, which stayed green throughout.
 
 So for each touched case, in writing:
 
-1. **Vacuous?** Break the code it covers. If the test still passes, it proves nothing.
+1. **Vacuous?** Two directions, and mutation only finds the first.
+   - Break the **code** it covers. Still green → it proves nothing.
+   - Break the **fixture**: change the input so the expected outcome must change. Still green → the
+     fixture was satisfying the assertion, not the code. Epic 4 shipped four of these in one story —
+     `toContain('12')` against an amount of `1240.00`; two reads of an unchanged table asserted to
+     agree; an assertion restating its neighbour; a cap landing on a boundary the input never
+     straddled. No production mutation can surface any of them.
 2. **Expired?** Name the requirement it encodes, then check that requirement against every decision
    made *after* the test was written — especially decisions made later in the same story, which is
    where the premise silently rots.

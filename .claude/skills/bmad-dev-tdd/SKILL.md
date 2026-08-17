@@ -330,6 +330,10 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
       - Repeatable: no dependence on wall-clock time, random seeds, network, ordering, or leftover state — inject those
       - Independent: passes alone and in any order; one test verifies one thing
       - Professional: named for the behavior and condition it asserts; no copy-paste drift; refactored like production code
+      - **Not satisfied by its own fixture:** pick inputs where a wrong implementation must give a different
+        answer. `toContain('12')` against an amount of `1240.00` passes with the feature deleted; a cap
+        asserted on an input that never reaches it proves nothing. Breaking the *code* cannot find these —
+        see `review-gate.md` §2a
     </action>
 
     <action>Name each test so a failure message alone identifies the behavior AND the condition (e.g.
@@ -406,6 +410,9 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
     <check if="{workflow.tdd.verify_test_sensitivity} == true">
       <action>Sensitivity check on the task's most important assertion: temporarily break the production code path it covers,
         confirm the test fails, then restore the code exactly. A test that passes against broken code is worthless</action>
+      <action>Then break the **fixture** on any assertion whose input could satisfy it independently of the code —
+        change the input so the expected outcome must change. Still green means the fixture was doing the work.
+        Mutation cannot reach this class; `review-gate.md` §2a is the authority</action>
       <critical>Restore the code immediately and re-run the suite to confirm green before proceeding</critical>
     </check>
 

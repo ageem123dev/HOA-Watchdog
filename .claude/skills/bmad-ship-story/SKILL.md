@@ -98,6 +98,14 @@ CLI reviews are **3/hr per developer** on Free and OSS (Pro 5, Pro+ 10) — a ro
 
 **The CLI ignores `.coderabbit.yaml` `path_filters` too.** The 2026-08-09 capture reviewed `_bmad-output/**`, which the file excludes. Expect the local round to review more than the merge request will.
 
+### 4c — The AC audit, before the MR
+
+**For each acceptance criterion, name the test that would fail if the behaviour were removed.** Write the list; a criterion you cannot name a test for is not implemented, whatever the code looks like.
+
+It has found something on **nine consecutive stories** — an AC read by the adapter, carried by the port and rendered by nothing; a URL parameter the page and its export read two different ways; and on 4.8 an AC nothing had implemented at all. It runs **here, not after the reviews**: on 3.8 that difference was a fix in the same branch versus a follow-up MR.
+
+Cheap and mechanical. Do not skip it because the story felt thorough — that is the condition under which it keeps finding things.
+
 ### 5 — Merge request to main
 
 1. Existing? `glab api "projects/{enc}/merge_requests?source_branch={branch}&state=opened&target_branch=main"`. Filter on the target: an open MR from this branch to anything else must **stop the run** — it gets no CodeRabbit review (see 3), and opening a second MR from the same source is worse. Report it and let the user close or retarget it.
@@ -214,4 +222,5 @@ Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a
 - **CodeRabbit:** `.coderabbit.yaml`, `auto_review.base_branches: [main]`. Pro is free on public repos and the tier binds at MR-open time. Posts as a service account, findings in the review body, resolves threads itself when satisfied, hourly rate limits.
 - **Invariants a review must not trade away:** NFR-2/AD-2 (no banking, payment-rail, or external-accounting credential anywhere, enforced by `core/security/nfr2-guard.test.ts`); AD-4 (reader role is SELECT-only); AD-13 (content-hash idempotency is a DB constraint); `core/` imports nothing outward (`core/ports/boundary.test.ts`). A finding asking you to weaken one is an architecture decision for the user, not a fix.
 - **Committed:** `_bmad-output/`. **Ignored:** `.claude/` except tracked skills, `.agents/`, `_bmad/`, `node_modules/`, `.next/`, `.probe/`, `envprobe`, `.env*.local`. Benign: Git's CRLF warnings.
+- **Any scripted edit is read back afterwards.** Not "be careful with heredocs" — that rule existed and was broken anyway. An anchored replacement whose assertion fails is a change that did not happen: on 4.8 one was reported as fixed on a review thread and the reviewer's next round caught it. Grep the file for the new text before claiming the edit.
 - **Shell gotchas:** backticks inside double-quoted bash strings are command-substituted (write bodies to files); `glab api --field "body=$(cat f)"` **fails if the body starts with `@`** — glab reads a leading `@` as a filename, so every `@coderabbitai review` request errors with "The filename, directory name, or volume label syntax is incorrect"; use `glab mr note create` for those; PowerShell here-strings don't work in the Bash tool; `git show origin/branch:path` is mangled by Windows path conversion (use `git cat-file -p <blob>`); run one test file with `npm test -- <substring>`, never `npx vitest run` (fails here, and `npx` fetches unpinned packages); never `npx prettier` — no config, and its defaults fight the house style.
