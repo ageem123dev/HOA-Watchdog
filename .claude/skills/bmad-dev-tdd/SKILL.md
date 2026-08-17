@@ -21,6 +21,16 @@ description: 'Execute story implementation under strict test-driven development.
 
 **New code is guilty until proven innocent.** Production code is written only to make a failing test pass. If you find yourself writing an `if`, a `throw`, a null check, or a boundary clamp that no test demanded, stop — go write the test that demands it, watch it fail, then write the guard.
 
+## Porting this skill
+
+Nothing here is repo-specific — no forge, no build commands, no paths. It does depend on three things that must travel with it:
+
+1. **`_bmad/custom/review-gate.md`** and **`_bmad/custom/argus-review-routing.md`** — Step 9's adversarial review is defined by them.
+2. **`_bmad/custom/bmad-dev-tdd.toml`** — loads those two as persistent facts, and re-establishes the after-every-task review if a BMad reinstall overwrites this file.
+3. **An `argus_review` MCP tool.** Without one, Step 9 keeps the sensitivity check and the test-value pass and loses the third check; say so rather than reporting a satisfied gate.
+
+Story numbers cited below are evidence from the repository this was written in. The rules stand without them.
+
 ## Conventions
 
 - Bare paths (e.g. `test-design-reference.md`) resolve from the skill root.

@@ -12,8 +12,9 @@ Resumable: every run detects state from `sprint-status.yaml`, git and the MR, th
 ## Conventions
 
 - `implementation_artifacts` = `_bmad-output/implementation-artifacts`; `sprint_status` = that + `/sprint-status.yaml`; `story_file` = that + `/{story_key}.md`.
-- **GitLab only.** `glab` for all remote ops; MRs not PRs. **There is no CI** — the pipeline was removed on 2026-08-07 because GitLab bills per minute (see AD-2's amendment). `.github/workflows/ci.yml` is vestigial and does not run either.
-- Project path `ageem123/hoa-treasurer-assistant`, encoded `ageem123%2Fhoa-treasurer-assistant` for `glab api`.
+- **GitLab only.** `glab` for all remote ops; MRs not PRs.
+- **CI:** `{ci}`. Where there is none, the local gate is the only evidence a head is green — say "gates green locally on `<sha>`", never "pipeline green".
+- Project path `{project}`, encoded `{project_encoded}` for `glab api`.
 - Never guess MR state — query it.
 
 ## Hard rules
@@ -31,7 +32,7 @@ Resumable: every run detects state from `sprint-status.yaml`, git and the MR, th
 
 ### 0 — Preflight
 
-`glab auth status` and `git` available. If `glab` is missing from PATH: `export PATH="$PATH:/c/Users/magee/AppData/Local/Programs/glab"`. Read `sprint_status` fully — order matters.
+`glab auth status` and `git` available. If `glab` is missing from PATH: `export PATH="$PATH:{glab_path}"`. Read `sprint_status` fully — order matters.
 
 ### 1 — Resolve the story
 
@@ -84,10 +85,10 @@ The CLI is Linux/macOS only, so it runs in WSL against the Windows checkout.
 
    ```bash
    COMMIT=$(git rev-parse HEAD)
-   wsl.exe -e bash -lc 'export PATH="$HOME/.local/bin:$PATH"; coderabbit review      --dir /mnt/c/Users/magee/repos/HOA-Treasurer-Assistant      --base main --committed --agent' > .argus/cr.jsonl 2> .argus/cr.err
+   wsl.exe -e bash -lc 'export PATH="$HOME/.local/bin:$PATH"; coderabbit review      --dir {repo_path_wsl}      --base main --committed --agent' > .argus/cr.jsonl 2> .argus/cr.err
    ```
 
-   No user action, and it does not re-trigger on a push. Minutes, not seconds; `/mnt/c` is the slow part. Capture stderr — an error otherwise leaves an empty file and no reason.
+   No user action, and it does not re-trigger on a push. Minutes, not seconds. Capture stderr — an error otherwise leaves an empty file and no reason.
 4. **Accept only `status: "review_completed"` on the `complete` event.** `review_skipped` is not a clean review, and neither is an empty or unparseable file: the adapter returns *zero reviews* for those, which is not the same as one review with zero findings. Treating them alike is the false-clean 8c exists to refuse.
 5. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Otherwise every path in `A` must appear in the `complete` event's `reviewedFiles`; a path in neither is unreviewed. `reviewedFiles` also names the files reviewed and *clean* — 25 against 10 findings in the first capture — which a finding list cannot express.
 6. **`argus_ingest` with both `from` and `commit`.** `from: .argus/cr.jsonl`, `commit: $COMMIT`. **Without `commit` it silently learns nothing**, because the stream has no SHA to join on and an unjoinable review is skipped. Severities come from committed `argus.config.json` (critical + major). **Default `dry_run: false`** — that is the call that writes. Ingest before fixing; a later round reviews different code and cannot score this one.
@@ -129,11 +130,11 @@ Under `/loop` choose **Apply every patch**; surface and STOP on anything needing
 
 ### 7 — Verify the head, locally
 
-**There is no pipeline.** It was removed on 2026-08-07 — GitLab bills per minute on this account and the budget is not there. Do not wait for one, do not report its status, and do not treat its absence as a failure.
+Run `{gate}` — the whole of it — **on the exact head the MR points at**. Not the run from before the close-out commit: that was a different head.
 
-What replaced it is the gate you already ran before pushing: `npm run lint`, `npm run build`, `npm test`, plus `npm run test:db` for schema, adapter or `app/tools/` work, `npm run test:py` for `agent/` work **or any change to the gate itself** (`scripts/run-pytest.mjs`, the `test:py` script), and `npx --no-install tsc --noEmit` against its baseline. **Re-run them on the exact head the MR points at**, because that is now the only evidence that head is green, and there is no second opinion.
+**Where `{ci}` is none, this run is the only evidence that head is green.** There is no second opinion and no external record, so an unrun check is simply an unmade claim. Do not wait for a pipeline, report its status, or treat its absence as a failure.
 
-Say so honestly when reporting: "gates green locally on `<sha>`" is true; "pipeline green" is not, and there is nothing to link to.
+Report it as what it is: "gates green locally on `<sha>`".
 
 ### 8 — CodeRabbit loop (the `/loop` tick)
 
@@ -141,7 +142,7 @@ Say so honestly when reporting: "gates green locally on `<sha>`" is true; "pipel
 
 **On waking, before reading anything:** confirm the MR is still `opened` and its `sha` is still yours. A merge can land while you sleep — that happened on story 1.5 — and 8e would then push fixes to a branch about to be deleted. If either changed, stop and move any unmerged commits to a fresh branch and MR.
 
-**8b. Read the review.** CodeRabbit posts as a **service account** (`service_account_group_138854092_…`), not a name containing "coderabbit" — filtering on the name finds nothing and looks like "no review yet". Fetch `.../merge_requests/{iid}/notes?per_page=100&sort=desc` and match **`Actionable comments posted: N`**; that line is the review. Threads from `.../discussions`. Only trust one whose commit matches the current head.
+**8b. Read the review.** CodeRabbit posts as a **service account** (`{reviewer_account}`), not a name containing "coderabbit" — filtering on the name finds nothing and looks like "no review yet". Fetch `.../merge_requests/{iid}/notes?per_page=100&sort=desc` and match **`Actionable comments posted: N`**; that line is the review. Threads from `.../discussions`. Only trust one whose commit matches the current head.
 
 `per_page=100` is **one page** — story 1.5's MR reached 64 notes, and replies push a review down fast. Follow `X-Next-Page` until the current-head review is found or the pages run out. Concluding "no review" from page one is the same absence-of-evidence error in a new place.
 
@@ -162,11 +163,11 @@ A note is a review only if it carries a `Commits` / `Files selected for processi
 
 Converged = the local gates green on the current head AND every finding **fixed** (push → new head → back to 8a), **skipped** with a reason on its thread, or **resolved by CodeRabbit**. Anything else is pending — including a review still missing after the wait.
 
-**8d. Triage.** Fix real correctness/security/accessibility issues. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
+**8d. Triage.** Fix real correctness/security/accessibility issues. A finding that asks you to weaken one of `{invariants}` is an architecture decision for the user, not a fix — route it there and say so. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
 
 **8e. Apply — one commit and one push per round.** Fix **every** finding in the round first, then **run the review gate on the whole round's diff before pushing** — sensitivity check, **test-value pass**, and one `argus_review` scoped to what the round touched (`_bmad/custom/review-gate.md`). Then **one** commit, **one** push.
 
-**A push does not reliably trigger a review, and batching does not change that.** CodeRabbit pauses automatic reviews after `auto_pause_after_reviewed_commits` (set to 25 here, default 5), and a paused branch stays paused until asked. So after every push: **confirm a review body exists for the current head**; if none arrives, post `@coderabbitai review` and wait for it. A pause is indistinguishable from a clean review from the outside — which is the false-clean 8c exists to refuse.
+**A push does not reliably trigger a review, and batching does not change that.** CodeRabbit pauses automatic reviews after `auto_pause_after_reviewed_commits` (`{auto_pause}` here, default 5), and a paused branch stays paused until asked. So after every push: **confirm a review body exists for the current head**; if none arrives, post `@coderabbitai review` and wait for it. A pause is indistinguishable from a clean review from the outside — which is the false-clean 8c exists to refuse.
 
 **Not a commit per finding.** Story 1.6b answered 4 rounds with 12 commits, and each one cost a re-review and a place in CodeRabbit's `auto_pause_after_reviewed_commits` budget — it paused itself mid-story twice, which from outside is indistinguishable from a clean review. Batching also gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
 
@@ -212,18 +213,42 @@ If the user wants to keep building without merging, branch off the previous *sto
 
 Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a fix push, ~2400s after a rate limit. A foreground `sleep` is blocked. Standalone: run 0–7, STOP at 8a, say when the review is due.
 
-## Project facts
+## Project bindings
 
-- **"Tested" = `npm run lint` + `npm run build` + `npm test`**, plus `npm run test:db` for schema, adapter or `app/tools/` work, plus **`npm run test:py`** for anything under `agent/` **or the gate itself** — `scripts/run-pytest.mjs` and the `test:py` script define it, so changing them without running it is the one edit that can silently disable a gate (story 3.3 added it; it runs pytest on the pinned 3.13, never the ambient 3.14). **Neither ESLint nor Vitest type-checks**, and `npm run build` does not check test files — so also run **`npx --no-install tsc --noEmit`** and compare against its baseline of 8 pre-existing errors. It caught real errors in three consecutive stories that lint and build both passed.
-- **This list is the only gate there is.** With CI removed there is no second chance and no external record: an unrun check is simply an unmade claim. `npm run test:db` in particular now runs *nowhere* unless someone runs it, which makes AD-4's SELECT-only proof and AD-13's idempotency constraints locally-verified only.
-- **Python is in scope, and the ambient interpreter is the wrong one.** `python3` here is **3.14.6**;
-  CrewAI's `requires_python` is `<3.14,>=3.10`, so AD-15 pins **3.13** (`py -3.13`, 3.13.14 on this
-  machine). The agent service runs from `agent/.venv`, built with the pinned interpreter — `npm run
-  test:py` refuses rather than falling back if that venv is missing, because a gate that runs on the
-  wrong runtime reports green from an environment CrewAI cannot be installed into.
+**Everything project-specific is in this block.** Porting this skill to another repository means editing the table and the two lists below it — the workflow above refers to them by name and contains no other repo-specific value.
+
+| Binding | This project |
+| --- | --- |
+| `{project}` | `ageem123/hoa-treasurer-assistant` |
+| `{project_encoded}` | `ageem123%2Fhoa-treasurer-assistant` |
+| `{glab_path}` | `/c/Users/magee/AppData/Local/Programs/glab` |
+| `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part) |
+| `{reviewer_account}` | `service_account_group_138854092_…` |
+| `{auto_pause}` | 25 |
+| `{ci}` | **none** — removed 2026-08-07, per-minute billing (AD-2's amendment). `.github/workflows/ci.yml` is vestigial |
+| `{tsc_baseline}` | 8 pre-existing errors |
+
+**`{gate}` — what "tested" means here.** Every command, every time; a partial run is an unmade claim.
+
+- `npm run lint` + `npm run build` + `npm test`
+- `npm run test:db` for schema, adapter or `app/tools/` work. It runs *nowhere* unless someone runs it, which makes AD-4's SELECT-only proof and AD-13's idempotency constraints locally-verified only
+- `npm run test:py` for anything under `agent/` **or for the gate itself** — `scripts/run-pytest.mjs` and the `test:py` script define it, so changing them without running it is the one edit that can silently disable a gate. It runs pytest on the pinned 3.13, never the ambient 3.14: CrewAI's `requires_python` is `<3.14,>=3.10`, so AD-15 pins it and `agent/.venv` is built with it. The script refuses rather than falling back, because a gate on the wrong runtime reports green from an environment CrewAI cannot be installed into
+- `npx --no-install tsc --noEmit`, compared against `{tsc_baseline}`. Neither ESLint nor Vitest type-checks and `npm run build` skips test files, so this is the only thing that sees them — it caught real errors in three consecutive stories that lint and build both passed
+
+**`{invariants}` — what a review may not trade away.** A finding asking you to weaken one is an architecture decision for the user, not a fix.
+
+- NFR-2/AD-2 — no banking, payment-rail or external-accounting credential anywhere (`core/security/nfr2-guard.test.ts`)
+- AD-4 — the reader database role is SELECT-only
+- AD-13 — content-hash idempotency is a database constraint
+- `core/` imports nothing outward (`core/ports/boundary.test.ts`)
+
+**Repo hygiene.** Committed: `_bmad-output/`. Ignored: `.claude/` except tracked skills, `.agents/`, `_bmad/`, `node_modules/`, `.next/`, `.probe/`, `envprobe`, `.env*.local`. Benign: Git's CRLF warnings.
+
+## Practice — portable
+
+These hold in any repository and travel with the skill unchanged.
+
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.
-- **CodeRabbit:** `.coderabbit.yaml`, `auto_review.base_branches: [main]`. Pro is free on public repos and the tier binds at MR-open time. Posts as a service account, findings in the review body, resolves threads itself when satisfied, hourly rate limits.
-- **Invariants a review must not trade away:** NFR-2/AD-2 (no banking, payment-rail, or external-accounting credential anywhere, enforced by `core/security/nfr2-guard.test.ts`); AD-4 (reader role is SELECT-only); AD-13 (content-hash idempotency is a DB constraint); `core/` imports nothing outward (`core/ports/boundary.test.ts`). A finding asking you to weaken one is an architecture decision for the user, not a fix.
-- **Committed:** `_bmad-output/`. **Ignored:** `.claude/` except tracked skills, `.agents/`, `_bmad/`, `node_modules/`, `.next/`, `.probe/`, `envprobe`, `.env*.local`. Benign: Git's CRLF warnings.
-- **Any scripted edit is read back afterwards.** Not "be careful with heredocs" — that rule existed and was broken anyway. An anchored replacement whose assertion fails is a change that did not happen: on 4.8 one was reported as fixed on a review thread and the reviewer's next round caught it. Grep the file for the new text before claiming the edit.
+- **CodeRabbit:** configured by `.coderabbit.yaml`, `auto_review.base_branches: [main]`. Pro is free on public repos and the tier binds at MR-open time. Posts as a service account, findings in the review body, resolves threads itself when satisfied, hourly rate limits.
+- **Any scripted edit is read back afterwards.** Not "be careful with heredocs" — that rule existed and was broken anyway. An anchored replacement whose assertion fails is a change that did not happen: one was reported as fixed on a review thread and the reviewer's next round caught it. Grep the file for the new text before claiming the edit.
 - **Shell gotchas:** backticks inside double-quoted bash strings are command-substituted (write bodies to files); `glab api --field "body=$(cat f)"` **fails if the body starts with `@`** — glab reads a leading `@` as a filename, so every `@coderabbitai review` request errors with "The filename, directory name, or volume label syntax is incorrect"; use `glab mr note create` for those; PowerShell here-strings don't work in the Bash tool; `git show origin/branch:path` is mangled by Windows path conversion (use `git cat-file -p <blob>`); run one test file with `npm test -- <substring>`, never `npx vitest run` (fails here, and `npx` fetches unpinned packages); never `npx prettier` — no config, and its defaults fight the house style.
