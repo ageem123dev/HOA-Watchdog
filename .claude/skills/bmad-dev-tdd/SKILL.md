@@ -21,6 +21,16 @@ description: 'Execute story implementation under strict test-driven development.
 
 **New code is guilty until proven innocent.** Production code is written only to make a failing test pass. If you find yourself writing an `if`, a `throw`, a null check, or a boundary clamp that no test demanded, stop — go write the test that demands it, watch it fail, then write the guard.
 
+## Porting this skill
+
+Nothing here is repo-specific — no forge, no build commands, no paths. It does depend on three things that must travel with it:
+
+1. **`_bmad/custom/review-gate.md`** and **`_bmad/custom/argus-review-routing.md`** — Step 9's adversarial review is defined by them.
+2. **`_bmad/custom/bmad-dev-tdd.toml`** — loads those two as persistent facts, and re-establishes the after-every-task review if a BMad reinstall overwrites this file.
+3. **An `argus_review` MCP tool.** Without one, Step 9 keeps the sensitivity check and the test-value pass and loses the third check; say so rather than reporting a satisfied gate.
+
+Story numbers cited below are evidence from the repository this was written in. The rules stand without them.
+
 ## Conventions
 
 - Bare paths (e.g. `test-design-reference.md`) resolve from the skill root.
@@ -330,6 +340,11 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
       - Repeatable: no dependence on wall-clock time, random seeds, network, ordering, or leftover state — inject those
       - Independent: passes alone and in any order; one test verifies one thing
       - Professional: named for the behavior and condition it asserts; no copy-paste drift; refactored like production code
+      - **Not satisfied by its own fixture:** pick inputs where a wrong implementation must give a
+        different answer. `toContain('12')` against an amount of `1240.00` passes with the feature
+        deleted; two reads of an unchanged table agree whatever the query does; a cap asserted on an
+        input that never reaches it proves nothing. Breaking the *code* cannot find these, so the
+        fixture is where the care goes
     </action>
 
     <action>Name each test so a failure message alone identifies the behavior AND the condition (e.g.
@@ -406,6 +421,12 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
     <check if="{workflow.tdd.verify_test_sensitivity} == true">
       <action>Sensitivity check on the task's most important assertion: temporarily break the production code path it covers,
         confirm the test fails, then restore the code exactly. A test that passes against broken code is worthless</action>
+      <action>Then break the **fixture** on any assertion whose input could satisfy it independently of the
+        code: change the input so the expected outcome must change, leaving the code and the expected value
+        alone. Still green means the fixture was doing the work, not the code. Mutation cannot reach this
+        class — Epic 4 shipped four of them in one story and the code-mutation pass caught none</action>
+      <critical>Restore the fixture and re-run before proceeding. A mutated input left behind reads as a
+        legitimate test case, which a mutated production line never does</critical>
       <critical>Restore the code immediately and re-run the suite to confirm green before proceeding</critical>
     </check>
 
@@ -453,6 +474,11 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
     </check>
 
     <action>Save the story file</action>
+    <action>**Any scripted edit is read back afterwards.** An anchored replacement whose assertion fails is a
+      change that did not happen. Verify the replacement — the old text gone, the match count as expected —
+      not merely that the new text appears somewhere; grep passes when the string already existed elsewhere.
+      A story
+      has been closed out claiming an edit that never applied</action>
     <action if="more incomplete tasks remain">
       <goto step="5">Next task — new failure-mode analysis</goto>
     </action>
