@@ -28,6 +28,16 @@ image — the first deploy restart-looped on `uvicorn: command not found`. Going
 interpreter works wherever the package is importable, which is why `scripts/run-agent.mjs` invokes it
 the same way locally.
 
+**The venv is in `/app` because that is what survives to runtime.** Railpack's build and runtime are
+separate layers, and only some paths are carried across -- the build log ends with `copy
+/root/.local/state/mise` and `copy /app`, and nothing else. A plain `pip install .` runs as root into
+the interpreter's own `site-packages` under `/mise/installs`, which is *not* copied: the build
+reports "Successfully installed ... uvicorn-0.52.3" and the container then dies on `No module named
+uvicorn`, which reads like a build failure and is not one.
+
+So the build makes a virtualenv at `/app/.venv` and the start command runs that interpreter
+explicitly. Same interpreter for install and run, in a directory that reaches the runtime image.
+
 **Railpack installs nothing on its own here.** It recognises `requirements.txt` and the poetry/pdm/uv
 lockfiles; a plain PEP 621 `pyproject.toml` gets the interpreter and no dependency install, so the
 first start failed with `No module named uvicorn` after the earlier `command not found`. The build
