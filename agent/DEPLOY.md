@@ -66,6 +66,7 @@ Set on the **agent** service:
 | `REASONING_MODEL` | optional; defaults to the spine's binding |
 | `AGENT_SERVICE_TOKEN` | `${{<web-service>.AGENT_SERVICE_TOKEN}}` |
 | `GATEWAY_SERVICE_TOKEN` | `${{<web-service>.GATEWAY_SERVICE_TOKEN}}` |
+| `GATEWAY_BASE_URL` | the **web** service's URL — how the agent calls back to `/tools/v1/*` for the rows an answer is built from (AD-3: it holds no data credential). `https` is enforced. Missing this is not a startup failure: the service runs and the first question that needs records answers "cannot access the records at this time" |
 
 Reference the web service's values rather than copying them: the two runtimes must agree, and a
 pasted copy is a second source that drifts. **Two different tokens, deliberately** (AD-17) — one is
