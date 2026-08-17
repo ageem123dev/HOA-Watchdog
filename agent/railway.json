@@ -1,5 +1,8 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "python -m pip install --upgrade pip && python -m pip install ."
+  },
   "deploy": {
     "startCommand": "python -m uvicorn watchdog_agent.chat_service:create_app --factory --host :: --port $PORT",
     "restartPolicyType": "ON_FAILURE",

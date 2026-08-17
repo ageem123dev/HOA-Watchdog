@@ -28,6 +28,15 @@ image — the first deploy restart-looped on `uvicorn: command not found`. Going
 interpreter works wherever the package is importable, which is why `scripts/run-agent.mjs` invokes it
 the same way locally.
 
+**Railpack installs nothing on its own here.** It recognises `requirements.txt` and the poetry/pdm/uv
+lockfiles; a plain PEP 621 `pyproject.toml` gets the interpreter and no dependency install, so the
+first start failed with `No module named uvicorn` after the earlier `command not found`. The build
+command in `railway.json` is what installs them.
+
+A `requirements.txt` would have worked too and is deliberately not used: it would be a second
+dependency list, and `tests/test_no_data_credentials.py` reads only `pyproject.toml`. A database
+driver added to the wrong list would bypass the AD-3 allowlist entirely.
+
 **Config as code.** This file is only read if the service's *config-as-code file path* is set to
 `agent/railway.json`. Railway looks for `railway.json` at the **repository** root by default, so a
 root directory of `agent` does not make it findable — the two settings are independent. Leaving the
