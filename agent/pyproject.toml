@@ -7,6 +7,23 @@
 #
 # AD-15 - it reaches Node only through the versioned /tools/* endpoints.
 
+# Nixpacks installs this service with `pip install .`, which needs a build
+# backend declared. Without one, pip falls back to a legacy path that is one
+# deprecation away from failing a deploy for a reason nothing in this file
+# explains.
+#
+# The package is still not *distributed* -- the service is deployed as a
+# directory, and `pythonpath = ["."]` below is what the test suite runs against.
+# This section exists so the dependency list in `[project]` stays the single
+# source of truth for what gets installed; a requirements.txt would be a second
+# list, and `tests/test_no_data_credentials.py` reads only this one.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["watchdog_agent"]
+
 [project]
 name = "watchdog-agent"
 version = "0.1.0"

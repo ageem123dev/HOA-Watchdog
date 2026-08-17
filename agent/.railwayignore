@@ -1,0 +1,7 @@
+# `railway up` uploads this directory as the build context. The virtualenv is a
+# local build artefact -- hundreds of megabytes, built with the Windows-side
+# interpreter, and useless to a Linux builder that runs `pip install .` itself.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
