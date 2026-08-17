@@ -422,9 +422,11 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
       <action>Sensitivity check on the task's most important assertion: temporarily break the production code path it covers,
         confirm the test fails, then restore the code exactly. A test that passes against broken code is worthless</action>
       <action>Then break the **fixture** on any assertion whose input could satisfy it independently of the
-        code: change the input so the expected outcome must change. Still green means the fixture was doing
-        the work, not the code. Mutation cannot reach this class — Epic 4 shipped four of them in one story
-        and the code-mutation pass caught none</action>
+        code: change the input so the expected outcome must change, leaving the code and the expected value
+        alone. Still green means the fixture was doing the work, not the code. Mutation cannot reach this
+        class — Epic 4 shipped four of them in one story and the code-mutation pass caught none</action>
+      <critical>Restore the fixture and re-run before proceeding. A mutated input left behind reads as a
+        legitimate test case, which a mutated production line never does</critical>
       <critical>Restore the code immediately and re-run the suite to confirm green before proceeding</critical>
     </check>
 
@@ -473,7 +475,9 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 
     <action>Save the story file</action>
     <action>**Any scripted edit is read back afterwards.** An anchored replacement whose assertion fails is a
-      change that did not happen. Grep the file for the new text before recording the work as done — a story
+      change that did not happen. Verify the replacement — the old text gone, the match count as expected —
+      not merely that the new text appears somewhere; grep passes when the string already existed elsewhere.
+      A story
       has been closed out claiming an edit that never applied</action>
     <action if="more incomplete tasks remain">
       <goto step="5">Next task — new failure-mode analysis</goto>

@@ -120,8 +120,10 @@ So for each touched case, in writing:
 
 1. **Vacuous?** Two directions, and mutation only finds the first.
    - Break the **code** it covers. Still green → it proves nothing.
-   - Break the **fixture**: change the input so the expected outcome must change. Still green → the
-     fixture was satisfying the assertion, not the code. Epic 4 shipped four of these in one story —
+   - Break the **fixture**: change the input so the expected outcome must change, leaving the
+     production code and the expected value alone. Still green → the fixture was satisfying the
+     assertion, not the code. **Restore it and re-run before moving on** — a mutated input left
+     behind reads as a legitimate test case, which a mutated production line never does. Epic 4 shipped four of these in one story —
      `toContain('12')` against an amount of `1240.00`; two reads of an unchanged table asserted to
      agree; an assertion restating its neighbour; a cap landing on a boundary the input never
      straddled. No production mutation can surface any of them.
