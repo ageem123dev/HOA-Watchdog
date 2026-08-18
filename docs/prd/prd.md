@@ -134,6 +134,91 @@ When an anomaly is detected (FR-6 or FR-7), the system must proactively notify t
 * Surfaces high-priority alerts in a dedicated "Watchdog Alerts" widget on the main web dashboard.  
 * Dispatches a structured, automated email alert summarizing the anomaly to configured board members (e.g., Treasurer, President).
 
+### **4.4 Onboarding a New Association**
+
+**Description:** How a board that has never seen this product gets its own records into it, using the
+spreadsheets it already has. Added 2026-08-18, after Epics 1–4 shipped and the product was exercised
+only by people who built it, with files already shaped to the import contract.
+
+#### **FR-9: Guided Onboarding and Import Mapping**
+
+A new association is set up through the product, and the columns of its existing documents are mapped
+onto the ones the importer requires — without a treasurer renaming a column by hand or anyone running
+SQL. **Consequences (testable):**
+
+* A setup wizard accepts one example document per document kind and reports the column headers it
+  found, naming duplicates and blanks rather than guessing at them.
+* **A source column is identified by its position, not its name.** Two columns may carry the same
+  header and a header may be blank, so a mapping that referred to a name could not say which was
+  meant. Duplicate headers remain a refusal at import, as they are today; the wizard reports them
+  rather than silently choosing.
+* **Source columns that are mapped to nothing are ignored, not refused.** A treasurer's export
+  carries columns this product has no use for, and requiring every one to be accounted for would
+  make the common case the hard one.
+* A treasurer maps their headers onto the importer's required and optional columns, **operable by
+  keyboard as well as by pointer** — neither is a degraded path. Accessible means, at minimum: every
+  control has a semantic label and an accessible name; focus order follows the mapping's reading
+  order; focus is always visible; validation failures are announced, not only coloured; and the
+  preview and confirmation controls are reachable and operable by keyboard.
+* Before a mapping is stored, the wizard shows what it would produce from the example: how many rows
+  parse, what each becomes, and what is refused.
+* **A confirmed mapping is validated before it is stored, and an invalid one is refused.** Human
+  confirmation records intent; it does not make a mapping correct. At minimum: every required column
+  for that document kind is mapped; no two targets draw on the same source column; columns that
+  belong only to an assessment roll are not mapped for a kind that has no use for them; and the
+  example parses through the mapping without error.
+* A stored mapping is applied to later uploads of that kind, so a document that failed on column
+  names before now imports without a mapping step.
+* **A mapping is identified by association and document kind, and matched by an explicit fingerprint
+  of the header row** — not by "looking similar". A file whose fingerprint does not match is sent
+  back through mapping rather than imported on a guess.
+* **A mapping change is versioned, and its effect on documents already imported is stated in the
+  product**, not left for a reader to infer. Re-parsing old bytes under a new mapping is a different
+  act from re-ingesting the same bytes, which is all AD-13 covers.
+* The wizard refuses an order that cannot work — deposits cannot be loaded before an assessment roll,
+  because units are created by the roll and by nothing else.
+* Board members are provisioned through the product by an authorized director. `scripts/add-board-member.mjs`
+  writes `board_member` directly with the writer credential; once a product flow exists, the script is
+  retired or constrained to first-boot bootstrap, so that provisioning is not permanently reachable
+  by anyone holding a database URL.
+
+#### **FR-10: Suggested Column Mapping**
+
+When an example document is selected, the system proposes which of its columns correspond to the
+importer's, so the treasurer confirms a mapping rather than building one from nothing.
+**Consequences (testable):**
+
+* **Deterministic matching runs first**, and a model is asked only about the columns it could not
+  resolve. Case, punctuation and common abbreviation account for most real headers; the model earns
+  the residue, not the whole job.
+* A suggestion is produced for each column the importer requires, or the system says plainly that it
+  has none for that column.
+* **A suggestion is never applied on its own.** It pre-fills the mapping a human then confirms or
+  changes, and nothing is stored until they do — the same human-confirm rule AD-8 already applies to
+  unknown vendors. This governs what is *stored*; it is not the injection control, which is below.
+* The mapping a treasurer confirms is what is stored, whether or not it matches what was suggested,
+  and it is validated as FR-9 requires before storage.
+* **The suggestion path holds no tool access and no data credential.** It receives the header strings
+  and the importer's schema, and nothing else; it can call no catalog entry and reach no ledger. A
+  header is untrusted text from a user-supplied file, so the control is what the runtime is *able* to
+  do, not what it is asked to do.
+* **Header input is bounded and the output is schema-validated.** Headers are length-capped and
+  count-capped before they are sent; a response that is not the expected structure is discarded
+  rather than repaired, and the column is reported as unmatched.
+* **Headers are not logged or retained** beyond producing the suggestion. They are the association's
+  own column names from its own file, and a suggestion is not a record worth keeping.
+* A suggestion that cannot be produced — the model is unreachable, returns nothing usable, or is
+  switched off entirely — leaves the wizard fully usable by hand and says so, rather than blocking
+  the setup.
+
+$$DECISION: Passing column headers to a reasoning model is the first place extracted text reaches a
+prompt, which AD-8 otherwise forbids. Human confirmation is **not** the control for that — it governs
+what is stored, while prompt injection is about what the runtime *does* on the way there, and the
+agent service holds `/tools/v1/*` access. The controls are therefore structural: deterministic
+matching first, no tool access and no data credential on the suggestion path, bounded input,
+schema-validated output, nothing retained, and a manual path that works when the model does not.
+Raised in review, which was right that the original framing leaned on the wrong safeguard.$$
+
 ## **5\. Explicit Non-Goals**
 
 * **Write-Access to Banking API:** The system will never execute, initiate, or approve payments on any banking rail, and holds no credential that would make this possible.  

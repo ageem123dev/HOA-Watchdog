@@ -149,7 +149,7 @@ FR-8: Epic 4 — Dashboard findings widget and structured email alerts
 
 Non-FR requirements are carried as follows: NFR-1, NFR-1a, NFR-2 in Epic 1 (they constrain how
 data enters and who holds credentials); NFR-3, NFR-4, NFR-5 in Epic 3 (they constrain how answers
-are produced and recorded); CS-1 … CS-9 in Epic 5.
+are produced and recorded); CS-1 … CS-9 in Epic 6.
 
 ## Epic List
 
@@ -212,7 +212,117 @@ structured email alerting.
 **Standalone:** yes, given Epic 1's data — **provided** detection and alert copy are deterministic
 rather than model-generated (see Open Question below). Does not require Epic 3.
 
-### Epic 5: Connected document sources — later
+### Epic 5: Onboarding — make the first upload work
+
+A new association is set up by someone who has never seen this product, using the spreadsheets they
+already have, without renaming a single column by hand. The wizard takes one example of each document
+kind, shows their headers beside the ones the importer needs, lets a treasurer map one to the other,
+previews what that mapping would actually produce, and stores it so every later upload is aligned
+automatically.
+
+**Why now, and not the connected-sources epic that used to be here.** Epics 1–4 are complete and the
+product has been exercised — but only by the people who built it, with files shaped to the contract.
+The route in for anyone else is a documented cliff: headers are matched exactly after
+`trim().toLowerCase()`, with no aliases, so a bank CSV fails until it is edited. `upload-contract.md`
+already carries a section titled *"Order matters on a fresh install"* explaining that a roll uploaded
+second turns every deposit into an `unknown-unit` hold. Adding a second intake channel before the
+first one can be used by a stranger is the wrong order.
+
+**FRs covered:** FR-9 (guided onboarding and import mapping), FR-10 (suggested column mapping) —
+both written 2026-08-18, since the PRD stopped at FR-8 and covered no part of onboarding.
+
+**Also carries:** the association entity and the tenancy decision below (AD-4 and AD-5 revisited),
+the first user-editable configuration in the product, board-member provisioning, and an
+accessibility floor that a drag-and-drop surface cannot meet on its own (UX-DR19–21).
+
+**Standalone:** yes, given Epic 1. Requires neither Epic 3 nor Epic 4 — but every epic's data
+depends on intake, so this is the one that decides whether any of them can be used by a real board.
+
+### Three decisions, taken 2026-08-18
+
+- **Document kind becomes a property of the file, not the row.** Today `type` is an optional column
+  read per row, defaulting to `statement`, and one file may mix kinds. The wizard's premise — *one
+  example per document kind* — makes that untenable: a mapping cannot be "for deposits" if the file
+  decides row by row. The upload declares its kind and the mapping is keyed on it. This is a change
+  to `core/extraction/tabular.ts` and to the published upload contract, so it is a story of its own
+  rather than a detail inside another.
+
+- **The association entity arrives now.** Mapping is configuration belonging to *an association*, and
+  there is no such concept: no `association_id`, no settings table, thirteen tables and none of them
+  configuration. The architecture defers multi-tenancy explicitly and says AD-4 and AD-5 must be
+  revisited before a second association is onboarded. **This is the expensive half of the epic and it
+  is not the wizard** — a retrofit across every table that holds association data, plus an
+  architecture amendment. It is sequenced first and alone so the rest is built on top of a settled
+  shape rather than around a moving one.
+
+- **Mapping applies to tabular intake only.** CSV and Excel have headers; PDFs and images go to the
+  model extractor, which never sees one. A wizard that appeared to configure scans would be
+  promising something the architecture cannot deliver (AD-9: the extractor is invoked with a
+  machine-enforced schema, not a user's column names).
+
+### Story spine
+
+| # | Story | Carries | Proves on its own |
+| --- | --- | --- | --- |
+| 5.1 | The association exists | AD-4, AD-5 amendments | Every row that belongs to an association says so, and a second association is representable without a schema change |
+| 5.2 | A document declares its kind | upload contract | A file is uploaded *as* a roll or a bank feed; the per-row `type` column is gone and the contract says so |
+| 5.3 | The headers we were given | — | An uploaded sample yields its column headers, with duplicates and blanks reported rather than guessed |
+| 5.4 | Mapping one column to another | UX-DR19–21 | A treasurer maps their headers onto the importer's, by drag **and** by keyboard, and neither is the poor relation |
+| 5.5 | What this mapping would produce | UX-DR24 | The sample parsed through the draft mapping, showing rows read and what each becomes — before anything is saved |
+| 5.6 | A guess, offered not applied | FR-10, AD-8 | Columns arrive pre-matched, the treasurer confirms or overrides, and nothing is stored that a human did not choose |
+| 5.7 | The mapping is remembered | AD-13 | A later upload of the same shape imports with no mapping step, and a changed mapping is a deliberate act with a record |
+| 5.8 | The order that works | the fresh-install trap | The wizard will not let deposits land before a roll, so a new install cannot produce a screen of `unknown-unit` holds |
+| 5.9 | The first directors | AD-3, sign-in | A board is provisioned through the product rather than by someone running SQL |
+
+**Why nine, and where the risk actually is.** 5.1 is the largest and least visible: it touches
+almost every table and cannot be demonstrated to a user. 5.4 and 5.5 are where the epic is *seen*.
+Sequencing 5.1 first is deliberate — the alternative is threading a tenancy retrofit through seven
+stories that have already been reviewed.
+
+### The suggestion is the epic's one real architectural risk
+
+Story 5.6 puts a reasoning model in the intake path, and two invariants meet there.
+
+**AD-8 says extracted strings are never string-interpolated into any prompt.** Column headers come
+off a user-supplied file, so sending them to a model is exactly that.
+
+**Human confirmation is not the control, and the first draft of this section said it was.** Confirming
+a mapping governs what gets *stored*; prompt injection is about what the runtime *does* on the way
+there — and the agent service holds `/tools/v1/catalog/execute` access, so an instruction smuggled
+into a header is aimed at a runtime that can call tools. Raised in review, correctly.
+
+The controls are structural instead. The suggestion path carries **no tool access and no data
+credential**; input is bounded and output schema-validated; headers are not retained; deterministic
+matching runs first so the model sees only what could not be resolved; and the manual path works when
+the model does not. Human confirmation stays — it is still what AD-8 prescribes for creating
+anything — but it is the *last* safeguard, not the only one.
+
+**Epic 4 spent a story proving no model sits in the alerting path**
+(`core/security/no-model-in-alerts.test.ts`), and that guard is about FR-6/7/8. It does not forbid a
+model in intake, but the two claims are easy to confuse — so 5.6 should say where the line is rather
+than leave a reader to infer that the deterministic claim has quietly weakened. Detection and alert
+copy stay deterministic; a setup-time suggestion a human approves is a different thing.
+
+**Try the boring version first.** Most real headers differ by case, punctuation and abbreviation —
+`Txn Date`, `Descr`, `Amt`, `Unit #`. A deterministic normaliser plus a small alias table will match
+the large majority at no cost, with no prompt, no credential and no failure mode. The model earns its
+place on the residue, not on the whole job, and building it that way means the wizard still works
+when the model is unreachable — which FR-10 requires anyway.
+
+### Two places this epic will fight the code
+
+- **Accessibility is not a polish pass on drag-and-drop.** EXPERIENCE.md sets a floor, and a
+  drag-only mapping surface breaches it: keyboard operation has to be designed in at 5.4, not
+  retrofitted after the interaction feels right with a mouse. The cheapest correct answer is usually
+  a selectable list pairing, with dragging as an accelerator over it rather than the mechanism.
+
+- **A mapping change makes old bytes mean something new, and AD-13 does not cover it.** Content-hash
+  idempotency says re-ingesting the same bytes replaces that document's derived rows. It says nothing
+  about the same bytes parsed under a *different mapping*, because nothing could change how they
+  parsed before. Story 5.6 has to decide whether changing a mapping re-imports what it affects, or
+  applies only to what arrives next — and say so where a treasurer can read it.
+
+### Epic 6: Connected document sources — later
 
 Documents arrive from the association's existing Dropbox or Google Drive without a treasurer
 uploading them by hand. Sequenced after the core pilot; direct upload remains and is not replaced.

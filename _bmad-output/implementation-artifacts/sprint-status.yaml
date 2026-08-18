@@ -118,10 +118,39 @@ development_status:
   4-8-told-before-you-pay: done
   epic-4-retrospective: done
 
+  # Epic 5 is ONBOARDING as of 2026-08-18. Connected document sources moved to
+  # epic 6 -- adding a second intake channel before the first can be used by a
+  # stranger was the wrong order.
   epic-5: backlog
   epic-5-retrospective: optional
+  epic-6: backlog
+  epic-6-retrospective: optional
 
 action_items:
+  - epic: 5
+    action: "Retire or constrain scripts/add-board-member.mjs once story 5.9 lands a product provisioning flow. It writes board_member directly with WATCHDOG_WRITER_DATABASE_URL, so until then provisioning is permanently reachable by anyone holding a database URL - and FR-9 claims directors are provisioned through the product. Raised by CodeRabbit on MR !67"
+    owner: "Dev"
+    status: open
+  - epic: 5
+    action: "Story 5.6 puts a reasoning model in the intake path, where AD-8 forbids interpolating extracted strings into a prompt - and column headers are extracted strings. The mitigation is AD-8's own shape rather than a sanitiser: the model proposes, a human confirms, nothing is created automatically. Assert the refusal, not just the suggestion. Also state where the line sits relative to epic 4's no-model-in-alerts guard, which covers FR-6/7/8 and not intake, so the deterministic claim is not read as quietly weakened"
+    owner: "Dev"
+    status: open
+  - epic: 5
+    action: "Build 5.6's deterministic matcher before the model call. Case, punctuation and abbreviation cover most real headers - Txn Date, Descr, Amt, Unit # - at no cost, no prompt and no credential. The model earns the residue, and building it that way is what makes FR-10's requirement to stay usable when the model is unreachable true by construction rather than by a fallback nobody tests"
+    owner: "Dev"
+    status: open
+  - epic: 5
+    action: "PREREQUISITE, before any epic 5 story: write the FR. The PRD stops at FR-8 and none of them cover onboarding, import configuration or provisioning, so the epic currently cites nothing. Every previous epic cites an FR; this would be the first that does not"
+    owner: "Matt"
+    status: done  # FR-9 and FR-10 written 2026-08-18
+  - epic: 5
+    action: "PREREQUISITE, before story 5.1: amend AD-4 and AD-5 for the association entity. The architecture defers multi-tenancy explicitly and names both as needing revision before a second association is onboarded. Introducing association_id across every table that holds association data is a retrofit, not a schema tweak, and it is the expensive half of epic 5 rather than the wizard"
+    owner: "Matt"
+    status: open
+  - epic: 5
+    action: "Decide at story 5.6 what a CHANGED mapping does to documents already imported. AD-13's content-hash idempotency covers re-ingesting the same bytes; it says nothing about the same bytes parsed under a different mapping, because nothing could change how they parsed before. Re-import what it affects, or apply only to what arrives next - and say which where a treasurer can read it"
+    owner: "Dev"
+    status: open
   - epic: 4
     action: "Add `* text=auto` to .gitattributes and run `git add --renormalize .`. The file exists but covers only samples/* binaries, so every source file is still index-LF / worktree-CRLF with no attribute declaring it, and every commit in epics 3 and 4 emitted CRLF warnings. Not cosmetic: scripted edits repeatedly failed to match anchors written with \n, and on story 4.8 one such failure silently did not apply and was then reported as fixed on a review thread. CodeRabbit's round-2 re-review is what caught it"
     owner: "Dev"
@@ -141,7 +170,7 @@ action_items:
   - epic: 4
     action: "DECISION NEEDED before epic 5 can be planned: epic 5 (connected document sources) has no story breakdown and carries a blocking prerequisite - AD-1 says data enters exclusively through user upload, which epic 5 makes false, and the spine requires the amendment to land BEFORE the epic starts. Separately: epics 1-4 are complete and the product has never been run by a board member, so epic 5 adds a second intake channel to a first one that has never been used in anger. Amend AD-1, deploy and pilot what exists, or re-sequence"
     owner: "Matt"
-    status: open
+    status: done  # RESOLVED 2026-08-18: onboarding becomes epic 5, connected sources epic 6. The product has now been exercised (Oracle + dashboard), and intake is the gap
   - epic: 4
     action: "Commit or discard the three tooling files carried uncommitted across two epics: .gitignore (.argus/ entry), .mcp.json (Argus path), and .claude/commands/argus-review.md - the last of which carries the known $ARGUMENTS shell injection that is itself an open action item"
     owner: "Matt"
