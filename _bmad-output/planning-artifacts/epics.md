@@ -284,12 +284,18 @@ stories that have already been reviewed.
 Story 5.6 puts a reasoning model in the intake path, and two invariants meet there.
 
 **AD-8 says extracted strings are never string-interpolated into any prompt.** Column headers come
-off a user-supplied file, so sending them to a model is exactly that. The mitigation is not a
-sanitiser — it is the shape AD-8 itself already prescribes for unknown vendors: **the model proposes,
-a human confirms, and nothing is created automatically.** A suggested mapping that cannot be stored
-without a treasurer accepting it is the quarantine queue in a different costume. FR-10 is written
-that way deliberately, and 5.6's acceptance criteria must assert the refusal, not merely the
-suggestion.
+off a user-supplied file, so sending them to a model is exactly that.
+
+**Human confirmation is not the control, and the first draft of this section said it was.** Confirming
+a mapping governs what gets *stored*; prompt injection is about what the runtime *does* on the way
+there — and the agent service holds `/tools/v1/catalog/execute` access, so an instruction smuggled
+into a header is aimed at a runtime that can call tools. Raised in review, correctly.
+
+The controls are structural instead. The suggestion path carries **no tool access and no data
+credential**; input is bounded and output schema-validated; headers are not retained; deterministic
+matching runs first so the model sees only what could not be resolved; and the manual path works when
+the model does not. Human confirmation stays — it is still what AD-8 prescribes for creating
+anything — but it is the *last* safeguard, not the only one.
 
 **Epic 4 spent a story proving no model sits in the alerting path**
 (`core/security/no-model-in-alerts.test.ts`), and that guard is about FR-6/7/8. It does not forbid a

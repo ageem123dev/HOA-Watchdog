@@ -128,6 +128,10 @@ development_status:
 
 action_items:
   - epic: 5
+    action: "Retire or constrain scripts/add-board-member.mjs once story 5.9 lands a product provisioning flow. It writes board_member directly with WATCHDOG_WRITER_DATABASE_URL, so until then provisioning is permanently reachable by anyone holding a database URL - and FR-9 claims directors are provisioned through the product. Raised by CodeRabbit on MR !67"
+    owner: "Dev"
+    status: open
+  - epic: 5
     action: "Story 5.6 puts a reasoning model in the intake path, where AD-8 forbids interpolating extracted strings into a prompt - and column headers are extracted strings. The mitigation is AD-8's own shape rather than a sanitiser: the model proposes, a human confirms, nothing is created automatically. Assert the refusal, not just the suggestion. Also state where the line sits relative to epic 4's no-model-in-alerts guard, which covers FR-6/7/8 and not intake, so the deterministic claim is not read as quietly weakened"
     owner: "Dev"
     status: open
