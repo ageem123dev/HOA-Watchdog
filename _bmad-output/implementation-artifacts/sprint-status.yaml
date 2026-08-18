@@ -128,9 +128,17 @@ development_status:
 
 action_items:
   - epic: 5
+    action: "Story 5.6 puts a reasoning model in the intake path, where AD-8 forbids interpolating extracted strings into a prompt - and column headers are extracted strings. The mitigation is AD-8's own shape rather than a sanitiser: the model proposes, a human confirms, nothing is created automatically. Assert the refusal, not just the suggestion. Also state where the line sits relative to epic 4's no-model-in-alerts guard, which covers FR-6/7/8 and not intake, so the deterministic claim is not read as quietly weakened"
+    owner: "Dev"
+    status: open
+  - epic: 5
+    action: "Build 5.6's deterministic matcher before the model call. Case, punctuation and abbreviation cover most real headers - Txn Date, Descr, Amt, Unit # - at no cost, no prompt and no credential. The model earns the residue, and building it that way is what makes FR-10's requirement to stay usable when the model is unreachable true by construction rather than by a fallback nobody tests"
+    owner: "Dev"
+    status: open
+  - epic: 5
     action: "PREREQUISITE, before any epic 5 story: write the FR. The PRD stops at FR-8 and none of them cover onboarding, import configuration or provisioning, so the epic currently cites nothing. Every previous epic cites an FR; this would be the first that does not"
     owner: "Matt"
-    status: open
+    status: done  # FR-9 and FR-10 written 2026-08-18
   - epic: 5
     action: "PREREQUISITE, before story 5.1: amend AD-4 and AD-5 for the association entity. The architecture defers multi-tenancy explicitly and names both as needing revision before a second association is onboarded. Introducing association_id across every table that holds association data is a retrofit, not a schema tweak, and it is the expensive half of epic 5 rather than the wizard"
     owner: "Matt"

@@ -228,9 +228,8 @@ already carries a section titled *"Order matters on a fresh install"* explaining
 second turns every deposit into an `unknown-unit` hold. Adding a second intake channel before the
 first one can be used by a stranger is the wrong order.
 
-**FRs covered:** none yet — **this epic needs an FR written first.** The PRD stops at FR-8 and none
-of them cover onboarding, import configuration, or provisioning. Every previous epic cites one;
-writing this without would be the first that does not.
+**FRs covered:** FR-9 (guided onboarding and import mapping), FR-10 (suggested column mapping) —
+both written 2026-08-18, since the PRD stopped at FR-8 and covered no part of onboarding.
 
 **Also carries:** the association entity and the tenancy decision below (AD-4 and AD-5 revisited),
 the first user-editable configuration in the product, board-member provisioning, and an
@@ -270,14 +269,39 @@ depends on intake, so this is the one that decides whether any of them can be us
 | 5.3 | The headers we were given | — | An uploaded sample yields its column headers, with duplicates and blanks reported rather than guessed |
 | 5.4 | Mapping one column to another | UX-DR19–21 | A treasurer maps their headers onto the importer's, by drag **and** by keyboard, and neither is the poor relation |
 | 5.5 | What this mapping would produce | UX-DR24 | The sample parsed through the draft mapping, showing rows read and what each becomes — before anything is saved |
-| 5.6 | The mapping is remembered | AD-13 | A later upload of the same shape imports with no mapping step, and a changed mapping is a deliberate act with a record |
-| 5.7 | The order that works | the fresh-install trap | The wizard will not let deposits land before a roll, so a new install cannot produce a screen of `unknown-unit` holds |
-| 5.8 | The first directors | AD-3, sign-in | A board is provisioned through the product rather than by someone running SQL |
+| 5.6 | A guess, offered not applied | FR-10, AD-8 | Columns arrive pre-matched, the treasurer confirms or overrides, and nothing is stored that a human did not choose |
+| 5.7 | The mapping is remembered | AD-13 | A later upload of the same shape imports with no mapping step, and a changed mapping is a deliberate act with a record |
+| 5.8 | The order that works | the fresh-install trap | The wizard will not let deposits land before a roll, so a new install cannot produce a screen of `unknown-unit` holds |
+| 5.9 | The first directors | AD-3, sign-in | A board is provisioned through the product rather than by someone running SQL |
 
-**Why eight, and where the risk actually is.** 5.1 is the largest and least visible: it touches
+**Why nine, and where the risk actually is.** 5.1 is the largest and least visible: it touches
 almost every table and cannot be demonstrated to a user. 5.4 and 5.5 are where the epic is *seen*.
 Sequencing 5.1 first is deliberate — the alternative is threading a tenancy retrofit through seven
 stories that have already been reviewed.
+
+### The suggestion is the epic's one real architectural risk
+
+Story 5.6 puts a reasoning model in the intake path, and two invariants meet there.
+
+**AD-8 says extracted strings are never string-interpolated into any prompt.** Column headers come
+off a user-supplied file, so sending them to a model is exactly that. The mitigation is not a
+sanitiser — it is the shape AD-8 itself already prescribes for unknown vendors: **the model proposes,
+a human confirms, and nothing is created automatically.** A suggested mapping that cannot be stored
+without a treasurer accepting it is the quarantine queue in a different costume. FR-10 is written
+that way deliberately, and 5.6's acceptance criteria must assert the refusal, not merely the
+suggestion.
+
+**Epic 4 spent a story proving no model sits in the alerting path**
+(`core/security/no-model-in-alerts.test.ts`), and that guard is about FR-6/7/8. It does not forbid a
+model in intake, but the two claims are easy to confuse — so 5.6 should say where the line is rather
+than leave a reader to infer that the deterministic claim has quietly weakened. Detection and alert
+copy stay deterministic; a setup-time suggestion a human approves is a different thing.
+
+**Try the boring version first.** Most real headers differ by case, punctuation and abbreviation —
+`Txn Date`, `Descr`, `Amt`, `Unit #`. A deterministic normaliser plus a small alias table will match
+the large majority at no cost, with no prompt, no credential and no failure mode. The model earns its
+place on the residue, not on the whole job, and building it that way means the wizard still works
+when the model is unreachable — which FR-10 requires anyway.
 
 ### Two places this epic will fight the code
 

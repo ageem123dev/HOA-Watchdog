@@ -134,6 +134,49 @@ When an anomaly is detected (FR-6 or FR-7), the system must proactively notify t
 * Surfaces high-priority alerts in a dedicated "Watchdog Alerts" widget on the main web dashboard.  
 * Dispatches a structured, automated email alert summarizing the anomaly to configured board members (e.g., Treasurer, President).
 
+### **4.4 Onboarding a New Association**
+
+**Description:** How a board that has never seen this product gets its own records into it, using the
+spreadsheets it already has. Added 2026-08-18, after Epics 1–4 shipped and the product was exercised
+only by people who built it, with files already shaped to the import contract.
+
+#### **FR-9: Guided Onboarding and Import Mapping**
+
+A new association is set up through the product, and the columns of its existing documents are mapped
+onto the ones the importer requires — without a treasurer renaming a column by hand or anyone running
+SQL. **Consequences (testable):**
+
+* A setup wizard accepts one example document per document kind and reports the column headers it
+  found, naming duplicates and blanks rather than guessing at them.
+* A treasurer maps their headers onto the importer's required and optional columns, **operable by
+  keyboard as well as by pointer** — neither is a degraded path.
+* Before a mapping is stored, the wizard shows what it would produce from the example: how many rows
+  parse, what each becomes, and what is refused.
+* A stored mapping is applied to later uploads of that kind, so a document that failed on column
+  names before now imports without a mapping step.
+* The wizard refuses an order that cannot work — deposits cannot be loaded before an assessment roll,
+  because units are created by the roll and by nothing else.
+* Board members are provisioned through the product rather than by direct database access.
+
+#### **FR-10: Suggested Column Mapping**
+
+When an example document is selected, the system proposes which of its columns correspond to the
+importer's, so the treasurer confirms a mapping rather than building one from nothing.
+**Consequences (testable):**
+
+* A suggestion is produced for each column the importer requires, or the system says plainly that it
+  has none for that column.
+* **A suggestion is never applied on its own.** It pre-fills the mapping a human then confirms or
+  changes, and nothing is stored until they do — the same human-confirm rule AD-8 already applies to
+  unknown vendors, for the same reason.
+* The mapping a treasurer confirms is what is stored, whether or not it matches what was suggested.
+* A suggestion that cannot be produced — the model is unreachable, or returns nothing usable — leaves
+  the wizard fully usable by hand and says so, rather than blocking the setup.
+
+$$ASSUMPTION: Column headers are short, low-cardinality strings from a user-supplied file. Passing
+them to a reasoning model is the first place extracted text reaches a prompt, which AD-8 otherwise
+forbids; FR-10 is written so the model only ever proposes, and a human decides.$$
+
 ## **5\. Explicit Non-Goals**
 
 * **Write-Access to Banking API:** The system will never execute, initiate, or approve payments on any banking rail, and holds no credential that would make this possible.  
