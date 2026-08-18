@@ -160,7 +160,7 @@ A review announces itself in **four** shapes. Match all of them, and read the no
 
 The clean shape is the one that matters most: keying only on `Actionable comments posted:` means a clean MR **never converges** and the loop waits forever for a line that is never coming. That happened on MR !8 — reviewed clean in 24 seconds, reported as "awaiting review" for an hour.
 
-A note is a review only if it carries a `Commits` / `Files selected for processing` block. The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) does not, and carries no findings. Do not treat a stray `rate limited` string as proof either — it appears in stale fragments of otherwise-complete reviews.
+A note is a review only if it carries a `Commits` / `Files selected for processing` block. The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) does not, and carries no findings. Do not treat a stray `rate limited` string as proof either — it appears in stale fragments of otherwise-complete reviews. A **live** refusal is its own note, posted within seconds of the request, and says which: `Review rate limited`, or `Head commit changed`.
 
 **8c. Convergence.** Precondition: a service-account review matching the current head, in any of 8b's four shapes. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
 
@@ -195,7 +195,11 @@ Marking `done` before the final review returns is safe because **8c still decide
 
 **8f. Reply per thread** — Fixed (what changed) or Skipped (why). **Write bodies to files** and post with `--field "body=$(cat file)"`.
 
-**Caps:** ~3–4 rounds; only-already-skipped findings recurring counts as converged. On a rate limit, back off ~2400s and re-request rather than pushing.
+**Caps:** ~3–4 rounds; only-already-skipped findings recurring counts as converged.
+
+**On a rate limit, wait half of `{review_window}` and re-request** — 30 minutes for a rolling hour. The window is *rolling*, so capacity returns gradually as the oldest request ages out rather than all at once; half is a probe, not a guarantee. Still limited → wait another half. **Never push to force a review**: a push spends nothing and resets nothing.
+
+**"Head commit changed" is a different failure and needs no wait.** The request was voided because the branch moved between asking and processing — which a force-push will do to you. Re-request once the head is settled, and check local, remote and MR heads agree before asking again.
 
 ### 9 — Ready-to-merge (terminal)
 
@@ -216,7 +220,7 @@ If the user wants to keep building without merging, branch off the previous *sto
 
 `/loop ship story {id}`. Early ticks run 1–7 once; later ticks sit in Step 8; the loop ends at Step 9.
 
-Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a fix push, ~2400s after a rate limit. A foreground `sleep` is blocked. Standalone: run 0–7, STOP at 8a, say when the review is due.
+Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a fix push, and **half of `{review_window}`** after a rate limit (~1800s for a rolling hour). A foreground `sleep` is blocked. Standalone: run 0–7, STOP at 8a, say when the review is due.
 
 ## Project bindings
 
@@ -230,6 +234,7 @@ Cadence is 8a's waits, scheduled not polled: ~1200s after opening, ~270s after a
 | `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part) |
 | `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
 | `{auto_pause}` | 25 |
+| `{review_window}` | **1 hour, rolling.** The plan allows 3 reviews in it (Free/OSS; Pro 5, Pro+ 10), and **the MR notice no longer states the limit** — so it is recorded here rather than read at the time. Measured on this project: rate-limited at 21:54, a re-request at 22:44 succeeded (~50 min); a re-request 7 minutes after a limit did not. A limit also arrived 5 hours after the last completed review, so **thread replies and learnings spend the budget too** — it counts requests, not just reviews |
 | `{review_trigger}` | **manual** — *"Reviews should be triggered manually for repositories with fewer than 10 stars"*. Every MR and every fix push needs `@coderabbitai review`. Becomes automatic at 10 stars or on a plan that does not gate it, and then only the pause above applies |
 | `{ci}` | **none** — removed 2026-08-07, per-minute billing (AD-2's amendment). `.github/workflows/ci.yml` is vestigial |
 | `{tsc_baseline}` | 8 pre-existing errors |
