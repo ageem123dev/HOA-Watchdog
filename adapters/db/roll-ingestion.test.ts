@@ -66,8 +66,7 @@ describeWithDatabase('an assessment roll uploaded, end to end', () => {
     await writer.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`roll-path-${RUN_PREFIX}@example.test`],
     )

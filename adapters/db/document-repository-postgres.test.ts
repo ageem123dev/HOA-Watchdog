@@ -97,8 +97,7 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await admin.connect()
 
     const { rows } = await admin.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`repo-test-${Date.now()}@example.test`],
     )
@@ -221,9 +220,7 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     try {
       await holder.query('begin')
       const { rows } = await holder.query<{ id: string }>(
-        `insert into document
-           (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-         values ($1, $2, $3, $4, $5, $6)
+        `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, $3, $4, $5, $6, '00000000-0000-7000-8000-000000000001')
          returning id`,
         [
           document.contentHash,

@@ -96,8 +96,12 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
         for (const line of lines) {
           if (line.kind === 'attributed') {
             await client.query(
-              `insert into payment (unit_id, document_id, paid_on, amount)
-               values ($1, $2, $3::date, $4)`,
+              // `association_id` from the parent document, never a parameter.
+              `insert into payment
+                 (unit_id, document_id, paid_on, amount, association_id)
+               select $1, $2, $3::date, $4, parent.association_id
+                 from document as parent
+                where parent.id = $2`,
               [line.unitId, documentId, line.paidOn, line.amount],
             )
           } else {
@@ -108,8 +112,11 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
             // in a deposit used to lose every payment in that document.
             await client.query(
               `insert into held_payment
-                 (document_id, unit_reference, paid_on, amount, hold_reason)
-               values ($1, $2, $3::date, $4, $5)`,
+                 (document_id, unit_reference, paid_on, amount, hold_reason,
+                  association_id)
+               select $1, $2, $3::date, $4, $5, parent.association_id
+                 from document as parent
+                where parent.id = $1`,
               [
                 documentId,
                 blankToNull(line.unitReference),

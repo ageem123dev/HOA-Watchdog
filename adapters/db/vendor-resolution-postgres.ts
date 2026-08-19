@@ -114,11 +114,15 @@ export function createVendorResolution(): VendorResolution {
         // treasurer confirming a name that normalises onto a vendor already
         // recorded.
         const inserted = await client.query<{ id: string }>(
-          `insert into vendor (display_name)
-           values ($1)
+          // A vendor belongs to the association whose document named it.
+          // Derived rather than passed so the two cannot disagree.
+          `insert into vendor (display_name, association_id)
+           select $1, parent.association_id
+             from document as parent
+            where parent.id = $2
            on conflict (normalised_name) do nothing
            returning id`,
-          [extractedName],
+          [extractedName, documentId],
         )
 
         const createdId = inserted.rows[0]?.id

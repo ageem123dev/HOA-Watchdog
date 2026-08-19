@@ -42,11 +42,11 @@ describeWithDatabase('the assessment directory', () => {
     cycle: string,
   ) => {
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named(unitSuffix)],
     )
     await writer.query(
-      'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle) values ($1, $2, $3, $4)',
+      'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, $2, $3, $4, \'00000000-0000-7000-8000-000000000001\')',
       [rows[0]!.id, year, amount, cycle],
     )
     return named(unitSuffix)
@@ -140,7 +140,7 @@ describeWithDatabase('the assessment directory', () => {
     // And the other filter. A query missing its year predicate would answer
     // 2024's question with 2025's figure.
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named('7C')],
     )
     for (const [year, amount] of [
@@ -148,7 +148,7 @@ describeWithDatabase('the assessment directory', () => {
       [2025, '1300.00'],
     ] as const) {
       await writer.query(
-        'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle) values ($1, $2, $3, $4)',
+        'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, $2, $3, $4, \'00000000-0000-7000-8000-000000000001\')',
         [rows[0]!.id, year, amount, 'monthly'],
       )
     }

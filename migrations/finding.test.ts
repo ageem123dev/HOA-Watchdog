@@ -140,8 +140,7 @@ describeWithDatabase('the key AD-13 names', () => {
 
   const raise = (type: string, period: string, evidence = '{"seen": 1}') =>
     writer.query(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, $2, $3::daterange, $4::jsonb)`,
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, $2, $3::daterange, $4::jsonb, '00000000-0000-7000-8000-000000000001')`,
       [type, subject, period, evidence],
     )
 
@@ -261,8 +260,7 @@ describeWithDatabase('the lifecycle is one-way', () => {
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`life-${RUN_PREFIX}@example.test`],
     )
     memberId = rows[0]!.id
@@ -280,8 +278,7 @@ describeWithDatabase('the lifecycle is one-way', () => {
 
   async function raised(suffix: string): Promise<string> {
     const { rows } = await writer.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, gen_random_uuid(), '[2026-06-01,2026-07-01)'::daterange, '{}'::jsonb)
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, gen_random_uuid(), '[2026-06-01,2026-07-01)'::daterange, '{}'::jsonb, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}_${suffix}`],
     )
@@ -381,8 +378,7 @@ describeWithDatabase('the lifecycle is one-way', () => {
       [id, memberId],
     )
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`life-${RUN_PREFIX}-second@example.test`],
     )
 
@@ -405,10 +401,8 @@ describeWithDatabase('the lifecycle is one-way', () => {
     // one round after the audit that found the UPDATE half.
     await expect(
       writer.query(
-        `insert into finding
-           (finding_type, subject_id, period, evidence, state, reviewed_by, reviewed_at)
-         values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb,
-                 'reviewed', $2, now())`,
+        `insert into finding (finding_type, subject_id, period, evidence, state, reviewed_by, reviewed_at, association_id) values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb,
+                 'reviewed', $2, now(), '00000000-0000-7000-8000-000000000001')`,
         [`${RUN_PREFIX}_prereviewed`, memberId],
       ),
     ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
@@ -426,8 +420,7 @@ describeWithDatabase('the lifecycle is one-way', () => {
     // the constraint quietly caught it instead. Raised by CodeRabbit.
     await expect(
       writer.query(
-        `insert into finding (finding_type, subject_id, period, evidence, reviewed_by)
-         values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb, $2)`,
+        `insert into finding (finding_type, subject_id, period, evidence, reviewed_by, association_id) values ($1, gen_random_uuid(), '[2026-10-01,2026-11-01)'::daterange, '{}'::jsonb, $2, '00000000-0000-7000-8000-000000000001')`,
         [`${RUN_PREFIX}_halfreviewed`, memberId],
       ),
     ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
@@ -495,8 +488,7 @@ describeWithDatabase('never dismissed is a grant, not a habit', () => {
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
     const { rows } = await writer.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, gen_random_uuid(), '[2026-08-01,2026-09-01)'::daterange, '{}'::jsonb)
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, gen_random_uuid(), '[2026-08-01,2026-09-01)'::daterange, '{}'::jsonb, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}_grant`],
     )

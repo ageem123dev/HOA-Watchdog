@@ -38,9 +38,7 @@ const units: string[] = []
 
 async function seedDocument(label: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into document
-       (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
-     values ($1, $2, $3, 'text/csv', 512, $4, '2026-07-01T09:00:00Z')
+    `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at, association_id) values ($1, $2, $3, 'text/csv', 512, $4, '2026-07-01T09:00:00Z', '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       randomBytes(32).toString('hex'),
@@ -58,7 +56,7 @@ async function seedDocument(label: string): Promise<string> {
 /** A unit scoped to this run, so parallel test files never share one. */
 async function seedUnit(label: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into unit (unit_number) values ($1) returning id`,
+    `insert into unit (unit_number, association_id) values ($1, '00000000-0000-7000-8000-000000000001') returning id`,
     [`${RUN_PREFIX}-${label}`],
   )
   const id = rows[0]!.id
@@ -69,28 +67,25 @@ async function seedUnit(label: string): Promise<string> {
 
 async function seedAssessment(unitId: string, annual: string, cycle: string, year = YEAR) {
   await writer.query(
-    `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle)
-     values ($1, $2, $3::numeric, $4)`,
+    `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, $2, $3::numeric, $4, '00000000-0000-7000-8000-000000000001')`,
     [unitId, year, annual, cycle],
   )
 }
 
 async function seedPayment(unitId: string, documentId: string, paidOn: string, amount: string) {
   await writer.query(
-    `insert into payment (unit_id, document_id, paid_on, amount)
-     values ($1, $2, $3::date, $4::numeric)`,
+    `insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, $3::date, $4::numeric, '00000000-0000-7000-8000-000000000001')`,
     [unitId, documentId, paidOn, amount],
   )
 }
 
 async function seedHolder(unitId: string, name: string, during: string): Promise<void> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into unit_holder (full_name) values ($1) returning id`,
+    `insert into unit_holder (full_name, association_id) values ($1, '00000000-0000-7000-8000-000000000001') returning id`,
     [name],
   )
   await writer.query(
-    `insert into unit_membership (unit_id, holder_id, held_during)
-     values ($1, $2, $3::daterange)`,
+    `insert into unit_membership (unit_id, holder_id, held_during, association_id) values ($1, $2, $3::daterange, '00000000-0000-7000-8000-000000000001')`,
     [unitId, rows[0]!.id, during],
   )
 }
@@ -115,8 +110,7 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     await owner.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`dues-reader-${RUN_PREFIX}@example.test`],
     )
     memberId = rows[0]!.id
@@ -187,9 +181,7 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
     // bug fully present. Raised by CodeRabbit, and it was the flakiness I had
     // noticed and talked myself out of.
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
-       values ($1, $2, $3, 'text/csv', 512, $4, '2026-07-01T02:00:00Z')
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at, association_id) values ($1, $2, $3, 'text/csv', 512, $4, '2026-07-01T02:00:00Z', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [
         randomBytes(32).toString('hex'),
@@ -376,9 +368,7 @@ describeWithDatabase('reading what a unit owed and what arrived', () => {
 
     async function seedDeposit(label: string): Promise<string> {
       const { rows } = await writer.query<{ id: string }>(
-        `insert into document
-           (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
-         values ($1, $2, $3, 'text/csv', 512, $4, '2099-07-01T09:00:00Z')
+        `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at, association_id) values ($1, $2, $3, 'text/csv', 512, $4, '2099-07-01T09:00:00Z', '00000000-0000-7000-8000-000000000001')
          returning id`,
         [
           randomBytes(32).toString('hex'),

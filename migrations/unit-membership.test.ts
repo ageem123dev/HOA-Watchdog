@@ -142,11 +142,11 @@ describeWithDatabase('who holds a unit, and when', () => {
   /** A unit and a holder to hang memberships on, both scoped to this test. */
   const givenUnitAndHolder = async () => {
     const unit = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named('4B')],
     )
     const holder = await writer.query<{ id: string }>(
-      'insert into unit_holder (full_name) values ($1) returning id',
+      'insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named('Ada Lovelace')],
     )
     return { unitId: unit.rows[0]!.id, holderId: holder.rows[0]!.id }
@@ -160,7 +160,7 @@ describeWithDatabase('who holds a unit, and when', () => {
     to: string | null,
   ) =>
     client.query(
-      'insert into unit_membership (unit_id, holder_id, held_during) values ($1, $2, daterange($3::date, $4::date))',
+      'insert into unit_membership (unit_id, holder_id, held_during, association_id) values ($1, $2, daterange($3::date, $4::date), \'00000000-0000-7000-8000-000000000001\')',
       [unitId, holderId, from, to],
     )
 
@@ -200,7 +200,7 @@ describeWithDatabase('who holds a unit, and when', () => {
 
   describe('the holder', () => {
     it('stores a name and reads it back unchanged', async () => {
-      await writer.query('insert into unit_holder (full_name) values ($1)', [named('Ada Lovelace')])
+      await writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('Ada Lovelace')])
 
       const { rows } = await writer.query<{ full_name: string }>(
         'select full_name from unit_holder where full_name = $1',
@@ -212,8 +212,8 @@ describeWithDatabase('who holds a unit, and when', () => {
     it('records two different people who share a name', async () => {
       // B4, and the one place in this migration where the obvious constraint is
       // the bug. Two rows, both retrievable, no rejection.
-      await writer.query('insert into unit_holder (full_name) values ($1)', [named('John Smith')])
-      await writer.query('insert into unit_holder (full_name) values ($1)', [named('John Smith')])
+      await writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('John Smith')])
+      await writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('John Smith')])
 
       const { rows } = await writer.query<{ n: string }>(
         'select count(*)::text n from unit_holder where full_name = $1',
@@ -225,26 +225,26 @@ describeWithDatabase('who holds a unit, and when', () => {
     it('refuses a blank name', async () => {
       // B2, measured the way migration 009 measures and 006 did not.
       await expect(
-        writer.query('insert into unit_holder (full_name) values ($1)', ['   ']),
+        writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', ['   ']),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
     it('refuses a name that is only padding around one character', async () => {
       await expect(
-        writer.query('insert into unit_holder (full_name) values ($1)', [`x${' '.repeat(300)}`]),
+        writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [`x${' '.repeat(300)}`]),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
     it('refuses an oversized name', async () => {
       // B3.
       await expect(
-        writer.query('insert into unit_holder (full_name) values ($1)', ['A'.repeat(201)]),
+        writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', ['A'.repeat(201)]),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
     it('lets watchdog_reader read it but not write it', async () => {
       // B5 and B6.
-      await writer.query('insert into unit_holder (full_name) values ($1)', [named('Grace Hopper')])
+      await writer.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('Grace Hopper')])
 
       const { rows } = await reader.query<{ full_name: string }>(
         'select full_name from unit_holder where full_name = $1',
@@ -253,7 +253,7 @@ describeWithDatabase('who holds a unit, and when', () => {
       expect(rows[0]?.full_name).toBe(named('Grace Hopper'))
 
       await expect(
-        reader.query('insert into unit_holder (full_name) values ($1)', [named('Nobody')]),
+        reader.query('insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('Nobody')]),
       ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
     })
   })
@@ -314,7 +314,7 @@ describeWithDatabase('who holds a unit, and when', () => {
       // more than one unit.
       const first = await givenUnitAndHolder()
       const second = await writer.query<{ id: string }>(
-        'insert into unit (unit_number) values ($1) returning id',
+        'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
         [named('5B')],
       )
 
@@ -361,7 +361,7 @@ describeWithDatabase('who holds a unit, and when', () => {
 
       await expect(
         writer.query(
-          'insert into unit_membership (unit_id, holder_id, held_during) values ($1, $2, null)',
+          'insert into unit_membership (unit_id, holder_id, held_during, association_id) values ($1, $2, null, \'00000000-0000-7000-8000-000000000001\')',
           [unitId, holderId],
         ),
       ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
@@ -399,7 +399,7 @@ describeWithDatabase('who holds a unit, and when', () => {
 
       await expect(
         reader.query(
-          'insert into unit_membership (unit_id, holder_id, held_during) values ($1, $2, daterange($3::date, null))',
+          'insert into unit_membership (unit_id, holder_id, held_during, association_id) values ($1, $2, daterange($3::date, null), \'00000000-0000-7000-8000-000000000001\')',
           [unitId, holderId, '2025-01-01'],
         ),
       ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
@@ -548,7 +548,7 @@ describeWithDatabase('who holds a unit, and when', () => {
       // it must come back true there.
       const first = await givenUnitAndHolder()
       const second = await writer.query<{ id: string }>(
-        'insert into unit (unit_number) values ($1) returning id',
+        'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
         [named('5B')],
       )
 

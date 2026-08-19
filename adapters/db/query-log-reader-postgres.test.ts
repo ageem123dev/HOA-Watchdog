@@ -47,8 +47,7 @@ async function seedMember(): Promise<string> {
   // version of this file failed, which is a fair advertisement for running these
   // against a real database rather than a mock that would have accepted it.
   const { rows } = await writer.query<{ id: string }>(
-    `insert into board_member (email, password_hash)
-     values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+    `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
      returning id`,
     [`access-log-${randomBytes(6).toString('hex')}@example.test`],
   )
@@ -60,8 +59,7 @@ async function seedMember(): Promise<string> {
 
 async function record(entryId: string, version = 1): Promise<void> {
   await writer.query(
-    `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text)
-     values ($1, $2, $3, $4::jsonb, $5)`,
+    `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text, association_id) values ($1, $2, $3, $4::jsonb, $5, '00000000-0000-7000-8000-000000000001')`,
     [memberId, entryId, version, JSON.stringify({ unitNumber: '4B' }), 'select 1'],
   )
 }
@@ -127,8 +125,7 @@ describeWithDatabase('reading the provenance log', () => {
     const otherMember = await seedMember()
     await record(scope)
     await writer.query(
-      `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text)
-       values ($1, $2, 1, '{}'::jsonb, 'select 1')`,
+      `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text, association_id) values ($1, $2, 1, '{}'::jsonb, 'select 1', '00000000-0000-7000-8000-000000000001')`,
       [otherMember, scope],
     )
 

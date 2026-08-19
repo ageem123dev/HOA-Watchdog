@@ -54,9 +54,7 @@ describeWithDatabase('applying an assessment roll', () => {
   async function newDocument(): Promise<string> {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await pool.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'roll.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'roll.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, uploadedBy],
     )
@@ -109,8 +107,7 @@ describeWithDatabase('applying an assessment roll', () => {
   beforeAll(async () => {
     pool = new Pool({ connectionString: writerUrl, max: 4 })
     const { rows } = await pool.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`${RUN_PREFIX}@example.test`],
     )
     uploadedBy = rows[0]!.id
@@ -236,8 +233,7 @@ describeWithDatabase('applying an assessment roll', () => {
       const unitId = await unitIdFor(number)
       const depositId = await newDocument()
       await pool.query(
-        `insert into payment (unit_id, document_id, paid_on, amount)
-         values ($1, $2, '2026-03-01'::date, '300.00')`,
+        `insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, '2026-03-01'::date, '300.00', '00000000-0000-7000-8000-000000000001')`,
         [unitId, depositId],
       )
 

@@ -54,7 +54,7 @@ describeWithDatabase('resolving deposit references to units', () => {
 
   const newUnit = async (unitNumber: string): Promise<string> => {
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [unitNumber],
     )
     return rows[0]!.id

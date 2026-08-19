@@ -52,9 +52,16 @@ export function createPostgresDocumentRepository(
       // `do nothing` returns no row when the hash is already present, which is
       // how "already held" is learned — from the constraint, not from a guess.
       const inserted = await pool().query<{ id: string }>(
+        // `association_id` is read from the uploader rather than passed in.
+        // A caller cannot supply the wrong one, and the composite foreign key
+        // this satisfies is what makes a document in another association's name
+        // unrepresentable rather than merely unwritten.
         `insert into document
-           (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-         values ($1, $2, $3, $4, $5, $6)
+           (content_hash, storage_key, filename, content_type, byte_size, uploaded_by,
+            association_id)
+         select $1, $2, $3, $4, $5, $6, uploader.association_id
+           from board_member as uploader
+          where uploader.id = $6
          on conflict (content_hash) do nothing
          returning id`,
         [

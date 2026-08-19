@@ -73,8 +73,7 @@ let crossing: string
  */
 async function seedFinding(suffix: string, raisedAt: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into finding (finding_type, subject_id, period, evidence, raised_at)
-     values ($1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb, $6::timestamptz)
+    `insert into finding (finding_type, subject_id, period, evidence, raised_at, association_id) values ($1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb, $6::timestamptz, '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       `${RUN_PREFIX}_${suffix}`,
@@ -91,10 +90,8 @@ async function seedFinding(suffix: string, raisedAt: string): Promise<string> {
 
 async function seedDocument(label: string, state: string, uploadedAt: string): Promise<void> {
   await writer.query(
-    `insert into document
-       (content_hash, storage_key, filename, content_type, byte_size,
-        uploaded_by, uploaded_at, extraction_state)
-     values ($1, $2, $3, 'text/csv', 512, $4, $5::timestamptz, $6)`,
+    `insert into document (content_hash, storage_key, filename, content_type, byte_size,
+        uploaded_by, uploaded_at, extraction_state, association_id) values ($1, $2, $3, 'text/csv', 512, $4, $5::timestamptz, $6, '00000000-0000-7000-8000-000000000001')`,
     [
       randomBytes(32).toString('hex'),
       `${STORAGE_PREFIX}/${label}`,
@@ -136,8 +133,7 @@ describeWithDatabase('the finding reader', () => {
     await owner.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash, display_name)
-       values ($1, 'scrypt$fixture', 'Finding Reader Fixture')
+      `insert into board_member (email, password_hash, display_name, association_id) values ($1, 'scrypt$fixture', 'Finding Reader Fixture', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${STORAGE_PREFIX}@example.test`],
     )
@@ -345,8 +341,7 @@ describeWithDatabase('the finding reader', () => {
     // `board_member.display_name` is nullable. The finding was still reviewed,
     // and the page has to say so without inventing a name.
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$fixture') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$fixture', '00000000-0000-7000-8000-000000000001') returning id`,
       [`${STORAGE_PREFIX}-nameless@example.test`],
     )
     const nameless = rows[0]!.id
@@ -490,8 +485,7 @@ describeWithDatabase('the register', () => {
     reviewer?: string,
   ): Promise<string> {
     const { rows } = await registerWriter.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence, raised_at)
-       values ($1, $2, daterange('2099-04-01'::date, '2099-05-01'::date, '[)'), $3::jsonb, now())
+      `insert into finding (finding_type, subject_id, period, evidence, raised_at, association_id) values ($1, $2, daterange('2099-04-01'::date, '2099-05-01'::date, '[)'), $3::jsonb, now(), '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${REGISTER_PREFIX}_${suffix}`, randomUUID(), JSON.stringify(evidence)],
     )
@@ -515,8 +509,7 @@ describeWithDatabase('the register', () => {
     await registerOwner.connect()
 
     const named = await registerWriter.query<{ id: string }>(
-      `insert into board_member (email, password_hash, display_name)
-       values ($1, 'scrypt$fixture', 'Regina Mbeki') returning id`,
+      `insert into board_member (email, password_hash, display_name, association_id) values ($1, 'scrypt$fixture', 'Regina Mbeki', '00000000-0000-7000-8000-000000000001') returning id`,
       [`${REGISTER_PREFIX}-reviewer@example.test`],
     )
     reviewerId = named.rows[0]!.id
@@ -524,8 +517,7 @@ describeWithDatabase('the register', () => {
     // A reviewer with no display name. Nullable by schema, and the finding must
     // still reach the register rather than being dropped along with the name.
     const nameless = await registerWriter.query<{ id: string }>(
-      `insert into board_member (email, password_hash, display_name)
-       values ($1, 'scrypt$fixture', null) returning id`,
+      `insert into board_member (email, password_hash, display_name, association_id) values ($1, 'scrypt$fixture', null, '00000000-0000-7000-8000-000000000001') returning id`,
       [`${REGISTER_PREFIX}-nameless@example.test`],
     )
 
@@ -555,8 +547,7 @@ describeWithDatabase('the register', () => {
     // Seeded and left unreviewed, so the partition has something to be wrong
     // about in both directions.
     const raised = await registerWriter.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence, raised_at)
-       values ($1, $2, daterange('2099-04-01'::date, '2099-05-01'::date, '[)'), '{}'::jsonb, now())
+      `insert into finding (finding_type, subject_id, period, evidence, raised_at, association_id) values ($1, $2, daterange('2099-04-01'::date, '2099-05-01'::date, '[)'), '{}'::jsonb, now(), '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${REGISTER_PREFIX}_unreviewed`, randomUUID()],
     )

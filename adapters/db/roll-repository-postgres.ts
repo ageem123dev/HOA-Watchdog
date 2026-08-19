@@ -74,12 +74,15 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
         // `unit_number` as the treasurer typed it and this roll is the most
         // recent thing they typed.
         await client.query(
-          `insert into unit (unit_number)
-           select distinct on (unit_normalised_number(x)) x
+          // `association_id` comes from the roll document rather than a
+          // parameter, so a unit cannot be created into another association.
+          `insert into unit (unit_number, association_id)
+           select distinct on (unit_normalised_number(x)) x, parent.association_id
              from unnest($1::text[]) with ordinality as t(x, n)
+             cross join (select association_id from document where id = $2) as parent
             order by unit_normalised_number(x), n
            on conflict (normalised_number) do update set unit_number = excluded.unit_number`,
-          [unitNumbers],
+          [unitNumbers, documentId],
         )
 
         const { rows: resolved } = await client.query<{ reference: string; id: string }>(
@@ -252,11 +255,16 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
                from input
            ),
            new_holder as (
-             insert into unit_holder (id, full_name, document_id)
-             select holder_id, full_name, $4 from bounded
+             insert into unit_holder (id, full_name, document_id, association_id)
+             select holder_id, full_name, $4,
+                    (select association_id from document where id = $4)
+               from bounded
            )
-           insert into unit_membership (unit_id, holder_id, held_during, document_id)
-           select unit_id, holder_id, daterange(held_from, held_until), $4 from bounded`,
+           insert into unit_membership
+             (unit_id, holder_id, held_during, document_id, association_id)
+           select unit_id, holder_id, daterange(held_from, held_until), $4,
+                  (select association_id from document where id = $4)
+             from bounded`,
           [rowUnitIds, holderNames, heldFrom, documentId],
         )
 
@@ -264,9 +272,11 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
         // corrected roll states a new amount for a year already recorded, and
         // the correction is the point.
         await client.query(
-          `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle)
+          `insert into assessment
+             (unit_id, assessment_year, annual_amount, billing_cycle, association_id)
            select distinct on (unit_id, assessment_year)
-                  unit_id, assessment_year, annual_amount, billing_cycle
+                  unit_id, assessment_year, annual_amount, billing_cycle,
+                  (select u.association_id from unit as u where u.id = t.unit_id)
              from unnest($1::uuid[], $2::int[], $3::numeric[], $4::text[]) with ordinality
                   as t(unit_id, assessment_year, annual_amount, billing_cycle, n)
             order by unit_id, assessment_year, n

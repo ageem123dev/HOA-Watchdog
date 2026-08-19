@@ -56,9 +56,7 @@ const documents = new Map<string, string>()
 
 async function seedDocument(label: string, uploadedAt: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into document
-       (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
-     values ($1, $2, $3, 'application/pdf', 1024, $4, $5)
+    `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at, association_id) values ($1, $2, $3, 'application/pdf', 1024, $4, $5, '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       // A 64-character lowercase hex string, because `document_content_hash_is_sha256`
@@ -85,9 +83,7 @@ interface InvoiceFixture {
 
 async function seedInvoice(documentLabel: string, fixture: InvoiceFixture = {}): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into extraction
-       (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency)
-     values ($1, 'invoice', $2, $3, $4::date, $5::numeric, 'USD')
+    `insert into extraction (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency, association_id) values ($1, 'invoice', $2, $3, $4::date, $5::numeric, 'USD', '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       documents.get(documentLabel),
@@ -109,8 +105,7 @@ describeWithDatabase('reading invoices', () => {
     await owner.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`invoice-reader-${RUN_PREFIX}@example.test`],
     )
     memberId = rows[0]!.id
@@ -215,8 +210,7 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
     await owner.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`invoice-prior-${RUN_PREFIX}@example.test`],
     )
     memberId = rows[0]!.id
@@ -313,8 +307,7 @@ describeWithDatabase('finding earlier invoices to compare against', () => {
     // one with an invoice would report the association's own income as a bill
     // it had already paid.
     await writer.query(
-      `insert into extraction (document_id, document_kind, vendor_name, total_amount, currency)
-       values ($1, 'deposit', $2, 715.00, 'USD')`,
+      `insert into extraction (document_id, document_kind, vendor_name, total_amount, currency, association_id) values ($1, 'deposit', $2, 715.00, 'USD', '00000000-0000-7000-8000-000000000001')`,
       [documents.get('older'), VENDOR],
     )
 

@@ -84,8 +84,7 @@ describeWithDatabase('running dues_status@1', () => {
     }
 
     const member = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$1$1$1$x$y') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001') returning id`,
       [`${RUN_PREFIX}@example.com`],
     )
     actorId = member.rows[0]!.id
@@ -99,14 +98,13 @@ describeWithDatabase('running dues_status@1', () => {
     // meant would be visible.
     unitNumber = `${RUN_PREFIX}-4B`
     const unit = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [unitNumber],
     )
     const unitId = unit.rows[0]!.id
 
     await writer.query(
-      `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle)
-       values ($1, 2026, '4800.00', 'six_monthly')`,
+      `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, 2026, '4800.00', 'six_monthly', '00000000-0000-7000-8000-000000000001')`,
       [unitId],
     )
 
@@ -115,9 +113,7 @@ describeWithDatabase('running dues_status@1', () => {
     // `content_hash` must satisfy `document_content_hash_is_sha256`.
     const contentHash = randomBytes(32).toString('hex')
     const document = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'deposits.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [contentHash, `${RUN_PREFIX}/deposits.csv`, actorId],
     )
@@ -129,7 +125,7 @@ describeWithDatabase('running dues_status@1', () => {
       ['2026-07-11', '350.00'],
     ] as const) {
       await writer.query(
-        'insert into payment (unit_id, document_id, paid_on, amount) values ($1, $2, $3, $4)',
+        'insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, $3, $4, \'00000000-0000-7000-8000-000000000001\')',
         [unitId, documentId, paidOn, amount],
       )
     }
@@ -138,7 +134,7 @@ describeWithDatabase('running dues_status@1', () => {
     // the entry attributes a payment to the year its `paid_on` falls in, and
     // without this row a query missing the year filter entirely would pass.
     await writer.query(
-      'insert into payment (unit_id, document_id, paid_on, amount) values ($1, $2, $3, $4)',
+      'insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, $3, $4, \'00000000-0000-7000-8000-000000000001\')',
       [unitId, documentId, '2027-01-09', '2000.00'],
     )
   })
@@ -237,12 +233,11 @@ describeWithDatabase('running dues_status@1', () => {
     it('answers for a unit that has paid nothing', async () => {
       const bare = `${RUN_PREFIX}-9Z`
       const unit = await writer.query<{ id: string }>(
-        'insert into unit (unit_number) values ($1) returning id',
+        'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
         [bare],
       )
       await writer.query(
-        `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle)
-         values ($1, 2026, '600.00', 'annual')`,
+        `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, 2026, '600.00', 'annual', '00000000-0000-7000-8000-000000000001')`,
         [unit.rows[0]!.id],
       )
 

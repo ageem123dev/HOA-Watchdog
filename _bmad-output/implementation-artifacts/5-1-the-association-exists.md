@@ -1,6 +1,6 @@
 ---
 Status: ready-for-dev
-baseline_commit:
+baseline_commit: 15440292da4bc7c3bdb97e872537f69eb7be85a7
 merge_request:
 ---
 
@@ -163,6 +163,63 @@ lookup. The constant lives in one place and is imported, never retyped.
 ## Dev Agent Record
 
 ### Agent Model Used
+
+### Test Design
+
+#### Task 1 decision — every one of the fourteen carries its own `association_id`
+
+Not "reaches one through its parent". Two reasons, and the second is the load-bearing one:
+
+- **AD-5 requires every catalog entry to filter by association.** If a table reaches its association
+  only by joining upward, every query touching it must carry that join, and a query that omits it is
+  exactly the defect the registry test exists to catch — but a test can only check for a predicate it
+  can see. A direct column makes the predicate uniform and checkable.
+- **Denormalisation is safe here because the failure is made unrepresentable, not guarded.**
+  A child row belonging to a different association than its parent is prevented by a **composite
+  foreign key** — `extraction (document_id, association_id)` references `document (id,
+  association_id)`, which needs `unique (id, association_id)` on the parent. The database refuses the
+  inconsistent row; no runtime check, no review vigilance. That is hardening preference 1 from Step 8,
+  applied at design time rather than after.
+
+No table is judged to hold none. `vendor` is scoped per the 2026-08-19 decision.
+
+#### Behaviours and failure modes
+
+**B1 — the `association` table and its one row.**
+1. Re-running inserts a second pilot row — **GUARD**: fixed UUID primary key plus `on conflict do
+   nothing`, so replay is a no-op rather than a duplicate.
+2. A blank or whitespace-only name — **GUARD**: check constraint on trimmed length.
+3. The row is absent when the backfill runs, so every `association_id` lands `null` and the `not
+   null` step fails the whole migration — **GUARD**: insert precedes backfill in one transaction.
+
+**B2 — `association_id` on each table.**
+1. Column added but the `not null` never applied, leaving it optional forever — **GUARD**: asserted
+   per table.
+2. No foreign key, so an orphaned association id is storable — **GUARD**: asserted per table.
+3. **A table is missed entirely, now or in a later migration** — **GUARD**: a drift test enumerating
+   the live schema and asserting every table outside a named allowlist carries the column. This is
+   the one that keeps the story true after it ships; migration 025 adding an unscoped table is the
+   realistic future defect.
+
+**B3 — the backfill.**
+1. Rows written between the column being added and the backfill running get `null` — **GUARD**: the
+   whole migration is one transaction (`migrate.mjs` already wraps each file in one).
+2. Replay re-points rows already assigned to a *different* association — **GUARD**: backfill is
+   `where association_id is null`, never unconditional.
+3. A table is backfilled but a sibling is not — **PROPAGATE**: the `not null` step fails loudly at
+   migration time rather than leaving a half-scoped schema.
+
+**B4 — cross-association children.**
+1. A child references a parent in another association — **GUARD (unrepresentable)**: composite FK.
+2. The composite FK cannot be declared without `unique (id, association_id)` on the parent —
+   **GUARD**: added alongside.
+3. Existing rows violate it at migration time — **PROPAGATE**: fails loudly; the backfill puts
+   everything in one association, so this can only fire if the data is already inconsistent, which is
+   worth stopping for.
+
+**OUT-OF-SCOPE**, recorded rather than silently skipped: row-level security (AD-4's amendment names
+the trigger, and AC9's guard is what forces the conversation), and cleaning up the `test_<hex>` rows
+`test:db` has written into the pilot database.
 
 ### Debug Log References
 

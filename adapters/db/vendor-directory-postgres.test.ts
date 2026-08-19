@@ -49,7 +49,7 @@ describeWithDatabase('createVendorDirectory', () => {
     await seed.connect()
 
     const { rows } = await seed.query(
-      'insert into vendor (display_name) values ($1) returning id',
+      'insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named('Evergreen Landscaping')],
     )
     evergreenId = rows[0].id

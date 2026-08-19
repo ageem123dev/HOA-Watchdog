@@ -104,8 +104,7 @@ describeWithDatabase('the document table', () => {
     await Promise.all([writer.connect(), reader.connect()])
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`document-test-${Date.now()}@example.test`],
     )
@@ -122,8 +121,7 @@ describeWithDatabase('the document table', () => {
 
   const insert = (input: DocumentInput = {}) =>
     writer.query(
-      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, $3, $4, $5, $6, '00000000-0000-7000-8000-000000000001')
        returning *`,
       [
         input.contentHash ?? distinctHash(),
@@ -168,8 +166,7 @@ describeWithDatabase('the document table', () => {
     it('refuses a row with no content hash, which AD-13 could not enforce', async () => {
       await expectRefusal(
         writer.query(
-          `insert into document (storage_key, filename, content_type, byte_size, uploaded_by)
-           values ('uploads/x.pdf', 'x.pdf', $1, 1, $2)`,
+          `insert into document (storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ('uploads/x.pdf', 'x.pdf', $1, 1, $2, '00000000-0000-7000-8000-000000000001')`,
           [PDF, boardMemberId],
         ),
         NOT_NULL_VIOLATION,
@@ -241,8 +238,7 @@ describeWithDatabase('the document table', () => {
     it('refuses a document attributed to no board member', async () => {
       await expectRefusal(
         writer.query(
-          `insert into document (content_hash, storage_key, filename, content_type, byte_size)
-           values ($1, 'uploads/x.pdf', 'x.pdf', $2, 1)`,
+          `insert into document (content_hash, storage_key, filename, content_type, byte_size, association_id) values ($1, 'uploads/x.pdf', 'x.pdf', $2, 1, '00000000-0000-7000-8000-000000000001')`,
           [distinctHash(), PDF],
         ),
         NOT_NULL_VIOLATION,
@@ -316,8 +312,7 @@ describeWithDatabase('the document table', () => {
     it('does not let the reader insert', async () => {
       await expectRefusal(
         reader.query(
-          `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-           values ($1, 'uploads/x.pdf', 'x.pdf', $2, 1, $3)`,
+          `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, 'uploads/x.pdf', 'x.pdf', $2, 1, $3, '00000000-0000-7000-8000-000000000001')`,
           [distinctHash(), PDF, boardMemberId],
         ),
         INSUFFICIENT_PRIVILEGE,

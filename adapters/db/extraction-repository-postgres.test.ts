@@ -64,8 +64,7 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     await admin.connect()
 
     const { rows } = await admin.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`extraction-repo-${RUN}@example.test`],
     )
@@ -85,9 +84,7 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     counter += 1
     const hash = `${RUN}${counter.toString(16).padStart(64 - RUN.length, '0')}`
     const { rows } = await admin.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'ledger.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'ledger.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )

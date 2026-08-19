@@ -53,8 +53,7 @@ let memberId: string
  */
 async function seedDocument(filename: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-     values ($1, $2, $3, 'application/pdf', 1024, $4)
+    `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, $3, 'application/pdf', 1024, $4, '00000000-0000-7000-8000-000000000001')
      returning id`,
     [randomBytes(32).toString('hex'), `${RUN_PREFIX}/${randomBytes(6).toString('hex')}`, filename, memberId],
   )
@@ -67,7 +66,7 @@ async function seedDocument(filename: string): Promise<string> {
 
 async function hold(documentId: string, extractedName: string): Promise<void> {
   await writer.query(
-    'insert into quarantine_item (document_id, extracted_name) values ($1, $2)',
+    'insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')',
     [documentId, extractedName],
   )
 }
@@ -82,8 +81,7 @@ describeWithDatabase('reading the quarantine queue', () => {
     await writer.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$1$1$1$x$y')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}@example.com`],
     )

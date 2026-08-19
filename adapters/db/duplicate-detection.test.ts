@@ -44,9 +44,7 @@ const seeded: string[] = []
 
 async function seedDocument(label: string, uploadedAt: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into document
-       (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
-     values ($1, $2, $3, 'application/pdf', 2048, $4, $5)
+    `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at, association_id) values ($1, $2, $3, 'application/pdf', 2048, $4, $5, '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       randomBytes(32).toString('hex'),
@@ -67,9 +65,7 @@ async function seedInvoice(
   fields: { number?: string | null; issuedOn?: string | null; amount?: string } = {},
 ): Promise<void> {
   await writer.query(
-    `insert into extraction
-       (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency)
-     values ($1, 'invoice', $5, $2, $3::date, $4::numeric, 'USD')`,
+    `insert into extraction (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency, association_id) values ($1, 'invoice', $5, $2, $3::date, $4::numeric, 'USD', '00000000-0000-7000-8000-000000000001')`,
     [
       documentId,
       fields.number === undefined ? 'INV-1001' : fields.number,
@@ -111,8 +107,7 @@ describeWithDatabase('detecting a duplicate invoice', () => {
     await owner.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`duplicate-detection-${RUN_PREFIX}@example.test`],
     )
     memberId = rows[0]!.id
@@ -224,13 +219,11 @@ describeWithDatabase('detecting a duplicate invoice', () => {
     const older = await seedDocument('null-older', '2026-08-20T09:00:00Z')
     const newer = await seedDocument('null-newer', '2026-08-21T09:00:00Z')
     await writer.query(
-      `insert into extraction (document_id, document_kind, vendor_name, currency)
-       values ($1, 'invoice', $2, 'USD')`,
+      `insert into extraction (document_id, document_kind, vendor_name, currency, association_id) values ($1, 'invoice', $2, 'USD', '00000000-0000-7000-8000-000000000001')`,
       [older, VENDOR],
     )
     await writer.query(
-      `insert into extraction (document_id, document_kind, vendor_name, currency)
-       values ($1, 'invoice', $2, 'USD')`,
+      `insert into extraction (document_id, document_kind, vendor_name, currency, association_id) values ($1, 'invoice', $2, 'USD', '00000000-0000-7000-8000-000000000001')`,
       [newer, VENDOR],
     )
 

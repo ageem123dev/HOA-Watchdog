@@ -89,8 +89,7 @@ function observation(overrides: Partial<FindingObservation> = {}): FindingObserv
  */
 async function seedMember(): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into board_member (email, password_hash)
-     values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+    `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
      returning id`,
     [`finding-adapter-${RUN_PREFIX}-${randomBytes(4).toString('hex')}@example.test`],
   )

@@ -157,8 +157,7 @@ describeWithDatabase('one alert per finding', () => {
   /** A fresh finding to hang an alert on, returning its id. */
   const raiseFinding = async (suffix: string): Promise<string> => {
     const result = await writer.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, gen_random_uuid(), $2::daterange, $3::jsonb)
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, gen_random_uuid(), $2::daterange, $3::jsonb, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}_${suffix}`, '[2026-03-01,2026-04-01)', '{"seen": 1}'],
     )
@@ -169,10 +168,10 @@ describeWithDatabase('one alert per finding', () => {
   it('refuses a second alert for a finding already alerted', async () => {
     const findingId = await raiseFinding('twice')
 
-    await writer.query(`insert into finding_alert (finding_id) values ($1)`, [findingId])
+    await writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [findingId])
 
     await expect(
-      writer.query(`insert into finding_alert (finding_id) values ($1)`, [findingId]),
+      writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [findingId]),
     ).rejects.toMatchObject({ code: UNIQUE_VIOLATION })
   })
 
@@ -181,14 +180,14 @@ describeWithDatabase('one alert per finding', () => {
     // director was warned about something nobody can look up, which reads as
     // answered.
     await expect(
-      writer.query(`insert into finding_alert (finding_id) values (gen_random_uuid())`),
+      writer.query(`insert into finding_alert (finding_id, association_id) values (gen_random_uuid(), '00000000-0000-7000-8000-000000000001')`),
     ).rejects.toMatchObject({ code: FOREIGN_KEY_VIOLATION })
   })
 
   it('accepts the claim, then the send, and reads back both', async () => {
     const findingId = await raiseFinding('roundtrip')
 
-    await writer.query(`insert into finding_alert (finding_id) values ($1)`, [findingId])
+    await writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [findingId])
     await writer.query(
       `update finding_alert set sent_at = now(), recipients = $2 where finding_id = $1`,
       [findingId, ['treasurer@example.test', 'president@example.test']],
@@ -236,8 +235,7 @@ describeWithDatabase('the sent state and its recipients cannot disagree', () => 
 
   const raiseFinding = async (suffix: string): Promise<string> => {
     const result = await writer.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, gen_random_uuid(), $2::daterange, $3::jsonb)
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, gen_random_uuid(), $2::daterange, $3::jsonb, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}_${suffix}`, '[2026-03-01,2026-04-01)', '{"seen": 1}'],
     )
@@ -254,7 +252,7 @@ describeWithDatabase('the sent state and its recipients cannot disagree', () => 
    * inconsistent row can only be *arrived at*, never born.
    */
   const claim = (findingId: string) =>
-    writer.query(`insert into finding_alert (finding_id) values ($1)`, [findingId])
+    writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [findingId])
 
   it('refuses a row that claims to be sent while naming nobody', async () => {
     const findingId = await raiseFinding('sent_nobody')
@@ -322,7 +320,7 @@ describeWithDatabase('the sent state and its recipients cannot disagree', () => 
     const findingId = await raiseFinding('long_failure')
 
     await expect(
-      writer.query(`insert into finding_alert (finding_id, failure) values ($1, $2)`, [
+      writer.query(`insert into finding_alert (finding_id, failure, association_id) values ($1, $2, '00000000-0000-7000-8000-000000000001')`, [
         findingId,
         'x'.repeat(2001),
       ]),
@@ -356,8 +354,7 @@ describeWithDatabase('a delivery cannot be un-sent', () => {
 
   const raiseFinding = async (suffix: string): Promise<string> => {
     const result = await writer.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, gen_random_uuid(), $2::daterange, $3::jsonb)
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, gen_random_uuid(), $2::daterange, $3::jsonb, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}_${suffix}`, '[2026-03-01,2026-04-01)', '{"seen": 1}'],
     )
@@ -366,7 +363,7 @@ describeWithDatabase('a delivery cannot be un-sent', () => {
   }
 
   const claimAndSend = async (findingId: string) => {
-    await writer.query(`insert into finding_alert (finding_id) values ($1)`, [findingId])
+    await writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [findingId])
     await writer.query(
       `update finding_alert set sent_at = now(), recipients = $2 where finding_id = $1`,
       [findingId, ['treasurer@example.test']],
@@ -413,7 +410,7 @@ describeWithDatabase('a delivery cannot be un-sent', () => {
     const first = await raiseFinding('identity_a')
     const second = await raiseFinding('identity_b')
 
-    await writer.query(`insert into finding_alert (finding_id) values ($1)`, [first])
+    await writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [first])
 
     await expect(
       writer.query(`update finding_alert set finding_id = $2 where finding_id = $1`, [
@@ -431,8 +428,7 @@ describeWithDatabase('a delivery cannot be un-sent', () => {
 
     await expect(
       writer.query(
-        `insert into finding_alert (finding_id, sent_at, recipients)
-         values ($1, now(), $2)`,
+        `insert into finding_alert (finding_id, sent_at, recipients, association_id) values ($1, now(), $2, '00000000-0000-7000-8000-000000000001')`,
         [findingId, ['treasurer@example.test']],
       ),
     ).rejects.toMatchObject({ code: RAISE_EXCEPTION })
@@ -474,7 +470,7 @@ describeWithDatabase('a delivery cannot be un-sent', () => {
     // entirely would satisfy every refusal above and strand every failed send.
     const findingId = await raiseFinding('reclaim')
 
-    await writer.query(`insert into finding_alert (finding_id, failure) values ($1, $2)`, [
+    await writer.query(`insert into finding_alert (finding_id, failure, association_id) values ($1, $2, '00000000-0000-7000-8000-000000000001')`, [
       findingId,
       'the provider refused',
     ])
@@ -503,14 +499,13 @@ describeWithDatabase('un-deletable, and invisible to the reader', () => {
     await owner.connect()
 
     const raised = await writer.query<{ id: string }>(
-      `insert into finding (finding_type, subject_id, period, evidence)
-       values ($1, gen_random_uuid(), $2::daterange, $3::jsonb)
+      `insert into finding (finding_type, subject_id, period, evidence, association_id) values ($1, gen_random_uuid(), $2::daterange, $3::jsonb, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}_grants`, '[2026-03-01,2026-04-01)', '{"seen": 1}'],
     )
     findingId = raised.rows[0]!.id
 
-    await writer.query(`insert into finding_alert (finding_id) values ($1)`, [findingId])
+    await writer.query(`insert into finding_alert (finding_id, association_id) values ($1, '00000000-0000-7000-8000-000000000001')`, [findingId])
   })
 
   afterAll(async () => {

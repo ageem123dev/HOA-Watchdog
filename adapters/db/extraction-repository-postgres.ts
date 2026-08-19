@@ -92,10 +92,14 @@ export function createPostgresExtractionRepository(
 
         for (const record of records) {
           await client.query(
+            // `association_id` comes from the parent document rather than a
+            // parameter: a caller cannot supply the wrong one.
             `insert into extraction
                (document_id, document_kind, vendor_name, document_number,
-                issued_on, total_amount, unit_reference, currency)
-             values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                issued_on, total_amount, unit_reference, currency, association_id)
+             select $1, $2, $3, $4, $5, $6, $7, $8, parent.association_id
+               from document as parent
+              where parent.id = $1`,
             [
               documentId,
               record.documentKind,

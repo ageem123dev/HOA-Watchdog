@@ -154,7 +154,7 @@ describeWithDatabase('the unit table', () => {
     // they should see.
     const number = numbered('4B')
 
-    await writer.query('insert into unit (unit_number) values ($1)', [number])
+    await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [number])
     const { rows } = await writer.query<{ unit_number: string }>(
       'select unit_number from unit where unit_number = $1',
       [number],
@@ -166,18 +166,18 @@ describeWithDatabase('the unit table', () => {
   it('treats two spellings of one number as the same unit', async () => {
     // A1. `4B` and `4b  ` off a hand-typed roll are one property. Two rows would
     // split every dues figure between them, and neither would look wrong.
-    await writer.query('insert into unit (unit_number) values ($1)', [numbered('4B')])
+    await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [numbered('4B')])
 
     await expect(
-      writer.query('insert into unit (unit_number) values ($1)', [numbered('4b  ')]),
+      writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [numbered('4b  ')]),
     ).rejects.toMatchObject({ code: UNIQUE_VIOLATION })
   })
 
   it('keeps genuinely different numbers apart', async () => {
     // Beside the case above: a normaliser that folded everything to one value
     // would satisfy it and be useless.
-    await writer.query('insert into unit (unit_number) values ($1)', [numbered('4B')])
-    await writer.query('insert into unit (unit_number) values ($1)', [numbered('5B')])
+    await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [numbered('4B')])
+    await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [numbered('5B')])
 
     const { rows } = await writer.query<{ n: string }>(
       'select count(*)::text n from unit where unit_number like $1',
@@ -189,7 +189,7 @@ describeWithDatabase('the unit table', () => {
   it('refuses a blank unit number', async () => {
     // A2. A row that names nothing.
     await expect(
-      writer.query('insert into unit (unit_number) values ($1)', ['   ']),
+      writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', ['   ']),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
   })
 
@@ -198,21 +198,21 @@ describeWithDatabase('the unit table', () => {
     // measuring after `btrim` lets 'x' plus 300 spaces through, because the
     // trim happens before the count.
     await expect(
-      writer.query('insert into unit (unit_number) values ($1)', [`x${' '.repeat(300)}`]),
+      writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [`x${' '.repeat(300)}`]),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
   })
 
   it('refuses an oversized unit number', async () => {
     // A3. A pasted spreadsheet cell.
     await expect(
-      writer.query('insert into unit (unit_number) values ($1)', ['4'.repeat(65)]),
+      writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', ['4'.repeat(65)]),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
   })
 
   it('lets watchdog_reader read it', async () => {
     // A4. Without this the catalog cannot answer a question about units, and the
     // failure surfaces an epic later as a permission error.
-    await writer.query('insert into unit (unit_number) values ($1)', [numbered('7A')])
+    await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [numbered('7A')])
 
     const { rows } = await reader.query<{ unit_number: string }>(
       'select unit_number from unit where unit_number = $1',
@@ -225,7 +225,7 @@ describeWithDatabase('the unit table', () => {
     // A5. AD-4: the role the LLM-driven query path runs under cannot invent a
     // unit.
     await expect(
-      reader.query('insert into unit (unit_number) values ($1)', [numbered('9Z')]),
+      reader.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [numbered('9Z')]),
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
   })
 

@@ -53,9 +53,7 @@ interface Scene {
 
 async function seedDocument(label: string, uploadedAt = '2026-06-20T09:00:00Z'): Promise<Scene> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into document
-       (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at)
-     values ($1, $2, $3, 'application/pdf', 2048, $4, $5)
+    `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, uploaded_at, association_id) values ($1, $2, $3, 'application/pdf', 2048, $4, $5, '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       randomBytes(32).toString('hex'),
@@ -80,9 +78,7 @@ interface InvoiceFields {
 
 async function seedInvoice(scene: Scene, fields: InvoiceFields = {}): Promise<void> {
   await writer.query(
-    `insert into extraction
-       (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency)
-     values ($1, $2, $3, 'INV-1', $4::date, $5::numeric, 'USD')`,
+    `insert into extraction (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency, association_id) values ($1, $2, $3, 'INV-1', $4::date, $5::numeric, 'USD', '00000000-0000-7000-8000-000000000001')`,
     [
       scene.id,
       fields.kind ?? 'invoice',
@@ -128,8 +124,7 @@ if (configured) {
     await owner.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`vendor-spike-${RUN_PREFIX}@example.test`],
     )
     memberId = rows[0]!.id

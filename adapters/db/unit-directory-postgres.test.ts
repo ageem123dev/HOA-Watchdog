@@ -51,7 +51,7 @@ describeWithDatabase('the unit directory', () => {
    */
   const givenAUnitSoldOn1July = async () => {
     const unit = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named('4B')],
     )
     const unitId = unit.rows[0]!.id
@@ -61,11 +61,11 @@ describeWithDatabase('the unit directory', () => {
       ['Grace', '2024-07-01', null],
     ] as const) {
       const holder = await writer.query<{ id: string }>(
-        'insert into unit_holder (full_name) values ($1) returning id',
+        'insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
         [named(name)],
       )
       await writer.query(
-        'insert into unit_membership (unit_id, holder_id, held_during) values ($1, $2, daterange($3::date, $4::date))',
+        'insert into unit_membership (unit_id, holder_id, held_during, association_id) values ($1, $2, daterange($3::date, $4::date), \'00000000-0000-7000-8000-000000000001\')',
         [unitId, holder.rows[0]!.id, from, to],
       )
     }
@@ -205,7 +205,7 @@ describeWithDatabase('the unit directory', () => {
 
     it('returns nothing for a unit nobody has held', async () => {
       // E4.
-      await writer.query('insert into unit (unit_number) values ($1)', [named('9Z')])
+      await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('9Z')])
 
       expect(await createUnitDirectory().historyFor(named('9Z'))).toEqual([])
     })
@@ -219,7 +219,7 @@ describeWithDatabase('the unit directory', () => {
       // return every membership in the association and still look ordered and
       // well-formed.
       await givenAUnitSoldOn1July()
-      await writer.query('insert into unit (unit_number) values ($1)', [named('5B')])
+      await writer.query('insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('5B')])
 
       expect(await createUnitDirectory().historyFor(named('5B'))).toEqual([])
     })
