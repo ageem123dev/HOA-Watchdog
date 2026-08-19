@@ -54,7 +54,7 @@ describeWithDatabase('createVendorDirectory', () => {
     )
     evergreenId = rows[0].id
 
-    await seed.query('insert into vendor (display_name) values ($1), ($2), ($3)', [
+    await seed.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\'), ($2, \'00000000-0000-7000-8000-000000000001\'), ($3, \'00000000-0000-7000-8000-000000000001\')', [
       // Close enough to rank beside Evergreen Landscaping, and a different
       // vendor. Without a second candidate of this run's own, the ordering and
       // limit tests were passing on rows another test file happened to leave

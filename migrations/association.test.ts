@@ -190,9 +190,11 @@ describeWithDatabase('the schema it produces', () => {
     // association, must be refused by the composite key rather than stored.
     await expect(
       client.query(
-        `insert into document (uploaded_by, association_id, content_hash, filename)
-         values ($1, $2, $3, $4)`,
-        [member, other, `${RUN_PREFIX}hash`, `${RUN_PREFIX}.csv`],
+        `insert into document
+           (uploaded_by, association_id, content_hash, storage_key, filename,
+            content_type, byte_size)
+         values ($1, $2, $3, $4, $5, 'text/csv', 12)`,
+        [member, other, `${RUN_PREFIX}hash`, `${RUN_PREFIX}/k.csv`, `${RUN_PREFIX}.csv`],
       ),
     ).rejects.toMatchObject({ code: FOREIGN_KEY_VIOLATION })
 
@@ -226,9 +228,24 @@ describeWithDatabase('the schema it produces', () => {
     )
     expect(between.length, 'no foreign keys between scoped tables — the query is wrong').toBeGreaterThan(0)
 
-    const offenders = between
+    // The single-column keys are deliberately kept: migration 024 is additive,
+    // because it runs against a database with real rows in it. So the assertion
+    // is not "every key carries association_id" — it is that every key between
+    // two scoped tables HAS a composite partner covering the same column, which
+    // is what makes the cross-association child unrepresentable.
+    const composite = between.filter((r) => (r.cols as string[]).includes('association_id'))
+    const uncovered = between
       .filter((r) => !(r.cols as string[]).includes('association_id'))
-      .map((r) => `${r.child}.${r.conname} -> ${r.parent}`)
-    expect(offenders).toEqual([])
+      .filter((single) => {
+        const [column] = single.cols as string[]
+        return !composite.some(
+          (pair) =>
+            pair.child === single.child &&
+            pair.parent === single.parent &&
+            (pair.cols as string[]).includes(column as string),
+        )
+      })
+      .map((r) => `${r.child}.${(r.cols as string[]).join(',')} -> ${r.parent}`)
+    expect(uncovered).toEqual([])
   })
 })

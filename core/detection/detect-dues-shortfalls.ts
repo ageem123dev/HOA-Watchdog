@@ -85,6 +85,7 @@ export async function detectDuesShortfalls(
       const outcome: RaisedFinding = await deps.findings.raise({
         findingType: UNIT_DUES_SHORTFALL,
         subjectId: unit.unitId,
+        documentId,
         period: yearRange(year),
         evidence: {
           ...shortfall,

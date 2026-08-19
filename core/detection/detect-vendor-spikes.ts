@@ -124,6 +124,7 @@ export async function detectVendorSpikes(
     const outcome: RaisedFinding = await deps.findings.raise({
       findingType: INVOICE_ABOVE_VENDOR_AVERAGE,
       subjectId: documentId,
+      documentId,
       period: monthRange(month),
       evidence: {
         // UX-DR24 forbids reassurance without a count of what was checked. The

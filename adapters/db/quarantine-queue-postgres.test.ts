@@ -170,8 +170,10 @@ describeWithDatabase('reading the quarantine queue', () => {
       '018f3a2b-0000-7000-8000-00000000000a',
     ]
     await writer.query(
-      `insert into quarantine_item (id, document_id, extracted_name)
-       values ($1, $4, $5), ($2, $4, $6), ($3, $4, $7)`,
+      `insert into quarantine_item (id, document_id, extracted_name, association_id)
+       values ($1, $4, $5, '00000000-0000-7000-8000-000000000001'),
+              ($2, $4, $6, '00000000-0000-7000-8000-000000000001'),
+              ($3, $4, $7, '00000000-0000-7000-8000-000000000001')`,
       [
         ids[0],
         ids[1],

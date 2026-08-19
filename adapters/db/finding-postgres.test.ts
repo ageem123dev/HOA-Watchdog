@@ -66,12 +66,20 @@ let memberId: string
 let type = ''
 let subject = ''
 
+/**
+ * The document a finding was surfaced by. Required since 5.1: the adapter reads
+ * `association_id` from it rather than taking one, so a finding raised against
+ * no document has no association and the not-null constraint refuses it.
+ */
+let sourceDocumentId = ''
+
 const MARCH = { from: '2026-03-01', until: '2026-04-01' } as const
 
 function observation(overrides: Partial<FindingObservation> = {}): FindingObservation {
   return {
     findingType: type,
     subjectId: subject,
+    documentId: sourceDocumentId,
     period: MARCH,
     evidence: { invoiceCount: 2 },
     ...overrides,
@@ -95,6 +103,28 @@ async function seedMember(): Promise<string> {
   )
   const id = rows[0]?.id
   if (id === undefined) throw new Error('seeding a board member returned no id')
+
+  return id
+}
+
+async function seedDocument(uploadedBy: string): Promise<string> {
+  const { rows } = await writer.query<{ id: string }>(
+    `insert into document
+       (content_hash, storage_key, filename, content_type, byte_size, uploaded_by,
+        association_id)
+     select $1, $2, $3, 'text/csv', 12, $4, uploader.association_id
+       from board_member as uploader
+      where uploader.id = $4
+     returning id`,
+    [
+      `${RUN_PREFIX}-${randomBytes(8).toString('hex')}`,
+      `${RUN_PREFIX}/source.csv`,
+      `${RUN_PREFIX}-source.csv`,
+      uploadedBy,
+    ],
+  )
+  const id = rows[0]?.id
+  if (id === undefined) throw new Error('seeding a document returned no id')
 
   return id
 }
@@ -126,6 +156,8 @@ describeWithDatabase('raising a finding', () => {
     await writer.connect()
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
+    memberId = await seedMember()
+    sourceDocumentId = await seedDocument(memberId)
   })
 
   afterAll(async () => {
@@ -249,6 +281,7 @@ describeWithDatabase('reviewing a finding', () => {
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
     memberId = await seedMember()
+    sourceDocumentId = await seedDocument(memberId)
   })
 
   afterAll(async () => {

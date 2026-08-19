@@ -91,6 +91,19 @@ export interface FindingObservation {
    */
   readonly subjectId: string
 
+  /**
+   * The document whose processing surfaced this.
+   *
+   * Not the subject — a dues shortfall is about a unit and a vendor spike about
+   * a vendor — but the run that noticed it, which every detector already holds
+   * because `runDetection` passes it. It is here so the association can be read
+   * from that document rather than supplied: `subject_id` is deliberately
+   * untyped as a foreign key (migration 021 explains why), so resolving the
+   * association through the subject would impose exactly the constraint that
+   * decision rejected.
+   */
+  readonly documentId: string
+
   /** The window it concerns. Part of the key, so it is never optional. */
   readonly period: FindingPeriod
 

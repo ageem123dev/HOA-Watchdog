@@ -64,8 +64,16 @@ export function createFindingRegister(): FindingRegister {
       // which branch ran without a second round trip, and it is asserted against
       // a real database in `finding-postgres.test.ts` rather than trusted.
       const { rows } = await pool().query<{ id: string; inserted: boolean }>(
-        `insert into finding (finding_type, subject_id, period, evidence)
-         values ($1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb)
+        // `association_id` is read from the document the run was over, not
+        // supplied by the caller and not resolved through `subject_id` — which
+        // is untyped as a foreign key on purpose, so resolving through it would
+        // impose the constraint migration 021 declined to impose.
+        `insert into finding
+           (finding_type, subject_id, period, evidence, association_id)
+         select $1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb,
+                source.association_id
+           from document as source
+          where source.id = $6
          on conflict (finding_type, subject_id, period)
          do update set evidence = excluded.evidence
          returning id, (xmax = 0) as inserted`,
@@ -75,6 +83,7 @@ export function createFindingRegister(): FindingRegister {
           observation.period.from,
           observation.period.until,
           JSON.stringify(observation.evidence),
+          observation.documentId,
         ],
       )
 
