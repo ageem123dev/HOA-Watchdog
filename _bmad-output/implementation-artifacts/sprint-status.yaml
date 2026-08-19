@@ -122,7 +122,8 @@ development_status:
   # epic 6 -- adding a second intake channel before the first can be used by a
   # stranger was the wrong order.
   epic-5: in-progress
-  5-1-the-association-exists: in-progress  # the retrofit, and the AD-4/AD-5 amendments it rests on
+  5-1-the-association-exists: review  # the schema retrofit and the write path
+  5-1b-the-catalog-answers-for-one-association: backlog  # split from 5.1: the read path
   5-2-a-document-declares-its-kind: backlog  # kind moves from the row to the upload; contract change
   5-3-the-headers-we-were-given: backlog  # duplicates and blanks reported, not guessed
   5-4-mapping-one-column-to-another: backlog  # drag AND keyboard, neither the poor relation

@@ -1,5 +1,5 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: 15440292da4bc7c3bdb97e872537f69eb7be85a7
 merge_request:
 ---
@@ -29,59 +29,53 @@ alternative is threading a tenancy retrofit through stories that have already be
 3. **Existing rows are backfilled to exactly one association**, and the migration is safe to re-run.
    The pilot's data is not lost, orphaned, or split.
 
-4. **A board member belongs to an association**, and an authenticated session yields it. Sign-in
-   behaviour is otherwise unchanged.
+4. **A board member belongs to an association** — the column and its foreign key. *Reading it from
+   an authenticated session is story 5.1b; this story only makes it representable.*
 
-5. **The gateway binds the association from the authenticated session, and it is never a tool
-   parameter.** A `/tools/v1/*` request that supplies an association id does not get to choose with
-   it — the supplied value is refused or ignored, and a test proves which. *(AD-5 amendment,
-   clause 2 — the load-bearing half: an injection that cannot author SQL but can choose whose
-   records to read has defeated AD-5 while obeying its letter.)*
-
-6. **Every catalog entry filters by association, enforced by a test over the registry** rather than
-   judged at review. A new entry whose SQL does not scope by association turns the suite red.
-   *(AD-5 amendment, clause 1. `strict: true` guarantees the arguments are well-formed, not that the
-   query is bounded — parameter validation cannot save an entry that never scoped.)*
-
-7. **`watchdog_reader` is still SELECT-only.** AD-4's capability claim is unchanged by this story;
+5. **`watchdog_reader` is still SELECT-only.** AD-4's capability claim is unchanged by this story;
    `migrations/roles.test.ts` still passes, and the reader gains no grant.
 
-8. **A second association is representable, and rows do not leak across.** A test inserts a second
-   association with its own rows and shows a catalog query scoped to association A returns none of
-   association B's — **without a schema change**. This is the story's real proof.
+6. **A child cannot belong to a different association than its parent, and the database refuses to
+   store one.** Every foreign key between two scoped tables has a composite partner carrying
+   `association_id` on both sides. This is the story's real proof: denormalising the column onto
+   fourteen tables is only safe because the inconsistent row is unrepresentable rather than merely
+   unwritten.
 
-9. **Nothing in the product creates a second association.** AC8 proves the *shape*; it does not
-   enable multi-tenancy. Row-level security does not exist, so scoping is by construction — two
-   pieces of code that must both be right — and AD-4's amendment says onboarding a second
-   association without RLS is a defect, not a trade-off. Concretely, and testably: **no product code
-   path inserts into `association`.** The pilot row arrives by migration; the second association in
-   AC8's test is inserted by the test itself. A structural test asserts no `insert into association`
-   outside `migrations/` and test files — the shape `core/security/no-model-in-alerts.test.ts`
-   already uses. When a create-association flow is eventually wanted, that test is what forces the
-   RLS conversation rather than letting it be skipped.
+7. **A second association is representable without a schema change** — a test inserts one and gives
+   it rows. *That its rows cannot be read through the catalog is story 5.1b, which is where the
+   scoping predicate lives.*
+
+8. **Every write states its association, and derives it rather than being handed it.** No column
+   default: a default would make the invariant true by accident and would never be removed. Each
+   insert reads the association from the row it belongs under — a document from its uploader, an
+   extraction from its document, a finding from the run that surfaced it — so a caller cannot supply
+   the wrong one.
+
+### Split out to story 5.1b, 2026-08-19
+
+The gateway binding (AD-5 clause 2), catalog scoping and its registry test (AD-5 clause 1), the
+end-to-end isolation proof, and the guard that no product path creates an association. They are a
+coherent piece of work about the *read* path, and this story is already a large schema retrofit;
+carrying them would mean holding fourteen tables of migration unmerged while a different subsystem
+is built. **Until 5.1b lands, `association_id` is stored and constrained but nothing reads it** —
+the catalog still answers across the whole table, which is correct while exactly one association
+exists and is why 5.1b must precede a second.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Decide and record which tables hold association data.** Fourteen exist:
-      `board_member`, `document`, `extraction`, `vendor`, `quarantine_item`, `unit`, `unit_holder`,
-      `unit_membership`, `assessment`, `payment`, `held_payment`, `query_log`, `finding`,
-      `finding_alert`. For each, decide *carries its own `association_id`* or *reaches one through
-      its parent* — and write the reasoning into the migration, since a reader a year from now
-      cannot reconstruct it. (AC2)
-- [ ] **Task 2 — The migration.** `association` table; `association_id` added per Task 1; backfill to
-      a single row; constraints last so the backfill can precede `not null`. Re-runnable. (AC1–3)
-- [ ] **Task 3 — Board member to association, and the session.** `board_member.association_id`, and
-      `authenticate` yields it. (AC4)
-- [ ] **Task 4 — The gateway binds it.** `/tools/v1/*` resolves the association from the session, not
-      from the request body. Prove a supplied id cannot choose. (AC5)
-- [ ] **Task 5 — Catalog scoping and its registry test.** `duesStatusV1` (the only entry today)
-      filters by association; the registry test asserts it for *every* entry, present and future, in
-      the shape `registry.test.ts` already applies to entry ids. (AC6)
-- [ ] **Task 6 — Prove the shape, and prove the refusal.** The two-association isolation test (AC8),
-      the reader-role regression (AC7), and the no-product-path-creates-an-association guard (AC9).
-- [ ] **Task 7 — Update the architecture's multi-tenancy deferral.** `vendor` is scoped by this
-      story, so "per-tenant vendor tables" is no longer deferred; row-level security alone is. The
-      entry currently says otherwise and would mislead the next reader. (Decision 1)
+- [x] **Task 1 — Decide and record which tables hold association data.** All fourteen carry their
+      own `association_id`; none was judged to reach one through a parent. The reasoning is in the
+      migration's prose and in Test Design below. (AC2)
+- [x] **Task 2 — The migration.** `association`, the `demo` row at a fixed id, the column added and
+      backfilled per table, `not null` last, and composite foreign keys. Additive throughout: no
+      `drop table`, `drop column` or `drop constraint`, asserted by test. (AC1–3, AC6)
+- [x] **Task 3 — Every writer derives its association.** Eleven inserts across ten adapters, plus
+      228 test fixtures. (AC8)
+- [x] **Task 4 — Prove the shape.** The composite-key refusal, the second-association case, the
+      drift guard over the live schema, and the reader-role regression. (AC5–7)
+- [x] **Task 5 — Update the architecture's multi-tenancy deferral.** `vendor` is scoped by this
+      story, so per-tenant vendor tables are no longer deferred; row-level security alone is.
+      (Decision 1)
 
 ## Dev Notes
 
