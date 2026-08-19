@@ -110,7 +110,19 @@ It was tuned on a benchmark that excludes test files, so its judgement is weakes
    4. **Severity maps into CodeRabbit's vocabulary**, which is what `argus_ingest` reads: `critical→critical`, `high→major`, `medium→minor`, `low→trivial`. It records critical and major by default, so an `ocr` `medium` is ingested only with `severities` overridden.
    5. **Ingest before fixing, and pass `commit` explicitly.** A later round reviews different code and cannot score this one; without `commit` the join finds nothing and it silently learns nothing.
 
-   **This step is blocked until a converter exists.** `argus_ingest` parses CodeRabbit's stream — `{"type":"finding", fileName, severity, suggestions}` events plus a `complete` event carrying `reviewedFiles` — not `ocr`'s JSON. Nothing converts one to the other yet, so ingest cannot run and Argus learns nothing from `ocr` until it does. Steps 1–3 are still worth doing on their own: they are the triage in 5.
+   **The converter is `scripts/ocr-to-argus.mjs`.** No change was needed in the argus repo: its CLI adapter reads generic field names (`comment`, `fileName`, `line`, `severity`, `category`) and guards only on the event `type`, so a synthesised stream is accepted like any other.
+
+   ```bash
+   node scripts/ocr-to-argus.mjs --in .argus/ocr.json --list        # verify each, then
+   node scripts/ocr-to-argus.mjs --in .argus/ocr.json --commit $COMMIT \
+     --confirmed 4,9 --reviewed-from main...HEAD --out .argus/ocr-review.jsonl
+   ```
+
+   `--confirmed` is required — there is no carry-everything path — and `--confirmed none` is legitimate: a review that confirmed nothing is not the same as a review that never ran. It refuses outright when `retry_report.failed_requests` is non-zero, so a partial review cannot become a lesson. Give it `--reviewed-from` or `--reviewed`: `reviewedFiles` carries what was reviewed **and clean**, which a finding list cannot express, and deriving it from the findings would tell Argus that every clean file went unreviewed.
+
+   Then `argus_ingest` with `from: .argus/ocr-review.jsonl` and `commit: $COMMIT`.
+
+   **Findings ingest as `source: "coderabbit"`** — the adapter hard-codes it. Harmless to what Argus learns, wrong in the record; correcting it is a change in the argus repo, not this one.
 
 ### 4c — The AC audit, before the MR
 
