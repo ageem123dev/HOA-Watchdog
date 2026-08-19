@@ -60,6 +60,15 @@ precisely why this story must precede a second.
       the test must bind *every* entry, present and future, in the shape `registry.test.ts` already
       applies to entry ids. (AC3)
 - [ ] **Task 4 — The isolation proof, and the creation guard.** (AC4, AC5)
+- [ ] **Task 5 — Make the identity keys association-scoped.** `unit (normalised_number)` and
+      `vendor (normalised_name)` are global unique indexes from migrations 011 and 009, so a second
+      association cannot hold a unit or vendor whose name collides with the first — and
+      `roll-repository`'s `on conflict (normalised_number) do update` would silently resolve to the
+      first association's row. Replace both with composite indexes on `(association_id, ...)` and
+      update the two `on conflict` clauses that name them. Found by Argus reviewing 5.1; deferred
+      there because it changes what "the same unit" means and requires dropping an index, which 5.1's
+      strictly-additive migration forbids. **This must land before a second association is
+      onboarded.**
 
 ## Dev Notes
 

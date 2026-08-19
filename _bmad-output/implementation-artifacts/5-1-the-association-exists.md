@@ -41,9 +41,20 @@ alternative is threading a tenancy retrofit through stories that have already be
    fourteen tables is only safe because the inconsistent row is unrepresentable rather than merely
    unwritten.
 
-7. **A second association is representable without a schema change** — a test inserts one and gives
-   it rows. *That its rows cannot be read through the catalog is story 5.1b, which is where the
-   scoping predicate lives.*
+7. **A second association is representable without a schema change, for data that does not collide
+   on an existing identity key.** A test inserts one and gives it rows.
+
+   **Known limitation, found by review and deliberately not fixed here.** `unit` and `vendor` still
+   carry *global* unique indexes — `unit (normalised_number)` and `vendor (normalised_name)` — from
+   migrations 011 and 009. So a second association cannot hold a unit "4B" or a vendor "Evergreen"
+   while the first does: `roll-repository`'s `on conflict (normalised_number) do update` would
+   resolve to the **first** association's row, and the composite key would then refuse the membership
+   that followed. Making those keys composite changes what "the same unit" means and requires
+   dropping an index, which this migration's strictly-additive property forbids. It is story 5.1b's,
+   listed there as a task, and it must land before a second association is onboarded — alongside RLS.
+
+   *That a second association's rows cannot be read through the catalog is also 5.1b, which is where
+   the scoping predicate lives.*
 
 8. **Every write states its association, and derives it rather than being handed it.** No column
    default: a default would make the invariant true by accident and would never be removed. Each
