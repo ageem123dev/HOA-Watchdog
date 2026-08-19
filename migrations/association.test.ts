@@ -194,7 +194,13 @@ describeWithDatabase('the schema it produces', () => {
            (uploaded_by, association_id, content_hash, storage_key, filename,
             content_type, byte_size)
          values ($1, $2, $3, $4, $5, 'text/csv', 12)`,
-        [member, other, `${RUN_PREFIX}hash`, `${RUN_PREFIX}/k.csv`, `${RUN_PREFIX}.csv`],
+        [
+          member,
+          other,
+          randomBytes(32).toString('hex'), // document_content_hash_is_sha256
+          `${RUN_PREFIX}/k.csv`,
+          `${RUN_PREFIX}.csv`,
+        ],
       ),
     ).rejects.toMatchObject({ code: FOREIGN_KEY_VIOLATION })
 

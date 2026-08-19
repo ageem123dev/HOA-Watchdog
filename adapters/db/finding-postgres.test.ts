@@ -117,7 +117,7 @@ async function seedDocument(uploadedBy: string): Promise<string> {
       where uploader.id = $4
      returning id`,
     [
-      `${RUN_PREFIX}-${randomBytes(8).toString('hex')}`,
+      randomBytes(32).toString('hex'), // document_content_hash_is_sha256
       `${RUN_PREFIX}/source.csv`,
       `${RUN_PREFIX}-source.csv`,
       uploadedBy,
@@ -289,6 +289,10 @@ describeWithDatabase('reviewing a finding', () => {
       // Findings first: `reviewed_by` references `board_member`, so the member
       // cannot go while a finding still names them.
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+      // Then the seeded document: since 5.1 each suite uploads one so a finding
+      // has an association to read, and `document.uploaded_by` references the
+      // member, so the member cannot go while it stands.
+      await owner.query(`delete from document where storage_key like $1`, [`${RUN_PREFIX}/%`])
       await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
     } finally {
       await Promise.allSettled([owner.end(), writer.end()])

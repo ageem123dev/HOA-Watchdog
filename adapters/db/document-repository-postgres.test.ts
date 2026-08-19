@@ -256,12 +256,19 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await expect(repository.record(document)).rejects.toMatchObject({ code: '23514' })
   })
 
-  it('lets an unknown uploader escape as a foreign-key violation', async () => {
+  it('lets an unknown uploader escape as a database violation', async () => {
+    // Story 5.1 changed which constraint answers first, not whether one does.
+    // `association_id` is derived from the uploader and is `not null`, so an
+    // unknown uploader leaves it null and the not-null check fires before the
+    // foreign key on `uploaded_by` is reached. The assertion is updated rather
+    // than relaxed: it still pins a specific code, and the case it exists to
+    // catch — an unknown uploader being read as "already held" and resolving
+    // quietly — would fail here as loudly as before.
     const document = {
       ...newDocument(`bad-user-${Date.now()}`, '00000000-0000-7000-8000-000000000000'),
     }
 
-    await expect(repository.record(document)).rejects.toMatchObject({ code: '23503' })
+    await expect(repository.record(document)).rejects.toMatchObject({ code: '23502' })
   })
 
 
