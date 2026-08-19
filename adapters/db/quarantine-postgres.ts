@@ -23,9 +23,7 @@ export function createQuarantine(): Quarantine {
       await writerPool().query(
         // `association_id` from the parent document, not a parameter.
         `insert into quarantine_item (document_id, extracted_name, association_id)
-         select $1, $2, parent.association_id
-           from document as parent
-          where parent.id = $1
+         values ($1, $2, (select association_id from document where id = $1))
          on conflict (document_id, normalised_name) do nothing`,
         [documentId, extractedName],
       )

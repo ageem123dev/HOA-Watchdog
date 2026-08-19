@@ -76,9 +76,7 @@ export function createFindingAlertLedger(): FindingAlertLedger {
       const { rows } = await writerPool().query<{ id: string }>(
         // `association_id` from the finding this alert is about.
         `insert into finding_alert (finding_id, association_id)
-         select $1, parent.association_id
-           from finding as parent
-          where parent.id = $1
+         values ($1, (select association_id from finding where id = $1))
          on conflict (finding_id) do update
             set claimed_at = now(),
                 failure    = null

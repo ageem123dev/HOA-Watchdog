@@ -34,9 +34,8 @@ export function createQueryLog(): QueryLog {
         // no row at all.
         `insert into query_log
            (actor_id, entry_id, entry_version, parameters, sql_text, association_id)
-         select $1, $2, $3, $4::jsonb, $5, actor.association_id
-           from board_member as actor
-          where actor.id = $1
+         values ($1, $2, $3, $4::jsonb, $5,
+                 (select association_id from board_member where id = $1))
          returning id`,
         [
           entry.actorId,

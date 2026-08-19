@@ -4,7 +4,10 @@
       "command": "node",
       "args": [
         "C:/Users/magee/repos/argus-agent/dist/mcp.mjs"
-      ]
+      ],
+      "env": {
+        "PATH": "C:\\Program Files\\Git\\usr\\bin;C:\\Users\\magee\\AppData\\Local\\agy\\bin;${PATH}"
+      }
     }
   }
 }

@@ -99,9 +99,8 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
               // `association_id` from the parent document, never a parameter.
               `insert into payment
                  (unit_id, document_id, paid_on, amount, association_id)
-               select $1, $2, $3::date, $4, parent.association_id
-                 from document as parent
-                where parent.id = $2`,
+               values ($1, $2, $3::date, $4,
+                       (select association_id from document where id = $2))`,
               [line.unitId, documentId, line.paidOn, line.amount],
             )
           } else {
@@ -114,9 +113,8 @@ export function createPaymentRepository(options: { pool?: Pool } = {}): PaymentR
               `insert into held_payment
                  (document_id, unit_reference, paid_on, amount, hold_reason,
                   association_id)
-               select $1, $2, $3::date, $4, $5, parent.association_id
-                 from document as parent
-                where parent.id = $1`,
+               values ($1, $2, $3::date, $4, $5,
+                       (select association_id from document where id = $1))`,
               [
                 documentId,
                 blankToNull(line.unitReference),

@@ -77,9 +77,9 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
           // `association_id` comes from the roll document rather than a
           // parameter, so a unit cannot be created into another association.
           `insert into unit (unit_number, association_id)
-           select distinct on (unit_normalised_number(x)) x, parent.association_id
+           select distinct on (unit_normalised_number(x)) x,
+                  (select association_id from document where id = $2)
              from unnest($1::text[]) with ordinality as t(x, n)
-             cross join (select association_id from document where id = $2) as parent
             order by unit_normalised_number(x), n
            on conflict (normalised_number) do update set unit_number = excluded.unit_number`,
           [unitNumbers, documentId],

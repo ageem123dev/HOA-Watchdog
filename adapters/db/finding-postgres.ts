@@ -70,10 +70,8 @@ export function createFindingRegister(): FindingRegister {
         // impose the constraint migration 021 declined to impose.
         `insert into finding
            (finding_type, subject_id, period, evidence, association_id)
-         select $1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb,
-                source.association_id
-           from document as source
-          where source.id = $6
+         values ($1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb,
+                 (select association_id from document where id = $6))
          on conflict (finding_type, subject_id, period)
          do update set evidence = excluded.evidence
          returning id, (xmax = 0) as inserted`,

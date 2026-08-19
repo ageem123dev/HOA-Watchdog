@@ -111,6 +111,43 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await pool.end()
   })
 
+  it("records the document under the uploader's association, not the pilot's", async () => {
+    // The AC audit's finding. Every other case here runs with one association,
+    // where any derivation — right, wrong, or a hard-coded constant — produces
+    // the same answer, so "derives its association from the uploader" was true
+    // but unfalsifiable. A second association is what makes it provable: this
+    // fails if the adapter stops reading the uploader's association, and it
+    // fails just as loudly if someone replaces the subquery with the demo id.
+    const { rows: made } = await admin.query<{ id: string }>(
+      'insert into association (name) values ($1) returning id',
+      [`repo-test-second-${Date.now()}`],
+    )
+    const second = made[0]!.id
+
+    const { rows: members } = await admin.query<{ id: string }>(
+      `insert into board_member (email, password_hash, association_id)
+       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', $2)
+       returning id`,
+      [`repo-second-${Date.now()}@example.test`, second],
+    )
+    const theirs = members[0]!.id
+
+    try {
+      const recorded = await repository.record(newDocument(`second-${Date.now()}`, theirs))
+      const { rows } = await admin.query<{ association_id: string }>(
+        'select association_id from document where id = $1',
+        [recorded.id],
+      )
+
+      expect(rows[0]!.association_id).toBe(second)
+      expect(rows[0]!.association_id).not.toBe('00000000-0000-7000-8000-000000000001')
+    } finally {
+      await admin.query('delete from document where uploaded_by = $1', [theirs])
+      await admin.query('delete from board_member where id = $1', [theirs])
+      await admin.query('delete from association where id = $1', [second])
+    }
+  })
+
   it('records a document and reports it as new', async () => {
     const result = await repository.record(newDocument(`fresh-${Date.now()}`, boardMemberId))
 

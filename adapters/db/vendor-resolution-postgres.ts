@@ -117,9 +117,7 @@ export function createVendorResolution(): VendorResolution {
           // A vendor belongs to the association whose document named it.
           // Derived rather than passed so the two cannot disagree.
           `insert into vendor (display_name, association_id)
-           select $1, parent.association_id
-             from document as parent
-            where parent.id = $2
+           values ($1, (select association_id from document where id = $2))
            on conflict (normalised_name) do nothing
            returning id`,
           [extractedName, documentId],
