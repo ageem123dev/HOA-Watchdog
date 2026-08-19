@@ -81,15 +81,18 @@ exists and is why 5.1b must precede a second.
 
 ### What this story is not
 
-It is **not** multi-tenancy. It makes a second association *representable* and proves rows do not
-leak through the catalog. It does not make onboarding one safe: there is no row-level security, so a
-correct catalog filter and a correct gateway binding are two pieces of code that must both be right,
-and nothing makes a mistake in either unexploitable. AD-4's amendment names the day a second
-association is onboarded as the trigger for RLS. AC9 exists so that day cannot arrive by accident.
+It is **not** multi-tenancy, and it does not even read the column it adds. It makes a second
+association *representable* and proves a child cannot sit under a parent in another one. Whether a
+question can be answered for one association without returning another's rows is story 5.1b, where
+the predicate lives. Nor does it make onboarding safe: there is no row-level security, so scoping
+will be by construction — a correct catalog filter and a correct gateway binding, two pieces of code
+that must both be right. AD-4's amendment names the day a second association is onboarded as the
+trigger for RLS, and 5.1b carries the guard that stops that day arriving by accident.
 
 ### The two AD amendments this story rests on
 
-Both landed on `main` in MR !68 and are the spec for AC5 and AC6:
+Both landed on `main` in MR !68. AD-4 is this story's AC5; AD-5's two clauses are story 5.1b's,
+since both are about the read path:
 
 - **AD-4 (amended):** the reader stays SELECT-only. SELECT-only is a **capability** control, not an
   **isolation** one — a reader that may read every row may read every association's rows. Isolation
@@ -125,10 +128,12 @@ not this story's job to clean them up.
 
 - Vitest for unit; `npm run test:db` for anything touching schema, adapters or `app/tools/` — this
   story touches all three, so **`test:db` is not optional here**.
-- AC8 and AC5 are the two that must not be vacuous. For AC8, breaking the catalog's association
-  filter must fail the test; for AC5, removing the gateway binding must fail it. Prove both by the
-  Step 9 sensitivity check rather than asserting them.
-- AC7 is a regression: `migrations/roles.test.ts` already exists and must still pass unchanged.
+- **AC6 is the one that must not be vacuous.** Dropping a composite foreign key must fail the
+  cross-association test, and the foreign-key coverage assertion must fail if a scoped key loses its
+  composite partner. Prove both by the Step 9 sensitivity check rather than asserting them. The
+  coverage check has already been vacuous once: read from `information_schema`, which shows only
+  constraints the connecting role owns, it returned zero rows and passed over an empty set.
+- AC5 is a regression: `migrations/roles.test.ts` already exists and must still pass unchanged.
 
 ### References
 
@@ -142,8 +147,8 @@ not this story's job to clean them up.
 **1. `vendor` is association-scoped.** It gets an `association_id` like any other table holding
 association data. Isolation wins over the letter of a deferral written before this story existed:
 `vendor` is the anchor for epic 4's detection, so leaving it global would let two associations share
-a vendor identity and a finding computed across both — which would make AC8's isolation claim
-narrower than it reads.
+a vendor identity and a finding computed across both — which would make story 5.1b's isolation
+claim narrower than it reads.
 
 **This makes the architecture's deferral entry stale, and Task 7 updates it.** It currently lists
 "per-tenant vendor tables" as still deferred. After this story, what remains deferred is row-level
@@ -212,7 +217,7 @@ No table is judged to hold none. `vendor` is scoped per the 2026-08-19 decision.
    worth stopping for.
 
 **OUT-OF-SCOPE**, recorded rather than silently skipped: row-level security (AD-4's amendment names
-the trigger, and AC9's guard is what forces the conversation), and cleaning up the `test_<hex>` rows
+the trigger, and story 5.1b's creation guard is what forces the conversation), and cleaning up the `test_<hex>` rows
 `test:db` has written into the pilot database.
 
 ### Debug Log References
