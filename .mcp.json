@@ -2,7 +2,9 @@
   "mcpServers": {
     "argus": {
       "command": "node",
-      "args": ["C:/Users/magee/repos/argus/argus-agent-ts/dist/mcp.mjs"]
+      "args": [
+        "C:/Users/magee/repos/argus-agent/dist/mcp.mjs"
+      ]
     }
   }
 }

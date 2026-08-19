@@ -31,3 +31,6 @@ Thumbs.db
 # Python bytecode. A probe script generated this and `git add -A` swept it in.
 __pycache__/
 *.pyc
+
+# Argus agent state: run records + learned lessons, machine-local
+.argus/
