@@ -122,6 +122,15 @@ development_status:
   # epic 6 -- adding a second intake channel before the first can be used by a
   # stranger was the wrong order.
   epic-5: backlog
+  5-1-the-association-exists: backlog  # the retrofit, and the AD-4/AD-5 amendments it rests on
+  5-2-a-document-declares-its-kind: backlog  # kind moves from the row to the upload; contract change
+  5-3-the-headers-we-were-given: backlog  # duplicates and blanks reported, not guessed
+  5-4-mapping-one-column-to-another: backlog  # drag AND keyboard, neither the poor relation
+  5-5-what-this-mapping-would-produce: backlog  # the preview, before anything is stored
+  5-6-a-guess-offered-not-applied: backlog  # FR-10; deterministic first, model on the residue
+  5-7-the-mapping-is-remembered: backlog  # and a mapping change is a deliberate act
+  5-8-the-order-that-works: backlog  # no deposits before a roll
+  5-9-the-first-directors: backlog  # retires or constrains scripts/add-board-member.mjs
   epic-5-retrospective: optional
   epic-6: backlog
   epic-6-retrospective: optional
@@ -212,7 +221,7 @@ action_items:
     owner: "Dev"
     status: open
   - epic: 2
-    action: "core/ports/unit-directory.test.ts declaredMethods matches only method-shorthand syntax (/^\s*(\w+)\s*\(/gm), so a write capability declared as a function-typed property (readonly record: (x) => Promise<void>) is invisible and the exhaustive read-only assertion still passes. Same hole was found and fixed in assessment-directory.test.ts on story 2.2; the fix is /^\s*(?:readonly\s+)?(\w+)\s*[:(]/gm."
+    action: "core/ports/unit-directory.test.ts declaredMethods matches only method-shorthand syntax (/^\\s*(\\w+)\\s*\\(/gm), so a write capability declared as a function-typed property (readonly record: (x) => Promise<void>) is invisible and the exhaustive read-only assertion still passes. Same hole was found and fixed in assessment-directory.test.ts on story 2.2; the fix is /^\\s*(?:readonly\\s+)?(\\w+)\\s*[:(]/gm."
     owner: "Dev"
     status: open
   - epic: 2
