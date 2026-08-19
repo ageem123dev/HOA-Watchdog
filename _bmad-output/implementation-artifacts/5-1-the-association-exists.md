@@ -78,7 +78,10 @@ alternative is threading a tenancy retrofit through stories that have already be
       filters by association; the registry test asserts it for *every* entry, present and future, in
       the shape `registry.test.ts` already applies to entry ids. (AC6)
 - [ ] **Task 6 — Prove the shape, and prove the refusal.** The two-association isolation test (AC8),
-      the reader-role regression (AC7), and the refusal of a second association (AC9).
+      the reader-role regression (AC7), and the no-product-path-creates-an-association guard (AC9).
+- [ ] **Task 7 — Update the architecture's multi-tenancy deferral.** `vendor` is scoped by this
+      story, so "per-tenant vendor tables" is no longer deferred; row-level security alone is. The
+      entry currently says otherwise and would mislead the next reader. (Decision 1)
 
 ## Dev Notes
 
@@ -140,27 +143,22 @@ not this story's job to clean them up.
   multi-tenancy deferral entry, now partly resolved
 - `docs/prd/prd.md` — FR-9, FR-10 (this story enables them; it implements neither)
 
-## Open questions — answer before Task 1
+## Decisions, taken 2026-08-19
 
-Both are decisions, not research. Task 1 cannot be completed honestly without them.
+**1. `vendor` is association-scoped.** It gets an `association_id` like any other table holding
+association data. Isolation wins over the letter of a deferral written before this story existed:
+`vendor` is the anchor for epic 4's detection, so leaving it global would let two associations share
+a vendor identity and a finding computed across both — which would make AC8's isolation claim
+narrower than it reads.
 
-**1. Does `vendor` get an `association_id`?** The architecture's deferral entry, as amended, still
-lists **per-tenant vendor tables** as deferred — which reads as "vendor stays global for now". But
-`vendor` is the anchor for detection (a vendor who charged more than usual, epic 4), so a global
-vendor table means two associations sharing a vendor identity and, potentially, a finding computed
-across both. The options:
+**This makes the architecture's deferral entry stale, and Task 7 updates it.** It currently lists
+"per-tenant vendor tables" as still deferred. After this story, what remains deferred is row-level
+security alone.
 
-- **Scope it** — `association_id` on `vendor`, contradicting the letter of a deferral that was
-  written before this story existed. Safest for isolation; makes the deferral entry stale.
-- **Leave it global** — honours the deferral, and makes AC8's isolation claim narrower than it
-  sounds: rows would not leak, but a vendor identity would be shared.
-
-Whichever is chosen, the deferral entry in the spine should be updated to say so, since it currently
-implies the answer without this story having been considered.
-
-**2. What is the pilot association called, and what is its id?** The backfill needs a name a
-treasurer would recognise, and a decision on whether the id is a fixed well-known UUID (simpler for
-seeds and fixtures, and makes the migration re-runnable by construction) or generated.
+**2. The pilot association is named `demo`, with a fixed well-known UUID.** A constant id rather than
+a generated one, so the backfill is idempotent by construction — re-running the migration cannot
+create a second row or re-point existing rows — and so seeds and fixtures can refer to it without a
+lookup. The constant lives in one place and is imported, never retyped.
 
 ## Dev Agent Record
 
