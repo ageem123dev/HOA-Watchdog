@@ -90,7 +90,7 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 4. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Every remaining path must appear in the run's manifest; one that appears in neither is unreviewed.
 
-5. **Triage.** Expect the same defect filed once per file it touches — three times on `3450d7d` — and a tail of documentation-comment nits. Verify each finding against the real file before acting on it; `ocr` re-files comments across files itself and warns when it does. Fix test-first, run 8a's gate, commit, then go back to 1.
+5. **Triage.** Expect the same defect filed once per file it touches — three times on `3450d7d` — and a tail of documentation-comment nits. Verify each finding against the real file before acting on it (step 7); `ocr` re-files comments across files itself and warns when it does. Fix test-first, run 8a's gate, commit, then go back to 1.
 
 6. **Push before Section 5** — `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
 
@@ -102,7 +102,15 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 It was tuned on a benchmark that excludes test files, so its judgement is weakest exactly where this project's defect class lives. **Argus and 8a's test-value pass stay load-bearing**, and every test-file finding is verified against the code before it is acted on.
 
-**Argus learning is suspended, deliberately.** `argus_ingest` reads CodeRabbit's file format and severity vocabulary and cannot read `ocr` output. Do not adapt one to the other before evaluating what `ocr` actually finds: ingesting a blind run's generic nitpicks as "the other reviewer found it, Argus missed it" would teach Argus to produce nitpicks.
+**7. Validate every finding before any of it reaches `argus_ingest`.** CodeRabbit's output was treated as ground truth and ingested unverified. `ocr`'s must not be. `argus_ingest` writes *everything in its input that Argus did not find* to memory as a miss — so a false positive there is not noise, it is a lesson teaching Argus to reproduce it. On the story 4.8 test scan a `high` finding claimed green tests "will fail"; it was wrong, specific, and confidently argued. Ingested, it would have taught Argus to flag correct tests as broken.
+
+   1. **Verify each finding against the real file.** Confirmed = the cited code exists, says what the finding claims, and the defect would actually manifest. Everything else is refuted — including "plausible, but the code does not do that".
+   2. **Dedup before counting.** `ocr` files one defect once per file it touches — three times on `3450d7d`. Three copies would become three lessons and skew the weighting.
+   3. **Only confirmed, deduped findings are ingested.** Record the refuted ones in Review Findings rather than discarding them silently: a reviewer's false-positive rate is a fact about the reviewer, and this one's is not zero.
+   4. **Severity maps into CodeRabbit's vocabulary**, which is what `argus_ingest` reads: `critical→critical`, `high→major`, `medium→minor`, `low→trivial`. It records critical and major by default, so an `ocr` `medium` is ingested only with `severities` overridden.
+   5. **Ingest before fixing, and pass `commit` explicitly.** A later round reviews different code and cannot score this one; without `commit` the join finds nothing and it silently learns nothing.
+
+   **This step is blocked until a converter exists.** `argus_ingest` parses CodeRabbit's stream — `{"type":"finding", fileName, severity, suggestions}` events plus a `complete` event carrying `reviewedFiles` — not `ocr`'s JSON. Nothing converts one to the other yet, so ingest cannot run and Argus learns nothing from `ocr` until it does. Steps 1–3 are still worth doing on their own: they are the triage in 5.
 
 ### 4c — The AC audit, before the MR
 
