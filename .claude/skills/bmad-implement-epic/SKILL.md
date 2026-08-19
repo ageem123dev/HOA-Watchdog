@@ -1,6 +1,6 @@
 ---
 name: bmad-implement-epic
-description: 'Implement an entire epic by running bmad-ship-story once per story, in order — each story gets its own branch, its own merge request to main, and its own CodeRabbit review cycle. Use when the user says "implement epic N", "ship epic N", or "run epic N".'
+description: 'Implement an entire epic by running bmad-ship-story once per story, in order — each story gets its own branch, its own merge request to main, and its own review cycle. Use when the user says "implement epic N", "ship epic N", or "run epic N".'
 ---
 
 # Implement Epic Pipeline
@@ -9,7 +9,7 @@ Run **`bmad-ship-story`** once per story, in order.
 
 **This is a loop, not a second pipeline.** It owns which epic, which stories, what order, when to stop, and the handoff between them. Branching, implementation, review, MR, and convergence all belong to `bmad-ship-story`. **If the two disagree, `bmad-ship-story` wins.**
 
-An earlier version batched a whole epic onto one branch behind a single epic MR, to avoid per-story CodeRabbit reviews and their rate limit. Stories here are large enough that one is already a substantial review, and epic-sized diffs cannot be read carefully. Fewer, larger stories also means fewer MRs, so the rate limit matters much less.
+An earlier version batched a whole epic onto one branch behind a single epic MR, to avoid per-story reviews and the rate limit the reviewer of the day imposed. That second reason is gone — the reviewer is local and synchronous now, and rate-limited by nothing — but the first never depended on it: stories here are large enough that one is already a substantial review, and epic-sized diffs cannot be read carefully.
 
 ## Hard rules
 
@@ -79,11 +79,11 @@ Each iteration starts from a freshly pulled `main`, so there is no epic branch a
 
 ## Out of scope
 
-It implements nothing (that is `bmad-dev-tdd`, via ship-story), runs no reviews (`bmad-code-review` and CodeRabbit, via ship-story), and neither merges nor judges a story good enough — those are the user's.
+It implements nothing (that is `bmad-dev-tdd`, via ship-story), runs no reviews (`bmad-code-review`, Argus and `ocr`, via ship-story), and neither merges nor judges a story good enough — those are the user's.
 
 ## Epic-level facts
 
-Toolchain, gates, CodeRabbit specifics and architecture invariants live in **`bmad-ship-story`** — a duplicated list drifts.
+Toolchain, gates, reviewer specifics and architecture invariants live in **`bmad-ship-story`** — a duplicated list drifts.
 
 - **Stories here are big.** Story 1.4 was 30 files, ~3,900 lines, 166 new tests, and drew 17 actionable findings on its first pass — two of them defects that made a stated guarantee untrue. That is why one MR per story.
 - **Order matters.** Epic 1's stories build directly on each other. A story started before its predecessor is in `main` either misses that work or drags it into its own MR.
