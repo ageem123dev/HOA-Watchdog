@@ -1,7 +1,7 @@
 ---
-Status: review
+Status: done
 baseline_commit: 04a94fefe53900c0b20b8902f3b127fc8e6f7ad9
-merge_request:
+merge_request: 71
 ---
 
 # Story 5.1b: The catalog answers for one association
@@ -479,6 +479,71 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `_bmad/custom/argus-review-routing.md`
 
+## Review Findings
+
+### The AC audit (before the merge request)
+
+Each criterion names the test that fails if the behaviour is removed, **and the sensitivity result
+that proves it would**. A name alone is what a vacuous test satisfies.
+
+| AC | Test | Sensitivity |
+| --- | --- | --- |
+| 1 | `adapters/auth/user-directory-postgres.test.ts::returns the association the member belongs to` | Dropped `association_id` from the SELECT → 3 of 5 fail |
+| 2 | `app/tools/v1/catalog/execute/route.test.ts::is refused when associationId is …` (4 values) | Removed the guard → all 5 refusal cases fail |
+| 3 | `catalog/registry.test.ts::scopes every association-owning table it reads…` | Deleted `unit.association_id = $1` → fails, naming the table |
+| 4 | `adapters/db/catalog-isolation.test.ts::answers association A with A's figures and nobody else's` | Removed both root predicates → 2 rows, not 1 |
+| 5 | `core/security/no-association-creation.test.ts::finds no INSERT into association in any of them` | Planted an insert in a product file → caught, named the file |
+
+**The audit's own limitation, stated.** AC4 is sensitive to the scoping *as a whole* and not to any
+single predicate, because migration 024's composite foreign keys make a child's association follow
+its parent's — so scoping either root suffices behaviourally and no behavioural test can isolate
+one. `registry.test.ts` is what holds each predicate individually, and its sensitivity was proved
+separately.
+
+### Reviews
+
+Five `argus_review` calls: one per task, plus the integration pass over
+`04a94fe..HEAD` (33 files, story and planning documents excluded — they are the review's spec, and
+reviewing them as a diff reviews the prose against itself).
+
+**Confirmed and fixed (2):**
+
+1. `[high]` `core/ports/query-log.test.ts` pins the port's members as exact signature strings, so
+   changing `record`'s return type broke it. **My own gate reading had missed it** — `npm test` was
+   piped through `tail -5`, which showed `exit 0`; that is `tail`'s exit code, and the summary four
+   lines above said `1 failed`. Fixed, and the habit corrected: read the summary line, never a
+   pipeline's exit code.
+2. `[info]` an orphaned `##` heading in `dues-status-v1.ts`, left when new sections were inserted
+   ahead of an existing one. Removed.
+
+**Refuted: none.** Nothing had to be argued down this time.
+
+**The integration pass returned no findings**, at `confidence: 1`, `audit_chain_ok: true`,
+`reflection_converged: true` — but `files_selected: 32` of `files_discovered: 38`
+(`selectivity: 0.75`), so it reasoned from a slice rather than the whole tree. Recorded because a
+clean verdict over three quarters of the context is weaker evidence than a clean verdict over all
+of it.
+
+**One review was discarded rather than used.** The first call passed
+`diff_file: "/tmp/task1.diff"` and returned a fluent, confident review of `core/ports/finding-reader.ts`
+and `core/ports/checked-documents.ts` — epic-4 files, absent from the diff — with
+`files_discovered: 5` against a 10-file change. Every signal said success. The MCP server resolves
+the path itself, so the POSIX form did not reach the file. Re-run with `C:/tmp/task1.diff` it
+reviewed the real change. Recorded in `_bmad/custom/argus-review-routing.md`, since it is the same
+silent-wrong-target shape that file already warns about for `repo_root`.
+
+### What the checks found that the tests did not
+
+Both vacuities in this story were found by the **sensitivity check**, not by a reviewer and not by
+the suite, which was green throughout:
+
+- the registry sweep's alias scanner silently skipped `unit`, so it verified two of three tables;
+- the isolation proof stayed green with a predicate deleted.
+
+Neither is a defect a mutation of *production* code could surface on its own — the first was a bug
+in a test's helper, the second a redundancy between predicates. This is the third story in a row
+where the gate found something the suite could not.
+
 ## Change Log
 
 | Date | Change |
@@ -486,3 +551,4 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 | 2026-08-19 | Split from story 5.1 |
 | 2026-08-20 | Context pass: files read, three constraints and one open question recorded; ready-for-dev |
 | 2026-08-20 | Tasks 1-5 implemented test-first; AD-14 decision taken by Matt; ready for review |
+| 2026-08-20 | Reviews triaged, AC audit clean, gates green, MR !71 opened — ready to merge |

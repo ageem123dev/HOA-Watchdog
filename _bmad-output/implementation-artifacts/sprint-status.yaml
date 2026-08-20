@@ -123,7 +123,7 @@ development_status:
   # stranger was the wrong order.
   epic-5: in-progress
   5-1-the-association-exists: done  # the schema retrofit and the write path
-  5-1b-the-catalog-answers-for-one-association: review  # split from 5.1: the read path
+  5-1b-the-catalog-answers-for-one-association: done  # split from 5.1: the read path
   5-2-a-document-declares-its-kind: backlog  # kind moves from the row to the upload; contract change
   5-3-the-headers-we-were-given: backlog  # duplicates and blanks reported, not guessed
   5-4-mapping-one-column-to-another: backlog  # drag AND keyboard, neither the poor relation
