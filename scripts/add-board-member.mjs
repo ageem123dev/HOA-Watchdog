@@ -35,8 +35,17 @@ try {
   const passwordHash = await hashPassword(password)
 
   const { rows } = await client.query(
-    `insert into board_member (email, password_hash, display_name)
-          values ($1, $2, $3)
+    // `association_id` is not null since story 5.1 and has no default, so this
+    // insert has to state one. `(select id from association)` rather than the
+    // pilot's literal id: a bare scalar subquery is exactly right while one
+    // association exists, and raises `more than one row returned by a subquery
+    // used as an expression` the moment a second does. That is the correct
+    // failure — this script writes `board_member` directly with the writer
+    // credential, and story 5.9 replaces it with a provisioning flow that knows
+    // which association a director belongs to. Failing loudly is better than
+    // silently enrolling somebody into the wrong board.
+    `insert into board_member (email, password_hash, display_name, association_id)
+          values ($1, $2, $3, (select id from association))
      on conflict (email) do update set password_hash = excluded.password_hash
        returning id, (xmax = 0) as created`,
     [email, passwordHash, displayName],
