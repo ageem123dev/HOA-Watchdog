@@ -316,7 +316,7 @@ describeWithDatabase('running dues_status@1', () => {
       )
 
       expect(rows[0]!.sql_text).toBe(duesStatusV1.sql)
-      expect(rows[0]!.sql_text).toContain('unit_normalised_number($1)')
+      expect(rows[0]!.sql_text).toContain('unit_normalised_number($2)')
     })
 
     it('records one row per execution, not one per entry', async () => {

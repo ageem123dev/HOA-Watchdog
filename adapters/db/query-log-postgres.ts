@@ -1,4 +1,4 @@
-import type { QueryLog, QueryLogEntry } from '../../core/ports/query-log'
+import type { QueryLog, QueryLogEntry, QueryLogRecord } from '../../core/ports/query-log'
 import { writerPool } from './pool'
 
 /**
@@ -18,7 +18,7 @@ import { writerPool } from './pool'
 
 export function createQueryLog(): QueryLog {
   return {
-    async record(entry: QueryLogEntry): Promise<string> {
+    async record(entry: QueryLogEntry): Promise<QueryLogRecord> {
       // `executed_at` is not in the column list. The database's `now()` default
       // stamps it, so the time in the audit trail is the database's and not a
       // caller's — an actor that could choose its own timestamp could put a
@@ -28,15 +28,20 @@ export function createQueryLog(): QueryLog {
       // send a JS object as a record literal. The cast is to `jsonb`, matching
       // the column, so migration 020's `jsonb_typeof(parameters) = 'object'`
       // check is what refuses an array or a scalar rather than this code.
-      const { rows } = await writerPool().query<{ id: string }>(
+      const { rows } = await writerPool().query<{ id: string; association_id: string }>(
         // `association_id` from the actor. A provenance row that claimed a
         // different association than the person who asked would be worse than
         // no row at all.
+        //
+        // Returned as well as written, because the query this record is *about*
+        // has to run under the same association. Reading it back off the row
+        // that was just written makes the two the same fact rather than two
+        // derivations that agree until one of them is edited.
         `insert into query_log
            (actor_id, entry_id, entry_version, parameters, sql_text, association_id)
          values ($1, $2, $3, $4::jsonb, $5,
                  (select association_id from board_member where id = $1))
-         returning id`,
+         returning id, association_id`,
         [
           entry.actorId,
           entry.entryId,
@@ -55,7 +60,7 @@ export function createQueryLog(): QueryLog {
         throw new Error('the provenance record was not written and the query must not run')
       }
 
-      return written.id
+      return { provenanceId: written.id, associationId: written.association_id }
     },
   }
 }

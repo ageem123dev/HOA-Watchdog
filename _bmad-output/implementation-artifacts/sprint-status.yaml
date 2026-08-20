@@ -123,7 +123,7 @@ development_status:
   # stranger was the wrong order.
   epic-5: in-progress
   5-1-the-association-exists: done  # the schema retrofit and the write path
-  5-1b-the-catalog-answers-for-one-association: backlog  # split from 5.1: the read path
+  5-1b-the-catalog-answers-for-one-association: review  # split from 5.1: the read path
   5-2-a-document-declares-its-kind: backlog  # kind moves from the row to the upload; contract change
   5-3-the-headers-we-were-given: backlog  # duplicates and blanks reported, not guessed
   5-4-mapping-one-column-to-another: backlog  # drag AND keyboard, neither the poor relation
@@ -137,6 +137,14 @@ development_status:
   epic-6-retrospective: optional
 
 action_items:
+  - epic: 5
+    action: "Amend AD-14's wording in the spine to name the pre-production exception. Story 5.1b edited dues_status@1 in place and re-pinned its digest, by explicit ruling from Matt on 2026-08-20, because AC3 (every entry scopes by association) and AD-14 (a published entry is frozen) could not both hold - published-versions.test.ts also forbids removing a published entry, since a query_log (entry_id, version) resolving to nothing breaks the trail exactly as an edit does. The grounds were that the pilot database holds test data only. As the spine reads today that decision looks like a violation rather than a ruling, and the next person to want an edit has a precedent with no stated limit"
+    owner: "Matt"
+    status: open
+  - epic: 5
+    action: "Scope the eight product read paths that still match on the normalised value alone: unit-directory (three queries), vendor-directory (three), vendor-resolution (two) and roll-repository's unit lookup. Migration 025 made unit and vendor identity keys composite on (association_id, ...), so these reads are unambiguous with one association and AMBIGUOUS with two. Story 5.1b scoped the catalog read path only - no acceptance criterion covered the product adapters. This is why core/security/no-association-creation.test.ts exists, and it must be done before that guard is relaxed"
+    owner: "Dev"
+    status: open
   - epic: 5
     action: "Retire or constrain scripts/add-board-member.mjs once story 5.9 lands a product provisioning flow. It writes board_member directly with WATCHDOG_WRITER_DATABASE_URL, so until then provisioning is permanently reachable by anyone holding a database URL - and FR-9 claims directors are provisioned through the product. Raised by CodeRabbit on MR !67"
     owner: "Dev"

@@ -10,8 +10,17 @@ import { hashPassword, needsRehash, verifyPassword } from './password'
  * put it at risk.
  */
 
+/**
+ * A rejection carries nothing but its kind — no id, no address, and no
+ * association. Which association an address belongs to is not an anonymous
+ * caller's to learn, and a result type with an optional user is one somebody
+ * eventually reads on the wrong branch.
+ */
 export type AuthenticationResult =
-  | { readonly kind: 'authenticated'; readonly user: { id: string; email: string } }
+  | {
+      readonly kind: 'authenticated'
+      readonly user: { id: string; email: string; associationId: string }
+    }
   | { readonly kind: 'rejected' }
 
 /** Emails are compared case-insensitively; nobody has two accounts differing by capitals. */
@@ -55,7 +64,10 @@ export async function authenticate(
 
   await upgradeHashIfStale(directory, user, password)
 
-  return { kind: 'authenticated', user: { id: user.id, email: user.email } }
+  return {
+    kind: 'authenticated',
+    user: { id: user.id, email: user.email, associationId: user.associationId },
+  }
 }
 
 /**

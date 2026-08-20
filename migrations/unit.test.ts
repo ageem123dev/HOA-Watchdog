@@ -250,12 +250,18 @@ describeWithDatabase('the unit table', () => {
       "select indexdef from pg_indexes where tablename = 'unit'",
     )
 
-    // On the indexed column, in parentheses -- not on the string appearing
+    // On the indexed columns, in parentheses -- not on the string appearing
     // anywhere in the definition, which the index's *name* already satisfies.
     // See the note on the text test above: the loose form stayed green with the
     // index pointed at `unit_number`.
+    //
+    // Scoped by association since migration 025: a unit number identifies a
+    // property *within one board's roll*. The global form this used to assert
+    // refused a second association its own "4B" outright, and -- worse --
+    // `roll-repository`'s `on conflict do update` resolved onto the first
+    // association's row instead of failing.
     expect(rows.map((r) => r.indexdef).join('\n')).toMatch(
-      /create unique index[^\n]*\(\s*normalised_number\s*\)/i,
+      /create unique index[^\n]*\(\s*association_id\s*,\s*normalised_number\s*\)/i,
     )
   })
 })

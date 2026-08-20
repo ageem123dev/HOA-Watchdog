@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import { authenticate } from '@/core/auth/authenticate'
+import { applyClaimsToSession, applyClaimsToToken } from './session-claims'
 import { createPostgresUserDirectory } from './user-directory-postgres'
 
 /**
@@ -57,18 +58,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         // reason, which matches the one-shape-for-every-failure rule in
         // core/auth/authenticate.
         return result.kind === 'authenticated'
-          ? { id: result.user.id, email: result.user.email }
+          ? {
+              id: result.user.id,
+              email: result.user.email,
+              associationId: result.user.associationId,
+            }
           : null
       },
     }),
   ],
   callbacks: {
+    // The rules live in `session-claims.ts`, where a test can call them without
+    // booting Auth.js. These two stay thin on purpose: mutate, then return the
+    // object Auth.js expects back.
     jwt: ({ token, user }) => {
-      if (user?.id !== undefined) token.sub = user.id
+      applyClaimsToToken(token, user)
       return token
     },
     session: ({ session, token }) => {
-      if (token.sub !== undefined) session.user.id = token.sub
+      applyClaimsToSession(session, token)
       return session
     },
   },

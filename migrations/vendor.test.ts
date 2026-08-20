@@ -341,17 +341,20 @@ describeWithDatabase('vendor', () => {
       // `similarity(...) >= floor` cannot use one, so the test proved only that
       // an unused object existed. The index that carries a rule is this one.
       const { rows } = await writer.query(
-        "select indexdef from pg_indexes where tablename = 'vendor' and indexname = 'vendor_normalised_name_key'",
+        "select indexdef from pg_indexes where tablename = 'vendor' and indexname = 'vendor_association_normalised_name_key'",
       )
 
       expect(rows).toHaveLength(1)
       expect(rows[0].indexdef).toMatch(/unique/i)
 
-      // Which column, not just which name. Recreated on `display_name` the
+      // Which columns, not just which name. Recreated on `display_name` the
       // index would still be unique and still be called this, while two
       // spellings of one vendor could coexist again -- the exact thing it is
       // here to stop. Raised in review.
-      expect(rows[0].indexdef).toMatch(/\(\s*normalised_name\s*\)\s*$/i)
+      //
+      // Scoped by association since migration 025: one "ACME Plumbing" per
+      // board, not one across every board the product will ever hold.
+      expect(rows[0].indexdef).toMatch(/\(\s*association_id\s*,\s*normalised_name\s*\)\s*$/i)
     })
   })
 })

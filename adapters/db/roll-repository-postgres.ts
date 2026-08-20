@@ -81,7 +81,7 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
                   (select association_id from document where id = $2)
              from unnest($1::text[]) with ordinality as t(x, n)
             order by unit_normalised_number(x), n
-           on conflict (normalised_number) do update set unit_number = excluded.unit_number`,
+           on conflict (association_id, normalised_number) do update set unit_number = excluded.unit_number`,
           [unitNumbers, documentId],
         )
 

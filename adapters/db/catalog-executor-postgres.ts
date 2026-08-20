@@ -81,7 +81,11 @@ export function createCatalogExecutorWith(
 
       validateParameters(entry.parameters, request.parameters)
 
-      const provenanceId = await dependencies.queryLog.record({
+      // The association comes back from the write rather than being asked for
+      // separately. Story 5.1b, AC2: it is derived from the board member the
+      // query is run for, and there is no argument on this path through which a
+      // caller could supply one.
+      const { provenanceId, associationId } = await dependencies.queryLog.record({
         actorId: request.actorId,
         entryId: entry.id,
         entryVersion: entry.version,
@@ -96,7 +100,10 @@ export function createCatalogExecutorWith(
       // request object in its own key order would answer about the wrong unit
       // whenever a caller happened to write the keys the other way round, and
       // the query would succeed while doing it.
-      const rows = await dependencies.runQuery(entry.sql, bindValues(entry, request.parameters))
+      const rows = await dependencies.runQuery(
+        entry.sql,
+        bindValues(entry, request.parameters, associationId),
+      )
 
       return { provenanceId, rows }
     },

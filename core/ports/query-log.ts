@@ -51,18 +51,43 @@ export interface QueryLogEntry {
   readonly sqlText: string
 }
 
+/**
+ * What the write gives back: the record's identity, and the association it
+ * resolved the actor to.
+ *
+ * The association is **returned rather than taken**, and that is the whole
+ * shape. It is derived from the board member the query is for, in SQL, inside
+ * the INSERT itself — so a caller cannot supply one, and the value the query
+ * then runs under is read off the same write that recorded it. Deriving it
+ * twice, once for the audit row and once for the query, would be two statements
+ * of one rule with nothing failing when they disagree.
+ */
+export interface QueryLogRecord {
+  /** The row's id. */
+  readonly provenanceId: string
+
+  /**
+   * The association the actor belongs to.
+   *
+   * Never null: `board_member.association_id` is `not null`, so an actor no
+   * board holds makes the derivation yield NULL and the insert is refused. The
+   * caller therefore either has a real association or has no provenance id, and
+   * with no provenance id it must not run the query at all.
+   */
+  readonly associationId: string
+}
+
 export interface QueryLog {
   /**
-   * Appends the record and returns its id.
+   * Appends the record and returns its id, with the association it derived.
    *
-   * Returning the id rather than `void` is what lets a caller prove the write
-   * happened before it did anything else — and it gives the executor something
-   * to hand back, so "was this logged?" is answerable from the result rather
-   * than by going and looking.
+   * Returning rather than resolving to `void` is what lets a caller prove the
+   * write happened before it did anything else — and it gives the executor both
+   * the receipt to hand back and the association to bind.
    *
    * It rejects rather than resolving on failure, and the caller must not
    * continue: an execution whose provenance write failed is the defect AD-12
    * names.
    */
-  record(entry: QueryLogEntry): Promise<string>
+  record(entry: QueryLogEntry): Promise<QueryLogRecord>
 }

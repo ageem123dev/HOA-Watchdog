@@ -14,6 +14,20 @@ export interface DirectoryUser {
   readonly passwordHash: string
   /** A member who has left the board keeps their audit trail but loses access. */
   readonly disabledAt: Date | null
+
+  /**
+   * The association this member sits on the board of.
+   *
+   * Not nullable, because `board_member.association_id` has been `not null`
+   * since migration 024 and has no default: a member without an association is
+   * a row the database will not store. Typing it as `string | null` here would
+   * invent a case that cannot occur and oblige every caller to handle it.
+   *
+   * It travels **with** the identity rather than behind a second lookup keyed on
+   * `id`. Two questions would leave a window between the answers, and nothing
+   * would fail when they disagreed.
+   */
+  readonly associationId: string
 }
 
 export interface UserDirectory {

@@ -118,7 +118,7 @@ export function createVendorResolution(): VendorResolution {
           // Derived rather than passed so the two cannot disagree.
           `insert into vendor (display_name, association_id)
            values ($1, (select association_id from document where id = $2))
-           on conflict (normalised_name) do nothing
+           on conflict (association_id, normalised_name) do nothing
            returning id`,
           [extractedName, documentId],
         )

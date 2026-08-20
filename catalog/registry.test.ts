@@ -103,8 +103,18 @@ describe('every entry in the catalog', () => {
       const placeholders = [...entry.sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]))
       const highest = placeholders.length === 0 ? 0 : Math.max(...placeholders)
 
-      expect(entry.bind).toHaveLength(highest)
+      // `$1` is the association and is **not** an entry parameter — the
+      // executor supplies it from the provenance write. So an entry declaring
+      // n parameters uses n+1 placeholders, and `bind` names the last n.
+      // Loosening this to `toHaveLength(highest)` would let an entry declare a
+      // parameter that lands on `$1` and let a caller choose the association.
+      expect(entry.bind).toHaveLength(highest - 1)
       expect(new Set(placeholders).size).toBe(highest)
+      expect(placeholders).toContain(1)
+
+      for (const name of entry.bind) {
+        expect(name).not.toBe('associationId')
+      }
 
       for (const name of entry.bind) {
         expect(Object.hasOwn(entry.parameters.properties, name)).toBe(true)
@@ -140,6 +150,134 @@ describe('every entry in the catalog', () => {
       expect(entry.sql).not.toMatch(/\b(insert|update|delete|truncate|drop|alter|create|grant)\b/i)
       expect(entry.sql).not.toContain('${')
       expect(entry.sql).not.toContain(';')
+    },
+  )
+
+  /**
+   * AC3, and the assertion the whole story rests on: **every entry scopes every
+   * scoped table it touches to `$1`.**
+   *
+   * Enforced here rather than judged at review, because AD-5's registry test can
+   * only catch a predicate it can *see*. `strict: true` guarantees an entry's
+   * arguments are well-formed; it says nothing about whether the query is
+   * bounded, and parameter validation cannot save an entry that never scoped.
+   *
+   * A grep for the string `association_id` would pass on an entry that merely
+   * mentions it in a comment, or that scopes one of its three tables. So this
+   * walks the `from`/`join` clauses, takes the alias each scoped table is bound
+   * to, and requires a predicate joining *that alias* to `$1`.
+   */
+  const SCOPED_TABLES = new Set([
+    'board_member',
+    'document',
+    'extraction',
+    'vendor',
+    'quarantine_item',
+    'unit',
+    'unit_holder',
+    'unit_membership',
+    'assessment',
+    'payment',
+    'held_payment',
+    'query_log',
+    'finding',
+    'finding_alert',
+  ])
+
+  /**
+   * The word that cannot follow a table name and still be its alias.
+   *
+   * Without this the scanner reads `from assessment join unit` as "assessment
+   * aliased to join", then demands `join.association_id = $1` and fails an entry
+   * that is perfectly scoped. Found by this test failing on its own first run.
+   */
+  const NOT_AN_ALIAS = [
+    'on',
+    'using',
+    'where',
+    'group',
+    'order',
+    'having',
+    'limit',
+    'offset',
+    'join',
+    'left',
+    'right',
+    'inner',
+    'outer',
+    'full',
+    'cross',
+    'natural',
+    'union',
+  ]
+
+  /**
+   * The keyword list is a **lookahead**, not a post-hoc filter, and the
+   * difference is the whole correctness of this scanner.
+   *
+   * Written as a filter — match the alias, then discard it if it turns out to be
+   * a keyword — the optional group still *consumes* the word. So
+   * `from assessment join unit` matched as "assessment, aliased join", ate the
+   * `join`, and the next scan began at `unit on …` with no `from`/`join` in
+   * front of it. `unit` was never seen, and the sweep below silently checked two
+   * of this entry's three tables. Deleting `unit.association_id = $1` left the
+   * suite green; the sensitivity check is what found it.
+   */
+  const TABLE_REFERENCE = new RegExp(
+    `\\b(?:from|join)\\s+([a-z_][a-z0-9_]*)` +
+      `(?:\\s+(?:as\\s+)?(?!(?:${NOT_AN_ALIAS.join('|')})\\b)([a-z_][a-z0-9_]*))?`,
+    'gi',
+  )
+
+  /** Every `from`/`join` target, as `[table, alias]`; the alias defaults to the table. */
+  function tableReferences(sql: string): [string, string][] {
+    return [...sql.matchAll(TABLE_REFERENCE)].map((match) => [
+      match[1]!.toLowerCase(),
+      (match[2] ?? match[1]!).toLowerCase(),
+    ])
+  }
+
+  /**
+   * The scanner gets its own tests because the sweep below is only as good as
+   * it is, and a table it fails to see is a table nobody checks — which is a
+   * green suite reporting an invariant it never tested.
+   */
+  describe('the table scanner the sweep depends on', () => {
+    it('sees every table in a from/join/left-join chain', () => {
+      expect(
+        tableReferences('from assessment join unit on unit.id = 1 left join payment on 2 = 2'),
+      ).toEqual([
+        ['assessment', 'assessment'],
+        ['unit', 'unit'],
+        ['payment', 'payment'],
+      ])
+    })
+
+    it('reads a real alias, with and without AS', () => {
+      expect(tableReferences('from assessment a join unit as u on 1 = 1')).toEqual([
+        ['assessment', 'a'],
+        ['unit', 'u'],
+      ])
+    })
+  })
+
+  it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
+    // No `$1` in this title: vitest reads `$name` in an `it.each` title as a
+    // property of the case object, so it would print the whole entry.
+    '%s scopes every association-owning table it reads to the association placeholder',
+    (_label, entry) => {
+      const references = tableReferences(entry.sql).filter(([table]) => SCOPED_TABLES.has(table))
+
+      // Not vacuous: an entry that reads no scoped table at all would pass this
+      // sweep by touching nothing, so say out loud that it touched something.
+      expect(references.length).toBeGreaterThan(0)
+
+      for (const [table, alias] of references) {
+        expect(
+          entry.sql,
+          `${entry.id}@${entry.version} reads ${table} as "${alias}" without binding it to $1`,
+        ).toMatch(new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`))
+      }
     },
   )
 })

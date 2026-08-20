@@ -29,11 +29,15 @@ const WITH_AN_OPTIONAL: CatalogEntry = {
   bind: ['unitNumber', 'since'],
 }
 
+/** The association the executor supplies; always `$1`, never a caller's to choose. */
+const ASSOCIATION = '00000000-0000-7000-8000-000000000001'
+
 describe('binding a parameter set to a query', () => {
   it('orders the values as the entry declares, not as the caller wrote them', () => {
     expect(duesStatusV1.bind).toEqual(['unitNumber', 'assessmentYear'])
 
-    expect(bindValues(duesStatusV1, { assessmentYear: 2026, unitNumber: '4B' })).toEqual([
+    expect(bindValues(duesStatusV1, { assessmentYear: 2026, unitNumber: '4B' }, ASSOCIATION)).toEqual([
+      ASSOCIATION,
       '4B',
       2026,
     ])
@@ -46,18 +50,25 @@ describe('binding a parameter set to a query', () => {
    * every *other* caller sees: a fake in a test, a logger, a future driver.
    */
   it('binds an omitted optional parameter as null, never as undefined', () => {
-    const values = bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B' })
+    const values = bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B' }, ASSOCIATION)
 
-    expect(values).toEqual(['4B', null])
-    expect(values[1]).not.toBeUndefined()
+    expect(values).toEqual([ASSOCIATION, '4B', null])
+    // Index 2, not 1: the association took `$1`, so the optional parameter this
+    // test is about is the third value.
+    expect(values[2]).not.toBeUndefined()
   })
 
   it('binds an explicitly null optional parameter as null', () => {
-    expect(bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B', since: null })).toEqual(['4B', null])
+    expect(bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B', since: null }, ASSOCIATION)).toEqual([
+      ASSOCIATION,
+      '4B',
+      null,
+    ])
   })
 
   it('binds a supplied optional parameter as itself', () => {
-    expect(bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B', since: '2026-01-01' })).toEqual([
+    expect(bindValues(WITH_AN_OPTIONAL, { unitNumber: '4B', since: '2026-01-01' }, ASSOCIATION)).toEqual([
+      ASSOCIATION,
       '4B',
       '2026-01-01',
     ])
@@ -73,7 +84,7 @@ describe('binding a parameter set to a query', () => {
     ['a zero', 0, 0],
     ['false', false, false],
   ])('binds %s as itself rather than as null', (_label, supplied, expected) => {
-    expect(bindValues(duesStatusV1, { unitNumber: supplied, assessmentYear: 2026 })[0]).toBe(
+    expect(bindValues(duesStatusV1, { unitNumber: supplied, assessmentYear: 2026 }, ASSOCIATION)[1]).toBe(
       expected,
     )
   })
@@ -90,7 +101,7 @@ describe('binding a parameter set to a query', () => {
     const inherited = Object.create({ since: 'never validated' }) as Record<string, unknown>
     inherited.unitNumber = '4B'
 
-    expect(bindValues(WITH_AN_OPTIONAL, inherited)).toEqual(['4B', null])
+    expect(bindValues(WITH_AN_OPTIONAL, inherited, ASSOCIATION)).toEqual([ASSOCIATION, '4B', null])
   })
 
   it('binds nothing for an entry with no placeholders', () => {
@@ -103,6 +114,6 @@ describe('binding a parameter set to a query', () => {
       bind: [],
     }
 
-    expect(bindValues(noParameters, {})).toEqual([])
+    expect(bindValues(noParameters, {}, ASSOCIATION)).toEqual([ASSOCIATION])
   })
 })

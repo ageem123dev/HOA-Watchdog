@@ -184,6 +184,56 @@ describe('POST /tools/v1/catalog/execute', () => {
     })
   })
 
+  /**
+   * AC2, and the half of it that carries the weight. AD-5 stops a model
+   * *authoring* SQL; it says nothing about a model choosing whose records the
+   * reviewed SQL runs against. The agent service holds this endpoint's token,
+   * so an instruction smuggled through a document could try exactly that.
+   *
+   * Refused rather than ignored, deliberately. Ignoring is safe — nothing reads
+   * the field — but it is safe silently, and a caller that supplies a parameter
+   * and gets a 200 has been told it worked. The association is derived from the
+   * board member the query is run for and there is no request shape that can
+   * influence it.
+   */
+  describe('a request that tries to choose its own association', () => {
+    it.each([
+      ['a real-looking id', '00000000-0000-7000-8000-000000000002'],
+      ['null', null],
+      ['an empty string', ''],
+      ['a number', 7],
+    ])('is refused when associationId is %s', async (_label, value) => {
+      const response = await call({ payload: body({ associationId: value }) })
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toMatchObject({ code: 'invalid_request' })
+    })
+
+    /**
+     * The presence of the key is the refusal, not its truthiness. A guard
+     * written as `if (payload.associationId)` lets `null`, `''` and `0`
+     * through — and a caller probing for a way in learns which values the
+     * endpoint does not mind receiving.
+     */
+    it('never reaches the executor, so nothing is logged for a refused request', async () => {
+      await call({ payload: body({ associationId: 'anything' }) })
+
+      expect(execute).not.toHaveBeenCalled()
+    })
+
+    /**
+     * 401 outranks 400. Answering "your associationId is not allowed" to a
+     * caller holding no token would confirm the field exists to someone who has
+     * not authenticated at all.
+     */
+    it('answers 401 rather than 400 when the caller is not the agent service', async () => {
+      const response = await call({ token: 'wrong', payload: body({ associationId: 'x' }) })
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+    })
+  })
+
   describe('what the executor refuses', () => {
     it('answers 404 when the catalog holds no such entry', async () => {
       const error = new Error('the catalog holds no entry called drop_everything')

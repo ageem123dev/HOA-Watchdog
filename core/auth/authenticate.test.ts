@@ -25,6 +25,7 @@ async function member(
     email: 'director@association.example',
     passwordHash: await hashPassword(password, FAST),
     disabledAt: null,
+    associationId: 'association-a',
     ...rest,
   }
 }
@@ -48,7 +49,31 @@ describe('authenticate', () => {
       password: 'correct-passphrase',
     })
 
-    expect(result).toEqual({ kind: 'authenticated', user: { id: user.id, email: user.email } })
+    expect(result).toEqual({
+      kind: 'authenticated',
+      user: { id: user.id, email: user.email, associationId: 'association-a' },
+    })
+  })
+
+  /**
+   * The association travels with the identity, so a caller cannot hold one
+   * without the other. A separate lookup keyed on the id would be a second
+   * question with a window between the two answers, and nothing failing when
+   * they disagree.
+   *
+   * `toEqual` above is exact, so this is not the only thing holding the shape —
+   * but that test reads as "sign-in works" and would be relaxed by someone who
+   * did not know the association was load-bearing. This one says why.
+   */
+  it('answers with the association the member belongs to', async () => {
+    const user = await member({ associationId: 'association-b' })
+
+    const result = await authenticate(fakeDirectory([user]), {
+      email: user.email,
+      password: 'correct-passphrase',
+    })
+
+    expect(result.kind === 'authenticated' && result.user.associationId).toBe('association-b')
   })
 
   it('accepts an address typed with different capitalisation', async () => {
