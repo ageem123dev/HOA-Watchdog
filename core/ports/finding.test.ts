@@ -89,9 +89,15 @@ describe('what a detector may supply', () => {
     // detector that could set any of them could raise a finding already marked
     // reviewed — which is dismissal with the paperwork filled in — or backdate
     // one out of the window an auditor is looking at.
+    // `documentId` joined them in 5.1 and is deliberately here rather than
+    // absent: it names the run that surfaced the finding, which is how the
+    // adapter reads an association without resolving through `subjectId` --
+    // untyped as a foreign key on purpose. It says nothing about the finding's
+    // lifecycle, so the rule this case guards is intact.
     expect(declaredMembers(source, 'FindingObservation')).toEqual([
       'readonly findingType: string',
       'readonly subjectId: string',
+      'readonly documentId: string',
       'readonly period: FindingPeriod',
       'readonly evidence: Readonly<Record<string, unknown>>',
     ])

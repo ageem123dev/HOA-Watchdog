@@ -78,8 +78,7 @@ describeWithDatabase('document.extraction_state', () => {
     await Promise.all([writer.connect(), reader.connect()])
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`state-test-${RUN_PREFIX}@example.test`],
     )
@@ -103,9 +102,7 @@ describeWithDatabase('document.extraction_state', () => {
     counter += 1
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, $3, 'application/pdf', 1024, $4)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, $3, 'application/pdf', 1024, $4, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${RUN_PREFIX}/${counter}`, `scan-${counter}.pdf`, uploader],
     )
@@ -190,8 +187,7 @@ describeWithDatabase('document.extraction_state', () => {
         await other.query('begin')
         await other.query('delete from extraction where document_id = $1', [id])
         await other.query(
-          `insert into extraction (document_id, document_kind, currency)
-           values ($1, 'invoice', 'USD')`,
+          `insert into extraction (document_id, document_kind, currency, association_id) values ($1, 'invoice', 'USD', '00000000-0000-7000-8000-000000000001')`,
           [id],
         )
         await other.query("update document set extraction_state = 'read' where id = $1", [id])

@@ -106,8 +106,7 @@ describeWithDatabase('a payment', () => {
     await reader.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`payment-${RUN_PREFIX}@example.test`],
     )
@@ -131,9 +130,7 @@ describeWithDatabase('a payment', () => {
   const newDocument = async (): Promise<string> => {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'deposits.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
@@ -142,7 +139,7 @@ describeWithDatabase('a payment', () => {
 
   const newUnit = async (suffix = '4B'): Promise<string> => {
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named(suffix)],
     )
     return rows[0]!.id
@@ -150,7 +147,7 @@ describeWithDatabase('a payment', () => {
 
   const pay = (unitId: string, documentId: string, amount: string, paidOn = '2024-03-01') =>
     writer.query(
-      'insert into payment (unit_id, document_id, paid_on, amount) values ($1, $2, $3::date, $4)',
+      'insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, $3::date, $4, \'00000000-0000-7000-8000-000000000001\')',
       [unitId, documentId, paidOn, amount],
     )
 
@@ -248,7 +245,7 @@ describeWithDatabase('a payment', () => {
 
     await expect(
       writer.query(
-        'insert into payment (unit_id, document_id, paid_on, amount) values ($1, $2, null, $3)',
+        'insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, null, $3, \'00000000-0000-7000-8000-000000000001\')',
         [unitId, documentId, '120.00'],
       ),
     ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
@@ -317,7 +314,7 @@ describeWithDatabase('a payment', () => {
 
     await expect(
       reader.query(
-        'insert into payment (unit_id, document_id, paid_on, amount) values ($1, $2, $3::date, $4)',
+        'insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, $3::date, $4, \'00000000-0000-7000-8000-000000000001\')',
         [unitId, documentId, '2024-04-01', '1.00'],
       ),
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })

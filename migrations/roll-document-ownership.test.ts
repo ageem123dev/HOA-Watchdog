@@ -136,46 +136,40 @@ describeWithDatabase('against the live schema', () => {
     const contentHash = randomBytes(32).toString('hex')
 
     const member = await client.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001') returning id`,
       [`${uniq('member')}@example.test`],
     )
     const uploadedBy = member.rows[0]!.id
 
     const document = await client.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'roll.csv', 'text/csv', 10, $3) returning id`,
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'roll.csv', 'text/csv', 10, $3, '00000000-0000-7000-8000-000000000001') returning id`,
       [contentHash, `documents/${contentHash}`, uploadedBy],
     )
     const documentId = document.rows[0]!.id
 
     const unit = await client.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [uniq('4B')],
     )
     const unitId = unit.rows[0]!.id
 
     const holder = await client.query<{ id: string }>(
-      'insert into unit_holder (full_name, document_id) values ($1, $2) returning id',
+      'insert into unit_holder (full_name, document_id, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\') returning id',
       [`${RUN_PREFIX} Jane Smith`, documentId],
     )
 
     await client.query(
-      `insert into unit_membership (unit_id, holder_id, held_during, document_id)
-       values ($1, $2, daterange($3::date, null), $4)`,
+      `insert into unit_membership (unit_id, holder_id, held_during, document_id, association_id) values ($1, $2, daterange($3::date, null), $4, '00000000-0000-7000-8000-000000000001')`,
       [unitId, holder.rows[0]!.id, '2019-03-01', documentId],
     )
 
     await client.query(
-      `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle)
-       values ($1, 2026, '3600.00', 'monthly')`,
+      `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, 2026, '3600.00', 'monthly', '00000000-0000-7000-8000-000000000001')`,
       [unitId],
     )
 
     await client.query(
-      `insert into payment (unit_id, document_id, paid_on, amount)
-       values ($1, $2, '2026-03-01'::date, '300.00')`,
+      `insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, '2026-03-01'::date, '300.00', '00000000-0000-7000-8000-000000000001')`,
       [unitId, documentId],
     )
 
@@ -201,19 +195,18 @@ describeWithDatabase('against the live schema', () => {
     await seed()
 
     const holder = await client.query<{ id: string }>(
-      'insert into unit_holder (full_name) values ($1) returning id',
+      'insert into unit_holder (full_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [`${RUN_PREFIX} Nobody In Particular`],
     )
 
     // A different unit, so the exclusion constraint is not what is under test.
     const other = await client.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [uniq('9Z')],
     )
 
     await client.query(
-      `insert into unit_membership (unit_id, holder_id, held_during)
-       values ($1, $2, daterange('2020-01-01'::date, null))`,
+      `insert into unit_membership (unit_id, holder_id, held_during, association_id) values ($1, $2, daterange('2020-01-01'::date, null), '00000000-0000-7000-8000-000000000001')`,
       [other.rows[0]!.id, holder.rows[0]!.id],
     )
 

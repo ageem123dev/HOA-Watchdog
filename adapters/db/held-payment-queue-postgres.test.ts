@@ -35,8 +35,7 @@ describeWithDatabase('the held payment queue', () => {
     readerPool = new Pool({ connectionString: readerUrl, max: 2 })
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`held-queue-${RUN_PREFIX}@example.test`],
     )
@@ -55,9 +54,7 @@ describeWithDatabase('the held payment queue', () => {
   const newDocument = async (filename: string): Promise<string> => {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, $3, 'text/csv', 512, $4)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, $3, 'text/csv', 512, $4, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, filename, boardMemberId],
     )
@@ -69,8 +66,7 @@ describeWithDatabase('the held payment queue', () => {
     // deliberately not the storage key or the folded reference.
     const documentId = await newDocument(`${RUN_PREFIX}-march.csv`)
     await writer.query(
-      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-       values ($1, '  9z Upper ', '2024-05-04'::date, '61.23', 'unknown-unit')`,
+      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '  9z Upper ', '2024-05-04'::date, '61.23', 'unknown-unit', '00000000-0000-7000-8000-000000000001')`,
       [documentId],
     )
 
@@ -95,8 +91,7 @@ describeWithDatabase('the held payment queue', () => {
     // the day west of UTC, and a coerced `numeric` loses its scale.
     const documentId = await newDocument(`${RUN_PREFIX}-types.csv`)
     await writer.query(
-      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-       values ($1, '4B', '2024-01-01'::date, '120.00', 'unknown-unit')`,
+      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '4B', '2024-01-01'::date, '120.00', 'unknown-unit', '00000000-0000-7000-8000-000000000001')`,
       [documentId],
     )
 
@@ -112,8 +107,7 @@ describeWithDatabase('the held payment queue', () => {
   it('reports absence as null rather than inventing a value', async () => {
     const documentId = await newDocument(`${RUN_PREFIX}-partial.csv`)
     await writer.query(
-      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-       values ($1, '4B', null, '120.00', 'missing-date')`,
+      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '4B', null, '120.00', 'missing-date', '00000000-0000-7000-8000-000000000001')`,
       [documentId],
     )
 

@@ -97,8 +97,7 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await admin.connect()
 
     const { rows } = await admin.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`repo-test-${Date.now()}@example.test`],
     )
@@ -110,6 +109,43 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await admin.query('delete from board_member where id = $1', [boardMemberId])
     await admin.end()
     await pool.end()
+  })
+
+  it("records the document under the uploader's association, not the pilot's", async () => {
+    // The AC audit's finding. Every other case here runs with one association,
+    // where any derivation — right, wrong, or a hard-coded constant — produces
+    // the same answer, so "derives its association from the uploader" was true
+    // but unfalsifiable. A second association is what makes it provable: this
+    // fails if the adapter stops reading the uploader's association, and it
+    // fails just as loudly if someone replaces the subquery with the demo id.
+    const { rows: made } = await admin.query<{ id: string }>(
+      'insert into association (name) values ($1) returning id',
+      [`repo-test-second-${Date.now()}`],
+    )
+    const second = made[0]!.id
+
+    const { rows: members } = await admin.query<{ id: string }>(
+      `insert into board_member (email, password_hash, association_id)
+       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', $2)
+       returning id`,
+      [`repo-second-${Date.now()}@example.test`, second],
+    )
+    const theirs = members[0]!.id
+
+    try {
+      const recorded = await repository.record(newDocument(`second-${Date.now()}`, theirs))
+      const { rows } = await admin.query<{ association_id: string }>(
+        'select association_id from document where id = $1',
+        [recorded.id],
+      )
+
+      expect(rows[0]!.association_id).toBe(second)
+      expect(rows[0]!.association_id).not.toBe('00000000-0000-7000-8000-000000000001')
+    } finally {
+      await admin.query('delete from document where uploaded_by = $1', [theirs])
+      await admin.query('delete from board_member where id = $1', [theirs])
+      await admin.query('delete from association where id = $1', [second])
+    }
   })
 
   it('records a document and reports it as new', async () => {
@@ -221,9 +257,7 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     try {
       await holder.query('begin')
       const { rows } = await holder.query<{ id: string }>(
-        `insert into document
-           (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-         values ($1, $2, $3, $4, $5, $6)
+        `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, $3, $4, $5, $6, '00000000-0000-7000-8000-000000000001')
          returning id`,
         [
           document.contentHash,
@@ -259,12 +293,19 @@ describeWithDatabase('createPostgresDocumentRepository', () => {
     await expect(repository.record(document)).rejects.toMatchObject({ code: '23514' })
   })
 
-  it('lets an unknown uploader escape as a foreign-key violation', async () => {
+  it('lets an unknown uploader escape as a database violation', async () => {
+    // Story 5.1 changed which constraint answers first, not whether one does.
+    // `association_id` is derived from the uploader and is `not null`, so an
+    // unknown uploader leaves it null and the not-null check fires before the
+    // foreign key on `uploaded_by` is reached. The assertion is updated rather
+    // than relaxed: it still pins a specific code, and the case it exists to
+    // catch — an unknown uploader being read as "already held" and resolving
+    // quietly — would fail here as loudly as before.
     const document = {
       ...newDocument(`bad-user-${Date.now()}`, '00000000-0000-7000-8000-000000000000'),
     }
 
-    await expect(repository.record(document)).rejects.toMatchObject({ code: '23503' })
+    await expect(repository.record(document)).rejects.toMatchObject({ code: '23502' })
   })
 
 

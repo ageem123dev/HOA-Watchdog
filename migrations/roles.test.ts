@@ -95,7 +95,7 @@ describeWithDatabase('AD-4: the two database roles', () => {
     it('cannot INSERT', async () => {
       await expect(
         reader.query(
-          "insert into board_member (email, password_hash) values ('intruder@example.com', 'scrypt$1$1$1$x$y')",
+          "insert into board_member (email, password_hash, association_id) values ('intruder@example.com', 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001')",
         ),
       ).rejects.toThrow(/permission denied/i)
     })
@@ -198,7 +198,7 @@ describeWithDatabase('AD-4: the two database roles', () => {
 
     it('can INSERT, UPDATE and DELETE, because ingestion must', async () => {
       await writer.query(
-        'insert into board_member (email, password_hash) values ($1, $2) on conflict (email) do nothing',
+        'insert into board_member (email, password_hash, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\') on conflict (email) do nothing',
         [email, 'scrypt$131072$8$1$c2FsdA$aGFzaA'],
       )
       await writer.query('update board_member set display_name = $1 where email = $2', [
@@ -218,7 +218,7 @@ describeWithDatabase('AD-4: the two database roles', () => {
   describe('the schema constraints hold against a real database', () => {
     it('rejects a mixed-case email, which would never match a lower-cased lookup', async () => {
       await expect(
-        writer.query('insert into board_member (email, password_hash) values ($1, $2)', [
+        writer.query('insert into board_member (email, password_hash, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           'MixedCase@example.invalid',
           'scrypt$131072$8$1$c2FsdA$aGFzaA',
         ]),
@@ -227,7 +227,7 @@ describeWithDatabase('AD-4: the two database roles', () => {
 
     it('rejects a password hash that is not in the format this system writes', async () => {
       await expect(
-        writer.query('insert into board_member (email, password_hash) values ($1, $2)', [
+        writer.query('insert into board_member (email, password_hash, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           'bcrypt-user@example.invalid',
           '$2b$12$abcdefghijklmnopqrstuv',
         ]),

@@ -124,8 +124,7 @@ describeWithDatabase('a deposit line', () => {
     await reader.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`deposit-kind-${RUN_PREFIX}@example.test`],
     )
@@ -145,9 +144,7 @@ describeWithDatabase('a deposit line', () => {
   const newDocument = async (): Promise<string> => {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'deposits.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
@@ -157,8 +154,7 @@ describeWithDatabase('a deposit line', () => {
   const line = async (unitReference: string | null) => {
     const documentId = await newDocument()
     return writer.query(
-      `insert into extraction (document_id, document_kind, unit_reference, total_amount, currency)
-       values ($1, 'deposit', $2, '120.00', 'USD')`,
+      `insert into extraction (document_id, document_kind, unit_reference, total_amount, currency, association_id) values ($1, 'deposit', $2, '120.00', 'USD', '00000000-0000-7000-8000-000000000001')`,
       [documentId, unitReference],
     )
   }
@@ -175,8 +171,7 @@ describeWithDatabase('a deposit line', () => {
     // unit a payment belongs to.
     const documentId = await newDocument()
     await writer.query(
-      `insert into extraction (document_id, document_kind, unit_reference, total_amount, currency)
-       values ($1, 'deposit', '  4b Upper  ', '120.00', 'USD')`,
+      `insert into extraction (document_id, document_kind, unit_reference, total_amount, currency, association_id) values ($1, 'deposit', '  4b Upper  ', '120.00', 'USD', '00000000-0000-7000-8000-000000000001')`,
       [documentId],
     )
 
@@ -219,8 +214,7 @@ describeWithDatabase('a deposit line', () => {
     // payment's unit.
     const documentId = await newDocument()
     await writer.query(
-      `insert into extraction (document_id, document_kind, unit_reference, total_amount, currency)
-       values ($1, 'deposit', '7A', '120.00', 'USD')`,
+      `insert into extraction (document_id, document_kind, unit_reference, total_amount, currency, association_id) values ($1, 'deposit', '7A', '120.00', 'USD', '00000000-0000-7000-8000-000000000001')`,
       [documentId],
     )
 
@@ -232,8 +226,7 @@ describeWithDatabase('a deposit line', () => {
 
     await expect(
       reader.query(
-        `insert into extraction (document_id, document_kind, unit_reference, currency)
-         values ($1, 'deposit', '9Z', 'USD')`,
+        `insert into extraction (document_id, document_kind, unit_reference, currency, association_id) values ($1, 'deposit', '9Z', 'USD', '00000000-0000-7000-8000-000000000001')`,
         [documentId],
       ),
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })

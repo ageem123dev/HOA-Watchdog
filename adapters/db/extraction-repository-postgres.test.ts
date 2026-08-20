@@ -32,7 +32,7 @@ if (!configured) {
   )
 }
 
-const FOREIGN_KEY_VIOLATION = '23503'
+const NOT_NULL_VIOLATION = '23502'
 const RUN = randomBytes(8).toString('hex')
 let counter = 0
 
@@ -64,8 +64,7 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     await admin.connect()
 
     const { rows } = await admin.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`extraction-repo-${RUN}@example.test`],
     )
@@ -85,9 +84,7 @@ describeWithDatabase('createPostgresExtractionRepository', () => {
     counter += 1
     const hash = `${RUN}${counter.toString(16).padStart(64 - RUN.length, '0')}`
     const { rows } = await admin.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'ledger.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'ledger.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
@@ -244,9 +241,15 @@ unitReference: null,
     })
 
     it('refuses a document that does not exist', async () => {
+      // Story 5.1 changed which constraint answers first, not whether one does.
+      // `association_id` is derived from the parent document and is `not null`,
+      // so an unknown document leaves it null and the not-null check fires
+      // before the foreign key on `document_id` is reached. Both describe the
+      // same refusal; the assertion is updated rather than relaxed, and it still
+      // pins a specific code so a write that silently succeeded would fail here.
       await expect(
         repository.replace('00000000-0000-7000-8000-000000000000', [record()]),
-      ).rejects.toMatchObject({ code: FOREIGN_KEY_VIOLATION })
+      ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
     })
   })
 

@@ -116,7 +116,7 @@ describeWithDatabase('vendor', () => {
   describe('storing one', () => {
     it('accepts a plain name and gives it an id', async () => {
       const { rows } = await writer.query(
-        'insert into vendor (display_name) values ($1) returning id, display_name',
+        'insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id, display_name',
         [named('Evergreen Landscaping')],
       )
 
@@ -128,19 +128,19 @@ describeWithDatabase('vendor', () => {
       // char_length('   ') is 3. Migration 006 learned this on vendor_name and
       // the same trap is here: a vendor made of spaces satisfies a bare bound.
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', ['   ']),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', ['   ']),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
     it('refuses an empty name', async () => {
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', ['']),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', ['']),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
     it('refuses a name past the bound extraction already enforces', async () => {
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [
           'x'.repeat(VENDOR_NAME_MAX_LENGTH + 1),
         ]),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
@@ -153,7 +153,7 @@ describeWithDatabase('vendor', () => {
 
       expect(atLimit).toHaveLength(VENDOR_NAME_MAX_LENGTH)
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [atLimit]),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [atLimit]),
       ).resolves.toBeDefined()
     })
 
@@ -166,7 +166,7 @@ describeWithDatabase('vendor', () => {
       const padded = `x${' '.repeat(300)}y`
 
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [padded]),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [padded]),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
@@ -179,7 +179,7 @@ describeWithDatabase('vendor', () => {
       // characters trimmed to one and were stored. Found by reviewing the fix,
       // which is where this story keeps finding things.
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [padded]),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [padded]),
       ).rejects.toMatchObject({ code: CHECK_VIOLATION })
     })
 
@@ -189,13 +189,13 @@ describeWithDatabase('vendor', () => {
       const ordinary = named('Evergreen Landscaping and Tree Surgery')
 
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [ordinary]),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [ordinary]),
       ).resolves.toBeDefined()
     })
 
     it('refuses a missing name', async () => {
       await expect(
-        writer.query('insert into vendor (display_name) values (null)'),
+        writer.query('insert into vendor (display_name, association_id) values (null, \'00000000-0000-7000-8000-000000000001\')'),
       ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
     })
   })
@@ -205,7 +205,7 @@ describeWithDatabase('vendor', () => {
       // `generated always ... stored`: the database refuses a caller who tries
       // to write it, so the key cannot disagree with the name it came from.
       await expect(
-        writer.query('insert into vendor (display_name, normalised_name) values ($1, $2)', [
+        writer.query('insert into vendor (display_name, normalised_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           named('Acme Plumbing'),
           'something else entirely',
         ]),
@@ -214,10 +214,10 @@ describeWithDatabase('vendor', () => {
 
     it('refuses a second spelling of a name already stored', async () => {
       const display = named('Evergreen Gardens')
-      await writer.query('insert into vendor (display_name) values ($1)', [display])
+      await writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [display])
 
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [
           `  ${display.toUpperCase()}   `,
         ]),
       ).rejects.toMatchObject({ code: UNIQUE_VIOLATION })
@@ -228,10 +228,10 @@ describeWithDatabase('vendor', () => {
       // aggressive enough to merge these would erase a real vendor's history.
       // `similarity` puts these at 0.75 -- close enough to rank as a suggestion,
       // nowhere near close enough to be the same row.
-      await writer.query('insert into vendor (display_name) values ($1)', [named('Wintergreen Ltd')])
+      await writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('Wintergreen Ltd')])
 
       await expect(
-        writer.query('insert into vendor (display_name) values ($1)', [named('Wintergreen Limited')]),
+        writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('Wintergreen Limited')]),
       ).resolves.toBeDefined()
     })
   })
@@ -284,7 +284,7 @@ describeWithDatabase('vendor', () => {
     it('stores the same key the application would compute', async () => {
       const display = named('  Cedar\u00a0Creek   ROOFING ')
       const { rows } = await writer.query(
-        'insert into vendor (display_name) values ($1) returning normalised_name',
+        'insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning normalised_name',
         [display],
       )
 
@@ -295,7 +295,7 @@ describeWithDatabase('vendor', () => {
   describe('the role split (AD-4)', () => {
     it('lets the reader read a vendor, because FR-6 compares against history', async () => {
       const display = named('Northside Electric')
-      await writer.query('insert into vendor (display_name) values ($1)', [display])
+      await writer.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [display])
 
       const { rows } = await reader.query('select display_name from vendor where display_name = $1', [
         display,
@@ -308,7 +308,7 @@ describeWithDatabase('vendor', () => {
       // Connected as the role, not read out of information_schema. The catalog
       // says what was intended; being refused proves what is true.
       await expect(
-        reader.query('insert into vendor (display_name) values ($1)', [named('Forged Vendor')]),
+        reader.query('insert into vendor (display_name, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\')', [named('Forged Vendor')]),
       ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
     })
 

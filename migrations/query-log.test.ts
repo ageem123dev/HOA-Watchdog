@@ -124,8 +124,7 @@ describeWithDatabase('the provenance record', () => {
     }
 
     return writer.query(
-      `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text)
-       values ($1, $2, $3, $4, $5)
+      `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text, association_id) values ($1, $2, $3, $4, $5, '00000000-0000-7000-8000-000000000001')
        returning id, executed_at, entry_id, entry_version, parameters, sql_text`,
       [row.actor_id, row.entry_id, row.entry_version, row.parameters, row.sql_text],
     )
@@ -142,8 +141,7 @@ describeWithDatabase('the provenance record', () => {
     }
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$1$1$1$x$y')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}@example.com`],
     )
@@ -409,8 +407,7 @@ describeWithDatabase('the provenance record', () => {
     it('cannot append to it either', async () => {
       await expect(
         reader.query(
-          `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text)
-           values ($1, $2, 1, '{}'::jsonb, 'select 1')`,
+          `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text, association_id) values ($1, $2, 1, '{}'::jsonb, 'select 1', '00000000-0000-7000-8000-000000000001')`,
           [actorId, anEntryId()],
         ),
       ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })

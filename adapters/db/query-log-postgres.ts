@@ -29,8 +29,13 @@ export function createQueryLog(): QueryLog {
       // the column, so migration 020's `jsonb_typeof(parameters) = 'object'`
       // check is what refuses an array or a scalar rather than this code.
       const { rows } = await writerPool().query<{ id: string }>(
-        `insert into query_log (actor_id, entry_id, entry_version, parameters, sql_text)
-         values ($1, $2, $3, $4::jsonb, $5)
+        // `association_id` from the actor. A provenance row that claimed a
+        // different association than the person who asked would be worse than
+        // no row at all.
+        `insert into query_log
+           (actor_id, entry_id, entry_version, parameters, sql_text, association_id)
+         values ($1, $2, $3, $4::jsonb, $5,
+                 (select association_id from board_member where id = $1))
          returning id`,
         [
           entry.actorId,

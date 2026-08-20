@@ -92,10 +92,18 @@ export function createPostgresExtractionRepository(
 
         for (const record of records) {
           await client.query(
+            // `association_id` comes from the parent document rather than a
+            // parameter: a caller cannot supply the wrong one.
+            //
+            // A scalar subquery inside VALUES, not `insert ... select` from
+            // `document`. The select form inserts nothing when the document does
+            // not exist, so a write against an unknown document succeeded
+            // silently instead of raising — the row simply never appeared.
             `insert into extraction
                (document_id, document_kind, vendor_name, document_number,
-                issued_on, total_amount, unit_reference, currency)
-             values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                issued_on, total_amount, unit_reference, currency, association_id)
+             values ($1, $2, $3, $4, $5, $6, $7, $8,
+                     (select association_id from document where id = $1))`,
             [
               documentId,
               record.documentKind,

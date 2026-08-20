@@ -87,20 +87,18 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     }
 
     const member = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$1$1$1$x$y') returning id`,
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001') returning id`,
       [`${RUN_PREFIX}@example.com`],
     )
     actorId = member.rows[0]!.id
 
     unitNumber = `${RUN_PREFIX}-7C`
     const unit = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [unitNumber],
     )
     await writer.query(
-      `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle)
-       values ($1, 2026, '3600.00', 'monthly')`,
+      `insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, 2026, '3600.00', 'monthly', '00000000-0000-7000-8000-000000000001')`,
       [unit.rows[0]!.id],
     )
   })

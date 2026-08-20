@@ -41,8 +41,7 @@ describeWithDatabase('the payment repository', () => {
     pool = new Pool({ connectionString: writerUrl, max: 4 })
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`payment-repo-${RUN_PREFIX}@example.test`],
     )
@@ -66,9 +65,7 @@ describeWithDatabase('the payment repository', () => {
   const newDocument = async (): Promise<string> => {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'deposits.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
@@ -77,7 +74,7 @@ describeWithDatabase('the payment repository', () => {
 
   const newUnit = async (suffix = '4B'): Promise<string> => {
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named(suffix)],
     )
     return rows[0]!.id
@@ -367,8 +364,7 @@ describeWithDatabase('the payment repository', () => {
     // What matters is not that nothing was written but that **the previous
     // reading survived**, which is the whole point of the fence.
     await writer.query(
-      `insert into payment (unit_id, document_id, paid_on, amount)
-       values ($1, $2, '2026-02-01'::date, '99.00')`,
+      `insert into payment (unit_id, document_id, paid_on, amount, association_id) values ($1, $2, '2026-02-01'::date, '99.00', '00000000-0000-7000-8000-000000000001')`,
       [unitId, documentId],
     )
 

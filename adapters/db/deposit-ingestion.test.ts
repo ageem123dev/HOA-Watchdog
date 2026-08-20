@@ -65,8 +65,7 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
     await writer.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`deposit-path-${RUN_PREFIX}@example.test`],
     )
@@ -88,7 +87,7 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
 
   const newUnit = async (unitNumber: string): Promise<string> => {
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [unitNumber],
     )
     return rows[0]!.id

@@ -106,7 +106,7 @@ describeWithDatabase('what a unit owes for a year', () => {
 
   const givenAUnit = async () => {
     const { rows } = await writer.query<{ id: string }>(
-      'insert into unit (unit_number) values ($1) returning id',
+      'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
       [named('4B')],
     )
     return rows[0]!.id
@@ -114,7 +114,7 @@ describeWithDatabase('what a unit owes for a year', () => {
 
   const assess = (unitId: string, year: number, amount: string, cycle: string) =>
     writer.query(
-      'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle) values ($1, $2, $3, $4)',
+      'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, $2, $3, $4, \'00000000-0000-7000-8000-000000000001\')',
       [unitId, year, amount, cycle],
     )
 
@@ -321,7 +321,7 @@ describeWithDatabase('what a unit owes for a year', () => {
       // would allow exactly one unit in the whole association.
       const first = await givenAUnit()
       const { rows } = await writer.query<{ id: string }>(
-        'insert into unit (unit_number) values ($1) returning id',
+        'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
         [named('5B')],
       )
 
@@ -367,7 +367,7 @@ describeWithDatabase('what a unit owes for a year', () => {
       // number.
       const monthlyUnit = await givenAUnit()
       const { rows } = await writer.query<{ id: string }>(
-        'insert into unit (unit_number) values ($1) returning id',
+        'insert into unit (unit_number, association_id) values ($1, \'00000000-0000-7000-8000-000000000001\') returning id',
         [named('7C')],
       )
       const annualUnit = rows[0]!.id
@@ -396,7 +396,7 @@ describeWithDatabase('what a unit owes for a year', () => {
 
       await expect(
         reader.query(
-          'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle) values ($1, $2, $3, $4)',
+          'insert into assessment (unit_id, assessment_year, annual_amount, billing_cycle, association_id) values ($1, $2, $3, $4, \'00000000-0000-7000-8000-000000000001\')',
           [unitId, 2027, '1.00', 'annual'],
         ),
       ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })

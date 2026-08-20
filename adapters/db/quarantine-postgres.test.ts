@@ -32,8 +32,7 @@ describeWithDatabase('createQuarantine', () => {
 
   async function makeDocument(suffix: string): Promise<string> {
     const { rows } = await seed.query(
-      `insert into document (filename, content_type, byte_size, content_hash, storage_key, uploaded_by)
-       values ($1, 'application/pdf', 1024, $2, $3, (select id from board_member limit 1))
+      `insert into document (filename, content_type, byte_size, content_hash, storage_key, uploaded_by, association_id) values ($1, 'application/pdf', 1024, $2, $3, (select id from board_member limit 1), '00000000-0000-7000-8000-000000000001')
        returning id`,
       [named(suffix), randomBytes(32).toString('hex'), `documents/${randomBytes(8).toString('hex')}`],
     )

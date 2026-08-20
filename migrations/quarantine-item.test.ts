@@ -110,8 +110,7 @@ describeWithDatabase('quarantine_item', () => {
 
   async function makeDocument(suffix: string): Promise<string> {
     const { rows } = await writer.query(
-      `insert into document (filename, content_type, byte_size, content_hash, storage_key, uploaded_by)
-       values ($1, 'application/pdf', 1024, $2, $3, (select id from board_member limit 1))
+      `insert into document (filename, content_type, byte_size, content_hash, storage_key, uploaded_by, association_id) values ($1, 'application/pdf', 1024, $2, $3, (select id from board_member limit 1), '00000000-0000-7000-8000-000000000001')
        returning id`,
       [named(suffix), randomBytes(32).toString('hex'), `documents/${randomBytes(8).toString('hex')}`],
     )
@@ -142,7 +141,7 @@ describeWithDatabase('quarantine_item', () => {
       // normalised form is a comparison key and is no use to a human.
       const spelled = '  EverGREEN   Landscaping '
       const { rows } = await writer.query(
-        'insert into quarantine_item (document_id, extracted_name) values ($1, $2) returning id, extracted_name, normalised_name',
+        'insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\') returning id, extracted_name, normalised_name',
         [documentId, spelled],
       )
 
@@ -153,7 +152,7 @@ describeWithDatabase('quarantine_item', () => {
 
     it('refuses a name that is only separators', async () => {
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           documentId,
           '   ',
         ]),
@@ -162,7 +161,7 @@ describeWithDatabase('quarantine_item', () => {
 
     it('refuses an empty name', async () => {
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           documentId,
           '',
         ]),
@@ -178,7 +177,7 @@ describeWithDatabase('quarantine_item', () => {
       // All four shapes, because 009's bound was wrong twice and each fix
       // closed one position while leaving another open.
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           documentId,
           name,
         ]),
@@ -190,7 +189,7 @@ describeWithDatabase('quarantine_item', () => {
 
       expect(atLimit).toHaveLength(200)
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           otherDocumentId,
           atLimit,
         ]),
@@ -199,7 +198,7 @@ describeWithDatabase('quarantine_item', () => {
 
     it('refuses a missing name', async () => {
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, null)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, null, \'00000000-0000-7000-8000-000000000001\')', [
           documentId,
         ]),
       ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
@@ -207,7 +206,7 @@ describeWithDatabase('quarantine_item', () => {
 
     it('refuses an item for a document that does not exist', async () => {
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           '018f3a2b-0000-7000-8000-00000000dead',
           named('Nowhere Ltd'),
         ]),
@@ -218,13 +217,13 @@ describeWithDatabase('quarantine_item', () => {
   describe('holding twice holds once', () => {
     it('refuses a second spelling of a name already held for that document', async () => {
       const held = await makeDocument('duplicate.pdf')
-      await writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+      await writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
         held,
         named('Acme Plumbing'),
       ])
 
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           held,
           `  ${named('ACME   plumbing')} `,
         ]),
@@ -239,13 +238,13 @@ describeWithDatabase('quarantine_item', () => {
       const second = await makeDocument('second.pdf')
       const vendor = named('Northwind Roofing')
 
-      await writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+      await writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
         first,
         vendor,
       ])
 
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           second,
           vendor,
         ]),
@@ -257,13 +256,13 @@ describeWithDatabase('quarantine_item', () => {
       // document are two things to ask about.
       const many = await makeDocument('two-vendors.pdf')
 
-      await writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+      await writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
         many,
         named('First Unknown'),
       ])
 
       await expect(
-        writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           many,
           named('Second Unknown'),
         ]),
@@ -274,7 +273,7 @@ describeWithDatabase('quarantine_item', () => {
   describe('an item does not outlive its document', () => {
     it('goes when the document goes', async () => {
       const doomed = await makeDocument('doomed.pdf')
-      await writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+      await writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
         doomed,
         named('Ephemeral Services'),
       ])
@@ -293,7 +292,7 @@ describeWithDatabase('quarantine_item', () => {
   describe('the role split (AD-4)', () => {
     it('lets the reader read the queue, which is what 1.6c needs', async () => {
       const visible = await makeDocument('visible.pdf')
-      await writer.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+      await writer.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
         visible,
         named('Readable Vendor'),
       ])
@@ -308,7 +307,7 @@ describeWithDatabase('quarantine_item', () => {
 
     it('refuses the reader an insert', async () => {
       await expect(
-        reader.query('insert into quarantine_item (document_id, extracted_name) values ($1, $2)', [
+        reader.query('insert into quarantine_item (document_id, extracted_name, association_id) values ($1, $2, \'00000000-0000-7000-8000-000000000001\')', [
           documentId,
           named('Forged Hold'),
         ]),

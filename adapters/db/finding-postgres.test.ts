@@ -66,12 +66,20 @@ let memberId: string
 let type = ''
 let subject = ''
 
+/**
+ * The document a finding was surfaced by. Required since 5.1: the adapter reads
+ * `association_id` from it rather than taking one, so a finding raised against
+ * no document has no association and the not-null constraint refuses it.
+ */
+let sourceDocumentId = ''
+
 const MARCH = { from: '2026-03-01', until: '2026-04-01' } as const
 
 function observation(overrides: Partial<FindingObservation> = {}): FindingObservation {
   return {
     findingType: type,
     subjectId: subject,
+    documentId: sourceDocumentId,
     period: MARCH,
     evidence: { invoiceCount: 2 },
     ...overrides,
@@ -89,13 +97,34 @@ function observation(overrides: Partial<FindingObservation> = {}): FindingObserv
  */
 async function seedMember(): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into board_member (email, password_hash)
-     values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+    `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
      returning id`,
     [`finding-adapter-${RUN_PREFIX}-${randomBytes(4).toString('hex')}@example.test`],
   )
   const id = rows[0]?.id
   if (id === undefined) throw new Error('seeding a board member returned no id')
+
+  return id
+}
+
+async function seedDocument(uploadedBy: string): Promise<string> {
+  const { rows } = await writer.query<{ id: string }>(
+    `insert into document
+       (content_hash, storage_key, filename, content_type, byte_size, uploaded_by,
+        association_id)
+     select $1, $2, $3, 'text/csv', 12, $4, uploader.association_id
+       from board_member as uploader
+      where uploader.id = $4
+     returning id`,
+    [
+      randomBytes(32).toString('hex'), // document_content_hash_is_sha256
+      `${RUN_PREFIX}/source.csv`,
+      `${RUN_PREFIX}-source.csv`,
+      uploadedBy,
+    ],
+  )
+  const id = rows[0]?.id
+  if (id === undefined) throw new Error('seeding a document returned no id')
 
   return id
 }
@@ -127,6 +156,8 @@ describeWithDatabase('raising a finding', () => {
     await writer.connect()
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
+    memberId = await seedMember()
+    sourceDocumentId = await seedDocument(memberId)
   })
 
   afterAll(async () => {
@@ -250,6 +281,7 @@ describeWithDatabase('reviewing a finding', () => {
     owner = new Client({ connectionString: adminUrl })
     await owner.connect()
     memberId = await seedMember()
+    sourceDocumentId = await seedDocument(memberId)
   })
 
   afterAll(async () => {
@@ -257,6 +289,10 @@ describeWithDatabase('reviewing a finding', () => {
       // Findings first: `reviewed_by` references `board_member`, so the member
       // cannot go while a finding still names them.
       await owner.query(`delete from finding where finding_type like $1`, [`${RUN_PREFIX}%`])
+      // Then the seeded document: since 5.1 each suite uploads one so a finding
+      // has an association to read, and `document.uploaded_by` references the
+      // member, so the member cannot go while it stands.
+      await owner.query(`delete from document where storage_key like $1`, [`${RUN_PREFIX}/%`])
       await owner.query(`delete from board_member where email like $1`, [`finding-adapter-${RUN_PREFIX}%`])
     } finally {
       await Promise.allSettled([owner.end(), writer.end()])

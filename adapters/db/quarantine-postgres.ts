@@ -21,8 +21,9 @@ export function createQuarantine(): Quarantine {
       // document already waits on is absorbed here too, not just an identical
       // repeat. That is the point of sharing migration 009's rule.
       await writerPool().query(
-        `insert into quarantine_item (document_id, extracted_name)
-         values ($1, $2)
+        // `association_id` from the parent document, not a parameter.
+        `insert into quarantine_item (document_id, extracted_name, association_id)
+         values ($1, $2, (select association_id from document where id = $1))
          on conflict (document_id, normalised_name) do nothing`,
         [documentId, extractedName],
       )

@@ -78,8 +78,7 @@ describeWithDatabase('the extraction table', () => {
     await Promise.all([writer.connect(), reader.connect()])
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`extraction-test-${RUN_PREFIX}@example.test`],
     )
@@ -104,9 +103,7 @@ describeWithDatabase('the extraction table', () => {
   async function newDocument(): Promise<string> {
     const hash = distinctHash()
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'ledger.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'ledger.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
@@ -116,9 +113,7 @@ describeWithDatabase('the extraction table', () => {
   const insert = async (input: ExtractionInput = {}) => {
     const documentId = input.documentId ?? (await newDocument())
     return writer.query(
-      `insert into extraction
-         (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency)
-       values ($1, $2, $3, $4, $5, $6, $7)
+      `insert into extraction (document_id, document_kind, vendor_name, document_number, issued_on, total_amount, currency, association_id) values ($1, $2, $3, $4, $5, $6, $7, '00000000-0000-7000-8000-000000000001')
        returning *`,
       [
         documentId,
@@ -241,7 +236,7 @@ describeWithDatabase('the extraction table', () => {
     it('refuses an extraction attached to no document', async () => {
       await expectRefusal(
         writer.query(
-          `insert into extraction (document_kind, currency) values ('invoice', 'USD')`,
+          `insert into extraction (document_kind, currency, association_id) values ('invoice', 'USD', '00000000-0000-7000-8000-000000000001')`,
         ),
         NOT_NULL_VIOLATION,
       )
@@ -379,8 +374,7 @@ describeWithDatabase('the extraction table', () => {
         await writer.query('begin')
         await writer.query('delete from extraction where document_id = $1', [documentId])
         await writer.query(
-          `insert into extraction (document_id, document_kind, document_number, currency)
-           values ($1, 'statement', 'NEW-1', 'USD')`,
+          `insert into extraction (document_id, document_kind, document_number, currency, association_id) values ($1, 'statement', 'NEW-1', 'USD', '00000000-0000-7000-8000-000000000001')`,
           [documentId],
         )
         await writer.query('commit')
@@ -453,8 +447,7 @@ describeWithDatabase('the extraction table', () => {
 
       await expectRefusal(
         reader.query(
-          `insert into extraction (document_id, document_kind, currency)
-           values ($1, 'invoice', 'USD')`,
+          `insert into extraction (document_id, document_kind, currency, association_id) values ($1, 'invoice', 'USD', '00000000-0000-7000-8000-000000000001')`,
           [documentId],
         ),
         INSUFFICIENT_PRIVILEGE,

@@ -137,6 +137,7 @@ export async function detectDuplicateInvoices(
     const outcome: RaisedFinding = await deps.findings.raise({
       findingType: POSSIBLE_DUPLICATE_INVOICE,
       subjectId: documentId,
+      documentId,
       period: monthRange(month),
       evidence: {
         // UX-DR24 forbids reassurance without a count of what was checked, and

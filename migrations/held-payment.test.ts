@@ -97,8 +97,7 @@ describeWithDatabase('a held payment', () => {
     await reader.connect()
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`held-payment-${RUN_PREFIX}@example.test`],
     )
@@ -117,9 +116,7 @@ describeWithDatabase('a held payment', () => {
   const newDocument = async (): Promise<string> => {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3)
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'deposits.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001')
        returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
@@ -128,7 +125,7 @@ describeWithDatabase('a held payment', () => {
 
   const hold = (documentId: string, reference: string, amount = '120.00', paidOn = '2024-03-01') =>
     writer.query(
-      'insert into held_payment (document_id, unit_reference, paid_on, amount) values ($1, $2, $3::date, $4)',
+      'insert into held_payment (document_id, unit_reference, paid_on, amount, association_id) values ($1, $2, $3::date, $4, \'00000000-0000-7000-8000-000000000001\')',
       [documentId, reference, paidOn, amount],
     )
 
@@ -256,7 +253,7 @@ describeWithDatabase('a held payment', () => {
 
     await expect(
       reader.query(
-        'insert into held_payment (document_id, unit_reference, paid_on, amount) values ($1, $2, $3::date, $4)',
+        'insert into held_payment (document_id, unit_reference, paid_on, amount, association_id) values ($1, $2, $3::date, $4, \'00000000-0000-7000-8000-000000000001\')',
         [documentId, '9Z', '2024-04-01', '1.00'],
       ),
     ).rejects.toMatchObject({ code: INSUFFICIENT_PRIVILEGE })
@@ -271,8 +268,7 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$256$8$1$c2FsdA$aGFzaA', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`held-017-${RUN_PREFIX}@example.test`],
     )
@@ -290,9 +286,7 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
   const doc = async (): Promise<string> => {
     const hash = randomBytes(32).toString('hex')
     const { rows } = await writer.query<{ id: string }>(
-      `insert into document
-         (content_hash, storage_key, filename, content_type, byte_size, uploaded_by)
-       values ($1, $2, 'deposits.csv', 'text/csv', 512, $3) returning id`,
+      `insert into document (content_hash, storage_key, filename, content_type, byte_size, uploaded_by, association_id) values ($1, $2, 'deposits.csv', 'text/csv', 512, $3, '00000000-0000-7000-8000-000000000001') returning id`,
       [hash, `documents/${hash}`, boardMemberId],
     )
     return rows[0]!.id
@@ -316,8 +310,7 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
 
     await expect(
       writer.query(
-        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-         values ($1, $2, $3::date, $4, $5)`,
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, $2, $3::date, $4, $5, '00000000-0000-7000-8000-000000000001')`,
         [documentId, values.unit_reference, values.paid_on, values.amount, reason],
       ),
     ).resolves.toBeDefined()
@@ -330,16 +323,14 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
 
     await expect(
       writer.query(
-        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-         values ($1, '   ', null, null, 'unknown-unit')`,
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '   ', null, null, 'unknown-unit', '00000000-0000-7000-8000-000000000001')`,
         [documentId],
       ),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
 
     await expect(
       writer.query(
-        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-         values ($1, '9Z', null, '-1.00', 'unknown-unit')`,
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '9Z', null, '-1.00', 'unknown-unit', '00000000-0000-7000-8000-000000000001')`,
         [documentId],
       ),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
@@ -353,8 +344,7 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
 
     await expect(
       writer.query(
-        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-         values ($1, '9Z', '2024-03-01'::date, null, 'unsupported-amount')`,
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '9Z', '2024-03-01'::date, null, 'unsupported-amount', '00000000-0000-7000-8000-000000000001')`,
         [documentId],
       ),
     ).resolves.toBeDefined()
@@ -364,8 +354,7 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
 
     await expect(
       writer.query(
-        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-         values ($1, '9Z', null, null, 'because-i-said-so')`,
+        `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, '9Z', null, null, 'because-i-said-so', '00000000-0000-7000-8000-000000000001')`,
         [documentId],
       ),
     ).rejects.toMatchObject({ code: CHECK_VIOLATION })
@@ -377,8 +366,7 @@ describeWithDatabase('migration 017: a held line may be incomplete', () => {
     // reference-less line together as one unknown unit.
     const documentId = await doc()
     await writer.query(
-      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason)
-       values ($1, null, null, null, 'missing-reference')`,
+      `insert into held_payment (document_id, unit_reference, paid_on, amount, hold_reason, association_id) values ($1, null, null, null, 'missing-reference', '00000000-0000-7000-8000-000000000001')`,
       [documentId],
     )
 

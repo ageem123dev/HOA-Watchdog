@@ -74,8 +74,9 @@ export function createFindingAlertLedger(): FindingAlertLedger {
       // be re-claimed and re-sent forever, with staleness reopening a finished
       // delivery — which is the one thing this table exists to make impossible.
       const { rows } = await writerPool().query<{ id: string }>(
-        `insert into finding_alert (finding_id)
-         values ($1)
+        // `association_id` from the finding this alert is about.
+        `insert into finding_alert (finding_id, association_id)
+         values ($1, (select association_id from finding where id = $1))
          on conflict (finding_id) do update
             set claimed_at = now(),
                 failure    = null

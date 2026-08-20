@@ -62,8 +62,7 @@ let owner: Client
  */
 async function seedFinding(suffix: string, raisedAt: string): Promise<string> {
   const { rows } = await writer.query<{ id: string }>(
-    `insert into finding (finding_type, subject_id, period, evidence, raised_at)
-     values ($1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb, $6::timestamptz)
+    `insert into finding (finding_type, subject_id, period, evidence, raised_at, association_id) values ($1, $2, daterange($3::date, $4::date, '[)'), $5::jsonb, $6::timestamptz, '00000000-0000-7000-8000-000000000001')
      returning id`,
     [
       `${RUN_PREFIX}_${suffix}`,
@@ -208,8 +207,7 @@ describeWithDatabase('what the board has not been told about yet', () => {
     const findingId = await seedFinding('reviewed', '1990-04-01T00:00:00Z')
 
     const { rows } = await writer.query<{ id: string }>(
-      `insert into board_member (email, password_hash)
-       values ($1, 'scrypt$1$1$1$x$y')
+      `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001')
        returning id`,
       [`${RUN_PREFIX}-reviewer@example.test`],
     )
@@ -444,13 +442,12 @@ describeWithDatabase('who an alert goes to', () => {
     // rewritten for.
     for (const address of [`${EMAIL_PREFIX}-z@example.test`, enabled, `${EMAIL_PREFIX}-a@example.test`]) {
       await writer.query(
-        `insert into board_member (email, password_hash) values ($1, 'scrypt$1$1$1$x$y')`,
+        `insert into board_member (email, password_hash, association_id) values ($1, 'scrypt$1$1$1$x$y', '00000000-0000-7000-8000-000000000001')`,
         [address],
       )
     }
     await writer.query(
-      `insert into board_member (email, password_hash, disabled_at)
-       values ($1, 'scrypt$1$1$1$x$y', now())`,
+      `insert into board_member (email, password_hash, disabled_at, association_id) values ($1, 'scrypt$1$1$1$x$y', now(), '00000000-0000-7000-8000-000000000001')`,
       [disabled],
     )
   })
