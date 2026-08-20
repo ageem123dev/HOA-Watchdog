@@ -1,7 +1,7 @@
 ---
-Status: review
+Status: done
 baseline_commit: 15440292da4bc7c3bdb97e872537f69eb7be85a7
-merge_request:
+merge_request: 70
 ---
 
 # Story 5.1: The association exists
@@ -235,10 +235,102 @@ the trigger, and story 5.1b's creation guard is what forces the conversation), a
 
 ### Completion Notes List
 
+- The schema retrofit and the write path. The read path — gateway binding, catalog
+  scoping, the isolation proof — is story 5.1b, split out on 2026-08-19.
+- Both reviewers ran to completion on the final head. Argus verifies all eight
+  acceptance criteria as met.
+- **Both independently found the same defect:** deriving in SQL turned a loud
+  foreign-key violation into a silent no-op, because `insert ... select` from an
+  absent parent inserts nothing. Eight adapters were affected; all eleven writes
+  now use a scalar subquery inside `VALUES`.
+- **Argus alone found two more:** that AC7 was false, since `unit` and `vendor`
+  keep global unique indexes (narrowed here, fixed in 5.1b); and that
+  `scripts/add-board-member.mjs` would fail with a `23502`, being the only writer
+  to a scoped table with no parent to derive from and no test covering it.
+- **The AC audit found a vacuity of its own.** AC8 was true but unfalsifiable with
+  one association; a test now creates a second and proves a document lands there.
+- Left deliberately: the ~2,041 `test_<hex>` rows `npm run test:db` has written
+  into the pilot database, backfilled into `demo` along with everything else.
+
 ### File List
+
+**Production (17)**
+
+- `.mcp.json`
+- `README.md`
+- `adapters/db/document-repository-postgres.ts`
+- `adapters/db/extraction-repository-postgres.ts`
+- `adapters/db/finding-alert-postgres.ts`
+- `adapters/db/finding-postgres.ts`
+- `adapters/db/payment-repository-postgres.ts`
+- `adapters/db/quarantine-postgres.ts`
+- `adapters/db/query-log-postgres.ts`
+- `adapters/db/roll-repository-postgres.ts`
+- `adapters/db/vendor-resolution-postgres.ts`
+- `core/detection/detect-dues-shortfalls.ts`
+- `core/detection/detect-duplicates.ts`
+- `core/detection/detect-vendor-spikes.ts`
+- `core/ports/finding.ts`
+- `migrations/024_association.sql`
+- `scripts/add-board-member.mjs`
+
+**Tests (42)**
+
+- `adapters/db/assessment-directory-postgres.test.ts`
+- `adapters/db/catalog-execution.test.ts`
+- `adapters/db/deposit-ingestion.test.ts`
+- `adapters/db/document-repository-postgres.test.ts`
+- `adapters/db/dues-reader-postgres.test.ts`
+- `adapters/db/duplicate-detection.test.ts`
+- `adapters/db/extraction-repository-postgres.test.ts`
+- `adapters/db/finding-alert-postgres.test.ts`
+- `adapters/db/finding-postgres.test.ts`
+- `adapters/db/finding-reader-postgres.test.ts`
+- `adapters/db/held-payment-queue-postgres.test.ts`
+- `adapters/db/invoice-reader-postgres.test.ts`
+- `adapters/db/payment-repository-postgres.test.ts`
+- `adapters/db/quarantine-postgres.test.ts`
+- `adapters/db/quarantine-queue-postgres.test.ts`
+- `adapters/db/query-log-reader-postgres.test.ts`
+- `adapters/db/roll-ingestion.test.ts`
+- `adapters/db/roll-repository-postgres.test.ts`
+- `adapters/db/unit-directory-postgres.test.ts`
+- `adapters/db/unit-directory-references.test.ts`
+- `adapters/db/vendor-directory-postgres.test.ts`
+- `adapters/db/vendor-resolution-postgres.test.ts`
+- `adapters/db/vendor-spike-detection.test.ts`
+- `app/tools/v1/catalog/execute/route.db.test.ts`
+- `core/ports/finding.test.ts`
+- `migrations/assessment.test.ts`
+- `migrations/association.test.ts`
+- `migrations/deposit-kind-and-unit-reference.test.ts`
+- `migrations/document-extraction-state.test.ts`
+- `migrations/document.test.ts`
+- `migrations/extraction.test.ts`
+- `migrations/finding-alert.test.ts`
+- `migrations/finding.test.ts`
+- `migrations/held-payment.test.ts`
+- `migrations/payment.test.ts`
+- `migrations/quarantine-item.test.ts`
+- `migrations/query-log.test.ts`
+- `migrations/roles.test.ts`
+- `migrations/roll-document-ownership.test.ts`
+- `migrations/unit-membership.test.ts`
+- `migrations/unit.test.ts`
+- `migrations/vendor.test.ts`
+
+**Docs and planning (4)**
+
+- `_bmad-output/implementation-artifacts/5-1-the-association-exists.md`
+- `_bmad-output/implementation-artifacts/5-1b-the-catalog-answers-for-one-association.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad-output/planning-artifacts/architecture/architecture-HOA-Treasurer-Assistant-2026-07-29/ARCHITECTURE-SPINE.md`
+
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-19 | Story created |
+| 2026-08-19 | Scoped to the schema and write path; read path split to 5.1b |
+| 2026-08-20 | Reviews triaged, gates green, MR !70 opened — ready to merge |
