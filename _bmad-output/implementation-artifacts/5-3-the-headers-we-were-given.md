@@ -1,5 +1,5 @@
 ---
-Status: in-progress
+Status: done
 baseline_commit: 67acbd5
 merge_request:
 ---
@@ -66,7 +66,7 @@ it contains, before a mapping exists to say what it is for.
       (AC2, AC3, AC4)
 - [x] **Task 3 — Distinguish the empty cases.** No rows, no header row, all-blank header row.
       (AC5)
-- [ ] **Task 4 — Reach it from an upload.** A sample is uploaded and its headings come back. Where
+- [x] **Task 4 — Reach it from an upload.** A sample is uploaded and its headings come back. Where
       this surfaces is a decision to record before it is built — see Dev Notes.
 
 ## Dev Notes
@@ -152,14 +152,74 @@ that reports the wrong thing is quietly wrong, and the treasurer acts on it.
   dropped, only-the-first-problem, duplicates not reported, an all-blank row accepted, `no-rows`
   folded into `no-headings`, and the written text discarded.
 
+#### Task 4 - the decision, recorded before it was built
+
+**A sample does not go through `ingest`, and there are two independent reasons.**
+
+*It must not.* `ingest` stores the document, hashes it for AD-13 idempotency, writes a provenance
+row and resolves vendors. A sample is uploaded so a treasurer can be shown its columns and then
+build a mapping. It is not a document the association is keeping, and one landing in `document`
+would sit in the permanent record - and in the register a board reads - because somebody wanted to
+see their own column names.
+
+*It cannot.* Story 5.2 made a declared `documentKind` mandatory for ingestion, and a sample has
+none. The mapping is what the kind is for.
+
+**So the shared half was extracted rather than copied.** `toRectangle` is now the one place that
+knows how bytes become rows, and it publishes `TABULAR_CONTENT_TYPES` so neither caller holds its
+own list. `ingest` uses it too - its 389 tests pass unchanged, which is the evidence the refactor
+preserved behaviour rather than the claim.
+
+Two copies would have drifted, and silently: a format accepted for ingestion but missing from the
+sample path is one a treasurer can upload and then cannot build a mapping for, with nothing saying
+why.
+
+**What is deliberately not here: the HTTP surface.** A server action with nothing rendering it is
+exactly the shape that shipped broken in 5.2 - an action requiring a field no form sent, with every
+gate green. The action lands with the screen that calls it, in 5.4.
+
+#### A distinction the composition was about to throw away
+
+`readSampleHeadings` first reported an empty file as `unreadable-file`, and the test I had written
+said `no-rows`. The reflex is to correct the test. **`parseCsv` already distinguishes `empty` from
+malformed** - `toRectangle` was flattening it - so the test was right and the code was losing
+information that existed.
+
+Kept apart as `empty-file`, because *"your file is empty"* and *"your file could not be read"* send
+a treasurer to different places, and the second is actively misleading about the first: it invites
+them to re-export a file that exported perfectly well. `ingest` still folds both into its existing
+`unreadable-file` outcome, on purpose - a document with nothing in it is as unstorable as one that
+would not parse - and that fold is now written down rather than incidental.
+
+#### Sensitivity
+
+Fourteen mutations across the three modules, all caught: eight on `readHeadings` (0-based positions,
+duplication on the written form, blanks dropped, only-the-first-problem, duplicates unreported, an
+all-blank row accepted, `no-rows` folded into `no-headings`, the written text discarded) and six on
+the composition (empty folded into unreadable, `no-reader` folded into unreadable, an unknown type
+read as an empty rectangle, problems dropped, headings dropped, and `ingest` losing its `no-reader`
+distinction - which turns 10 of its own tests red).
+
+Also worth recording: the `TABULAR_CONTENT_TYPES` round-trip test **passed against an empty list**
+when first written, because a loop over nothing reports success. It now asserts the list is
+non-empty first.
+
 ### File List
 
 - `core/extraction/headings.ts` *(new)* - `readHeadings`, the reporting reader
 - `core/extraction/headings.test.ts` *(new)* - 17 cases
+- `core/extraction/rectangle.ts` *(new)* - `toRectangle` and `TABULAR_CONTENT_TYPES`, the one place
+  that knows how bytes become rows
+- `core/extraction/rectangle.test.ts` *(new)* - 11 cases
+- `core/extraction/sample-headings.ts` *(new)* - the composition, taking no store and no kind
+- `core/extraction/sample-headings.test.ts` *(new)* - 9 cases
+- `core/ingestion/ingest.ts` - `read` now uses the shared dispatch; behaviour unchanged
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 4: a sample is read without being stored; the bytes-to-rows dispatch is shared with ingest rather than copied |
+| 2026-08-21 | Status done, written in this commit rather than after the merge |
 | 2026-08-21 | Tasks 1-3: readHeadings reports duplicates and blanks by position, all at once, and distinguishes the empty cases |
 | 2026-08-21 | Created from epic 5's story spine, with the sample-is-not-a-document decision flagged for Task 4 |

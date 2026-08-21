@@ -1,5 +1,6 @@
 import type { DocumentKind } from '../extraction/record'
-import { readRows, readTable } from '../extraction/tabular'
+import { toRectangle } from '../extraction/rectangle'
+import { readRows } from '../extraction/tabular'
 import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
@@ -350,32 +351,39 @@ async function ingestOne(
   }
 }
 
-/** Types with no reader yet are held rather than failed — see the outcome above. */
-const SPREADSHEET_TYPES = [
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-]
+type Reading = ReturnType<typeof readRows> | 'no-reader'
 
-type Reading = ReturnType<typeof readTable> | 'no-reader'
-
+/**
+ * Decode, then apply the contract.
+ *
+ * **The decoding is `toRectangle`'s, not this function's**, and that is story
+ * 5.3's doing: the mapping wizard needs the same bytes-to-rows step for a
+ * *sample*, without any of what ingestion does around it. Two copies of the
+ * content-type dispatch would drift, and the drift would be silent — a format
+ * ingestible but unsampleable, with nothing saying why.
+ *
+ * `no-reader` stays distinct from `unreadable-file` here as it always has: a
+ * type nothing reads yet is *held* for a human, which is the outcome above.
+ */
 function read(
   contentType: string,
   bytes: Uint8Array,
   documentKind: DocumentKind,
   deps: IngestDependencies,
 ): Reading {
-  if (contentType === 'text/csv') {
-    return readTable(new TextDecoder().decode(bytes), documentKind)
+  const rectangle = toRectangle(contentType, bytes, deps.workbooks)
+
+  if (!rectangle.ok) {
+    // `empty-file` and `unreadable-file` are one outcome *here* — a document
+    // with nothing in it is as unstorable as one that would not parse, and the
+    // upload has always said so. The distinction exists for the sample path,
+    // where the treasurer is being shown columns rather than storing anything.
+    return rectangle.reason === 'no-reader'
+      ? 'no-reader'
+      : { ok: false, problems: [{ reason: 'unreadable-file' }] }
   }
 
-  if (SPREADSHEET_TYPES.includes(contentType)) {
-    if (deps.workbooks === undefined) return 'no-reader'
-    const decoded = deps.workbooks.decode(bytes)
-    if (!decoded.ok) return { ok: false, problems: [{ reason: 'unreadable-file' }] }
-    return readRows(decoded.rows, documentKind)
-  }
-
-  return 'no-reader'
+  return readRows(rectangle.rows, documentKind)
 }
 
 export async function ingest(
