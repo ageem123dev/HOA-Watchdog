@@ -78,7 +78,14 @@ TOKEN_VARIABLE = "GATEWAY_SERVICE_TOKEN"
 #: This project already made the argument once, in `test_no_data_credentials.py`:
 #: "the allowlist is the real check; the denylist below only makes the message
 #: better", because a denylist is a list of the things somebody thought of.
-PERMITTED_FIELDS = ("question", "actorId")
+PERMITTED_FIELDS = ("question", "actorAssertion")
+
+#: `actorAssertion` replaced `actorId` in story 5.1c. AD-18: this runtime
+#: carries the assertion and cannot read or mint one, so the field is opaque
+#: here by construction rather than by convention. The only check below is
+#: that it is a non-empty string — the gateway that signed it is the only
+#: party that can say anything more, and a second opinion formed here would
+#: be a guess this runtime has no key to check.
 
 #: Kept for the message only. A request naming one of these gets an explanation
 #: rather than a bare "unknown field", because these are the ones somebody tries
@@ -95,7 +102,7 @@ _log = logging.getLogger(__name__)
 class Router(Protocol):
     """`routing.route_question`, injected so no test calls a model."""
 
-    def __call__(self, question: str, actor_id: str) -> RoutedAnswer:
+    def __call__(self, question: str, actor_assertion: str) -> RoutedAnswer:
         ...
 
 
@@ -188,11 +195,14 @@ def _read_question(payload: object) -> tuple[str, str] | JSONResponse:
     if not isinstance(question, str) or question.strip() == "":
         return _failure(400, "invalid_request", "question must be a non-empty string")
 
-    actor_id = payload.get("actorId")
-    if not isinstance(actor_id, str) or actor_id.strip() == "":
-        return _failure(400, "invalid_request", "actorId must be a non-empty string")
+    actor_assertion = payload.get("actorAssertion")
+    if not isinstance(actor_assertion, str) or actor_assertion.strip() == "":
+        # Shape, not validity. A refusal here says the request was malformed;
+        # whether the assertion is genuine, current and for this audience is
+        # the gateway's answer, given as a 401 on the tool call.
+        return _failure(400, "invalid_request", "actorAssertion must be a non-empty string")
 
-    return question, actor_id
+    return question, actor_assertion
 
 
 def create_app(*, route: Router | None = None, narrate: Narrator | None = None) -> Starlette:
@@ -238,7 +248,7 @@ def create_app(*, route: Router | None = None, narrate: Narrator | None = None) 
         if isinstance(read, JSONResponse):
             return read
 
-        question, actor_id = read
+        question, actor_assertion = read
 
         try:
             # In a threadpool, because both of these are *blocking* — the router
@@ -247,7 +257,9 @@ def create_app(*, route: Router | None = None, narrate: Narrator | None = None) 
             # block the event loop, so one slow turn stalls every other request
             # this process is serving, including the health of the service
             # itself. Raised by CodeRabbit.
-            routed = await run_in_threadpool(router, question=question, actor_id=actor_id)
+            routed = await run_in_threadpool(
+                router, question=question, actor_assertion=actor_assertion
+            )
         except (ModelChoseNothing, ModelChoseUnknownEntry) as refusal:
             # An honest "no entry answers that", not a fault. Story 3.7 gives it
             # a face; this gives it a status a caller can tell apart.

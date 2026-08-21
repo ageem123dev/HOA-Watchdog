@@ -87,7 +87,7 @@ Two things follow. Neither is urgent today; both get worse on the day a second a
 - [x] **Task 2 — Mint and verify.** The signing on the Next.js side, the verification at the
       gateway, and the key's home. (AC1)
 - [ ] **Task 3 — The refusals.** Forged, expired, altered, wrong audience. (AC2, AC5)
-- [ ] **Task 4 — The relay is a relay.** The agent service passes the token through and holds no
+- [x] **Task 4 — The relay is a relay.** The agent service passes the token through and holds no
       key; the structural test that says so. (AC3)
 - [ ] **Task 5 — Retire the believable `actorId`.** (AC4)
 
@@ -234,6 +234,26 @@ for subjects including a UUID, a delimiter-bearing string, and one with multi-by
 *Cross-check:* the signature is recomputed independently in the test with `createHmac` over the same
 payload, so the assertion is not merely self-consistent with whatever `mint` produced.
 
+#### Task 4 — the Python relay
+
+Two behaviours, and they fail in different directions. **Threading** breaks loudly (a turn 400s or
+the gateway 401s); **holding a key** breaks silently, and the silent one is the reason AC3 exists.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4.1a | The relay forwards under the old field name, so the gateway sees no assertion | GUARD — the wire-shape assertion in `test_tools_client.py` names the exact body |
+| 4.1b | `chat_service` still permits `actorId`, so a caller can send either and one of them is unchecked | GUARD — `PERMITTED_FIELDS` is an allowlist and its test drives an unknown field |
+| 4.1c | The assertion arrives absent, empty or non-string and is relayed anyway | GUARD — refuse at the boundary with `400`, before any model call |
+| 4.1d | The relay validates the assertion *itself* and forms a second opinion it has no key to justify | OUT-OF-SCOPE by construction — shape only; validity is the gateway's `401` |
+| 4.2a | Somebody adds a signing key to the agent so it can mint "just this once" | GUARD — the capability sweep over `os.environ`/`os.getenv` names |
+| 4.2b | The key arrives through a committed config file rather than the environment | GUARD — the same sweep over `agent/**` config suffixes |
+| 4.2c | The relay decodes the payload to read the subject, the first step toward trusting it | GUARD — source sweep for `b64decode`, `hmac` and friends |
+| 4.2d | The sweeps pass by scanning nothing — a wrong root, a renamed package | GUARD — `test_the_package_has_source_to_scan`, plus a matcher test asserting the pattern fires on a real key name and *not* on the two secrets the agent legitimately holds |
+
+*Deliberately not tested here:* that the assertion the gateway receives verifies. That is the Node
+side's property and `route.test.ts` owns it — asserting it from the Python side would need a key
+this runtime must not have, which is the thing 4.2a forbids.
+
 ### Debug Log References
 
 **Task 2.** The first red was a missing-module error, which is not a valid red — the module was
@@ -310,6 +330,32 @@ for, asserted end to end against a real database.
   down. That shape shipped twice on 5.1b.
 
 
+**Task 4 — the relay**
+
+- **`actorId` became `actorAssertion` end to end.** `PERMITTED_FIELDS` is an allowlist, so the
+  rename *removes* the old field rather than adding beside it: a request naming `actorId` is now an
+  unknown field and refused, which is the property that makes "the actor is proved" true of every
+  request rather than of the well-behaved ones.
+- **The agent validates shape and nothing else.** Non-empty string, then relay. It has no key with
+  which to form a second opinion, and a check it cannot justify would read like one it could.
+- **The capability guard checks what the runtime can reach, not what it imports.** A grep for `hmac`
+  proves nothing about capability — `test_no_data_credentials.py` makes the same argument about AD-3
+  and this follows it deliberately. So the sweep reads every string passed to `os.environ`/`os.getenv`
+  via AST, and every committed config file under `agent/`.
+- **The guard is proven by mutation in both directions.** A key added to `routing.py`'s environment
+  reads, an `hmac` import on the relay path, and a `.env` carrying the key each turn it red; the
+  wire-shape and boundary tests each turn red under their own mutation. All four reverted and
+  re-verified green.
+- **Four tests exist only so the sweeps cannot pass vacuously**: one asserting there is source to
+  scan, and one asserting the matcher fires on a real key name while staying quiet on
+  `GATEWAY_SERVICE_TOKEN` and `GEMINI_API_KEY`. A sweep whose pattern is wrong reports success
+  forever.
+- **`sed -i` silently rewrote three test files from CRLF to LF.** Git normalises on commit so the
+  diff was unaffected, but the working tree was left mixed. Normalised back and re-run. Recorded
+  because the mutation harness hit the same trap: a `
+` anchor found nothing in a CRLF file and the
+  revert asserted zero matches.
+
 ### File List
 
 **Task 2**
@@ -325,6 +371,14 @@ for, asserted end to end against a real database.
 - `README.md` — the variable count and its group
 - `docs/readme.test.ts` — the number-word lookup extended
 
+**Task 4**
+
+- `agent/watchdog_agent/chat_service.py` — `PERMITTED_FIELDS`, the boundary check, the router call
+- `agent/watchdog_agent/routing.py` — threads the assertion, keyword-only, untouched
+- `agent/watchdog_agent/tools_client.py` — the one place it leaves the process
+- `agent/tests/test_relay_holds_no_key.py` *(new)* — AC3's structural guard, 5 cases
+- `agent/tests/test_chat_service.py`, `agent/tests/test_routing.py`, `agent/tests/test_tools_client.py`
+
 
 ## Change Log
 
@@ -335,3 +389,4 @@ for, asserted end to end against a real database.
 | 2026-08-21 | AD-18 written and the parser dependency approved — both blockers cleared, story is implementable once the spine change merges |
 | 2026-08-21 | Context pass: the seven-file chain read and recorded, four design decisions made, ready-for-dev |
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
+| 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |

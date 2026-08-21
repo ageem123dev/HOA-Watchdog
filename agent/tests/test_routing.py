@@ -39,7 +39,11 @@ from watchdog_agent.tools_client import GatewayAuthError, InvalidRequest
 
 TOKEN = "r7Qx-4kP9mVt2LbN8sYw0aZc"
 BASE = "https://gateway.internal"
-ACTOR = "018f3a2b-0000-7000-8000-0000000000aa"
+#: Opaque to this runtime by design. AD-18: the Node gateway mints it and the
+#: Node gateway verifies it. Nothing here knows what is inside, and nothing here
+#: could produce a different one — a uuid-shaped constant would quietly suggest
+#: this side still handles an identity rather than a token it is carrying.
+ASSERTION = "eyJzdWIiOiI0YiJ9.p7Xk2QvT9mLzR0hCwYbN8sJdA5gFuE1oKiVtHnMqPcw"
 
 ENTRY = {
     "id": "dues_status",
@@ -111,7 +115,7 @@ def _configured(monkeypatch: pytest.MonkeyPatch) -> None:
 def _route(chooser, transport=None, question: str = "What does 4B owe for 2026?"):
     return route_question(
         question,
-        actor_id=ACTOR,
+        actor_assertion=ASSERTION,
         chooser=chooser,
         transport=transport or ScriptedGateway(),
     )
@@ -143,7 +147,7 @@ class TestTheOrdinaryCase:
                 "entryId": "dues_status",
                 "version": 1,
                 "parameters": PARAMETERS,
-                "actorId": ACTOR,
+                "actorAssertion": ASSERTION,
             }
         ]
 
@@ -283,7 +287,7 @@ class TestAChoiceTheCatalogDoesNotAccept:
                 "entryId": "dues_status",
                 "version": 1,
                 "parameters": wrong_type,
-                "actorId": ACTOR,
+                "actorAssertion": ASSERTION,
             }
         ]
 
