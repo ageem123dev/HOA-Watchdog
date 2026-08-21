@@ -596,6 +596,40 @@ did not pin the fail-closed behaviour the module documents. Now `toEqual({ ok: f
 right rule* and then not followed it a few lines later. Neither reviewer that read the code alone
 found them; both were found by a reviewer comparing the code against its own stated intent.
 
+#### MR !74, CodeRabbit round 2 - one finding, and the worst one of the story
+
+Round 1's four threads were **resolved by CodeRabbit itself** at 17:48. The re-review of `bd802bd`
+raised one further finding, delivered as an *outside diff range* comment rather than inline - the
+shape that is easiest to miss, because it carries no `Actionable comments posted:` line of its own.
+
+**`readConfig` trimmed the signing key before signing with it.** `verifyActorAssertion` signs with
+the value it is handed and trims only to decide whether a key is blank; `route.ts` hands it
+`process.env.ACTOR_ASSERTION_KEY` raw. So a key with a stray space meant the client derived one HMAC
+and the gateway derived another **from the same variable**.
+
+Every turn would be refused with `reason: 'signature'` - which reads as somebody forging assertions,
+not as a trailing space in `.env.local`. **And this is the story that introduces that variable to
+every environment for the first time**, which is exactly when a pasted value picks up whitespace.
+The two findings compound: the operator action this story already requires is the event that would
+have triggered this bug.
+
+Fixed by judging blankness on the trimmed form and signing with the original.
+
+**`baseUrl` and `token` deliberately stay trimmed**, and the reason is written into the code rather
+than left looking like an inconsistency somebody forgot to clean up:
+
+- the URL is **parsed**, not compared, so trimming cannot desynchronise it from anything;
+- `GATEWAY_SERVICE_TOKEN` is a **different variable** from the `AGENT_SERVICE_TOKEN` it is checked
+  against, so trimming there cannot desynchronise one value *from itself*. Changing it would in fact
+  be the riskier edit: a deployment whose client token carries whitespace and whose gateway token
+  does not works today and would stop working.
+
+The defect depends specifically on one variable being read twice by two code paths. That is the
+distinction, and it is what makes "trim everything for consistency" the wrong fix.
+
+Proved by RED: four whitespace cases failed before the change and pass after, while the two
+blank-key cases passed throughout - so the guard that refuses to send was never what moved.
+
 ## Change Log
 
 | Date | Change |
@@ -607,6 +641,7 @@ found them; both were found by a reviewer comparing the code against its own sta
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
 | 2026-08-21 | 4b/4c: the AC audit found an unproved db-level refusal, and mutation found the forgery too short to test the signature check |
+| 2026-08-21 | MR !74 round 2: the client signed with a trimmed copy of the key the gateway verifies raw - fixed on f3e1045 |
 | 2026-08-21 | MR !74 round 1: four CodeRabbit findings, all confirmed and fixed on f619c30 |
 | 2026-08-21 | Step 6 integration review: Argus clean; the chain matches end to end, and ACTOR_ASSERTION_KEY is missing from .env.local |
 | 2026-08-21 | CodeRabbit CLI round: 3 of 5 confirmed; four claim guards had no test that could reach them |
