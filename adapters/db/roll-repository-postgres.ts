@@ -86,10 +86,15 @@ export function createRollRepository(options: { pool?: Pool } = {}): RollReposit
         )
 
         const { rows: resolved } = await client.query<{ reference: string; id: string }>(
+          // Scoped to the roll's own association, matching the upsert above.
+          // Since migration 025 a unit number identifies a row only *within* an
+          // association, so joining on the normalised number alone can resolve
+          // to another association's unit and attribute this roll's rows to it.
           `select r.reference as "reference", unit.id as "id"
              from unnest($1::text[]) as r(reference)
-             join unit on unit.normalised_number = unit_normalised_number(r.reference)`,
-          [unitNumbers],
+             join unit on unit.normalised_number = unit_normalised_number(r.reference)
+              and unit.association_id = (select association_id from document where id = $2)`,
+          [unitNumbers, documentId],
         )
 
         // Keyed by the reference as given, exactly as `unitIdsFor` is and for

@@ -434,7 +434,7 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 
 ### File List
 
-**Production (18)**
+**Production (19)**
 
 - `README.md`
 - `adapters/auth/auth.ts`
@@ -449,13 +449,14 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 - `catalog/bind-values.ts`
 - `catalog/entries/dues-status-v1.ts`
 - `catalog/published-versions.json`
+- `core/association/scoped-tables.ts`
 - `core/auth/authenticate.ts`
 - `core/ports/query-log.ts`
 - `core/ports/user-directory.ts`
 - `migrations/025_association_scoped_identity.sql`
 - `package.json`
 
-**Tests (15)**
+**Tests (17)**
 
 - `adapters/auth/session-claims.test.ts`
 - `adapters/auth/user-directory-postgres.test.ts`
@@ -463,6 +464,7 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 - `adapters/db/catalog-executor-postgres.test.ts`
 - `adapters/db/catalog-isolation.test.ts`
 - `adapters/db/query-log-postgres.test.ts`
+- `adapters/db/vendor-resolution-isolation.test.ts`
 - `app/tools/v1/catalog/execute/route.test.ts`
 - `catalog/bind-values.test.ts`
 - `catalog/registry.test.ts`
@@ -470,6 +472,7 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 - `core/ports/query-log.test.ts`
 - `core/security/no-association-creation.test.ts`
 - `migrations/association-scoped-identity.test.ts`
+- `migrations/association.test.ts`
 - `migrations/unit.test.ts`
 - `migrations/vendor.test.ts`
 
@@ -502,7 +505,13 @@ separately.
 
 ### Reviews
 
-Five `argus_review` calls: one per task, plus the integration pass over
+**The `ocr` half of step 4b was skipped on the first pass and run afterwards.** The story was
+closed out and reported ready-to-merge on the strength of Argus alone, which is half the reviewer
+setup. It found a real bug. Recorded here rather than quietly folded in, because "the review was
+clean" and "half the review never ran" are not the same sentence.
+
+Six `argus_review` calls: one per task, the integration pass, and one on the fix round below. Plus
+the integration pass over
 `04a94fe..HEAD` (33 files, story and planning documents excluded — they are the review's spec, and
 reviewing them as a diff reviews the prose against itself).
 
@@ -532,6 +541,66 @@ the path itself, so the POSIX form did not reach the file. Re-run with `C:/tmp/t
 reviewed the real change. Recorded in `_bmad/custom/argus-review-routing.md`, since it is the same
 silent-wrong-target shape that file already warns about for `repo_root`.
 
+### `ocr` (qwen3.7-plus), run after the fact
+
+**The first run was incomplete and said it was fine.** `summary.files_reviewed: 33` against
+`manifest.coverage.completed: 9` and `coverage.failed: 24`, every one `classification: "budget"`,
+with `budget_exceeded: true` — and exit code 0 with four findings. There is no `retry_report` key in
+this output shape at all, so `manifest.coverage` is the only honest signal. The 24 dropped files
+included `registry.test.ts`, `route.ts` and `query-log-postgres.ts` — the three that carry the
+story. Re-run at `--max-tokens-budget 3000000`: **33 of 33, 0 failed**, and coverage reconciles
+exactly against `git diff --name-only main...HEAD` minus the planning documents.
+
+**Cost: 3.80M tokens for 33 files** (115k/file). Story 5.1 was 11.2M for 63 (178k/file).
+
+Twenty-two findings. **Four confirmed, three refuted, fifteen skipped as nits.**
+
+*Confirmed:*
+
+1. `[high]` **A real bug, and one this story introduced.** `vendor-resolution-postgres.ts`'s
+   fallback SELECT reads `vendor` by normalised name alone, directly after an
+   `on conflict (association_id, normalised_name)`. Task 5 made the INSERT association-scoped and
+   left its paired SELECT global, so a document could be attached to **another association's
+   vendor** — with a real id and the right name, so nothing downstream would look wrong.
+   `roll-repository`'s unit lookup had the identical shape and is fixed with it. Regression test:
+   `adapters/db/vendor-resolution-isolation.test.ts`, proved to fail against the pre-fix code
+   (`expected <A's vendor id> to be <B's>`).
+2. `[medium]` `SCOPED_TABLES` was copied into `registry.test.ts` from `migrations/association.test.ts`
+   — two statements of one rule with nothing failing on disagreement. Now
+   `core/association/scoped-tables.ts`, imported by both, so the migration drift guard holds the
+   schema to the same list the catalog sweep uses.
+3. `[low]` `[medium]` The scoping scanner silently skips CTEs, derived tables and quoted
+   identifiers — it would pass an entry while checking none of its tables. It now **refuses** SQL it
+   cannot analyse, naming the construct.
+4. `[low]` A stale `unit_normalised_number($1)` in a comment, now `$2`.
+
+*Refuted:*
+
+- `[medium]` "the comment says migration 024 but should be 025" — migration 024 line 61 sets
+  `board_member.association_id` not null; 025 does not touch that table.
+- `[low]` "migration 025 references a dropped index name" — that line **is** the `drop index`
+  statement, which must name it.
+- `[low]` "the scanner only matches lowercase identifiers" — the `i` flag already covers case;
+  verified against `FROM Assessment`.
+
+*The fix round got its own review*, and it found one more: the regression test confirmed
+`b.firstDocument` without seeding a hold, so `confirmAsNew` returned `already-resolved`, the
+assertion guarded on `'vendorId' in created` silently did not run, and the case depended on an
+earlier test having run first. Rewritten to seed its own holds and to assert
+`second.outcome === 'matched'` — which is what proves it exercised the fallback path at all.
+
+### The suite was flaky, and this story made it so
+
+Three of six full runs failed with 5s timeouts in `dual-llm-boundary.test.ts` — on a commit already
+reported green. Not the fix round: it reproduced with the round stashed. `no-association-creation.test.ts`
+called `productSources()` in the `describe` body, so its whole-tree walk ran at **collection** time
+and blocked the worker before any test started, alongside four other guards that scan the tree under
+the default timeout. Memoised and moved out of collection, plus `withFileTypes` to halve the
+syscalls. Five consecutive green runs since.
+
+Worth stating plainly: a green run on a flaky suite is not evidence, and this was found only because
+a fix round happened to run the suite six times.
+
 ### What the checks found that the tests did not
 
 Both vacuities in this story were found by the **sensitivity check**, not by a reviewer and not by
@@ -552,3 +621,4 @@ where the gate found something the suite could not.
 | 2026-08-20 | Context pass: files read, three constraints and one open question recorded; ready-for-dev |
 | 2026-08-20 | Tasks 1-5 implemented test-first; AD-14 decision taken by Matt; ready for review |
 | 2026-08-20 | Reviews triaged, AC audit clean, gates green, MR !71 opened — ready to merge |
+| 2026-08-20 | `ocr` review run (it had been skipped); one real bug fixed, suite flakiness fixed |

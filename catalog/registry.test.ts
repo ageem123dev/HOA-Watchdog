@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { ASSOCIATION_SCOPED_TABLES } from '../core/association/scoped-tables'
 import type { CatalogEntry } from './entry'
 import {
   ALL_ENTRIES,
@@ -167,22 +168,14 @@ describe('every entry in the catalog', () => {
    * walks the `from`/`join` clauses, takes the alias each scoped table is bound
    * to, and requires a predicate joining *that alias* to `$1`.
    */
-  const SCOPED_TABLES = new Set([
-    'board_member',
-    'document',
-    'extraction',
-    'vendor',
-    'quarantine_item',
-    'unit',
-    'unit_holder',
-    'unit_membership',
-    'assessment',
-    'payment',
-    'held_payment',
-    'query_log',
-    'finding',
-    'finding_alert',
-  ])
+  /**
+   * From `core/association/scoped-tables.ts`, not a copy of it. A second list
+   * here would fall behind the schema silently — a table added to migrations and
+   * missed here is a table catalog entries may read unscoped while this sweep
+   * reports success. `migrations/association.test.ts` holds the live schema to
+   * the same constant, so it cannot drift from reality unnoticed.
+   */
+  const SCOPED_TABLES = new Set<string>(ASSOCIATION_SCOPED_TABLES)
 
   /**
    * The word that cannot follow a table name and still be its alias.
@@ -260,6 +253,42 @@ describe('every entry in the catalog', () => {
       ])
     })
   })
+
+  /**
+   * Constructs the scanner cannot see into, each of which would make it skip a
+   * table **silently** — which is worse than not having the sweep at all, since
+   * a green result would say the entry was checked.
+   *
+   * - a CTE (`with x as (…)`) puts its tables outside any `from`/`join` the
+   *   scanner reaches;
+   * - a derived table (`from (select … from unit) u`) is read as the alias `u`,
+   *   and `unit` is never seen;
+   * - a quoted identifier (`from "unit"`) does not match the bare-word pattern.
+   *
+   * So the sweep refuses them rather than passing over them. This is a
+   * deliberate restriction on what a catalog entry may look like, not a
+   * limitation being papered over: the day one is genuinely needed, the scanner
+   * is extended and this list shrinks. Raised by `ocr` reviewing story 5.1b.
+   */
+  const UNANALYSABLE = [
+    [/\bwith\s+[a-z_][a-z0-9_]*\s+as\s*\(/i, 'a common table expression'],
+    [/\b(?:from|join)\s*\(/i, 'a derived table'],
+    [/\b(?:from|join)\s+"/i, 'a quoted identifier'],
+  ] as const
+
+  it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
+    '%s uses only SQL the scoping scanner can analyse',
+    (_label, entry) => {
+      for (const [pattern, what] of UNANALYSABLE) {
+        expect(
+          pattern.test(entry.sql),
+          `${entry.id}@${entry.version} uses ${what}, which the scoping scanner ` +
+            `below cannot see into — it would skip a table and still report success. ` +
+            `Extend tableReferences before allowing it.`,
+        ).toBe(false)
+      }
+    },
+  )
 
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
     // No `$1` in this title: vitest reads `$name` in an `it.each` title as a

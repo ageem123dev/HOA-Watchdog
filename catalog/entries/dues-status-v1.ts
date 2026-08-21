@@ -73,7 +73,7 @@ import type { CatalogEntry } from '../entry'
 /**
  * Notes on the SQL, in the order a reader meets them.
  *
- * `unit_normalised_number($1)` rather than the raw column, so `4b ` off a roll
+ * `unit_normalised_number($2)` rather than the raw column, so `4b ` off a roll
  * finds `4B`. Migration 011 defines the folding and pins its `search_path`;
  * `adapters/db/assessment-directory-postgres.ts` matches the same way, and the
  * two must not diverge.

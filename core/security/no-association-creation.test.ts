@@ -33,7 +33,7 @@
  * silently stop covering the directory somebody adds next.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -51,20 +51,30 @@ const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mjs', '.js'])
 /** A test may create an association; that is how AC4's second board exists. */
 const isTest = (path: string) => /\.(test|spec)\.[cm]?[jt]sx?$/.test(path)
 
+/**
+ * `withFileTypes` rather than a `statSync` per entry, which halves the syscalls
+ * over roughly four hundred files.
+ *
+ * Not a micro-optimisation: four other guards in this directory scan the tree
+ * too, each under vitest's default 5s timeout, and the first version of this
+ * walk made `dual-llm-boundary.test.ts` time out intermittently under parallel
+ * workers. A guard that makes its neighbours flaky costs more than it defends,
+ * because the next red run gets re-run rather than read.
+ */
 function productSources(): string[] {
   const found: string[] = []
 
   const walk = (directory: string) => {
-    for (const entry of readdirSync(directory)) {
-      if (entry === 'node_modules' || entry.startsWith('.')) continue
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
 
-      const path = join(directory, entry)
-      if (statSync(path).isDirectory()) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) {
         walk(path)
         continue
       }
 
-      if (SOURCE_EXTENSIONS.has(extname(entry)) && !isTest(path)) found.push(path)
+      if (SOURCE_EXTENSIONS.has(extname(entry.name)) && !isTest(path)) found.push(path)
     }
   }
 
@@ -103,15 +113,26 @@ describe('the matcher itself', () => {
   })
 })
 
-describe('no product code path creates an association', () => {
-  const sources = productSources()
+/**
+ * Walked once, on first use, and **not while the suite is being collected**.
+ *
+ * Calling `productSources()` in the `describe` body runs it at collection time,
+ * which blocks this file's worker before a single test starts and delays every
+ * file scheduled beside it. Four other guards in this directory also scan the
+ * tree under vitest's default 5s timeout, and two of them began timing out
+ * intermittently once this file existed. Memoised rather than moved into each
+ * test so the walk still happens only once.
+ */
+let cached: string[] | null = null
+const sourcesOnce = () => (cached ??= productSources())
 
+describe('no product code path creates an association', () => {
   it('has product source files to read, so the sweep is not passing over nothing', () => {
-    expect(sources.length).toBeGreaterThan(50)
+    expect(sourcesOnce().length).toBeGreaterThan(50)
   })
 
   it('finds no INSERT into association in any of them', () => {
-    const offenders = sources.filter((path) =>
+    const offenders = sourcesOnce().filter((path) =>
       CREATES_AN_ASSOCIATION.test(readFileSync(path, 'utf8')),
     )
 

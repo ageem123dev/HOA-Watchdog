@@ -126,9 +126,16 @@ export function createVendorResolution(): VendorResolution {
         const createdId = inserted.rows[0]?.id
         if (createdId !== undefined) return { outcome: 'created', vendorId: createdId }
 
+        // Scoped to the same association the INSERT above conflicted within.
+        // Since migration 025 the identity key is `(association_id,
+        // normalised_name)`, so this is the row that conflict was *about* — read
+        // by name alone it could be another association's vendor with the same
+        // name, and this document would be attached to it.
         const existing = await client.query<{ id: string }>(
-          'select id from vendor where normalised_name = vendor_normalised_name($1)',
-          [extractedName],
+          `select id from vendor
+            where normalised_name = vendor_normalised_name($1)
+              and association_id = (select association_id from document where id = $2)`,
+          [extractedName, documentId],
         )
 
         const matchedId = existing.rows[0]?.id
