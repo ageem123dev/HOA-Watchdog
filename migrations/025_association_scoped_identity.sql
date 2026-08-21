@@ -31,14 +31,31 @@
 --
 -- ## What this deliberately does not do
 --
--- It does not scope the *reads* keyed on these columns — `unit-directory`,
--- `vendor-directory`, `vendor-resolution` and `roll-repository` all still match
--- on the normalised value alone. With one association those return exactly what
--- they did before. With two they become ambiguous, which is why story 5.1b also
--- forbids any product path from creating an association: the guard is what stops
--- a second one arriving before that work is done.
-
-begin;
+-- It does not scope every *read* keyed on these columns. `vendor-resolution`
+-- and `roll-repository` were scoped when their upserts were — their paired
+-- lookups had to agree with the conflict target — but `unit-directory` and
+-- `vendor-directory` still match on the normalised value alone. With one
+-- association those return exactly what they did before. With two they become
+-- ambiguous, which is why story 5.1b also forbids any product path from
+-- creating an association: the guard is what stops a second one arriving before
+-- that work is done.
+--
+-- ## This runs inside a transaction, and that is a trade-off rather than a win
+--
+-- `scripts/migrate.mjs` wraps every migration in `begin`/`commit`, so there is
+-- no `begin` here — one would merely nest inside the runner's and read as if
+-- this file controlled its own. The consequence is that
+-- `create index concurrently` **cannot** be used: it is forbidden inside a
+-- transaction block. So the builds below take a lock that blocks writes to
+-- `unit` and `vendor` while they run.
+--
+-- Accepted deliberately. Both tables are small here and the build is
+-- milliseconds; the alternative is teaching the runner to execute a migration
+-- outside a transaction, which then has to handle a failed concurrent build
+-- leaving an `INVALID` index behind that no rollback removes. That is a change
+-- to the runner, not to this migration, and it is recorded as an action item.
+-- **Revisit before either table is large**, which for `unit` means a real roll
+-- rather than a pilot's. Raised by CodeRabbit on MR !71.
 
 -- `unit`: one "4B" per association.
 create unique index if not exists unit_association_normalised_number_key
@@ -52,4 +69,3 @@ create unique index if not exists vendor_association_normalised_name_key
 
 drop index if exists vendor_normalised_name_key;
 
-commit;

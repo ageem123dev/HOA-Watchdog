@@ -58,10 +58,16 @@ it was a confident, well-written, `audit_chain_ok: true` review of `core/ports/f
 and `checked-documents.ts` — epic-4 files, absent from the diff entirely. Re-running the identical
 call with `C:/tmp/task1.diff` reviewed the real change.
 
-Write the file to a Windows-absolute path and pass it as one. **Then check the verdict names files
-that are actually in your diff** before reading a word of its judgement — `files_discovered` should
-be in the region of your file count, and this is the same silent-wrong-target shape as the
-`repo_root` default above.
+Write the file to a Windows-absolute path and pass it as one. **Then check that the verdict names
+files which are actually in your diff**, before reading a word of its judgement — this is the same
+silent-wrong-target shape as the `repo_root` default above.
+
+**Check the names, not `files_discovered`.** That number counts the files Argus gathered as
+*context*, not the contents of your diff, so it is only loosely related to the diff's size and
+proves nothing about the target: on one run it read 38 for a 33-file diff, on another 6 for a
+4-file diff. An earlier version of this note said to compare it against your file count, which
+would have passed a wrong-target review whose context happened to be a similar size. Compare the
+verdict's file names against `git diff --name-only` for the same range.
 
 ### Pass `diff`, not `git_range`
 

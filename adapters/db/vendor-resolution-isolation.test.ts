@@ -18,6 +18,8 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -35,6 +37,8 @@ if (!configured) {
       'and DATABASE_URL must both be set.\n',
   )
 }
+
+const REPO_ROOT = process.cwd()
 
 const RUN_PREFIX = `v${randomBytes(4).toString('hex')}`
 
@@ -175,6 +179,30 @@ describeWithDatabase('resolving a vendor name that two associations both use', (
 
     expect(await associationOf(secondId)).toBe(b.associationId)
     expect(secondId).toBe(firstId)
+  })
+
+  /**
+   * The deterministic half, and it is here because the behavioural test above
+   * is **not** deterministic.
+   *
+   * The fallback `SELECT` has no `ORDER BY`, so with the association predicate
+   * removed Postgres may return either board's vendor. It returned A's both
+   * times this was checked against the pre-fix code, which is evidence and not
+   * a guarantee — a regression test that catches the defect most of the time
+   * is a regression test that eventually stops catching it, silently. Raised by
+   * CodeRabbit on MR !71.
+   *
+   * Reading the adapter's source is a weaker kind of assertion on its own; the
+   * pair is the point. This one cannot flake, and the one above cannot be
+   * satisfied by text that never runs.
+   */
+  it('constrains the fallback lookup to the document association, in the SQL itself', () => {
+    const source = readFileSync(join(REPO_ROOT, 'adapters/db/vendor-resolution-postgres.ts'), 'utf8')
+
+    const fallback = source.slice(source.indexOf('const existing'))
+
+    expect(fallback).toMatch(/select id from vendor/i)
+    expect(fallback).toMatch(/association_id\s*=\s*\(\s*select association_id from document/i)
   })
 
   it('leaves two vendors standing, one per association', async () => {

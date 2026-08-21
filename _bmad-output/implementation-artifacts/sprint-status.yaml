@@ -146,7 +146,7 @@ action_items:
     owner: "Matt"
     status: open
   - epic: 5
-    action: "Scope the eight product read paths that still match on the normalised value alone: unit-directory (three queries), vendor-directory (three), vendor-resolution (two) and roll-repository's unit lookup. Migration 025 made unit and vendor identity keys composite on (association_id, ...), so these reads are unambiguous with one association and AMBIGUOUS with two. Story 5.1b scoped the catalog read path only - no acceptance criterion covered the product adapters. This is why core/security/no-association-creation.test.ts exists, and it must be done before that guard is relaxed"
+    action: "Scope the six product read paths that still match on the normalised value alone: unit-directory (three queries) and vendor-directory (three). vendor-resolution and roll-repository were scoped during 5.1b because their paired lookups had to agree with the conflict targets migration 025 changed - a review found the vendor one returning another association's row. Migration 025 made unit and vendor identity keys composite on (association_id, ...), so these reads are unambiguous with one association and AMBIGUOUS with two. Story 5.1b scoped the catalog read path only - no acceptance criterion covered the product adapters. This is why core/security/no-association-creation.test.ts exists, and it must be done before that guard is relaxed"
     owner: "Dev"
     status: open
   - epic: 5
