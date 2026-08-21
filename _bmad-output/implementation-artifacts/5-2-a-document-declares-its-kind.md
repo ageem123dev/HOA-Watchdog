@@ -239,6 +239,27 @@ argument too many in the restored helper - while the suite stayed green, because
 without checking them. That is exactly what `{gate}` says `tsc --noEmit` is for, and it is the
 second time in this story that a green suite meant less than it appeared to.
 
+#### AC4 shipped broken, and every gate was green
+
+`actions.ts` was changed to require `documentKind` and to refuse a submission without one. **The
+form was never changed to send it.** `upload-form.tsx` had `name="documents"` and nothing else, so
+every upload through the UI would have been refused with *"Choose what kind of document this is
+before uploading."*
+
+ was at baseline, lint was clean, the build succeeded and 3300 tests passed. Nothing could see
+it, because **no test rendered the form and looked at what it submits** - the same shape as the
+AC-audit's standing example: *an AC read by the adapter, carried by the port, and rendered by
+nothing*. Found by reading the form while checking AC4, not by running anything.
+
+Fixed with a `select` offering every kind in `DOCUMENT_KINDS`, labelled, **with nothing
+pre-selected** - a default there would put the decision back where this story took it from, made by
+omission, and a roll uploaded as a bank statement fails silently: the units simply never appear.
+
+`app/upload/upload-form.test.tsx` *(new)* asserts the **wire**, not the appearance: the control's
+`name` (what `formData.get` reads), the option values as a set against `DOCUMENT_KINDS`, and that
+nothing is pre-selected. Three mutations prove it - removing the control (4 red), giving it a
+default (1 red), renaming the field (3 red). The first of those is the bug that shipped.
+
 ### File List
 
 - `core/extraction/tabular.ts` - the kind is a parameter; `kindOf`, `DEFAULT_DOCUMENT_KIND` and the
@@ -249,6 +270,8 @@ second time in this story that a green suite meant less than it appeared to.
 - `core/ingestion/ingest.test.ts`, `reading.test.ts`, `ingest-quarantine.test.ts`
 - `adapters/db/roll-ingestion.test.ts`, `adapters/db/deposit-ingestion.test.ts`
 - `app/upload/actions.ts` - the submission declares the kind, refused before a byte is read
+- `app/upload/upload-form.tsx` - the control that sends it, nothing pre-selected
+- `app/upload/upload-form.test.tsx` *(new)* - what the form submits, 5 cases
 - `docs/upload-contract.md` - one file is one kind; the `type` row and the mixing sentence gone
 - `scripts/build-samples.mjs` and the four regenerated samples
 
@@ -259,4 +282,5 @@ second time in this story that a green suite meant less than it appeared to.
 | 2026-08-21 | Created from epic 5's story spine, with the byte-exact sample fixtures flagged as the trap |
 | 2026-08-21 | All five tasks: the kind is declared by the upload. `type` refused rather than ignored, samples regenerated, contract rewritten |
 | 2026-08-21 | Argus found that a helper script had truncated an existing 21-test file; restored and merged, 42 cases |
+| 2026-08-21 | AC4 was shipped broken - the action required a field the form never sent, with every gate green. Control and render test added |
 | 2026-08-21 | Status done, written in this commit rather than after the merge |

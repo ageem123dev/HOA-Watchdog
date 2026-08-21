@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react'
 
+import { DOCUMENT_KINDS, type DocumentKind } from '@/core/extraction/record'
 import { ACCEPTED_CONTENT_TYPES } from '@/core/ingestion/acceptance'
 import { uploadFeedback } from '@/core/ingestion/upload-feedback'
 import { uploadDocuments } from './actions'
@@ -16,6 +17,22 @@ import { EMPTY_UPLOAD_STATE, type UploadState } from './upload-state'
  * Every word rendered here comes from `core/ingestion/upload-feedback.ts`, which
  * is tested against the PRD. Nothing on this page phrases an outcome itself.
  */
+
+/**
+ * What a treasurer calls each kind.
+ *
+ * Derived from `DOCUMENT_KINDS` rather than listed independently — a kind added
+ * to the domain and missed here would be a kind nobody could upload, and the
+ * lookup below makes that a type error rather than a silent omission.
+ */
+const KIND_LABELS: Readonly<Record<DocumentKind, string>> = {
+  assessment_roll: 'Assessment roll — creates units, holders and assessments',
+  deposit: 'Deposits — payments against units',
+  invoice: 'Invoices',
+  statement: 'Bank statement',
+  other: 'Something else',
+}
+
 export function UploadForm() {
   const [state, submit, pending] = useActionState<UploadState, FormData>(
     uploadDocuments,
@@ -25,6 +42,32 @@ export function UploadForm() {
   return (
     <>
       <form action={submit} style={styles.form}>
+        {/*
+          **What these documents are, declared before they are sent** (story
+          5.2). The kind used to be an optional `type` column read row by row,
+          which meant one file could be several things at once and a mapping
+          could not be "for deposits".
+
+          No option is pre-selected. A default here would put the decision back
+          where it was — decided by omission — and the treasurer who uploads a
+          roll as a bank statement finds out when their units do not appear.
+          `actions.ts` refuses a submission that names no kind, before it reads
+          a byte.
+        */}
+        <label htmlFor="documentKind" style={styles.label}>
+          What are these documents?
+        </label>
+        <select id="documentKind" name="documentKind" defaultValue="" style={styles.field}>
+          <option value="" disabled>
+            Choose a kind…
+          </option>
+          {DOCUMENT_KINDS.map((kind) => (
+            <option key={kind} value={kind}>
+              {KIND_LABELS[kind]}
+            </option>
+          ))}
+        </select>
+
         <label htmlFor="documents" style={styles.label}>
           Documents
         </label>
