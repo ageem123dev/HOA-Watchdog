@@ -515,6 +515,49 @@ includes a wrapper call for that reason.
 false positive at `major` could not be written to memory as an Argus miss. Joined on `9fb1c41`, 1
 review compared, 0 skipped, 0 lessons - Argus and CodeRabbit agreed at critical/major.
 
+#### Step 6 - the whole-story integration review
+
+Argus over the 17 code files at once (`17b6794..d027aa0`, `_bmad-output` excluded - the story is
+the spec, and reviewing it as a diff reviews the prose against itself). Clean:
+`audit_chain_ok` true, `reflection_converged` true, `selectivity` 0.93 (17 of 19 - not a thin
+slice), `confidence` 1, one `agy` call.
+
+Then the seams a per-task review structurally cannot see, because they span two languages and four
+processes:
+
+**The chain matches end to end.** `page.tsx` (`session.user.id`) -> `askOracle({question, actorId})`
+-> `askAgent` mints with that subject -> `POST /chat {question, actorAssertion}` -> `PERMITTED_FIELDS`
+-> `routing` -> `tools_client` -> `POST execute {..., actorAssertion}` -> verify ->
+`execute({actorId: verified.subject})` -> `query_log`. Field spellings agree across the language
+boundary at both hops.
+
+**`actorId` survives on purpose, and only where it is not a wire field.** It remains the domain name
+upstream of minting (the session's own user id) and downstream of verification (the executor port,
+the `query_log` column, the access-log read path). That is coherent rather than leftover: it is a
+*claim* only inside the one process that also holds the signing key, and it becomes *proof* the
+moment it crosses a process boundary. What AD-18 removes is the field, not the concept.
+
+##### The finding: a required variable nothing can fail on
+
+**`ACTOR_ASSERTION_KEY` is absent from `.env.local`.** This story makes it required - `readConfig`
+lists it among the missing and `askAgent` refuses to send without it - so **the Oracle stops
+answering in any environment that has not had the variable added**, this development machine
+included.
+
+**No gate catches this and none can.** Every suite stubs the key, which is correct; `.env.local` is
+gitignored, so no test may read it. The only mechanisms are `.env.example` and this note.
+
+Action, before the MR is merged and before the Oracle is next used locally - **the operator runs
+this, not the agent; the value must never reach a transcript**:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+...added to `.env.local` as `ACTOR_ASSERTION_KEY=` and to the **Next.js runtime's** deployment
+environment. **Not** the agent service's - `test_relay_holds_no_key.py` exists to make holding it
+there a failing test, and AD-18's whole claim is that the relay cannot mint.
+
 ## Change Log
 
 | Date | Change |
@@ -526,5 +569,6 @@ review compared, 0 skipped, 0 lessons - Argus and CodeRabbit agreed at critical/
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
 | 2026-08-21 | 4b/4c: the AC audit found an unproved db-level refusal, and mutation found the forgery too short to test the signature check |
+| 2026-08-21 | Step 6 integration review: Argus clean; the chain matches end to end, and ACTOR_ASSERTION_KEY is missing from .env.local |
 | 2026-08-21 | CodeRabbit CLI round: 3 of 5 confirmed; four claim guards had no test that could reach them |
 | 2026-08-21 | Tasks 3 and 5: the expiry window gains a bound that can fail, and `actorId` is refused rather than ignored. All tasks complete |
