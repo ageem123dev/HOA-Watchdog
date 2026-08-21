@@ -61,7 +61,7 @@ const ASSERTION_KEY_VARIABLE = 'ACTOR_ASSERTION_KEY'
  * gateway request open indefinitely and the board member sees a page that never
  * resolves. Raised by CodeRabbit.
  */
-const DEFAULT_TIMEOUT_MS = 60_000
+export const DEFAULT_TIMEOUT_MS = 60_000
 
 export class AgentNotConfiguredError extends Error {
   override readonly name = 'AgentNotConfiguredError'

@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AgentNotConfiguredError,
   AgentUnavailableError,
+  DEFAULT_TIMEOUT_MS,
   NoCatalogMatchError,
   askAgent,
 } from './chat-client'
@@ -375,6 +376,30 @@ describe('the actor assertion on the wire', () => {
 
     expect(payload).not.toHaveProperty('actorId')
     expect(Object.keys(payload).sort()).toEqual(['actorAssertion', 'question'])
+  })
+
+  /**
+   * AC5. The two tests around this one move the clock relative to
+   * `ACTOR_ASSERTION_TTL_MS`, so they pass at any value it holds — including a
+   * week, which would make a relayed assertion a bearer credential for that
+   * board member. This is the one that fails when the window stops being a
+   * window.
+   *
+   * **The lower bound is the gateway's own timeout, not a chosen number.** A
+   * turn is a model call plus a catalog execution and may take the full
+   * `DEFAULT_TIMEOUT_MS`; an assertion that could expire inside a turn the
+   * gateway is still willing to wait for would fail legitimate requests on the
+   * clock, intermittently, under load — the hardest kind of failure to read.
+   * Both constants are imported, so widening either one alone fails here.
+   *
+   * **The upper bound is a judgement**, and stating it in a test is what makes
+   * it reviewable: fifteen minutes is already far longer than a turn, and past
+   * it the credential outlives the thing it was minted for by enough that
+   * "bounded replay" stops being an honest description.
+   */
+  it('mints inside a window long enough for a slow turn and short enough to bound replay', () => {
+    expect(ACTOR_ASSERTION_TTL_MS).toBeGreaterThan(DEFAULT_TIMEOUT_MS)
+    expect(ACTOR_ASSERTION_TTL_MS).toBeLessThanOrEqual(15 * 60_000)
   })
 
   it('mints an assertion that is not yet expired but does not outlive the window', async () => {

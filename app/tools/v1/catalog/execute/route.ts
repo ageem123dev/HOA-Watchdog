@@ -69,6 +69,17 @@ function readRequest(payload: unknown): ExecuteRequest | null {
   // caller learning exactly which shapes the endpoint does not mind receiving.
   if (Object.hasOwn(payload, 'associationId')) return null
 
+  // AC4 of story 5.1c, and the same refusal for the same reason. Who a query is
+  // run for is established by the assertion below, never by a field beside it.
+  //
+  // Refused even when it *agrees* with the assertion's subject. A guard that
+  // only refused a disagreeing `actorId` would teach a caller that the field
+  // works, and would answer "whose turn is this?" by which value comes back
+  // 200. Ignoring it would be safe today — nothing reads it — but it would sit
+  // in every request body looking exactly like an input, and the next reader
+  // wires it to something.
+  if (Object.hasOwn(payload, 'actorId')) return null
+
   const { entryId, version, parameters, actorAssertion } = payload as Record<string, unknown>
 
   if (typeof entryId !== 'string' || entryId.trim() === '') return null

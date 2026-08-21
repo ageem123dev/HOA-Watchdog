@@ -1,5 +1,5 @@
 ---
-Status: in-progress
+Status: review
 baseline_commit: 17b6794bbea06cea3a7c55a1504c9061cb615cc7
 merge_request:
 ---
@@ -86,10 +86,17 @@ Two things follow. Neither is urgent today; both get worse on the day a second a
       to cover a per-turn per-actor credential would blur the claim its own test enforces. (AC6)
 - [x] **Task 2 — Mint and verify.** The signing on the Next.js side, the verification at the
       gateway, and the key's home. (AC1)
-- [ ] **Task 3 — The refusals.** Forged, expired, altered, wrong audience. (AC2, AC5)
+- [x] **Task 3 — The refusals.** Forged, expired, altered, wrong audience. (AC2, AC5) Task 2 had
+      already driven all four through the gateway in `route.test.ts`, each asserting a valid
+      assertion is still accepted in the same run. What was **missing** was AC5's other half: every
+      expiry test moved the clock *relative to* `ACTOR_ASSERTION_TTL_MS`, so all of them passed at
+      any value it held — a week included. Closed with a bounds test tying the window to the
+      gateway's own `DEFAULT_TIMEOUT_MS` below and fifteen minutes above.
 - [x] **Task 4 — The relay is a relay.** The agent service passes the token through and holds no
       key; the structural test that says so. (AC3)
-- [ ] **Task 5 — Retire the believable `actorId`.** (AC4)
+- [x] **Task 5 — Retire the believable `actorId`.** (AC4) The gateway refuses a request carrying
+      the field, mirroring 5.1b's `associationId` refusal — **not** the "derives it and ignores a
+      body value" branch AC4 also allows. Reasoning below.
 
 ## Dev Notes
 
@@ -254,6 +261,22 @@ the gateway 401s); **holding a key** breaks silently, and the silent one is the 
 side's property and `route.test.ts` owns it — asserting it from the Python side would need a key
 this runtime must not have, which is the thing 4.2a forbids.
 
+#### Tasks 3 and 5 — what was actually left
+
+Both tasks were **partly discharged by task 2's implementation**, and the work here was finding the
+part that was not. Recorded that way rather than as fresh work, because "already covered" is the
+claim an AC audit exists to disbelieve.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3.1a | The expiry tests all move the clock relative to the constant, so the suite is green at any window — including one that makes a relayed assertion a bearer credential for that member | GUARD — bounds asserted against `DEFAULT_TIMEOUT_MS` and fifteen minutes; proved by mutating the constant in **both** directions |
+| 3.1b | The lower bound is written as a chosen number and drifts when the gateway timeout is raised | GUARD — the bound *is* the imported timeout, so raising either alone fails |
+| 5.1a | `actorId` in the body is silently ignored, so a caller supplying it gets a `200` and believes it worked | GUARD — refused, `400`, executor never called |
+| 5.1b | The guard refuses only a *disagreeing* `actorId`, which answers "whose turn is this?" by which value comes back `200` | GUARD — the case list includes the assertion's own subject |
+| 5.1c | The guard is written as a truthiness check, so `null`, `''` and `0` pass and a prober learns which shapes the endpoint tolerates | GUARD — `Object.hasOwn`, with those three in the case list |
+| 5.1d | The refusal block passes because the endpoint refuses *everything* | GUARD — the inverse case in the same block: the identical request without the field returns `200` and the executor receives the proved subject |
+| 5.1e | An unauthenticated caller learns the field exists from a `400` | GUARD — `401` outranks `400`, as it already does for `associationId` |
+
 ### Debug Log References
 
 **Task 2.** The first red was a missing-module error, which is not a valid red — the module was
@@ -356,6 +379,30 @@ for, asserted end to end against a real database.
 ` anchor found nothing in a CRLF file and the
   revert asserted zero matches.
 
+**Tasks 3 and 5 — the refusals and the retirement**
+
+- **AC5 was stated but not enforced.** The window's *reasoning* lived in a docstring and every test
+  around it was relative to the constant, so widening `ACTOR_ASSERTION_TTL_MS` to a week broke
+  nothing. This is the vacuity this project keeps finding, in a new shape: not a test that passes
+  when the behaviour is deleted, but a suite that passes at every value of the number it is about.
+- **The lower bound is the gateway's own timeout, imported, not a number chosen to match it.** A
+  turn may take the full `DEFAULT_TIMEOUT_MS`; an assertion that can expire inside a turn the
+  gateway is still waiting for fails legitimate requests on the clock, intermittently, under load.
+  Raising either constant alone now fails. The upper bound is a judgement, and writing it into a
+  test is what makes it reviewable rather than merely asserted.
+- **`actorId` is refused, not ignored** — AC4 permits either, and this is the choice. Ignoring is
+  safe *today*, because nothing reads the field; but the field would then sit in every request body
+  looking exactly like an input, which is a property of the current code rather than of the design.
+- **Refused even when it agrees with the assertion's subject.** A guard that refused only a
+  disagreeing `actorId` would teach a caller the field works, and would answer "whose turn is this?"
+  by which value comes back `200`.
+- **The refusal block carries its own inverse.** The same request without the field returns `200`
+  and the executor is called with the proved subject — so the five refusals cannot be passing
+  because the endpoint refuses everything.
+- **Sensitivity:** the five refusals were red before the guard and green after, which is the
+  strongest form of the check. The bounds test was mutated both ways — a week and thirty seconds —
+  and failed on each, restored green.
+
 ### File List
 
 **Task 2**
@@ -379,6 +426,13 @@ for, asserted end to end against a real database.
 - `agent/tests/test_relay_holds_no_key.py` *(new)* — AC3's structural guard, 5 cases
 - `agent/tests/test_chat_service.py`, `agent/tests/test_routing.py`, `agent/tests/test_tools_client.py`
 
+**Tasks 3 and 5**
+
+- `app/tools/v1/catalog/execute/route.ts` — refuses a body `actorId`, with the reasoning in place
+- `app/tools/v1/catalog/execute/route.test.ts` — the refusal block, its inverse, and the `401` rank
+- `adapters/agent/chat-client.ts` — `DEFAULT_TIMEOUT_MS` exported so the bound can be the real one
+- `adapters/agent/chat-client.test.ts` — AC5's bounds test
+
 
 ## Change Log
 
@@ -390,3 +444,4 @@ for, asserted end to end against a real database.
 | 2026-08-21 | Context pass: the seven-file chain read and recorded, four design decisions made, ready-for-dev |
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
+| 2026-08-21 | Tasks 3 and 5: the expiry window gains a bound that can fail, and `actorId` is refused rather than ignored. All tasks complete |

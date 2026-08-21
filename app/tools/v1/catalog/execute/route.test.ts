@@ -254,6 +254,60 @@ describe('POST /tools/v1/catalog/execute', () => {
   })
 
   /**
+   * AC4. The field this whole story exists to retire.
+   *
+   * Refused rather than ignored, for the reason the `associationId` block above
+   * records — and here the argument is stronger. Ignoring `actorId` is safe:
+   * the subject comes from the verified assertion and nothing reads the field.
+   * But "safe because nothing reads it" is a property of today's code, and the
+   * field would sit in the body of every request looking exactly like an input.
+   * The next reader wires it to something.
+   *
+   * The presence of the key is the refusal, whatever it holds — including when
+   * it agrees with the assertion's subject. A guard that only refuses a
+   * *disagreeing* `actorId` teaches a caller that the field works, and tells it
+   * whose turn it is by which value comes back 200.
+   */
+  describe('a request that tries to name its own actor', () => {
+    it.each([
+      ['another board member', '00000000-0000-7000-8000-0000000000bb'],
+      ['the same subject the assertion proves', ACTOR],
+      ['null', null],
+      ['an empty string', ''],
+      ['a number', 7],
+    ])('is refused when actorId is %s', async (_label, value) => {
+      const response = await call({ payload: body({ actorId: value }) })
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toMatchObject({ code: 'invalid_request' })
+      expect(execute).not.toHaveBeenCalled()
+    })
+
+    /**
+     * The inverse, and the case that keeps the block above from being vacuous:
+     * the same request without the field is accepted, and the executor is given
+     * the subject the assertion proved.
+     */
+    it('accepts the same request without the field, running it for the proved subject', async () => {
+      const response = await call({ payload: body() })
+
+      expect(response.status).toBe(200)
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ actorId: ACTOR }))
+    })
+
+    /**
+     * 401 outranks 400, as it does for `associationId`: a caller with no token
+     * must not learn which fields the endpoint recognises.
+     */
+    it('answers 401 rather than 400 when the caller is not the agent service', async () => {
+      const response = await call({ token: 'wrong', payload: body({ actorId: 'x' }) })
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
    * AD-18 at the gateway. The service token proves the *caller is the agent
    * service*; the assertion proves *which board member the turn is for*. Both,
    * or neither is enough.
