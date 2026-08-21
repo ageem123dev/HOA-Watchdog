@@ -1,6 +1,6 @@
 ---
-Status: ready-for-dev
-baseline_commit:
+Status: done
+baseline_commit: ba2503d
 merge_request:
 ---
 
@@ -60,17 +60,17 @@ make "the mapping for deposits" a phrase with no referent.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The kind becomes a parameter.** `readTable`/`readRows` require it; `kindOf` and
+- [x] **Task 1 — The kind becomes a parameter.** `readTable`/`readRows` require it; `kindOf` and
       `DEFAULT_DOCUMENT_KIND` are deleted rather than defaulted. Every internal read of the row's
       kind becomes the declared one. (AC1, AC3)
-- [ ] **Task 2 — Refuse a file that still carries `type`.** A named reason in `TABULAR_PROBLEMS`,
+- [x] **Task 2 — Refuse a file that still carries `type`.** A named reason in `TABULAR_PROBLEMS`,
       not a silent drop. (AC2)
-- [ ] **Task 3 — Thread it through ingest and the upload surface.** `core/ingestion/ingest.ts`,
+- [x] **Task 3 — Thread it through ingest and the upload surface.** `core/ingestion/ingest.ts`,
       `app/upload/actions.ts`, `app/upload/upload-state.ts`. A submission with no kind is refused
       before the file is read. (AC4)
-- [ ] **Task 4 — Regenerate the samples.** `scripts/build-samples.mjs` and the four sample files.
+- [x] **Task 4 — Regenerate the samples.** `scripts/build-samples.mjs` and the four sample files.
       Read the trap below first. (AC6)
-- [ ] **Task 5 — Rewrite the contract section.** `docs/upload-contract.md` and its test. (AC5)
+- [x] **Task 5 — Rewrite the contract section.** `docs/upload-contract.md` and its test. (AC5)
 
 ## Dev Notes
 
@@ -134,14 +134,129 @@ comes from*. If it starts growing a mapping concept, that is the seam being cros
 
 ### Test Design
 
-### Debug Log References
+#### Failure modes of a declared kind
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | A caller omits the kind and the module supplies `statement` - the per-row rule relocated, deciding by omission | GUARD - required by the type *and* refused at runtime, because the value crosses a form submission |
+| 1b | An unrecognised kind flows through and every row reports `invalid-row`, naming the wrong thing | GUARD - `unknown-kind`, refused before the file is read |
+| 1c | The declared kind is used for records while a row's `type` still wins somewhere | GUARD - `kindOf` and `DEFAULT_DOCUMENT_KIND` deleted, not shadowed |
+| 2a | A file still carrying `type` has the column silently ignored | GUARD - `kind-is-not-a-column`, refused by name |
+| 3a | The roll-header pre-check still scans rows, so a file's contents decide what is demanded of it | GUARD - reads the declaration |
+| 3b | The parameter is accepted and ignored, so the same bytes always mean one thing | GUARD - **the decisive test**: one rectangle read as `assessment_roll` and as `statement`, yielding a roll row in one case and none in the other |
+| 4a | The unit gate consults the row, so a declared deposit's `unit` column is dropped | GUARD |
 
 ### Completion Notes List
 
+- **The decisive test is 3b**, and it is the one that cannot pass if the parameter is ignored: the
+  same rectangle, read twice, meaning two different things. Everything else is detail.
+- **No default, by argument rather than by omission.** `DEFAULT_DOCUMENT_KIND` is deleted; a
+  submission that declares nothing is refused at the upload surface *and* in `readRows`. Defaulting
+  to `statement` is the smaller diff and it is the per-row rule relocated - the file would still
+  decide, by saying nothing.
+- **`type` is refused, not dropped.** Third instance of the rule 5.1b and 5.1c established. A
+  treasurer whose file says `type,deposit` and is served a statement has been told their column
+  worked.
+- **The kind sits on `IngestibleFile`, not on the `ingest` call.** The first attempt made it a
+  parameter of the batch, which cascaded to ~84 call sites - and the size of the cascade was the
+  signal. The story is called *a document declares its kind*; per file is more faithful, and the
+  test factories absorb it. Corrected rather than pushed through.
+- **Four mutations, four caught**: the declaration ignored (54 tests red), an unknown kind accepted,
+  a retired `type` column tolerated, and the roll pre-check asking the rows again.
+
+#### A test replaced, deliberately, rather than deleted
+
+`'reads only the roll rows when a document mixes kinds'` existed to pin the per-row behaviour this
+story abolishes. Deleting it to get a green suite would have dropped an assertion quietly - the one
+thing this project's rules never allow. It is replaced by
+`'refuses the mixed-kind file that used to be read row by row'`, plus a companion asserting every
+row of a declared roll is a roll row with no per-row opt-in. The contract change is visible in the
+suite, not only in the diff.
+
+#### What the mechanical passes got wrong, and how each was caught
+
+Three bulk edits went wrong in this story, and none were caught by "it compiled":
+
+1. **A column-offset insertion driven by tsc's own output** put `documentKind` inside a `${...}`
+   template literal and into a *deps* object rather than the file literal - taking two db test files
+   from 11 errors to 120. One of those bad edits compiled cleanly. Restored from `HEAD` and redone
+   through the `rollFile`/`depositFile` helpers, one place each.
+2. **A script crashed mid-run while printing** a `U+10437` character, after writing the first file
+   and before writing the second. Only checking the files afterward revealed the roll fixtures still
+   had all seven `type` headers.
+3. **The row-literal pass could not reach CSV *text* fixtures.** Five fixtures build their tables as
+   strings; they still carried `type` and were refused. Found by the suite, one failure at a time,
+   until a repo-wide grep for the header found the rest at once.
+
+The pass that went right is the one that printed all 53 proposed removals for reading **before**
+writing any of them. That is the difference: a bulk edit needs a step that would notice it went
+wrong, and compiling is not that step.
+
+#### Two fixture bugs the suite caught in my own work
+
+- `quarterly` is not a billing cycle (`BILLING_CYCLES` is monthly, six_monthly, annual) - an
+  existing test uses it precisely to prove refusal, and my new fixture used it as if valid.
+- The invoice fixtures inside the roll suite were given `assessment_roll` by the mechanical pass;
+  three of them assert invoice behaviour and had to declare `invoice`.
+
+#### The samples, and the trap that did bite
+
+`scripts/build-samples.mjs` regenerated all four tabular samples. **The trap flagged in Dev Notes
+caught me one file earlier than expected**: the patch script wrote the *generator* with LF endings
+when it was CRLF. Restored before running anything. The samples themselves came out right because
+they were produced by the generator rather than edited.
+
+`invoices.xlsx` and `deposit-slip.pdf` changed too, and that is expected rather than churn - both
+are built from the tables that lost a column. `statement.xls` is untouched, because STATEMENT never
+had a `type` column, which is a useful consistency signal. The generator is deterministic: two runs,
+identical hash.
+
+#### The worst mistake of this story: 21 tests destroyed, and the suite went green
+
+`core/extraction/tabular.test.ts` **already existed** - 194 lines, 21 tests covering `readTable`
+parsing, header normalisation, unknown-column tolerance, missing and duplicate headers, header-only
+files, malformed rows, the closed set of refusal reasons, and CSV failure passthrough. A helper
+script wrote the new declared-kind tests to that path with `io.open(path, "w")` and truncated all
+of it.
+
+**`git status` said ` M`, not `??`, and that was read straight past.** Then the suite went green,
+because the deleted assertions no longer existed to fail. Nothing in the gate could see it: a test
+that is gone does not fail.
+
+Caught by **Argus**, as a `medium`, on the whole-story review - the one reviewer looking at the
+change rather than at the result of running it.
+
+Restored from `git show HEAD:`, threaded with the new parameter, and merged with the new block:
+**42 cases now**, against the 11 that were passing while 21 were missing. Three of the originals
+were genuinely obsolete - they pinned the per-row `type` - and those are *replaced* with assertions
+that the behaviour is gone, not dropped.
+
+The Write tool refuses to overwrite a file it has not read. A Python helper has no such guard, which
+is the whole lesson and is now in memory.
+
+**A second thing this exposed:** after the restore, `tsc` was 9 against a baseline of 8 - a threaded
+argument too many in the restored helper - while the suite stayed green, because vitest strips types
+without checking them. That is exactly what `{gate}` says `tsc --noEmit` is for, and it is the
+second time in this story that a green suite meant less than it appeared to.
+
 ### File List
+
+- `core/extraction/tabular.ts` - the kind is a parameter; `kindOf`, `DEFAULT_DOCUMENT_KIND` and the
+  `type` header gone; `unknown-kind` and `kind-is-not-a-column` added
+- `core/extraction/tabular.test.ts` *(new)* - the declared-kind contract, 11 cases
+- `core/extraction/tabular-roll.test.ts`, `core/extraction/tabular-deposit.test.ts`
+- `core/ingestion/ingest.ts` - `IngestibleFile.documentKind`, threaded to the reader
+- `core/ingestion/ingest.test.ts`, `reading.test.ts`, `ingest-quarantine.test.ts`
+- `adapters/db/roll-ingestion.test.ts`, `adapters/db/deposit-ingestion.test.ts`
+- `app/upload/actions.ts` - the submission declares the kind, refused before a byte is read
+- `docs/upload-contract.md` - one file is one kind; the `type` row and the mixing sentence gone
+- `scripts/build-samples.mjs` and the four regenerated samples
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-21 | Created from epic 5's story spine, with the byte-exact sample fixtures flagged as the trap |
+| 2026-08-21 | All five tasks: the kind is declared by the upload. `type` refused rather than ignored, samples regenerated, contract rewritten |
+| 2026-08-21 | Argus found that a helper script had truncated an existing 21-test file; restored and merged, 42 cases |
+| 2026-08-21 | Status done, written in this commit rather than after the merge |

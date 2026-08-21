@@ -33,12 +33,12 @@ const samples = join(root, 'samples')
  * `description` names who holds it.
  */
 const ROLL = {
-  headers: ['date', 'description', 'amount', 'type', 'unit', 'cycle', 'year'],
+  headers: ['date', 'description', 'amount', 'unit', 'cycle', 'year'],
   rows: [
-    ['2026-01-01', 'Dana Whitfield', '3600.00', 'assessment_roll', '4B', 'monthly', '2026'],
-    ['2026-01-01', 'Marcus Oyelaran', '3600.00', 'assessment_roll', '5C', 'monthly', '2026'],
-    ['2026-01-01', 'Priya Raghunathan', '4200.00', 'assessment_roll', '6A', 'six_monthly', '2026'],
-    ['2026-01-01', 'Tomas Lindqvist', '4200.00', 'assessment_roll', '7D', 'annual', '2026'],
+    ['2026-01-01', 'Dana Whitfield', '3600.00', '4B', 'monthly', '2026'],
+    ['2026-01-01', 'Marcus Oyelaran', '3600.00', '5C', 'monthly', '2026'],
+    ['2026-01-01', 'Priya Raghunathan', '4200.00', '6A', 'six_monthly', '2026'],
+    ['2026-01-01', 'Tomas Lindqvist', '4200.00', '7D', 'annual', '2026'],
   ],
 }
 
@@ -51,30 +51,32 @@ const ROLL = {
  * reader sees what that looks like on purpose rather than by accident.
  */
 const DEPOSITS = {
-  headers: ['date', 'description', 'amount', 'type', 'unit', 'reference'],
+  headers: ['date', 'description', 'amount', 'unit', 'reference'],
   rows: [
-    ['2026-03-02', 'Dana Whitfield', '300.00', 'deposit', '4B', 'DEP-3001'],
-    ['2026-03-02', 'Marcus Oyelaran', '300.00', 'deposit', '4b ', 'DEP-3002'],
-    ['2026-03-03', 'Priya Raghunathan', '2100.00', 'deposit', '6A', 'DEP-3003'],
-    ['2026-03-04', 'Unknown payer', '250.00', 'deposit', '9Z', 'DEP-3004'],
+    ['2026-03-02', 'Dana Whitfield', '300.00', '4B', 'DEP-3001'],
+    ['2026-03-02', 'Marcus Oyelaran', '300.00', '4b ', 'DEP-3002'],
+    ['2026-03-03', 'Priya Raghunathan', '2100.00', '6A', 'DEP-3003'],
+    ['2026-03-04', 'Unknown payer', '250.00', '9Z', 'DEP-3004'],
   ],
 }
 
 /** An invoice batch. An unfamiliar vendor is held for a human, not created. */
 const INVOICES = {
-  headers: ['date', 'description', 'amount', 'type', 'reference'],
+  headers: ['date', 'description', 'amount', 'reference'],
   rows: [
-    ['2026-03-05', 'Evergreen Landscaping', '1450.00', 'invoice', 'INV-4021'],
-    ['2026-03-06', 'Harbour Glass & Glazing', '880.50', 'invoice', 'INV-4022'],
-    ['2026-03-07', 'Municipal Water Authority', '312.75', 'invoice', 'INV-4023'],
+    ['2026-03-05', 'Evergreen Landscaping', '1450.00', 'INV-4021'],
+    ['2026-03-06', 'Harbour Glass & Glazing', '880.50', 'INV-4022'],
+    ['2026-03-07', 'Municipal Water Authority', '312.75', 'INV-4023'],
   ],
 }
 
 /**
- * A bank statement with **no `type` column at all**.
+ * A bank statement: the plainest shape a file can take.
  *
- * The default kind is `statement`, and this is the case most likely to surprise
- * someone who assumes the column is required. A negative amount is a credit.
+ * This docblock used to say the file carried "no `type` column at all" and that
+ * the default kind was `statement`. Story 5.2 removed both the column and the
+ * default — every upload declares what it is, so no sample is distinguished by
+ * omitting a declaration. A negative amount is a credit.
  */
 const STATEMENT = {
   headers: ['date', 'description', 'amount', 'reference'],

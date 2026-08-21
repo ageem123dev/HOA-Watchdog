@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { readWorkbook } from '../../adapters/extraction/workbook-sheetjs'
 
-import type { ExtractionRecord } from '../extraction/record'
+import type { DocumentKind, ExtractionRecord } from '../extraction/record'
 import type { DocumentRepository, NewDocument } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
 import type { ExtractionRepository } from '../ports/extraction-repository'
@@ -22,14 +22,21 @@ import { ingest } from './ingest'
 const UPLOADER = '018f3a2b-0000-7000-8000-000000000001'
 
 const CSV = 'date,description,amount\n2026-06-01,Landscaping,1450.00\n2026-06-02,Pool,820.50'
-const csvFile = (filename = 'ledger.csv', text = CSV) => ({
+const csvFile = (
+  filename = 'ledger.csv',
+  text = CSV,
+  documentKind: DocumentKind = 'statement',
+) => ({
   filename,
   contentType: 'text/csv',
   bytes: new TextEncoder().encode(text),
+  // Declared by the upload since story 5.2, not read off a `type` column.
+  documentKind,
 })
 const pdfFile = (filename = 'invoice.pdf') => ({
   filename,
   contentType: 'application/pdf',
+  documentKind: 'statement' as const,
   bytes: new TextEncoder().encode('%PDF-1.7\nx\ntrailer\n<< /Size 4 >>\n%%EOF'),
 })
 
@@ -102,7 +109,7 @@ describe('reading during ingestion', () => {
       // Cross-check: the expected records are recomputed here from the same
       // text, independently of whatever ingestion passed along.
       const f = fakes()
-      const expected = readTable(CSV)
+      const expected = readTable(CSV, 'statement')
 
       await ingest([csvFile()], UPLOADER, f)
 
@@ -141,6 +148,7 @@ describe('reading during ingestion', () => {
       return new Uint8Array(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }))
     }
     const xlsxFile = (rows: (string | number)[][]) => ({
+      documentKind: 'statement' as const,
       filename: 'ledger.xlsx',
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       bytes: xlsxOf(rows),
@@ -191,6 +199,7 @@ describe('reading during ingestion', () => {
     it('is unreadable when the bytes are not a workbook', async () => {
       const f = fakes()
       const notAWorkbook = {
+        documentKind: 'statement' as const,
         filename: 'fake.xlsx',
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]),

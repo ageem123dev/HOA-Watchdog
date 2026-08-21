@@ -125,12 +125,14 @@ describeWithDatabase('an assessment roll uploaded, end to end', () => {
   ) => ({
     filename: `${salt}-roll.csv`,
     contentType: 'text/csv',
+    // Declared by the upload since story 5.2; the `type` column is gone.
+    documentKind: 'assessment_roll' as const,
     bytes: new TextEncoder().encode(
       [
-        'date,description,amount,type,unit,cycle,year',
+        'date,description,amount,unit,cycle,year',
         ...lines.map(
           ([number, holder, amount]) =>
-            `2019-03-01,${holder},${amount},assessment_roll,${number},monthly,2026`,
+            `2019-03-01,${holder},${amount},${number},monthly,2026`,
         ),
       ].join('\n'),
     ),
@@ -140,10 +142,11 @@ describeWithDatabase('an assessment roll uploaded, end to end', () => {
   const depositFile = (lines: readonly (readonly [string, string])[], salt: string) => ({
     filename: `${salt}-deposits.csv`,
     contentType: 'text/csv',
+    documentKind: 'deposit' as const,
     bytes: new TextEncoder().encode(
       [
-        'date,description,amount,type,unit',
-        ...lines.map(([number, amount]) => `2026-03-01,March dues,${amount},deposit,${number}`),
+        'date,description,amount,unit',
+        ...lines.map(([number, amount]) => `2026-03-01,March dues,${amount},${number}`),
       ].join('\n'),
     ),
   })
@@ -316,14 +319,14 @@ describeWithDatabase('an assessment roll uploaded, end to end', () => {
 
     const bytes = new TextEncoder().encode(
       [
-        'date,description,amount,type,unit,cycle,year',
-        `2019-03-01,${RUN_PREFIX} Jane Smith,3600.00,assessment_roll,${good},monthly,2026`,
-        `2019-03-01,${RUN_PREFIX} John Doe,4800.00,assessment_roll,${bad},quarterly,2026`,
+        'date,description,amount,unit,cycle,year',
+        `2019-03-01,${RUN_PREFIX} Jane Smith,3600.00,${good},monthly,2026`,
+        `2019-03-01,${RUN_PREFIX} John Doe,4800.00,${bad},quarterly,2026`,
       ].join('\n'),
     )
 
     const [outcome] = await ingest(
-      [{ filename: `${scope}-bad-roll.csv`, contentType: 'text/csv', bytes }],
+      [{ filename: `${scope}-bad-roll.csv`, contentType: 'text/csv', bytes, documentKind: 'assessment_roll' }],
       boardMemberId,
       dependencies(),
     )
@@ -345,10 +348,10 @@ describeWithDatabase('an assessment roll uploaded, end to end', () => {
     )
 
     const bytes = new TextEncoder().encode(
-      ['date,description,amount,type', '2026-03-01,ACME Plumbing,250.00,invoice'].join('\n'),
+      ['date,description,amount', '2026-03-01,ACME Plumbing,250.00'].join('\n'),
     )
     await ingest(
-      [{ filename: `${scope}-invoice.csv`, contentType: 'text/csv', bytes }],
+      [{ filename: `${scope}-invoice.csv`, contentType: 'text/csv', bytes, documentKind: 'invoice' }],
       boardMemberId,
       dependencies(),
     )

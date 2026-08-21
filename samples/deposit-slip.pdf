@@ -9,7 +9,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length 473 >>
+<< /Length 426 >>
 stream
 BT
 /F1 11 Tf
@@ -18,11 +18,11 @@ BT
 (Sunnyvale Gardens Condominium Association) Tj
 T* (Deposit slip - March 2026) Tj
 T* () Tj
-T* (date   description   amount   type   unit   reference) Tj
-T* (2026-03-02   Dana Whitfield   300.00   deposit   4B   DEP-3001) Tj
-T* (2026-03-02   Marcus Oyelaran   300.00   deposit   4b    DEP-3002) Tj
-T* (2026-03-03   Priya Raghunathan   2100.00   deposit   6A   DEP-3003) Tj
-T* (2026-03-04   Unknown payer   250.00   deposit   9Z   DEP-3004) Tj
+T* (date   description   amount   unit   reference) Tj
+T* (2026-03-02   Dana Whitfield   300.00   4B   DEP-3001) Tj
+T* (2026-03-02   Marcus Oyelaran   300.00   4b    DEP-3002) Tj
+T* (2026-03-03   Priya Raghunathan   2100.00   6A   DEP-3003) Tj
+T* (2026-03-04   Unknown payer   250.00   9Z   DEP-3004) Tj
 ET
 endstream
 endobj
@@ -36,9 +36,9 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000241 00000 n 
-0000000764 00000 n 
+0000000717 00000 n 
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-834
+787
 %%EOF

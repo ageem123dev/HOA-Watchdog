@@ -105,7 +105,7 @@ describe('the .xls sample is a real BIFF8 workbook', () => {
 
 describe('the tabular samples read into the records the README promises', () => {
   it('reads the assessment roll as roll rows for four units', () => {
-    const result = readTable(readFileSync(join(here, 'assessment-roll.csv'), 'utf8'))
+    const result = readTable(readFileSync(join(here, 'assessment-roll.csv'), 'utf8'), 'assessment_roll')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -124,7 +124,7 @@ describe('the tabular samples read into the records the README promises', () => 
   })
 
   it('reads the deposits, including the reference the roll spells differently', () => {
-    const result = readTable(readFileSync(join(here, 'deposits.csv'), 'utf8'))
+    const result = readTable(readFileSync(join(here, 'deposits.csv'), 'utf8'), 'deposit')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -151,7 +151,7 @@ describe('the tabular samples read into the records the README promises', () => 
     expect(workbook.ok).toBe(true)
     if (!workbook.ok) return
 
-    const result = readRows(workbook.rows)
+    const result = readRows(workbook.rows, 'statement')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -169,7 +169,7 @@ describe('the tabular samples read into the records the README promises', () => 
     expect(workbook.ok).toBe(true)
     if (!workbook.ok) return
 
-    const result = readRows(workbook.rows)
+    const result = readRows(workbook.rows, 'invoice')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
