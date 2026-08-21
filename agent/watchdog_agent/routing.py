@@ -103,7 +103,12 @@ class Chooser(Protocol):
 def route_question(
     question: str,
     *,
-    actor_id: str,
+    # Passed through untouched to the gateway. AD-18: this runtime relays the
+    # proof of *which board member the turn is for*; it neither reads it nor
+    # holds the key that would let it produce another. Kept keyword-only, as
+    # it was when it was an id, so no caller can supply it positionally by
+    # accident — the model chooses the entry, never who the turn is for.
+    actor_assertion: str,
     chooser: Chooser | None = None,
     transport: Transport | None = None,
 ) -> RoutedAnswer:
@@ -136,7 +141,7 @@ def route_question(
         # answer rather than an error.
         version=entry.version,
         parameters=parameters,
-        actor_id=actor_id,
+        actor_assertion=actor_assertion,
         transport=transport,
     )
 

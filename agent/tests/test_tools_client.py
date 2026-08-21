@@ -33,7 +33,11 @@ from watchdog_agent.tools_client import (
 
 TOKEN = "r7Qx-4kP9mVt2LbN8sYw0aZc"
 BASE = "https://gateway.internal"
-ACTOR = "018f3a2b-0000-7000-8000-0000000000aa"
+#: Opaque to this runtime by design. AD-18: the Node gateway mints it and the
+#: Node gateway verifies it. Nothing here knows what is inside, and nothing here
+#: could produce a different one — a uuid-shaped constant would quietly suggest
+#: this side still handles an identity rather than a token it is carrying.
+ASSERTION = "eyJzdWIiOiI0YiJ9.p7Xk2QvT9mLzR0hCwYbN8sJdA5gFuE1oKiVtHnMqPcw"
 
 
 class RecordingTransport:
@@ -60,7 +64,7 @@ def _call(transport, **overrides):
         "entry_id": "dues_status",
         "version": 1,
         "parameters": {"unitNumber": "4B", "assessmentYear": 2026},
-        "actor_id": ACTOR,
+        "actor_assertion": ASSERTION,
         "transport": transport,
     }
     kwargs.update(overrides)
@@ -95,7 +99,7 @@ class TestTheOrdinaryCase:
             "entryId": "dues_status",
             "version": 1,
             "parameters": {"unitNumber": "4B", "assessmentYear": 2026},
-            "actorId": ACTOR,
+            "actorAssertion": ASSERTION,
         }
 
 

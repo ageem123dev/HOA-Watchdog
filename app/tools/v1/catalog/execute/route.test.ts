@@ -16,6 +16,10 @@
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { createHmac } from 'node:crypto'
+
+import { mintActorAssertion } from '@/core/auth/actor-assertion'
+
 const execute = vi.fn()
 
 vi.mock('@/adapters/db/catalog-executor-postgres', () => ({
@@ -26,12 +30,26 @@ const { POST } = await import('./route')
 
 const TOKEN = 'r7Qx-4kP9mVt2LbN8sYw0aZc'
 const ACTOR = '018f3a2b-0000-7000-8000-0000000000aa'
+const ASSERTION_KEY = 'gateway-actor-assertion-signing-key'
+
+/**
+ * A live assertion for `ACTOR`, minted per call rather than once at module
+ * scope: it carries an expiry, and a module-scope one would age across a slow
+ * suite until the tests began failing on the clock rather than on the code.
+ */
+const validAssertion = () =>
+  mintActorAssertion(ACTOR, {
+    key: ASSERTION_KEY,
+    now: Date.now(),
+    ttlMs: 60_000,
+    audience: 'tools/v1',
+  })
 
 const body = (overrides: Record<string, unknown> = {}) => ({
   entryId: 'dues_status',
   version: 1,
   parameters: { unitNumber: '4B', assessmentYear: 2026 },
-  actorId: ACTOR,
+  actorAssertion: validAssertion(),
   ...overrides,
 })
 
@@ -51,6 +69,7 @@ const call = (options: { token?: string | null; raw?: string; payload?: unknown 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('AGENT_SERVICE_TOKEN', TOKEN)
+  vi.stubEnv('ACTOR_ASSERTION_KEY', ASSERTION_KEY)
   execute.mockResolvedValue({ provenanceId: 'prov-1', rows: [{ unitNumber: '4B' }] })
 })
 
@@ -173,7 +192,9 @@ describe('POST /tools/v1/catalog/execute', () => {
       ['a non-string entryId', { entryId: 42 }],
       ['a missing version', { version: undefined }],
       ['a non-integer version', { version: 1.5 }],
-      ['a missing actorId', { actorId: undefined }],
+      ['a missing actorAssertion', { actorAssertion: undefined }],
+      ['a non-string actorAssertion', { actorAssertion: 42 }],
+      ['a blank actorAssertion', { actorAssertion: '   ' }],
       ['parameters that are not an object', { parameters: ['4B'] }],
     ])('answers 400 for %s', async (_label, override) => {
       const response = await call({ payload: body(override) })
@@ -228,6 +249,175 @@ describe('POST /tools/v1/catalog/execute', () => {
      */
     it('answers 401 rather than 400 when the caller is not the agent service', async () => {
       const response = await call({ token: 'wrong', payload: body({ associationId: 'x' }) })
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * AC4. The field this whole story exists to retire.
+   *
+   * Refused rather than ignored, for the reason the `associationId` block above
+   * records — and here the argument is stronger. Ignoring `actorId` is safe:
+   * the subject comes from the verified assertion and nothing reads the field.
+   * But "safe because nothing reads it" is a property of today's code, and the
+   * field would sit in the body of every request looking exactly like an input.
+   * The next reader wires it to something.
+   *
+   * The presence of the key is the refusal, whatever it holds — including when
+   * it agrees with the assertion's subject. A guard that only refuses a
+   * *disagreeing* `actorId` teaches a caller that the field works, and tells it
+   * whose turn it is by which value comes back 200.
+   */
+  describe('a request that tries to name its own actor', () => {
+    it.each([
+      ['another board member', '00000000-0000-7000-8000-0000000000bb'],
+      ['the same subject the assertion proves', ACTOR],
+      ['null', null],
+      ['an empty string', ''],
+      ['a number', 7],
+    ])('is refused when actorId is %s', async (_label, value) => {
+      const response = await call({ payload: body({ actorId: value }) })
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toMatchObject({ code: 'invalid_request' })
+      expect(execute).not.toHaveBeenCalled()
+    })
+
+    /**
+     * The inverse, and the case that keeps the block above from being vacuous:
+     * the same request without the field is accepted, and the executor is given
+     * the subject the assertion proved.
+     */
+    it('accepts the same request without the field, running it for the proved subject', async () => {
+      const response = await call({ payload: body() })
+
+      expect(response.status).toBe(200)
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ actorId: ACTOR }))
+    })
+
+    /**
+     * 401 outranks 400, as it does for `associationId`: a caller with no token
+     * must not learn which fields the endpoint recognises.
+     */
+    it('answers 401 rather than 400 when the caller is not the agent service', async () => {
+      const response = await call({ token: 'wrong', payload: body({ actorId: 'x' }) })
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * AD-18 at the gateway. The service token proves the *caller is the agent
+   * service*; the assertion proves *which board member the turn is for*. Both,
+   * or neither is enough.
+   *
+   * Every refusal here asserts a **valid** assertion is still accepted in the
+   * same run. A verifier that refused everything would pass a suite of refusal
+   * tests while taking the Oracle down, and story 5.1b shipped that shape twice.
+   */
+  describe('the actor assertion', () => {
+    const KEY = ASSERTION_KEY
+
+    /**
+     * `Date.now()` per call, not a `NOW` captured when the suite is registered.
+     * A describe-level constant is read at collection time, so every assertion
+     * from this helper expires sixty seconds after *registration* — and if
+     * the suite takes longer than that to reach this block, the valid-assertion
+     * cases fail on test scheduling rather than on route behaviour.
+     *
+     * `validAssertion` at the top of this file already records that decision for
+     * itself; this helper had drifted from it. Cases needing a controlled clock
+     * take their own local timestamp. Raised by CodeRabbit on MR !74.
+     */
+    const assertionFor = (subject: string, overrides: Record<string, unknown> = {}) =>
+      mintActorAssertion(subject, {
+        key: KEY,
+        now: Date.now(),
+        ttlMs: 60_000,
+        audience: 'tools/v1',
+        ...overrides,
+      } as Parameters<typeof mintActorAssertion>[1])
+
+    const callWith = (assertion: string, extra: Record<string, unknown> = {}) =>
+      call({ payload: { ...body(), actorAssertion: assertion, ...extra } })
+
+    it('accepts a valid assertion and runs the entry for its subject', async () => {
+      const response = await callWith(assertionFor(ACTOR))
+
+      expect(response.status).toBe(200)
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ actorId: ACTOR }))
+    })
+
+    /**
+     * Signed with the wrong key, **not** truncated. A short signature is
+     * refused by the length pre-check before `timingSafeEqual` is reached, so a
+     * truncated forgery passes this test against a gateway whose signature
+     * comparison has been removed entirely — which is what the first draft did,
+     * caught by mutating that comparison away and watching this stay green.
+     */
+    it('refuses a forged signature, and still accepts a valid assertion', async () => {
+      const [payload] = assertionFor(ACTOR).split('.')
+      const forged = `${payload}.${createHmac('sha256', 'not-the-key').update(payload!).digest('base64url')}`
+
+      const response = await callWith(forged)
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+
+      execute.mockClear()
+      expect((await callWith(assertionFor(ACTOR))).status).toBe(200)
+    })
+
+    /** The attack: a legitimate assertion with the subject swapped. */
+    it('refuses a subject altered after signing, and still accepts a valid assertion', async () => {
+      const now = Date.now()
+      const [, signature] = assertionFor(ACTOR, { now }).split('.')
+      const otherMember = Buffer.from(
+        JSON.stringify({ sub: 'somebody-else', exp: now + 60_000, aud: 'tools/v1' }),
+        'utf8',
+      ).toString('base64url')
+
+      const response = await callWith(`${otherMember}.${signature}`)
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+
+      execute.mockClear()
+      expect((await callWith(assertionFor(ACTOR))).status).toBe(200)
+    })
+
+    it('refuses an expired assertion, and still accepts a valid assertion', async () => {
+      const response = await callWith(assertionFor(ACTOR, { now: Date.now() - 120_000 }))
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+
+      execute.mockClear()
+      expect((await callWith(assertionFor(ACTOR))).status).toBe(200)
+    })
+
+    it('refuses one minted for another audience, and still accepts a valid assertion', async () => {
+      const response = await callWith(assertionFor(ACTOR, { audience: 'chat/v1' }))
+
+      expect(response.status).toBe(401)
+      expect(execute).not.toHaveBeenCalled()
+
+      execute.mockClear()
+      expect((await callWith(assertionFor(ACTOR))).status).toBe(200)
+    })
+
+    /**
+     * Unconfigured refuses everybody, matching `verifyServiceToken`. A gateway
+     * that accepted assertions because it had no key to check them with would
+     * fail open exactly when it is most exposed.
+     */
+    it('refuses every assertion when no signing key is configured', async () => {
+      vi.stubEnv('ACTOR_ASSERTION_KEY', '')
+
+      const response = await callWith(assertionFor(ACTOR))
 
       expect(response.status).toBe(401)
       expect(execute).not.toHaveBeenCalled()

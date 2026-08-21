@@ -25,6 +25,12 @@
  * into a component whose job is to draw.
  */
 
+import {
+  ACTOR_ASSERTION_AUDIENCE,
+  ACTOR_ASSERTION_TTL_MS,
+  mintActorAssertion,
+} from '../../core/auth/actor-assertion'
+
 const CHAT_PATH = '/chat/v1/turn'
 
 /** Where the agent service is. */
@@ -39,6 +45,15 @@ const BASE_URL_VARIABLE = 'AGENT_BASE_URL'
 const TOKEN_VARIABLE = 'GATEWAY_SERVICE_TOKEN'
 
 /**
+ * The key this gateway signs actor assertions with — AD-18.
+ *
+ * A **third** credential, and deliberately not either of the other two: those
+ * authenticate runtimes, this one carries a subject. It never leaves Node. The
+ * agent service relays what it produces and cannot mint or inspect one.
+ */
+const ASSERTION_KEY_VARIABLE = 'ACTOR_ASSERTION_KEY'
+
+/**
  * How long a turn may take before the gateway gives up.
  *
  * Generous, because a turn is a model call and a catalog execution — but
@@ -46,7 +61,7 @@ const TOKEN_VARIABLE = 'GATEWAY_SERVICE_TOKEN'
  * gateway request open indefinitely and the board member sees a page that never
  * resolves. Raised by CodeRabbit.
  */
-const DEFAULT_TIMEOUT_MS = 60_000
+export const DEFAULT_TIMEOUT_MS = 60_000
 
 export class AgentNotConfiguredError extends Error {
   override readonly name = 'AgentNotConfiguredError'
@@ -113,8 +128,31 @@ function readConfig(env: Readonly<Record<string, string | undefined>>) {
   const baseUrl = env[BASE_URL_VARIABLE]?.trim()
   const token = env[TOKEN_VARIABLE]?.trim()
 
+  // **Not trimmed.** `verifyActorAssertion` signs with the value it is handed
+  // and trims only to decide whether a key is blank; `route.ts` hands it
+  // `process.env.ACTOR_ASSERTION_KEY` raw. Trimming here would sign with a
+  // different key than the gateway verifies with — and since both sides read
+  // the **same variable**, that is a mismatch the system inflicts on itself.
+  //
+  // The symptom is every turn refused with reason `signature`, which reads as
+  // somebody forging assertions rather than as a stray space in `.env.local`.
+  // Raised by CodeRabbit on MR !74.
+  //
+  // `baseUrl` and `token` above stay trimmed, and the difference is real rather
+  // than an inconsistency: the URL is parsed, not compared, and the token is a
+  // *different variable* from the `AGENT_SERVICE_TOKEN` it is checked against,
+  // so trimming there cannot desynchronise one value from itself.
+  const assertionKey = env[ASSERTION_KEY_VARIABLE]
+
   if (!baseUrl) missing.push(BASE_URL_VARIABLE)
   if (!token) missing.push(TOKEN_VARIABLE)
+  // Refuse to send rather than sending a turn the gateway will reject: a
+  // failure at the far end costs a model call and reads as an outage instead of
+  // as a missing variable. Blankness is judged on the trimmed form; what gets
+  // *used* is the original.
+  if (typeof assertionKey !== 'string' || assertionKey.trim() === '') {
+    missing.push(ASSERTION_KEY_VARIABLE)
+  }
   if (missing.length > 0) throw new AgentNotConfiguredError(missing)
 
   // Absolute https, for the reason story 3.3 gave in the other direction: the
@@ -130,22 +168,39 @@ function readConfig(env: Readonly<Record<string, string | undefined>>) {
     throw new AgentNotConfiguredError([BASE_URL_VARIABLE])
   }
 
-  return { baseUrl: baseUrl!.replace(/\/+$/, ''), token: token! }
+  return { baseUrl: baseUrl!.replace(/\/+$/, ''), token: token!, assertionKey: assertionKey! }
 }
 
 export async function askAgent(question: Question, options: AskAgentOptions = {}): Promise<ChatTurn> {
-  const { baseUrl, token } = readConfig(options.env ?? process.env)
+  const { baseUrl, token, assertionKey } = readConfig(options.env ?? process.env)
   const doFetch = options.fetch ?? globalThis.fetch
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+
+  // **Minted before the `try`, deliberately.** `mintActorAssertion` throws when
+  // the subject names nobody, and that is this caller's bug, not the agent being
+  // down. Inside the try, the catch below would relabel it
+  // `AgentUnavailableError` — and a caller that retries on an outage would
+  // then retry a request that can never succeed. Raised by CodeRabbit on MR !74.
+  //
+  // It also means a request that cannot be signed never leaves the process.
+  const actorAssertion = mintActorAssertion(question.actorId, {
+    key: assertionKey,
+    now: Date.now(),
+    ttlMs: ACTOR_ASSERTION_TTL_MS,
+    audience: ACTOR_ASSERTION_AUDIENCE,
+  })
 
   let response: Response
   try {
     response = await doFetch(`${baseUrl}${CHAT_PATH}`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      // The question and the actor. Never an entry id — AD-17's load-bearing
-      // clause, from the sending end.
-      body: JSON.stringify({ question: question.question, actorId: question.actorId }),
+      // The question and **proof of** the actor — never a claim about one, and
+      // never an entry id. AD-17's load-bearing clause from the sending end, and
+      // AD-18's from the minting end. `actorId` does not travel at all: leaving
+      // it beside the assertion would keep the believable path open and make the
+      // assertion decoration.
+      body: JSON.stringify({ question: question.question, actorAssertion }),
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (error) {

@@ -259,7 +259,9 @@ def execute_catalog_entry(
     entry_id: str,
     version: int,
     parameters: dict[str, Any],
-    actor_id: str,
+    # Opaque. See AD-18 and `tests/test_relay_holds_no_key.py`: this is the one
+    # place it leaves the process, and it leaves exactly as it arrived.
+    actor_assertion: str,
     transport: Transport | None = None,
 ) -> CatalogExecution:
     """Run a catalog entry through the gateway and return its rows.
@@ -275,7 +277,7 @@ def execute_catalog_entry(
             "entryId": entry_id,
             "version": version,
             "parameters": parameters,
-            "actorId": actor_id,
+            "actorAssertion": actor_assertion,
         },
         transport=transport,
     )

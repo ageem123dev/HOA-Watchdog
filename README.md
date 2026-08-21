@@ -37,7 +37,7 @@ Then sign in and go to **Upload**. Start with `samples/assessment-roll.csv`; see
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env.local`. It names **twenty** variables in nine groups:
+Copy [`.env.example`](.env.example) to `.env.local`. It names **twenty-one** variables in ten groups:
 
 | Group | Variables | Why |
 | --- | --- | --- |
@@ -47,6 +47,7 @@ Copy [`.env.example`](.env.example) to `.env.local`. It names **twenty** variabl
 | Extraction | `GEMINI_API_KEY`, `GEMINI_OCR_MODEL` | Reading scans and photographs |
 | Agent service | `AGENT_SERVICE_TOKEN` | The bearer token `/tools/v1/*` accepts (AD-15). Unset means the endpoint refuses everyone — and until the private network exists, this token is the only thing in front of it |
 | Chat turn | `GATEWAY_SERVICE_TOKEN`, `AGENT_BASE_URL`, `GATEWAY_BASE_URL` | How the gateway reaches the agent service (AD-17). A **different** token from `AGENT_SERVICE_TOKEN`, which is the agent's identity in the other direction — one token used both ways means either runtime's compromise grants the other's identity. Two URLs for the same reason the tokens are two: `AGENT_BASE_URL` is how the gateway reaches the agent, `GATEWAY_BASE_URL` is how the agent reaches the gateway's tool endpoints for the rows an answer is built from |
+| Actor assertion | `ACTOR_ASSERTION_KEY` | The key the gateway signs a per-turn actor assertion with (AD-18). A **third** credential, and unlike the two above it carries a *subject* rather than authenticating a runtime — which is what lets the tool endpoints know which board member a turn is for. **Only the gateway holds it**: Node mints on the way out and verifies on the way back in, and the agent service relays what it cannot mint or read. The agent having this key would undo the property AD-18 exists for |
 | Reasoning model | `REASONING_API_KEY`, `REASONING_MODEL` | The agent service's own model credential (AD-11). Since AD-10's vendor clause was withdrawn on 2026-08-10, extraction and reasoning are one vendor and this separate name is the whole of the boundary — never set `GEMINI_API_KEY` in the agent's environment, or CrewAI hands the reasoning model the extraction key and everything keeps working. `REASONING_MODEL` is optional |
 | Outbound mail | `MAIL_API_URL`, `MAIL_API_KEY`, `MAIL_FROM` | The alert email (FR-8) — the only thing this system sends, and the only thing it sends uninvited. The provider is configuration rather than code: `MAIL_API_URL` is the full endpoint, so swapping providers is a value here. `https:` only, because the key travels to whatever it names. Unset means alerting is off entirely: nothing is read, nothing is claimed, no record is written, and no upload fails. A reason is recorded against a finding once it has been claimed and processing it fails — a refused send, but also anything else that goes wrong between the claim and the record. That is the state a later run retries |
 | Public address | `WATCHDOG_BASE_URL` | Where a board member's browser reaches this application. The alert email deep-links to a finding, and a relative path is meaningless in an inbox. `http:` is accepted here, unlike `MAIL_API_URL` — this one carries no credential |

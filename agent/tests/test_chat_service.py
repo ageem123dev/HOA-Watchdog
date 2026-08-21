@@ -31,7 +31,11 @@ from watchdog_agent.chat_service import CHAT_PATH, TOKEN_VARIABLE, create_app
 from watchdog_agent.routing import RoutedAnswer
 
 TOKEN = "gw-8Kd2mZq7Rt4Xn0Lb"
-ACTOR = "018f3a2b-0000-7000-8000-0000000000aa"
+#: Opaque to this runtime by design. AD-18: the Node gateway mints it and the
+#: Node gateway verifies it. Nothing here knows what is inside, and nothing here
+#: could produce a different one — a uuid-shaped constant would quietly suggest
+#: this side still handles an identity rather than a token it is carrying.
+ASSERTION = "eyJzdWIiOiI0YiJ9.p7Xk2QvT9mLzR0hCwYbN8sJdA5gFuE1oKiVtHnMqPcw"
 
 ROUTED = RoutedAnswer(
     entry_id="dues_status",
@@ -44,7 +48,7 @@ ROUTED = RoutedAnswer(
 
 def a_client(
     *,
-    route=lambda question, actor_id: ROUTED,
+    route=lambda question, actor_assertion: ROUTED,
     narrate=lambda question, routed: "Unit 4B owes $240.00.",
     token: str | None = TOKEN,
     monkeypatch: pytest.MonkeyPatch,
@@ -59,7 +63,7 @@ def a_client(
 
 def ask(client: TestClient, body: dict | None = None, *, bearer: str | None = TOKEN):
     headers = {} if bearer is None else {"Authorization": f"Bearer {bearer}"}
-    payload = {"question": "What does 4B owe for 2026?", "actorId": ACTOR}
+    payload = {"question": "What does 4B owe for 2026?", "actorAssertion": ASSERTION}
     if body is not None:
         payload = body
     return client.post(CHAT_PATH, json=payload, headers=headers)
@@ -165,7 +169,7 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
         call site, so the caller learns nothing and the next caller tries again.
         """
         client = a_client(monkeypatch=monkeypatch)
-        body = {"question": "What does 4B owe?", "actorId": ACTOR, **smuggled}
+        body = {"question": "What does 4B owe?", "actorAssertion": ASSERTION, **smuggled}
 
         response = ask(client, body)
 
@@ -195,7 +199,7 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
         better." Raised by CodeRabbit.
         """
         client = a_client(monkeypatch=monkeypatch)
-        body = {"question": "What does 4B owe?", "actorId": ACTOR, **unknown}
+        body = {"question": "What does 4B owe?", "actorAssertion": ASSERTION, **unknown}
 
         response = ask(client, body)
 
@@ -222,7 +226,7 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
         reasoning. Raised by CodeRabbit.
         """
         client = a_client(monkeypatch=monkeypatch)
-        huge = b'{"question":"' + b"x" * (128 * 1024) + b'","actorId":"a"}'
+        huge = b'{"question":"' + b"x" * (128 * 1024) + b'","actorAssertion":"a"}'
 
         response = client.post(
             CHAT_PATH,
@@ -241,7 +245,7 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
         body never reaches `json.loads`. Raised by CodeRabbit.
         """
         client = a_client(monkeypatch=monkeypatch)
-        huge = {"question": "x" * (128 * 1024), "actorId": ACTOR}
+        huge = {"question": "x" * (128 * 1024), "actorAssertion": ASSERTION}
 
         assert ask(client, huge).status_code == 413
 
@@ -250,24 +254,35 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
     ) -> None:
         calls: list = []
 
-        def route(question, actor_id):
+        def route(question, actor_assertion):
             calls.append(question)
             return ROUTED
 
         client = a_client(monkeypatch=monkeypatch, route=route)
-        ask(client, {"question": "q", "actorId": ACTOR, "entryId": "dues_status"})
+        ask(client, {"question": "q", "actorAssertion": ASSERTION, "entryId": "dues_status"})
 
         assert calls == []
 
     @pytest.mark.parametrize(
         "body",
         [
-            {"actorId": ACTOR},
-            {"question": "", "actorId": ACTOR},
-            {"question": "   ", "actorId": ACTOR},
+            {"actorAssertion": ASSERTION},
+            {"question": "", "actorAssertion": ASSERTION},
+            {"question": "   ", "actorAssertion": ASSERTION},
             {"question": "q"},
-            {"question": "q", "actorId": ""},
-            {"question": 42, "actorId": ACTOR},
+            {"question": "q", "actorAssertion": ""},
+            {"question": "q", "actorAssertion": "   "},
+            {"question": 42, "actorAssertion": ASSERTION},
+            # A non-string assertion. `payload.get` returns `None` when the key
+            # is absent, so the absent case above exercises the `isinstance`
+            # guard through the same branch a wrong *type* would take — these
+            # reach it with the key present, which is the shape a caller that
+            # thinks it is sending something actually produces.
+            {"question": "q", "actorAssertion": 42},
+            {"question": "q", "actorAssertion": None},
+            {"question": "q", "actorAssertion": True},
+            {"question": "q", "actorAssertion": ["a", "b"]},
+            {"question": "q", "actorAssertion": {"sub": "somebody"}},
         ],
     )
     def test_refuses_a_malformed_request(
@@ -289,14 +304,14 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
     ) -> None:
         seen: dict = {}
 
-        def route(question, actor_id):
-            seen.update({"question": question, "actor_id": actor_id})
+        def route(question, actor_assertion):
+            seen.update({"question": question, "actor_assertion": actor_assertion})
             return ROUTED
 
         client = a_client(monkeypatch=monkeypatch, route=route)
-        ask(client, {"question": "What does 4B owe for 2026?", "actorId": ACTOR})
+        ask(client, {"question": "What does 4B owe for 2026?", "actorAssertion": ASSERTION})
 
-        assert seen == {"question": "What does 4B owe for 2026?", "actor_id": ACTOR}
+        assert seen == {"question": "What does 4B owe for 2026?", "actor_assertion": ASSERTION}
 
 
 class TestTheResponse:
@@ -361,7 +376,7 @@ class TestWhenTheTurnCannotBeCompleted:
     def test_a_router_failure_is_a_named_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from watchdog_agent.routing import ModelChoseNothing
 
-        def route(question, actor_id):
+        def route(question, actor_assertion):
             raise ModelChoseNothing("the model chose no catalog entry")
 
         response = ask(a_client(monkeypatch=monkeypatch, route=route))
@@ -374,7 +389,7 @@ class TestWhenTheTurnCannotBeCompleted:
     ) -> None:
         from watchdog_agent.routing import ModelChoseUnknownEntry
 
-        def route(question, actor_id):
+        def route(question, actor_assertion):
             raise ModelChoseUnknownEntry("the model named nothing the catalog holds")
 
         assert ask(a_client(monkeypatch=monkeypatch, route=route)).status_code == 422
@@ -390,7 +405,7 @@ class TestWhenTheTurnCannotBeCompleted:
         """
         from watchdog_agent.tools_client import GatewayError
 
-        def route(question, actor_id):
+        def route(question, actor_assertion):
             raise GatewayError("connection to unit_membership failed", status=500)
 
         response = ask(a_client(monkeypatch=monkeypatch, route=route))
@@ -417,7 +432,7 @@ class TestWhenTheTurnCannotBeCompleted:
             "RuntimeError": RuntimeError("z"),
         }[boom]
 
-        def route(question, actor_id):
+        def route(question, actor_assertion):
             raise raised
 
         response = ask(a_client(monkeypatch=monkeypatch, route=route))
