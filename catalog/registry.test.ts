@@ -241,6 +241,23 @@ describe('every entry in the catalog', () => {
    * `jointype` is not `op`: a `JoinExpr` also has `larg`/`rarg`, and those are
    * `from` items rather than scopes. `op` is the field only a select body
    * carries, which is what makes this test exact rather than a guess.
+   *
+   * **Deliberately structural rather than typed.** CodeRabbit suggested taking
+   * `SelectStmt` from `@pgsql/types`, which `libpg-query` does re-export. It is
+   * declined on purpose, and the reason is recorded here so it is not
+   * re-litigated:
+   *
+   * - `parseSync` is declared `(query: string) => any`, so a generated type
+   *   here would be an unchecked assertion over untyped data. CodeRabbit's own
+   *   note concedes the runtime guards must stay regardless.
+   * - This predicate is asked about **every node in the tree**, most of which
+   *   are not select bodies. Typing its parameter as the thing it is testing
+   *   for inverts the question.
+   * - The drift it would nominally protect against — a future `libpg-query`
+   *   changing this field — is already caught by behaviour: disabling
+   *   `isSetOperation` turns three fixtures red, which is the mutation result
+   *   recorded in the story. A test that fails is worth more here than a
+   *   declaration that compiles.
    */
   const isSetOperation = (node: Node): boolean =>
     typeof node.op === 'string' && node.op.startsWith('SETOP_') && node.op !== 'SETOP_NONE'

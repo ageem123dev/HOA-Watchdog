@@ -356,13 +356,48 @@ unions that scope both arms properly.
 **Eighteen mutations, eighteen caught** - the fifteen before, plus arms-not-scopes, walk-descends,
 and `isSetOperation` disabled.
 
-#### A second suite flake, recorded
+#### Three intermittent failures in one session - a pattern, not three flakes
 
-`adapters/db/finding-reader-postgres.test.ts > counts the whole register even when it hands back a
-window of it` failed once during this round's gate and passed on re-run. This story touches nothing
-under `adapters/`. That is the second intermittent failure seen today, distinct from the known
-`export-control.test.tsx` one, and both are recorded rather than absorbed - a flake nobody writes
-down becomes a failure somebody learns to re-run past.
+Three different tests failed once each during this story's gates and passed on re-run:
+
+| Suite | Test | Touched by this story? |
+| --- | --- | --- |
+| `npm test` | `app/findings/register/export-control.test.tsx` | no - known flake from story 4.7 |
+| `npm run test:db` | `adapters/db/finding-reader-postgres.test.ts` | no |
+| `npm run test:db` | `adapters/db/assessment-directory-postgres.test.ts` | no |
+
+**Two distinct database tests, in one session, in files this story does not touch.** That reads as
+shared-fixture or parallel-worker contention against one database rather than three unrelated
+flakes, and it matters more here than it would elsewhere: with no CI, `npm run test:db` is the
+*only* evidence that AD-4's SELECT-only role and AD-13's idempotency constraints hold. A gate that
+is intermittently red trains its operator to re-run until green, at which point it has stopped being
+a gate.
+
+**Raised as an action item rather than absorbed.** Out of scope for this story - it touches no
+adapter - and not something to fix quietly inside a story about SQL parsing.
+
+#### MR !76, round 2 - one finding, declined with the reason in the code
+
+*"Use `SelectStmt` for set-operation nodes"* - import the generated PG17 type that `libpg-query`
+re-exports, keeping the runtime guards. Rated **trivial / low value** by CodeRabbit itself.
+
+The premise checks out: `libpg-query`'s `index.d.ts` does `export * from "@pgsql/types"`. Declined
+anyway, on three grounds now recorded beside `isSetOperation` so nobody re-litigates it:
+
+- `parseSync` is declared `(query: string) => any`, so a generated type here is an unchecked
+  assertion over untyped data. The finding concedes the runtime guards must stay regardless, which
+  is the admission that it buys no checking.
+- The predicate is asked about **every node in the tree**, most of which are not select bodies.
+  Typing its parameter as the thing it is testing for inverts the question.
+- The drift it would nominally guard - a future `libpg-query` changing this field - is already
+  caught by **behaviour**: disabling `isSetOperation` turns three fixtures red. A test that fails is
+  worth more than a declaration that compiles, and this file's whole argument is that structure
+  beats resemblance.
+
+Adopting the types for one helper would also be inconsistent: `relname`, `jointype`, `aliasname`
+and the rest are all reached structurally. Either the file adopts generated AST types throughout -
+version-coupled to PG17, in a test whose job is to distrust the parser's output - or it stays
+structural. It stays structural.
 
 ### File List
 
@@ -379,4 +414,5 @@ down becomes a failure somebody learns to re-run past.
 | 2026-08-21 | Tasks 2-4: the sweep parses. 642 lines of hand-written lexer removed; Argus found the outer-join semantics the rewrite had wrong |
 | 2026-08-21 | Local CodeRabbit round: three findings, three confirmed - a write carrying a scoped select was accepted, a cast placeholder refused, a derived table hiding ambiguity |
 | 2026-08-21 | Status done, written in the review round's commit rather than after the merge - the mistake 5.1c made |
+| 2026-08-21 | MR !76 round 2: a typed-AST suggestion declined, with the reason recorded in the code |
 | 2026-08-21 | MR !76 round 1: a trivial "add a fixture" finding turned out to be a scope bypass, an accidental refusal and a false rejection; set-operation arms are now scopes |
