@@ -1,7 +1,7 @@
 ---
 Status: done
 baseline_commit: ba2503d
-merge_request:
+merge_request: 77
 ---
 
 # Story 5.2: A document declares its kind
