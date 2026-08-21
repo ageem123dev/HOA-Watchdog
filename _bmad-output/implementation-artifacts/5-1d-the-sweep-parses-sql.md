@@ -48,12 +48,12 @@ trustworthy — it does not make it the thing that establishes isolation.
 - [x] **Task 1 — Choose and name the parser.** **`libpg-query` 17.7.4, as a `devDependency`.**
       Chosen and measured 2026-08-21; see *The parser* below for the probe results and the rejected
       alternatives. (AC1)
-- [ ] **Task 2 — Rewrite `sweepVerdict` around the parse.** Per-scope alias resolution replaces the
+- [x] **Task 2 — Rewrite `sweepVerdict` around the parse.** Per-scope alias resolution replaces the
       flat namespace. Keep the shape that works: one function returning the reason or `null`, called
       by both the per-entry sweep and the fixtures, so the two cannot drift. (AC1)
-- [ ] **Task 3 — Carry the eight bypasses over.** Each asserting the stage that rejects it, and each
+- [x] **Task 3 — Carry the eight bypasses over.** Each asserting the stage that rejects it, and each
       proved by mutation rather than assumed. (AC2)
-- [ ] **Task 4 — Refuse what the parser cannot resolve, and delete the rules it makes dead.**
+- [x] **Task 4 — Refuse what the parser cannot resolve, and delete the rules it makes dead.**
       `FORBIDDEN_LEXICAL` currently subsumes the `E'`/`U&'` and dollar-construct entries in
       `UNANALYSABLE` — anything containing `E'` contains `'` and is already refused. That redundancy
       was left in deliberately at the end of 5.1b rather than doing test-only surgery on a ready MR.
@@ -181,17 +181,86 @@ that can be satisfied dishonestly is worse than none, because it is reported as 
 
 ## Dev Agent Record
 
-### Agent Model Used
+### Test Design
 
-### Debug Log References
+#### Tasks 2-4 - failure modes of a parse-based sweep
+
+The scanner's failure modes were all *lexical* - some text form it misread. A parser removes those
+and introduces a different set, which is what this table is for. **Two of them are false-pass and
+two are false-reject, and the false-rejects matter just as much**: an entry author who cannot get a
+correct query past the guard rewrites the query until the guard stops complaining, which is how a
+guard trains people to work around it.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2.1a | The WASM module is not loaded, `parseSync` throws, and the sweep folds that into "unanalysable" - **every refusal fixture then passes while the parser is not running at all** | GUARD - the harness failure is rethrown, and the parser is injectable so both branches are reachable from a test |
+| 2.1b | A parse error is treated as a pass | GUARD - refusal with the parser's own message |
+| 2.2a | Aliases resolved in one flat namespace, so an inner predicate satisfies an outer table - the bypass that ended 5.1b | GUARD - one scope per `SelectStmt`; the walk stops at a nested one |
+| 2.2b | A predicate under `OR` or `NOT` credited as scoping | GUARD - only `AND`-reachable conjuncts count |
+| 2.2c | **An `on` clause credited to the preserved side of an outer join**, which it does not filter | GUARD - per side: `JOIN_LEFT` credits the right, `JOIN_RIGHT` the left, `JOIN_FULL` neither |
+| 2.2d | Join conditions ignored entirely, refusing a correct entry that binds in `on` | GUARD (false-reject) - inner-join quals credited |
+| 2.2e | Outer joins refused outright, refusing a correct entry that scopes the nullable side in `on` | GUARD (false-reject) - `dues_status@1` does exactly this |
+| 2.3a | More than one statement | GUARD - `stmts.length !== 1` |
+| 2.3b | A schema-qualified name, which the parser reads but whose identity depends on `search_path` | REFUSE, and now for a stated reason rather than because the scanner misread it |
+| 2.3c | An unqualified `association_id = $1` credited to a table it may not constrain | GUARD - resolved only when the scope reads exactly one table |
+| 2.4a | A placeholder other than `$1` | GUARD |
+| 2.4b | The sweep passes because it examined nothing | GUARD - `scopedReferences === 0` is a refusal, plus a per-entry non-vacuity assertion |
 
 ### Completion Notes List
 
+**Tasks 2, 3 and 4 landed as one edit**, because they are one edit: the parse replaces the scanner,
+the fixtures move onto the parse, and the lexical rules the scanner needed die with it. Splitting
+them would have meant a commit where the sweep was half each.
+
+- **642 lines out, 452 in.** Gone: `stripComments`, `stripLiterals`, `withoutComments`,
+  `unrecognisedDollar`, `NOT_AN_ALIAS`, `TABLE_REFERENCE`, `tableReferences`, `UNANALYSABLE`,
+  `FORBIDDEN_LEXICAL`, and every test that existed to check that hand-written lexer. Task 4 asked
+  which of `FORBIDDEN_LEXICAL`'s rules a parser makes dead; the answer was **all of them**. Comments,
+  literals and dollar constructs were forbidden because the scanner could not read them, and nothing
+  now needs them forbidden - a predicate inside a comment simply is not in the tree.
+- **A duplicated sweep went with it.** A second per-entry test re-implemented the scoping check with
+  its own copy of the scanner - the exact duplication the surviving comment warns about, sitting in
+  the same file. It is now one `sweepVerdict` plus a non-vacuity assertion.
+- **`sweepVerdict` stayed synchronous.** `parseSync` works once `loadModule()` has been awaited, so
+  one `beforeAll` keeps every fixture and per-entry assertion a plain expression. Making the sweep
+  async would have rippled through every call site for no gain.
+- **The parser is an argument with a default.** Not indirection for its own sake: the branch telling
+  a *broken harness* apart from an *unparseable entry* is unreachable otherwise, and it is the
+  branch whose failure is silent. Same reasoning `core/auth/actor-assertion.ts` records for its key
+  and clock. The first version of that test asserted a regex against a hardcoded string - vacuous,
+  and caught before it was committed.
+- **Twelve mutations, twelve caught**, each reverted and re-verified: the scope boundary, `OR` as
+  `AND`, schema acceptance, the vacuity guard, the statement count, any-placeholder, the ambiguity
+  guess, the harness/parse distinction, swapped join sides, outer-as-inner, the filtered-side
+  restriction, and inner-join quals ignored.
+
+#### The finding that made the story worth more than its ACs
+
+Argus raised a **high** on the first review: `on` clause predicates were credited regardless of join
+type, and **an outer join's `on` clause does not filter the preserved side**. So
+`from unit u left join m on u.association_id = $1` returns every association's units and the sweep
+called it scoped. Real, and a defect the *previous* scanner could not have had - it never looked at
+join conditions at all. Reading SQL properly means owning SQL's semantics, not only its syntax.
+
+**The first fix was wrong in the other direction**, and the catalog caught it: refusing outer joins
+outright rejected `dues_status@1`, which scopes `payment` in the `on` clause of a `left join`. That
+is correct SQL - the nullable side *is* filtered by its own `on` clause. The rule is per side, not
+per join. Both directions now have fixtures and both are mutation-proved.
+
+Worth naming because the sequence is the argument for the whole pipeline: an independent reviewer
+found a real defect, the obvious fix introduced a worse one, and the per-entry sweep over the real
+catalog caught that within a single test run.
+
 ### File List
 
-## Change Log
+- `catalog/registry.test.ts` - the sweep rewritten around the parse; the hand-written lexer and its
+  tests removed
+- `package.json`, `package-lock.json` - `libpg-query` as a `devDependency`
+
+### Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-21 | Split from 5.1c, which had absorbed it from 5.1b. Same theme, no shared files |
 | 2026-08-21 | Task 1: libpg-query 17.7.4 chosen as a devDependency, measured against all eight bypasses; ready-for-dev |
+| 2026-08-21 | Tasks 2-4: the sweep parses. 642 lines of hand-written lexer removed; Argus found the outer-join semantics the rewrite had wrong |
