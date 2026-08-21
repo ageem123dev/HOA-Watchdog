@@ -19,6 +19,12 @@ import { randomBytes } from 'node:crypto'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import {
+  ACTOR_ASSERTION_AUDIENCE,
+  ACTOR_ASSERTION_TTL_MS,
+  mintActorAssertion,
+} from '@/core/auth/actor-assertion'
+
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const readerUrl = process.env.WATCHDOG_READER_DATABASE_URL
 const adminUrl = process.env.DATABASE_URL
@@ -52,6 +58,20 @@ if (!configured) {
 }
 
 const TOKEN = 'r7Qx-4kP9mVt2LbN8sYw0aZc'
+const ASSERTION_KEY = 'route-db-test-actor-assertion-key'
+
+/**
+ * A live assertion for the seeded board member. Minted per call: it carries an
+ * expiry, and one made once at module scope would age across a slow database
+ * suite until these failed on the clock rather than on the code.
+ */
+const assertionFor = (subject: string) =>
+  mintActorAssertion(subject, {
+    key: ASSERTION_KEY,
+    now: Date.now(),
+    ttlMs: ACTOR_ASSERTION_TTL_MS,
+    audience: ACTOR_ASSERTION_AUDIENCE,
+  })
 /** Lower-case and letter-initial, so it also satisfies `query_log_entry_id_shaped`. */
 const RUN_PREFIX = `t${randomBytes(4).toString('hex')}`
 
@@ -78,6 +98,7 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
 
   beforeAll(async () => {
     vi.stubEnv('AGENT_SERVICE_TOKEN', TOKEN)
+  vi.stubEnv('ACTOR_ASSERTION_KEY', ASSERTION_KEY)
 
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
@@ -164,7 +185,7 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
       entryId: 'dues_status',
       version: 1,
       parameters: { unitNumber, assessmentYear: 2026 },
-      actorId,
+      actorAssertion: assertionFor(actorId),
     })
 
     expect(response.status).toBe(200)
@@ -189,7 +210,7 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
       entryId: 'dues_status',
       version: 1,
       parameters: { unitNumber, assessmentYear: 2026 },
-      actorId,
+      actorAssertion: assertionFor(actorId),
     })
     const { provenanceId } = (await response.json()) as { provenanceId: string }
 
@@ -217,7 +238,7 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     const before = await logRowCount()
 
     const response = await call(
-      { entryId: 'dues_status', version: 1, parameters: { unitNumber, assessmentYear: 2026 }, actorId },
+      { entryId: 'dues_status', version: 1, parameters: { unitNumber, assessmentYear: 2026 }, actorAssertion: assertionFor(actorId) },
       'not-the-token',
     )
 
@@ -232,7 +253,7 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
       entryId: 'drop_everything',
       version: 1,
       parameters: {},
-      actorId,
+      actorAssertion: assertionFor(actorId),
     })
 
     expect(response.status).toBe(404)

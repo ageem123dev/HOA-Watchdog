@@ -1,10 +1,10 @@
 ---
-Status: backlog
-baseline_commit:
+Status: in-progress
+baseline_commit: 17b6794bbea06cea3a7c55a1504c9061cb615cc7
 merge_request:
 ---
 
-# Story 5.1c: Proved, not approximated
+# Story 5.1c: The actor is proved, not relayed
 
 ## Story
 
@@ -14,18 +14,13 @@ so that **holding a service token is not the same as being able to ask on anyone
 
 Split from story 5.1b on 2026-08-21, and widened on the same day when MR !71 merged.
 
-**Two halves, one theme: the boundary is currently *approximated*, and this story makes each half
-provable.**
+**The actor is claimed, not proved.** 5.1b made the association a derived value the caller cannot
+choose — but it derives it **from `actorId`**, and `actorId` is a plain field in the body of
+`/tools/v1/catalog/execute`. The trust anchor moved rather than disappeared.
 
-- **The actor is claimed, not proved.** 5.1b made the association a derived value the caller cannot
-  choose — but it derives it **from `actorId`**, and `actorId` is a plain field in the body of
-  `/tools/v1/catalog/execute`. The trust anchor moved rather than disappeared.
-- **The scoping guard matches text, it does not read SQL.** `catalog/registry.test.ts` decides
-  whether an entry scopes its tables with a hand-written scanner. Over MR !71 that scanner was
-  defeated eight times, each by a different Postgres lexical form.
-
-They are one story because they are one mistake in two places: a property asserted by resemblance
-rather than established by construction.
+**Narrowed again on 2026-08-21**, after task 2 landed and the remaining scale became concrete. The
+scoping-guard half — the same mistake in a second place — is **story 5.1d**. They share a theme and
+no files, so combining them bought nothing and cost reviewability.
 
 ## What is *not* wrong, stated first
 
@@ -59,8 +54,6 @@ Two things follow. Neither is urgent today; both get worse on the day a second a
 
 ## Acceptance Criteria
 
-### The actor
-
 1. **A tool request carries proof of its actor, not a claim about one.** The Next.js side mints a
    short-lived signed token binding `actorId` (and the association resolved for them); the agent
    service relays it **opaquely**, never constructing or modifying it; the gateway verifies it before
@@ -85,44 +78,18 @@ Two things follow. Neither is urgent today; both get worse on the day a second a
    arrangement between gateway and agent service; this adds a third credential with different
    properties — per-turn, per-actor, signed by one side and verified by the other.
 
-### The scoping guard
-
-7. **The sweep reads SQL rather than resembling it.** `catalog/registry.test.ts`'s scanner is
-   replaced by a real parse — an existing SQL parser, not another hand-written one. Alias resolution
-   is **per query scope**, which is the property the current scanner structurally cannot have.
-
-8. **Every bypass found on MR !71 stays a regression case.** All eight, driven through the whole
-   sweep and asserting *which* stage rejects them, as the current fixtures already do: a line
-   comment, a nested block comment, a plain literal, an `E'…\'…'` escape string, a `$café$` tag, a
-   schema-qualified name, a comma-separated list, and an alias shadowed inside a subquery. A parser
-   that accepts any of them is not an improvement.
-
-9. **What the parser cannot analyse is still refused, not guessed at.** The one rule that held
-   across eight rounds. A construct outside what the parser can resolve turns the suite red rather
-   than passing quietly.
-
 ## Tasks / Subtasks
 
 - [x] **Task 1 — The amendment.** Written 2026-08-21 as **AD-18**, with amendments on AD-15 and
       AD-17 pointing to it. A new AD rather than widening either, following AD-17's own precedent:
       both existing tokens authenticate *runtimes*, and neither carries a subject, so widening one
       to cover a per-turn per-actor credential would blur the claim its own test enforces. (AC6)
-- [ ] **Task 2 — Mint and verify.** The signing on the Next.js side, the verification at the
+- [x] **Task 2 — Mint and verify.** The signing on the Next.js side, the verification at the
       gateway, and the key's home. (AC1)
 - [ ] **Task 3 — The refusals.** Forged, expired, altered, wrong audience. (AC2, AC5)
 - [ ] **Task 4 — The relay is a relay.** The agent service passes the token through and holds no
       key; the structural test that says so. (AC3)
 - [ ] **Task 5 — Retire the believable `actorId`.** (AC4)
-- [ ] **Task 6 — Replace the scanner with a parser.** Choose one, add it, and rewrite
-      `sweepVerdict` around per-scope alias resolution. **Dependency approved by Matt 2026-08-21**;
-      the specific parser is still to be chosen and named here before it is added, with its
-      resolution behaviour checked against the eight bypasses rather than assumed. It parses SQL
-      that decides which association's records are returned, so the choice is part of the decision
-      and not an implementation detail. (AC7, AC9)
-- [ ] **Task 7 — Carry the eight bypasses over, then delete the dead rules.** Once the parser lands,
-      `FORBIDDEN_LEXICAL` subsumes the `E'`/`U&'` and dollar-construct entries in `UNANALYSABLE` —
-      anything containing `E'` contains `'` and is already refused. That redundancy was left in
-      deliberately at the end of 5.1b rather than doing test-only surgery on a ready MR. (AC8)
 
 ## Dev Notes
 
@@ -143,36 +110,74 @@ association is onboarded.
 **So the ordering constraint is: this story, or the RLS work AD-4's amendment calls for, must precede
 onboarding a second association.** 5.1b's creation guard is what forces that conversation.
 
-### What eight rounds actually taught
-
-Recorded because the next person will be tempted to patch rather than replace.
-
-The scanner was defeated by: a line comment; a **nested** block comment (the regex fix reopened the
-hole one level down); a plain string literal; an `E'…\'…'` escape string; a `$café$` dollar tag; a
-schema-qualified name; a comma-separated `from` list; and an alias shadowed inside
-`exists (select … from assessment as unit …)`, where the predicate belongs to the inner query and
-the outer table is unconstrained.
-
-Two further defects were in the *fixes*: one refusal was dead in the pipeline because it ran after
-the literal it looked for had already been blanked, and the bypass fixtures passed for the wrong
-reason twice — once because blanking a literal also ate the `from unit` after it, once because every
-fixture stopped at the first stage and never reached the one under test.
-
-**The pattern is that a text scan cannot decide a question about what SQL executes.** What ended
-each round was not a better regex but the same inversion: *refuse what cannot be analysed*. Keep
-that rule after the parser lands (AC9) — a parser has its own edges, and the failure mode to avoid
-is the parser silently resolving something differently from Postgres.
-
-**And keep the division of labour honest.** `adapters/db/catalog-isolation.test.ts` gives two
-associations the same unit number and runs the real query; none of the eight bypasses would have
-survived it. The sweep is an early warning that a *new* entry looks unscoped. It is not the proof,
-and 5.1b's own comments now say so.
-
 ### The mistake to avoid
 
 Do not start from "a prompt-injected model could choose an actor". It cannot, that is pinned by a
 test, and designing against it produces a control in the wrong place — inside the agent, which is the
 component that would have to be trusted to apply it.
+
+### The chain as it stands today
+
+Read in full while preparing this story. Every one is an UPDATE.
+
+`app/oracle/page.tsx` → `app/oracle/ask.ts` → `adapters/agent/chat-client.ts` →
+`agent/watchdog_agent/chat_service.py` → `routing.py` → `tools_client.py` →
+`app/tools/v1/catalog/execute/route.ts`.
+
+- **`app/oracle/page.tsx:73`** — `const actorId = session.user.id`, and it redirects when there is
+  no session. `core/security/actor-is-never-chosen.test.ts` pins both, plus that the call site
+  passes the binding by shorthand.
+- **`adapters/agent/chat-client.ts`** — sends `{ question, actorId }` with a
+  **`GATEWAY_SERVICE_TOKEN`** bearer. Refuses a non-https base URL, bounds the turn at 60s, and
+  refuses a malformed 200 rather than passing it to a renderer. Its header comment records AD-17's
+  rule that this token is *not* `AGENT_SERVICE_TOKEN`.
+- **`agent/watchdog_agent/chat_service.py`** — `PERMITTED_FIELDS = ("question", "actorId")`, and it
+  refuses any field outside that set. Token-checked with constant-time comparison; an unset token
+  refuses everyone.
+- **`agent/watchdog_agent/routing.py`** — `route_question(question, *, actor_id, ...)`. The model
+  supplies only `choice.name` and `choice.arguments`; `actor_id` is threaded as a keyword.
+- **`agent/watchdog_agent/tools_client.py`** — `execute_catalog_entry(..., actor_id=...)` posts
+  `{entryId, version, parameters, actorId}` with the **`AGENT_SERVICE_TOKEN`** bearer.
+- **`app/tools/v1/catalog/execute/route.ts`** — verifies the service token *first*, then parses.
+  Already refuses a body carrying `associationId` (5.1b, AC2). `readRequest` whitelists four fields.
+- **`core/tools/service-token.ts`** — `verifyServiceToken`, constant-time, unset-refuses-everyone,
+  length mismatch returns `false` rather than throwing so there is no length oracle. **The
+  assertion verifier should follow this file's shape**, including that last property.
+
+### The design decisions this story has to make, made here
+
+**Where the assertion is minted.** In the Node gateway, on the way out — `app/oracle/ask.ts` or
+`chat-client.ts`. Not in `page.tsx`: the page already proves it holds a session, and moving crypto
+into a React server component puts a signing key somewhere a future page will copy from.
+
+**HMAC, not a JWT library, and no algorithm field.** Node both mints and verifies (AD-18), so there
+is no second party to negotiate an algorithm with — and an `alg` field with no negotiation is JWT's
+classic confusion vector for nothing gained. A fixed-format `base64url(payload).base64url(hmac)`
+using `node:crypto`'s `createHmac` and `timingSafeEqual` is the whole mechanism. **This is not
+rolling your own crypto** — the primitive is standard and used as intended; what is avoided is the
+parsing surface that carries JWT's actual CVEs. If a reviewer argues for `jose`, that is a
+dependency decision for Matt and not a fix.
+
+**The payload is the subject, an expiry, and an audience.** No association: 5.1b derives that from
+the subject, and putting it in the token would create a second source that can disagree with the
+database — the shape migration 007's comment warns about.
+
+**`actorId` leaves the wire.** AC4 says the gateway must stop believing it. Prefer *refusing* a
+request that carries one, matching the `associationId` refusal 5.1b already added two lines above —
+one shape, one reason, and a caller that tries is told rather than silently ignored.
+
+**Python's `PERMITTED_FIELDS` is the relay's whole contract.** It becomes
+`("question", "actorAssertion")`. That the agent holds no key is then provable by the same
+structural shape `core/security/no-model-in-alerts.test.ts` uses: no module on the relay path may
+read a signing-key variable.
+
+### The vacuity risk, named in advance
+
+AC2's four refusals are the ones that will look green while proving nothing. A test that asserts
+"a forged token is refused" passes if verification refuses *everything* — including valid tokens.
+So each refusal case needs a sibling assertion that the **valid** token is accepted in the same
+test run, and the expiry case needs an injected clock rather than a sleep. 5.1b shipped exactly this
+shape twice and the sensitivity check is what caught it.
 
 ### References
 
@@ -187,11 +192,139 @@ component that would have to be trusted to apply it.
 
 ### Agent Model Used
 
+### Test Design
+
+#### Task 2 — Mint and verify
+
+**Design decision forced by testability:** the mechanism lives in a pure module,
+`core/auth/actor-assertion.ts`, taking the key and the current time as **arguments**. Reading the
+key from `process.env` inside would make "unconfigured" untestable, which is the case that matters
+most — `core/tools/service-token.ts` sets the house precedent and its header says why.
+
+**Behaviour 2.1 — `mintActorAssertion(subject, { key, now, ttlMs, audience })`.**
+
+*Signal:* a string that `verifyActorAssertion` resolves back to the same subject.
+*Seam:* key and clock are parameters. No environment, no `Date.now()`.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2.1a | The key is absent or blank, and it mints an *unsigned-but-well-formed* assertion | GUARD — refuse to mint. An unconfigured minter that produces something is worse than one that produces nothing |
+| 2.1b | The subject is empty or blank, so a token is minted that names nobody | GUARD — refuse |
+| 2.1c | The subject contains the field delimiter and shifts the payload boundary | GUARD — base64url encoding makes the delimiter unrepresentable in a field; a test forces a subject containing `.` and `\|` |
+| 2.1d | `ttlMs` is zero or negative, so the token is born expired | GUARD — refuse rather than mint something that can never verify |
+
+**Behaviour 2.2 — `verifyActorAssertion(assertion, { key, now, audience })`.**
+
+*Signal:* the subject, or a refusal naming which check failed — to the caller, never to the wire.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2.2a | **It refuses everything, including valid tokens.** The vacuity this story was warned about | GUARD — every refusal case asserts a *valid* token is accepted in the same run |
+| 2.2b | The signature is wrong | GUARD |
+| 2.2c | The payload is altered after signing — the subject swapped for another member's | GUARD. The one that matters: this is the attack |
+| 2.2d | Expired, at the boundary and one millisecond either side | GUARD — injected clock, never a sleep |
+| 2.2e | Minted for a different audience | GUARD |
+| 2.2f | Malformed: no delimiter, two delimiters, empty half, non-base64 body | GUARD — refuse, never throw |
+| 2.2g | A signature of a different length makes `timingSafeEqual` raise `RangeError`, so a wrong-length token throws while a wrong-value token returns false — a length oracle | GUARD — compare lengths first and return a refusal, exactly as `verifyServiceToken` does |
+| 2.2h | The key is absent or blank | GUARD — refuse everyone, matching `verifyServiceToken`'s unconfigured-rejects-everybody |
+
+*Inverse (required by `require_inverse_or_crosscheck`):* mint → verify returns the original subject,
+for subjects including a UUID, a delimiter-bearing string, and one with multi-byte characters.
+
+*Cross-check:* the signature is recomputed independently in the test with `createHmac` over the same
+payload, so the assertion is not merely self-consistent with whatever `mint` produced.
+
 ### Debug Log References
+
+**Task 2.** The first red was a missing-module error, which is not a valid red — the module was
+stubbed with correct signatures and deliberately wrong bodies so the 25 cases failed on assertions
+instead. Green after the real implementation.
+
+**Sensitivity, both directions.** Removing the `timingSafeEqual` comparison failed *two* cases —
+the forged signature and the tampered payload — which is the pair that matters. Relaxing the expiry
+from `>=` to `>` failed `refuses exactly at expiry` and nothing else, so the boundary case is
+carrying its own weight rather than riding on its neighbours.
+
+**A fabricated SHA, caught before it shipped.** `baseline_commit` was set by padding the short hash
+`17b6794` to full length rather than reading `git rev-parse HEAD`. It looked entirely plausible and
+was wrong; the review diff range depends on it. Corrected to
+`17b6794bbea06cea3a7c55a1504c9061cb615cc7`.
+
+**`it.each` title bug.** Three columns and one `%s` printed the elapsed milliseconds where the
+expectation belonged — `at one millisecond before expiry, accepted = 59999`. Labels are
+self-describing now, because a red test whose name reads as gibberish is a red test nobody trusts.
+
 
 ### Completion Notes List
 
+**Task 2 — mint and verify.** *(reopened — see below)* `core/auth/actor-assertion.ts`, pure, with
+the key and the clock as arguments.
+
+> **Marked complete prematurely and reopened 2026-08-21.** Task 2 is "the signing on the Next.js
+> side, the verification at the gateway, and the key's home". Only the mechanism existed:
+> `actor-assertion.ts` was imported by nothing but its own test. That is the shape the AC audit has
+> caught on nine consecutive stories — built, tested, wired to nothing — and marking it done was the
+> "NO LYING OR CHEATING" gate failing. The mechanism's own notes below stand; the wiring follows.
+
+**The wiring, now done.**
+
+- **Minting** — `adapters/agent/chat-client.ts` mints on the way out and sends `actorAssertion`. It
+  sends **no `actorId` at all**: leaving the claim beside the proof would keep the believable path
+  open and make the assertion decoration. An exact-keys assertion pins the wire to
+  `['actorAssertion', 'question']`, so a third field cannot appear unnoticed.
+- **Verification** — `/tools/v1/catalog/execute` verifies and hands the executor
+  `actorId: verified.subject`. Never a request field.
+- **The key's home** — `ACTOR_ASSERTION_KEY`, read at request time, documented in `.env.example`
+  with the warning that matters: **the agent service must never hold it**, because a relay that can
+  mint is not a relay.
+- **The constants live in `core`**, imported by both ends. A copy on each side is two statements of
+  one rule with nothing failing on disagreement — they drift, and the symptom is every turn refused
+  for `audience` with both sides looking correct in isolation.
+
+**Task 5's AC4 is satisfied here, ahead of its task.** Requiring `actorAssertion` in `readRequest`
+means the gateway no longer accepts a believable `actorId` — which is AC4. The alternative was a
+transitional accept-both path with its own tests, then deleting them. Recorded rather than claimed
+separately when task 5 comes round.
+
+**The db route test got stronger rather than merely updated.** It now proves the provenance row
+names the actor the *assertion proved*, not the one the request claimed — the property AD-18 exists
+for, asserted end to end against a real database.
+
+- **HMAC-SHA256 with no algorithm field.** Node mints and Node verifies, so there is no second party
+  to negotiate an algorithm with, and an `alg` field would carry JWT's classic confusion vector for
+  nothing gained. Fixed format, verifier recomputes rather than reads.
+- **Signature is checked before the payload is parsed**, so a tampered assertion is reported as a bad
+  signature rather than as malformed. Those are different events — one is somebody trying, the other
+  is something broken.
+- **Length compared before `timingSafeEqual`**, which raises `RangeError` on unequal lengths. Letting
+  it escape would answer a wrong-*length* signature with an exception and a wrong-*value* one with a
+  refusal — a length oracle. `core/tools/service-token.ts` records the same reasoning; this follows
+  it deliberately rather than by coincidence.
+- **Unconfigured refuses everybody**, and minting without a key throws rather than producing
+  something unsigned. An unconfigured minter that produces *something* is worse than one that
+  produces nothing.
+- **The payload carries no association.** 5.1b derives it from the subject inside the provenance
+  write; a copy here would be a second source that can disagree with the database.
+- **Every refusal case asserts a valid assertion is still accepted in the same run.** A verifier that
+  refused everything would pass a naive "forged tokens are refused" suite while taking the Oracle
+  down. That shape shipped twice on 5.1b.
+
+
 ### File List
+
+**Task 2**
+
+- `core/auth/actor-assertion.ts` *(new)* — mint, verify, and the shared TTL/audience constants
+- `core/auth/actor-assertion.test.ts` *(new)* — 25 cases
+- `adapters/agent/chat-client.ts` — mints and sends the assertion; refuses to send unconfigured
+- `adapters/agent/chat-client.test.ts`
+- `app/tools/v1/catalog/execute/route.ts` — verifies, and passes the proved subject to the executor
+- `app/tools/v1/catalog/execute/route.test.ts`
+- `app/tools/v1/catalog/execute/route.db.test.ts` — provenance names the proved actor
+- `.env.example` — `ACTOR_ASSERTION_KEY`, and why the agent must not hold it
+- `README.md` — the variable count and its group
+- `docs/readme.test.ts` — the number-word lookup extended
+
 
 ## Change Log
 
@@ -200,3 +333,5 @@ component that would have to be trusted to apply it.
 | 2026-08-21 | Split from 5.1b after a CodeRabbit finding on MR !71; the finding's stated mechanism was refuted and the real one recorded |
 | 2026-08-21 | Widened on Matt's instruction after !71 merged: the SQL scanner replacement joins the actor token, both being properties asserted by resemblance rather than construction |
 | 2026-08-21 | AD-18 written and the parser dependency approved — both blockers cleared, story is implementable once the spine change merges |
+| 2026-08-21 | Context pass: the seven-file chain read and recorded, four design decisions made, ready-for-dev |
+| 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |

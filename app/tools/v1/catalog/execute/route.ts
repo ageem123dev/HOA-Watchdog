@@ -1,5 +1,9 @@
 import { createCatalogExecutor } from '@/adapters/db/catalog-executor-postgres'
 import { bearerToken, failure } from '@/core/tools/http'
+import {
+  ACTOR_ASSERTION_AUDIENCE,
+  verifyActorAssertion,
+} from '@/core/auth/actor-assertion'
 import { verifyServiceToken } from '@/core/tools/service-token'
 
 /**
@@ -42,7 +46,7 @@ interface ExecuteRequest {
   readonly entryId: string
   readonly version: number
   readonly parameters: Readonly<Record<string, unknown>>
-  readonly actorId: string
+  readonly actorAssertion: string
 }
 
 /**
@@ -55,7 +59,7 @@ function readRequest(payload: unknown): ExecuteRequest | null {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null
 
   // Whose records a query runs against is not a request field. The association
-  // is derived from the board member named in `actorId`, inside the provenance
+  // is derived from the board member the assertion names, inside the provenance
   // write itself, so there is nothing here that could influence it — and this
   // refusal exists so that a caller which tries is told, rather than quietly
   // served its own association and left believing the parameter worked.
@@ -65,18 +69,18 @@ function readRequest(payload: unknown): ExecuteRequest | null {
   // caller learning exactly which shapes the endpoint does not mind receiving.
   if (Object.hasOwn(payload, 'associationId')) return null
 
-  const { entryId, version, parameters, actorId } = payload as Record<string, unknown>
+  const { entryId, version, parameters, actorAssertion } = payload as Record<string, unknown>
 
   if (typeof entryId !== 'string' || entryId.trim() === '') return null
   if (!Number.isInteger(version)) return null
-  if (typeof actorId !== 'string' || actorId.trim() === '') return null
+  if (typeof actorAssertion !== 'string' || actorAssertion.trim() === '') return null
   if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters)) return null
 
   return {
     entryId,
     version: version as number,
     parameters: parameters as Record<string, unknown>,
-    actorId,
+    actorAssertion,
   }
 }
 
@@ -100,12 +104,37 @@ export async function POST(request: Request): Promise<Response> {
     return failure(
       400,
       'invalid_request',
-      'the request must carry entryId, an integer version, a parameters object and actorId',
+      'the request must carry entryId, an integer version, a parameters object and actorAssertion',
     )
   }
 
+  // AD-18. The service token above established that the caller is the agent
+  // service; this establishes **which board member the turn is for**, which the
+  // service token says nothing about. Both, or neither is enough.
+  //
+  // `401` and not `403`: the request has failed to establish who it is for, and
+  // the reason is deliberately not returned. Which check failed — signature,
+  // expiry, audience — is the gateway's to log and not a caller's to learn.
+  const verified = verifyActorAssertion(parsed.actorAssertion, {
+    key: process.env.ACTOR_ASSERTION_KEY ?? '',
+    now: Date.now(),
+    audience: ACTOR_ASSERTION_AUDIENCE,
+  })
+
+  if (!verified.ok) {
+    console.warn('tools/v1/catalog/execute refused an actor assertion', { reason: verified.reason })
+
+    return failure(401, 'unauthenticated', 'the actor assertion was not accepted')
+  }
+
   try {
-    const execution = await executor.execute(parsed)
+    // The subject the assertion proves, never a field the request supplied.
+    const execution = await executor.execute({
+      entryId: parsed.entryId,
+      version: parsed.version,
+      parameters: parsed.parameters,
+      actorId: verified.subject,
+    })
 
     return Response.json({ provenanceId: execution.provenanceId, rows: execution.rows })
   } catch (error) {

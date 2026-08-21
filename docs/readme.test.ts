@@ -48,7 +48,7 @@ describe('the README describes this environment', () => {
     // thirteenth variable made this assert `**undefined** variables` — a failure
     // that describes the lookup table rather than the README. Extended, and the
     // lookup is now guarded so running off the end says so.
-    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']
+    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one']
     const count = declaredVariables().length
     expect(words[count], `no word for ${count} — extend the list`).toBeDefined()
     expect(readme).toContain(`**${words[count]}** variables`)

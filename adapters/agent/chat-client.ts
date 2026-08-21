@@ -25,6 +25,12 @@
  * into a component whose job is to draw.
  */
 
+import {
+  ACTOR_ASSERTION_AUDIENCE,
+  ACTOR_ASSERTION_TTL_MS,
+  mintActorAssertion,
+} from '../../core/auth/actor-assertion'
+
 const CHAT_PATH = '/chat/v1/turn'
 
 /** Where the agent service is. */
@@ -37,6 +43,15 @@ const BASE_URL_VARIABLE = 'AGENT_BASE_URL'
  * identity."
  */
 const TOKEN_VARIABLE = 'GATEWAY_SERVICE_TOKEN'
+
+/**
+ * The key this gateway signs actor assertions with — AD-18.
+ *
+ * A **third** credential, and deliberately not either of the other two: those
+ * authenticate runtimes, this one carries a subject. It never leaves Node. The
+ * agent service relays what it produces and cannot mint or inspect one.
+ */
+const ASSERTION_KEY_VARIABLE = 'ACTOR_ASSERTION_KEY'
 
 /**
  * How long a turn may take before the gateway gives up.
@@ -112,9 +127,14 @@ function readConfig(env: Readonly<Record<string, string | undefined>>) {
 
   const baseUrl = env[BASE_URL_VARIABLE]?.trim()
   const token = env[TOKEN_VARIABLE]?.trim()
+  const assertionKey = env[ASSERTION_KEY_VARIABLE]?.trim()
 
   if (!baseUrl) missing.push(BASE_URL_VARIABLE)
   if (!token) missing.push(TOKEN_VARIABLE)
+  // Refuse to send rather than sending a turn the gateway will reject: a
+  // failure at the far end costs a model call and reads as an outage instead of
+  // as a missing variable.
+  if (!assertionKey) missing.push(ASSERTION_KEY_VARIABLE)
   if (missing.length > 0) throw new AgentNotConfiguredError(missing)
 
   // Absolute https, for the reason story 3.3 gave in the other direction: the
@@ -130,11 +150,11 @@ function readConfig(env: Readonly<Record<string, string | undefined>>) {
     throw new AgentNotConfiguredError([BASE_URL_VARIABLE])
   }
 
-  return { baseUrl: baseUrl!.replace(/\/+$/, ''), token: token! }
+  return { baseUrl: baseUrl!.replace(/\/+$/, ''), token: token!, assertionKey: assertionKey! }
 }
 
 export async function askAgent(question: Question, options: AskAgentOptions = {}): Promise<ChatTurn> {
-  const { baseUrl, token } = readConfig(options.env ?? process.env)
+  const { baseUrl, token, assertionKey } = readConfig(options.env ?? process.env)
   const doFetch = options.fetch ?? globalThis.fetch
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
@@ -143,9 +163,20 @@ export async function askAgent(question: Question, options: AskAgentOptions = {}
     response = await doFetch(`${baseUrl}${CHAT_PATH}`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      // The question and the actor. Never an entry id — AD-17's load-bearing
-      // clause, from the sending end.
-      body: JSON.stringify({ question: question.question, actorId: question.actorId }),
+      // The question and **proof of** the actor — never a claim about one, and
+      // never an entry id. AD-17's load-bearing clause from the sending end, and
+      // AD-18's from the minting end. `actorId` does not travel at all: leaving
+      // it beside the assertion would keep the believable path open and make the
+      // assertion decoration.
+      body: JSON.stringify({
+        question: question.question,
+        actorAssertion: mintActorAssertion(question.actorId, {
+          key: assertionKey,
+          now: Date.now(),
+          ttlMs: ACTOR_ASSERTION_TTL_MS,
+          audience: ACTOR_ASSERTION_AUDIENCE,
+        }),
+      }),
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (error) {

@@ -21,9 +21,16 @@ import {
   askAgent,
 } from './chat-client'
 
+import {
+  ACTOR_ASSERTION_AUDIENCE,
+  ACTOR_ASSERTION_TTL_MS,
+  verifyActorAssertion,
+} from '../../core/auth/actor-assertion'
+
 const ENV = {
   AGENT_BASE_URL: 'https://agent.internal',
   GATEWAY_SERVICE_TOKEN: 'gw-8Kd2mZq7Rt4Xn0Lb',
+  ACTOR_ASSERTION_KEY: 'the-actor-assertion-signing-key',
 }
 
 const ACTOR = '018f3a2b-0000-7000-8000-0000000000aa'
@@ -89,18 +96,21 @@ describe('the ordinary turn', () => {
     )
   })
 
-  it('sends a question and an actor and nothing else', async () => {
+  it('sends a question and a proved actor and nothing else', async () => {
     // AD-17's load-bearing clause, from the sending end. The agent refuses a
-    // request naming the entry; this never sends one.
+    // request naming the entry; this never sends one. Since AD-18 the actor is
+    // an assertion rather than a claim — the exact-shape assertion is what stops
+    // a third field being added without anyone noticing.
     const doFetch = respondWith(200, TURN)
 
     await ask({ fetch: doFetch })
 
     const [, init] = vi.mocked(doFetch).mock.calls[0]!
-    expect(JSON.parse(String(init?.body))).toEqual({
-      question: 'What does 4B owe for 2026?',
-      actorId: ACTOR,
-    })
+    const payload = JSON.parse(String(init?.body)) as Record<string, unknown>
+
+    expect(Object.keys(payload).sort()).toEqual(['actorAssertion', 'question'])
+    expect(payload.question).toBe('What does 4B owe for 2026?')
+    expect(typeof payload.actorAssertion).toBe('string')
   })
 })
 
@@ -324,5 +334,86 @@ describe('a malformed success', () => {
     await expect(ask({ fetch: respondWith(200, '<html>hello</html>') })).rejects.toThrow(
       /the body was not JSON/,
     )
+  })
+})
+
+
+/**
+ * AD-18 from the minting end. The gateway's half is tested in
+ * `app/tools/v1/catalog/execute/route.test.ts`; this asserts the two ends agree
+ * — the assertion this client sends is one that verifier accepts, for the
+ * subject it was asked about.
+ */
+describe('the actor assertion on the wire', () => {
+  const sent = async (options: Partial<Parameters<typeof askAgent>[1]> = {}) => {
+    const doFetch = respondWith(200, TURN)
+    await ask({ fetch: doFetch, ...options })
+
+    const [, init] = (doFetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    return JSON.parse((init as RequestInit).body as string) as Record<string, unknown>
+  }
+
+  it('sends an assertion the gateway verifier accepts for this actor', async () => {
+    const payload = await sent()
+
+    const verified = verifyActorAssertion(payload.actorAssertion as string, {
+      key: ENV.ACTOR_ASSERTION_KEY,
+      now: Date.now(),
+      audience: ACTOR_ASSERTION_AUDIENCE,
+    })
+
+    expect(verified).toEqual({ ok: true, subject: ACTOR })
+  })
+
+  /**
+   * The point of the story. A claim the gateway would have to believe must not
+   * travel at all — leaving it beside the assertion would keep the old path
+   * open and make the new one decoration.
+   */
+  it('sends no actorId at all', async () => {
+    const payload = await sent()
+
+    expect(payload).not.toHaveProperty('actorId')
+    expect(Object.keys(payload).sort()).toEqual(['actorAssertion', 'question'])
+  })
+
+  it('mints an assertion that is not yet expired but does not outlive the window', async () => {
+    const payload = await sent()
+
+    const justInside = verifyActorAssertion(payload.actorAssertion as string, {
+      key: ENV.ACTOR_ASSERTION_KEY,
+      now: Date.now() + ACTOR_ASSERTION_TTL_MS - 1_000,
+      audience: ACTOR_ASSERTION_AUDIENCE,
+    })
+    const wellOutside = verifyActorAssertion(payload.actorAssertion as string, {
+      key: ENV.ACTOR_ASSERTION_KEY,
+      now: Date.now() + ACTOR_ASSERTION_TTL_MS + 60_000,
+      audience: ACTOR_ASSERTION_AUDIENCE,
+    })
+
+    expect(justInside.ok).toBe(true)
+    expect(wellOutside).toEqual({ ok: false, reason: 'expired' })
+  })
+
+  /**
+   * Unconfigured refuses to send, rather than sending something the gateway
+   * will reject — a turn that fails at the far end costs a model call and
+   * reports as an outage instead of as a misconfiguration.
+   */
+  it.each(['', '   '])('refuses to send when the signing key is %j', async (blank) => {
+    const doFetch = respondWith(200, TURN)
+
+    await expect(
+      ask({ env: { ...ENV, ACTOR_ASSERTION_KEY: blank }, fetch: doFetch }),
+    ).rejects.toThrow(AgentNotConfiguredError)
+    expect(doFetch).not.toHaveBeenCalled()
+  })
+
+  it('names the missing variable without printing any secret', async () => {
+    const error = await ask({ env: { ...ENV, ACTOR_ASSERTION_KEY: '' } }).catch((e: Error) => e)
+
+    expect(String(error)).toContain('ACTOR_ASSERTION_KEY')
+    expect(String(error)).not.toContain(ENV.ACTOR_ASSERTION_KEY)
+    expect(String(error)).not.toContain(ENV.GATEWAY_SERVICE_TOKEN)
   })
 })
