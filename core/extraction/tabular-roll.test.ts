@@ -21,12 +21,12 @@ import { OPTIONAL_HEADERS, readRows, readTable } from './tabular'
 
 /** A roll table, header row first. `type` is what makes a row a roll row. */
 const roll = (rows: readonly (readonly string[])[]) => [
-  ['date', 'description', 'amount', 'type', 'unit', 'cycle', 'year'],
+  ['date', 'description', 'amount', 'unit', 'cycle', 'year'],
   ...rows,
 ]
 
 /** One ordinary roll row: 4B, held by Jane Smith, owing 3600 a year monthly. */
-const JANE = ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', '2026']
+const JANE = ['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly', '2026']
 
 const rollRowsOf = (result: ReturnType<typeof readRows>) => {
   if (!result.ok) {
@@ -42,7 +42,7 @@ const problemsOf = (result: ReturnType<typeof readRows>) => {
 
 describe('reading an assessment roll off a table', () => {
   it('carries every column of a roll row into one row', () => {
-    const rows = rollRowsOf(readRows(roll([JANE])))
+    const rows = rollRowsOf(readRows(roll([JANE]), 'assessment_roll'))
 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toEqual({
@@ -59,7 +59,7 @@ describe('reading an assessment roll off a table', () => {
     // Never a number. `3600.00` and `3600` are the same figure and different
     // strings, and the assessment column is numeric(14,2) reached by a decimal
     // string end to end.
-    const rows = rollRowsOf(readRows(roll([JANE])))
+    const rows = rollRowsOf(readRows(roll([JANE]), 'assessment_roll'))
 
     expect(rows[0]!.annualAmount).toBe('3600.00')
     expect(typeof rows[0]!.annualAmount).toBe('string')
@@ -73,7 +73,7 @@ describe('reading an assessment roll off a table', () => {
   })
 
   it('reads a roll written as CSV text, not only as a rectangle', () => {
-    const result = readTable(serialiseCsv(roll([JANE])))
+    const result = readTable(serialiseCsv(roll([JANE])), 'assessment_roll')
 
     expect(rollRowsOf(result)[0]!.unitNumber).toBe('4B')
   })
@@ -82,8 +82,8 @@ describe('reading an assessment roll off a table', () => {
     // Reverse-it: serialise the rectangle, parse it back, and the roll rows must
     // be identical. Catches quoting and separator defects an example-based test
     // would not.
-    const direct = rollRowsOf(readRows(roll([JANE])))
-    const viaText = rollRowsOf(readTable(serialiseCsv(roll([JANE]))))
+    const direct = rollRowsOf(readRows(roll([JANE]), 'assessment_roll'))
+    const viaText = rollRowsOf(readTable(serialiseCsv(roll([JANE])), 'assessment_roll'))
 
     // Asserted non-empty first. Comparing two empty lists — or, before the
     // reader existed, two undefined values — is a test that passes by having
@@ -97,25 +97,60 @@ describe('which rows become roll rows', () => {
   it('produces none for a document with no roll rows', () => {
     // Every upload goes through this reader. An invoice CSV must come back with
     // an empty list, not a problem.
-    const result = readRows([
-      ['date', 'description', 'amount', 'type'],
-      ['2026-03-01', 'ACME Plumbing', '250.00', 'invoice'],
-    ])
+    const result = readRows(
+      [
+        ['date', 'description', 'amount'],
+        ['2026-03-01', 'ACME Plumbing', '250.00'],
+      ],
+      'invoice',
+    )
 
     expect(rollRowsOf(result)).toEqual([])
   })
 
-  it('reads only the roll rows when a document mixes kinds', () => {
-    const rows = rollRowsOf(
-      readRows([
+  /**
+   * **This replaces a test, and the replacement is the point of story 5.2.**
+   *
+   * What stood here was `'reads only the roll rows when a document mixes
+   * kinds'` — a document carrying an invoice row and a roll row, with the
+   * reader picking out the roll. That capability is *removed*, not broken: a
+   * mapping cannot be "for deposits" if a file decides row by row, so one file
+   * is now one kind.
+   *
+   * Deleting the old test outright would have quietly dropped an assertion; it
+   * is replaced by the assertion that the mixing is refused, so the contract
+   * change is visible in the suite rather than only in the diff.
+   */
+  it('refuses the mixed-kind file that used to be read row by row', () => {
+    const result = readRows(
+      [
         ['date', 'description', 'amount', 'type', 'unit', 'cycle', 'year'],
         ['2026-03-01', 'ACME Plumbing', '250.00', 'invoice', '', '', ''],
-        JANE,
-      ]),
+        ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', '2026'],
+      ],
+      'assessment_roll',
     )
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0]!.holderName).toBe('Jane Smith')
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    // Refused for saying so, rather than read and half-ignored.
+    expect(result.problems[0]?.reason).toBe('kind-is-not-a-column')
+  })
+
+  /** And the same rows, declared once, are all roll rows. */
+  it('reads every row of a declared roll, with no per-row opt-in', () => {
+    const rows = rollRowsOf(
+      readRows(
+        [
+          ['date', 'description', 'amount', 'unit', 'cycle', 'year'],
+          ['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly', '2026'],
+          ['2020-06-01', 'John Doe', '4800.00', '5C', 'six_monthly', '2026'],
+        ],
+        'assessment_roll',
+      ),
+    )
+
+    expect(rows.map((row) => row.holderName)).toEqual(['Jane Smith', 'John Doe'])
   })
 
   it('ignores a populated unit cell on a kind that is not about a unit', () => {
@@ -125,10 +160,13 @@ describe('which rows become roll rows', () => {
     // `validate` refuses a reference on an invoice, and one invalid row fails
     // the whole document — so an ignored column is the difference between a
     // stray header and a refused upload.
-    const result = readRows([
-      ['date', 'description', 'amount', 'type', 'unit', 'cycle', 'year'],
-      ['2026-03-01', 'ACME Plumbing', '250.00', 'invoice', '4B', 'monthly', '2026'],
-    ])
+    const result = readRows(
+      [
+        ['date', 'description', 'amount', 'unit', 'cycle', 'year'],
+        ['2026-03-01', 'ACME Plumbing', '250.00', '4B', 'monthly', '2026'],
+      ],
+      'invoice',
+    )
 
     if (!result.ok) throw new Error(`expected a readable table, got ${JSON.stringify(result.problems)}`)
     expect(result.records[0]!.unitReference).toBeNull()
@@ -138,7 +176,7 @@ describe('which rows become roll rows', () => {
   it('leaves the extraction records of a roll document alone', () => {
     // The roll rows are additional, not a replacement. The document still says
     // what it said, and `extraction` still records it.
-    const result = readRows(roll([JANE]))
+    const result = readRows(roll([JANE]), 'assessment_roll')
     if (!result.ok) throw new Error('expected a readable table')
 
     expect(result.records).toHaveLength(1)
@@ -150,7 +188,7 @@ describe('which rows become roll rows', () => {
     // `tabular` read the column only for a deposit — so a roll's unit was null
     // rather than rejected, and asserting `ok` alone would pass against exactly
     // that. The record has to actually carry it.
-    const result = readRows(roll([JANE]))
+    const result = readRows(roll([JANE]), 'assessment_roll')
     if (!result.ok) throw new Error(`expected a readable table, got ${JSON.stringify(result.problems)}`)
 
     expect(result.records[0]!.unitReference).toBe('4B')
@@ -161,9 +199,10 @@ describe('the columns a roll row cannot do without', () => {
   it('refuses a file whose roll rows have no cycle or year columns', () => {
     const problems = problemsOf(
       readRows([
-        ['date', 'description', 'amount', 'type', 'unit'],
-        ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B'],
-      ]),
+        ['date', 'description', 'amount', 'unit'],
+        ['2019-03-01', 'Jane Smith', '3600.00', '4B'],
+      ],
+      'assessment_roll'),
     )
 
     expect(problems[0]!.reason).toBe('missing-headers')
@@ -176,9 +215,10 @@ describe('the columns a roll row cannot do without', () => {
     // bad, and never which column to add. Raised by review.
     const problems = problemsOf(
       readRows([
-        ['date', 'description', 'amount', 'type', 'cycle', 'year'],
-        ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', 'monthly', '2026'],
-      ]),
+        ['date', 'description', 'amount', 'cycle', 'year'],
+        ['2019-03-01', 'Jane Smith', '3600.00', 'monthly', '2026'],
+      ],
+      'assessment_roll'),
     )
 
     expect(problems[0]!.reason).toBe('missing-headers')
@@ -190,9 +230,10 @@ describe('the columns a roll row cannot do without', () => {
     // with `cycle` and no `year` was told to add both. Raised by review.
     const problems = problemsOf(
       readRows([
-        ['date', 'description', 'amount', 'type', 'unit', 'cycle'],
-        ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly'],
-      ]),
+        ['date', 'description', 'amount', 'unit', 'cycle'],
+        ['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly'],
+      ],
+      'assessment_roll'),
     )
 
     expect(problems[0]!.reason).toBe('missing-headers')
@@ -201,7 +242,7 @@ describe('the columns a roll row cannot do without', () => {
 
   it('refuses a roll row with a blank cycle', () => {
     const problems = problemsOf(
-      readRows(roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', '', '2026']])),
+      readRows(roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', '', '2026']]), 'assessment_roll'),
     )
 
     expect(problems[0]!.reason).toBe('invalid-row')
@@ -211,7 +252,8 @@ describe('the columns a roll row cannot do without', () => {
   it('refuses a roll row with a blank year', () => {
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', '']]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly', '']]),
+        'assessment_roll',
       ),
     )
 
@@ -221,7 +263,8 @@ describe('the columns a roll row cannot do without', () => {
   it('refuses a roll row that names no unit', () => {
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '   ', 'monthly', '2026']]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '   ', 'monthly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -230,7 +273,7 @@ describe('the columns a roll row cannot do without', () => {
 
   it('refuses a roll row that names nobody', () => {
     const problems = problemsOf(
-      readRows(roll([['2019-03-01', '  ', '3600.00', 'assessment_roll', '4B', 'monthly', '2026']])),
+      readRows(roll([['2019-03-01', '  ', '3600.00', '4B', 'monthly', '2026']]), 'assessment_roll'),
     )
 
     expect(problems[0]!.reason).toBe('invalid-row')
@@ -240,7 +283,7 @@ describe('the columns a roll row cannot do without', () => {
 describe('the billing cycle', () => {
   it.each(['monthly', 'six_monthly', 'annual'])('accepts %s', (cycle) => {
     const rows = rollRowsOf(
-      readRows(roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', cycle, '2026']])),
+      readRows(roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', cycle, '2026']]), 'assessment_roll'),
     )
 
     expect(rows[0]!.billingCycle).toBe(cycle)
@@ -252,7 +295,8 @@ describe('the billing cycle', () => {
     // which is the same reason `validate` upper-cases a currency.
     const rows = rollRowsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'Monthly', '2026']]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', 'Monthly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -262,7 +306,8 @@ describe('the billing cycle', () => {
   it('refuses a cycle the assessment table does not admit', () => {
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'quarterly', '2026']]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', 'quarterly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -272,7 +317,7 @@ describe('the billing cycle', () => {
 
 describe('the assessment year', () => {
   it('reads the year as a number', () => {
-    const rows = rollRowsOf(readRows(roll([JANE])))
+    const rows = rollRowsOf(readRows(roll([JANE]), 'assessment_roll'))
 
     expect(rows[0]!.assessmentYear).toBe(2026)
   })
@@ -281,7 +326,7 @@ describe('the assessment year', () => {
     // The load-bearing case. `date` is when the membership began, so a member
     // who bought in 2019 and appears on the 2026 roll would derive 2019 —
     // an assessment against the wrong year, silently.
-    const rows = rollRowsOf(readRows(roll([JANE])))
+    const rows = rollRowsOf(readRows(roll([JANE]), 'assessment_roll'))
 
     expect(rows[0]!.heldFrom).toBe('2019-03-01')
     expect(rows[0]!.assessmentYear).toBe(2026)
@@ -290,7 +335,8 @@ describe('the assessment year', () => {
   it.each(['20xx', '2026.5', '-2026', '2,026'])('refuses %s as a year', (year) => {
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', year]]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly', year]]),
+        'assessment_roll',
       ),
     )
 
@@ -300,7 +346,8 @@ describe('the assessment year', () => {
   it.each(['1899', '2201'])('refuses %s, which the year check would reject', (year) => {
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', year]]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly', year]]),
+        'assessment_roll',
       ),
     )
 
@@ -310,7 +357,8 @@ describe('the assessment year', () => {
   it.each(['1900', '2200'])('accepts %s, the boundary the check admits', (year) => {
     const rows = rollRowsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', year]]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', 'monthly', year]]),
+        'assessment_roll',
       ),
     )
 
@@ -324,7 +372,8 @@ describe('the assessment year', () => {
     // project's single statement of either.
     const rows = rollRowsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4B', ' monthly ', ' 2026 ']]),
+        roll([['2019-03-01', 'Jane Smith', '3600.00', '4B', ' monthly ', ' 2026 ']]),
+        'assessment_roll',
       ),
     )
 
@@ -340,7 +389,8 @@ describe('the annual amount', () => {
     // reader has to catch them or one bad cell costs the document.
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', amount, 'assessment_roll', '4B', 'monthly', '2026']]),
+        roll([['2019-03-01', 'Jane Smith', amount, '4B', 'monthly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -350,7 +400,8 @@ describe('the annual amount', () => {
   it.each(['$3,600.00', '3600.000', '3.6e3'])('refuses %s', (amount) => {
     const problems = problemsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', amount, 'assessment_roll', '4B', 'monthly', '2026']]),
+        roll([['2019-03-01', 'Jane Smith', amount, '4B', 'monthly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -360,7 +411,8 @@ describe('the annual amount', () => {
   it('accepts the smallest amount the table stores', () => {
     const rows = rollRowsOf(
       readRows(
-        roll([['2019-03-01', 'Jane Smith', '0.01', 'assessment_roll', '4B', 'monthly', '2026']]),
+        roll([['2019-03-01', 'Jane Smith', '0.01', '4B', 'monthly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -373,8 +425,9 @@ describe('what the storing columns will not hold', () => {
     const problems = problemsOf(
       readRows(
         roll([
-          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', 'U'.repeat(65), 'monthly', '2026'],
+          ['2019-03-01', 'Jane Smith', '3600.00', 'U'.repeat(65), 'monthly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -385,8 +438,9 @@ describe('what the storing columns will not hold', () => {
     const rows = rollRowsOf(
       readRows(
         roll([
-          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', 'U'.repeat(64), 'monthly', '2026'],
+          ['2019-03-01', 'Jane Smith', '3600.00', 'U'.repeat(64), 'monthly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -397,8 +451,9 @@ describe('what the storing columns will not hold', () => {
     const problems = problemsOf(
       readRows(
         roll([
-          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '𐐷'.repeat(65), 'monthly', '2026'],
+          ['2019-03-01', 'Jane Smith', '3600.00', '𐐷'.repeat(65), 'monthly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -409,8 +464,9 @@ describe('what the storing columns will not hold', () => {
     const problems = problemsOf(
       readRows(
         roll([
-          ['2019-03-01', 'J'.repeat(201), '3600.00', 'assessment_roll', '4B', 'monthly', '2026'],
+          ['2019-03-01', 'J'.repeat(201), '3600.00', '4B', 'monthly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -424,13 +480,14 @@ describe('what the storing columns will not hold', () => {
     const cells = [...JANE]
     cells[column] = `${cells[column]}\u0000`
 
-    expect(problemsOf(readRows(roll([cells])))[0]!.reason).toBe('invalid-row')
+    expect(problemsOf(readRows(roll([cells]), 'assessment_roll'))[0]!.reason).toBe('invalid-row')
   })
 
   it('refuses a held-from date that is not a real day', () => {
     const problems = problemsOf(
       readRows(
-        roll([['2026-02-30', 'Jane Smith', '3600.00', 'assessment_roll', '4B', 'monthly', '2026']]),
+        roll([['2026-02-30', 'Jane Smith', '3600.00', '4B', 'monthly', '2026']]),
+        'assessment_roll',
       ),
     )
 
@@ -515,8 +572,9 @@ describe('one unit, one row', () => {
       readRows(
         roll([
           JANE,
-          ['2020-06-01', 'John Doe', '4800.00', 'assessment_roll', '4B', 'annual', '2026'],
+          ['2020-06-01', 'John Doe', '4800.00', '4B', 'annual', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -531,8 +589,9 @@ describe('one unit, one row', () => {
       readRows(
         roll([
           JANE,
-          ['2020-06-01', 'John Doe', '4800.00', 'assessment_roll', '4b  ', 'annual', '2026'],
+          ['2020-06-01', 'John Doe', '4800.00', '4b  ', 'annual', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -548,9 +607,10 @@ describe('one unit, one row', () => {
     const rows = rollRowsOf(
       readRows(
         roll([
-          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4\u3000B', 'monthly', '2026'],
-          ['2019-03-01', 'John Doe', '4800.00', 'assessment_roll', '4 B', 'monthly', '2026'],
+          ['2019-03-01', 'Jane Smith', '3600.00', '4\u3000B', 'monthly', '2026'],
+          ['2019-03-01', 'John Doe', '4800.00', '4 B', 'monthly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -562,9 +622,10 @@ describe('one unit, one row', () => {
     const problems = problemsOf(
       readRows(
         roll([
-          ['2019-03-01', 'Jane Smith', '3600.00', 'assessment_roll', '4\u00a0B', 'monthly', '2026'],
-          ['2019-03-01', 'John Doe', '4800.00', 'assessment_roll', '4 B', 'monthly', '2026'],
+          ['2019-03-01', 'Jane Smith', '3600.00', '4\u00a0B', 'monthly', '2026'],
+          ['2019-03-01', 'John Doe', '4800.00', '4 B', 'monthly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -577,8 +638,9 @@ describe('one unit, one row', () => {
       readRows(
         roll([
           JANE,
-          ['2019-03-01', 'Jane Smith', '3700.00', 'assessment_roll', '4B', 'monthly', '2027'],
+          ['2019-03-01', 'Jane Smith', '3700.00', '4B', 'monthly', '2027'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -590,8 +652,9 @@ describe('one unit, one row', () => {
       readRows(
         roll([
           JANE,
-          ['2020-06-01', 'John Doe', '4800.00', 'assessment_roll', '5C', 'annual', '2026'],
+          ['2020-06-01', 'John Doe', '4800.00', '5C', 'annual', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 
@@ -608,8 +671,9 @@ describe('one defective row fails the document', () => {
       readRows(
         roll([
           JANE,
-          ['2020-06-01', 'John Doe', '4800.00', 'assessment_roll', '5C', 'quarterly', '2026'],
+          ['2020-06-01', 'John Doe', '4800.00', '5C', 'quarterly', '2026'],
         ]),
+        'assessment_roll',
       ),
     )
 

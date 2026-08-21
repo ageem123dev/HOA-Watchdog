@@ -1,5 +1,5 @@
-date,description,amount,type,unit,reference
-2026-03-02,Dana Whitfield,300.00,deposit,4B,DEP-3001
-2026-03-02,Marcus Oyelaran,300.00,deposit,"4b ",DEP-3002
-2026-03-03,Priya Raghunathan,2100.00,deposit,6A,DEP-3003
-2026-03-04,Unknown payer,250.00,deposit,9Z,DEP-3004
+date,description,amount,unit,reference
+2026-03-02,Dana Whitfield,300.00,4B,DEP-3001
+2026-03-02,Marcus Oyelaran,300.00,"4b ",DEP-3002
+2026-03-03,Priya Raghunathan,2100.00,6A,DEP-3003
+2026-03-04,Unknown payer,250.00,9Z,DEP-3004

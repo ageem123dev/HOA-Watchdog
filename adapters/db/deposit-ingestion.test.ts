@@ -108,13 +108,14 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
   const depositFile = (lines: readonly (readonly [string, string])[], salt: string) => ({
     filename: `${salt}-deposits.csv`,
     contentType: 'text/csv',
+    documentKind: 'deposit' as const,
     bytes: new TextEncoder().encode(
       [
-        'date,description,amount,type,unit',
+        'date,description,amount,unit',
         // The salt rides in a data column so two runs are different documents:
         // AD-13 keys on the content hash, and an identical file is deliberately
         // the *same* document.
-        ...lines.map(([unit, amount]) => `2026-03-01,Dues ${salt},${amount},deposit,${unit}`),
+        ...lines.map(([unit, amount]) => `2026-03-01,Dues ${salt},${amount},${unit}`),
       ].join('\n'),
     ),
   })
@@ -266,8 +267,9 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
         {
           filename: `${scope}-invoices.csv`,
           contentType: 'text/csv',
+          documentKind: 'invoice' as const,
           bytes: new TextEncoder().encode(
-            ['date,description,amount,type', `2026-03-01,Acme ${scope},250.00,invoice`].join('\n'),
+            ['date,description,amount', `2026-03-01,Acme ${scope},250.00`].join('\n'),
           ),
         },
       ],
@@ -328,10 +330,11 @@ describeWithDatabase('a deposit uploaded, end to end', () => {
         {
           filename: `${scope}-nul.csv`,
           contentType: 'text/csv',
+          documentKind: 'deposit' as const,
           bytes: new TextEncoder().encode(
             [
-              'date,description,amount,type,unit',
-              `2026-03-01,Dues ${scope},250.00,deposit,4B\u0000X`,
+              'date,description,amount,unit',
+              `2026-03-01,Dues ${scope},250.00,4B\u0000X`,
             ].join('\n'),
           ),
         },

@@ -7,6 +7,7 @@
  * when the cause is a transient storage error rather than the file's fault.
  */
 
+import type { DocumentKind } from '../extraction/record'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { DocumentRepository, NewDocument } from '../ports/document-repository'
@@ -21,10 +22,17 @@ const UPLOADER = '018f3a2b-0000-7000-8000-000000000001'
 const pdf = (label: string): Uint8Array =>
   new TextEncoder().encode(`%PDF-1.7\n${label}\ntrailer\n<< /Size 4 >>\n%%EOF`)
 
-const file = (filename: string, bytes = pdf(filename), contentType = 'application/pdf') => ({
+const file = (
+  filename: string,
+  bytes = pdf(filename),
+  contentType = 'application/pdf',
+  documentKind: DocumentKind = 'statement',
+) => ({
   filename,
   contentType,
   bytes,
+  // Declared by the upload since story 5.2, not read off a `type` column.
+  documentKind,
 })
 
 interface Fakes {

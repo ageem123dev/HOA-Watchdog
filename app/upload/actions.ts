@@ -23,6 +23,7 @@ import {
   MAX_FILES_PER_UPLOAD,
   MAX_UPLOAD_BATCH_BYTES,
 } from '@/core/ingestion/acceptance'
+import { isDocumentKind } from '@/core/extraction/record'
 import { ingest } from '@/core/ingestion/ingest'
 import type { UploadState } from './upload-state'
 
@@ -74,6 +75,24 @@ export async function uploadDocuments(
     return { outcomes: [], error: 'Your session has expired. Sign in again to upload.' }
   }
 
+  // **What these documents are, declared by the person uploading them.**
+  //
+  // Story 5.2. It used to be an optional `type` column read per row, defaulting
+  // to `statement`, which meant a file decided what it was — and a mapping
+  // cannot be "for deposits" if the file decides row by row.
+  //
+  // Checked before a single byte is read, like the two limits below, and
+  // refused rather than defaulted. A default would be the per-row rule
+  // relocated: the submission would still decide, by omission.
+  const declaredKind = formData.get('documentKind')
+
+  if (!isDocumentKind(declaredKind)) {
+    return {
+      outcomes: [],
+      error: 'Choose what kind of document this is before uploading.',
+    }
+  }
+
   const selected = formData.getAll('documents').filter((entry): entry is File => entry instanceof File)
   const chosen = selected.filter((file) => file.size > 0 || file.name !== '')
 
@@ -105,6 +124,7 @@ export async function uploadDocuments(
       filename: file.name,
       contentType: file.type,
       bytes: new Uint8Array(await file.arrayBuffer()),
+      documentKind: declaredKind,
     })),
   )
 

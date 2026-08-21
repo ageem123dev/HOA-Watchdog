@@ -1,6 +1,11 @@
 import { normaliseUnitNumber } from '../unit/normalised-number'
 import { parseCsv } from './csv'
-import { KINDS_WITH_UNIT_REFERENCE, type ExtractionRecord } from './record'
+import {
+  KINDS_WITH_UNIT_REFERENCE,
+  isDocumentKind,
+  type DocumentKind,
+  type ExtractionRecord,
+} from './record'
 import { ROLL_HEADERS, ROLL_REQUIRED_HEADERS, readRollRow, type RollRow } from './roll'
 import { validate } from './validate'
 
@@ -29,10 +34,20 @@ export const REQUIRED_HEADERS = ['date', 'description', 'amount'] as const
  * meaning depends on the value of a sibling cell is a rule nobody can read off
  * the header row.
  */
-export const OPTIONAL_HEADERS = ['reference', 'type', 'unit', ...ROLL_HEADERS] as const
+export const OPTIONAL_HEADERS = ['reference', 'unit', ...ROLL_HEADERS] as const
 
-/** A tabular upload with no `type` column is a bank statement, which is what the pilot ingests. */
-const DEFAULT_DOCUMENT_KIND = 'statement'
+/**
+ * `type` was one of these until story 5.2, read per row and defaulting to
+ * `statement`. The kind is now declared by the upload.
+ *
+ * **Kept as a name so it can be refused rather than ignored.** A file exported
+ * against the old contract still has the column, and dropping it silently would
+ * tell a treasurer their `type,deposit` row worked when the upload said
+ * `statement`. The same argument refused a body `actorId` in story 5.1c and an
+ * `associationId` in 5.1b: a caller that says something is answered, never
+ * quietly overruled.
+ */
+const RETIRED_HEADERS = ['type'] as const
 
 export const TABULAR_PROBLEMS = [
   'unreadable-file',
@@ -49,6 +64,14 @@ export const TABULAR_PROBLEMS = [
    * turns a failed upload into a sentence naming the unit.
    */
   'duplicate-unit',
+  /**
+   * The upload declared a kind this contract does not publish, or declared
+   * none. Refused before the file is read: reading it first would report every
+   * row as defective, which names the wrong thing.
+   */
+  'unknown-kind',
+  /** The file carries a `type` column, which stopped being a column in 5.2. */
+  'kind-is-not-a-column',
 ] as const
 
 export type TabularProblem = (typeof TABULAR_PROBLEMS)[number]
@@ -78,7 +101,7 @@ export type TableResult =
 
 const normalise = (header: string): string => header.trim().toLowerCase()
 
-export function readTable(text: string): TableResult {
+export function readTable(text: string, documentKind: DocumentKind): TableResult {
   const parsed = parseCsv(text)
   if (!parsed.ok) {
     // The CSV problem is not restated as a contract problem: the file was never
@@ -86,7 +109,7 @@ export function readTable(text: string): TableResult {
     return { ok: false, problems: [{ reason: 'unreadable-file' }] }
   }
 
-  return readRows(parsed.rows)
+  return readRows(parsed.rows, documentKind)
 }
 
 /**
@@ -96,7 +119,19 @@ export function readTable(text: string): TableResult {
  * library that decodes a workbook lives in an adapter, and what it produces is
  * the same rectangle `parseCsv` produces.
  */
-export function readRows(rows: readonly (readonly string[])[]): TableResult {
+export function readRows(
+  rows: readonly (readonly string[])[],
+  documentKind: DocumentKind,
+): TableResult {
+  // **Checked first, and there is no default.** A missing declaration used to
+  // mean `statement`, which is the per-row rule relocated: the file still
+  // decides, by omission, and a mapping still cannot say what it is *for*.
+  // Validated at runtime as well as in the type, because the value crosses a
+  // form submission on its way here.
+  if (!isDocumentKind(documentKind)) {
+    return { ok: false, problems: [{ reason: 'unknown-kind' }] }
+  }
+
   const [headerRow, ...dataRows] = rows
   const headers = (headerRow ?? []).map(normalise)
 
@@ -105,6 +140,11 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
     // Taking the first or the last is how a figure arrives from the wrong
     // column with nothing to show it happened.
     return { ok: false, problems: [{ reason: 'duplicate-headers' }] }
+  }
+
+  const retired = RETIRED_HEADERS.filter((header) => headers.includes(header))
+  if (retired.length > 0) {
+    return { ok: false, problems: [{ reason: 'kind-is-not-a-column', expected: retired }] }
   }
 
   const missing = REQUIRED_HEADERS.filter((required) => !headers.includes(required))
@@ -141,14 +181,14 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
     return value === undefined || value.trim() === '' ? null : value
   }
 
-  const kindOf = (row: readonly string[]): string =>
-    optional(row, 'type') ?? DEFAULT_DOCUMENT_KIND
-
-  // The roll's two columns are required only of a document that has roll rows,
+  // The roll's two columns are required only of a document that *is* a roll,
   // which is why this is not part of REQUIRED_HEADERS. Checked before any row is
   // read, so a roll exported without them says which columns are missing rather
   // than reporting every one of its rows as defective.
-  if (dataRows.some((row) => kindOf(row) === 'assessment_roll')) {
+  //
+  // This asked the rows until story 5.2 (`dataRows.some(...)`), which meant a
+  // file's own contents decided what was demanded of it.
+  if (documentKind === 'assessment_roll') {
     const missingRollHeaders = ROLL_REQUIRED_HEADERS.filter((header) => !headers.includes(header))
 
     if (missingRollHeaders.length > 0) {
@@ -180,8 +220,6 @@ export function readRows(rows: readonly (readonly string[])[]): TableResult {
   const seenUnitYears = new Set<string>()
 
   dataRows.forEach((row, index) => {
-    const documentKind = kindOf(row)
-
     // Read for the kinds that are about a unit, because `validate` refuses
     // `unitReference` on every other kind — and one invalid row fails the whole
     // document here. Reading it unconditionally would turn a stray `unit` column

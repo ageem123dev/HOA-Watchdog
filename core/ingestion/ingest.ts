@@ -1,3 +1,4 @@
+import type { DocumentKind } from '../extraction/record'
 import { readRows, readTable } from '../extraction/tabular'
 import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
@@ -49,6 +50,19 @@ export interface IngestibleFile {
   /** As declared by the client; the acceptance gate treats it as a claim. */
   readonly contentType: string
   readonly bytes: Uint8Array
+  /**
+   * What this document *is*, declared by the upload rather than read off a row.
+   *
+   * Story 5.2. It sat in an optional `type` column until then, defaulting to
+   * `statement`, and one file could mix kinds row by row — which makes "the
+   * mapping for deposits" a phrase with no referent. It is per **file**, not
+   * per batch: a roll and a bank feed may be uploaded together, and each is what
+   * it is.
+   *
+   * Not optional, and there is no default. A default would be the per-row rule
+   * relocated: the file would still decide, by omission.
+   */
+  readonly documentKind: DocumentKind
 }
 
 export type IngestOutcome =
@@ -161,7 +175,7 @@ async function ingestOne(
   uploadedBy: string,
   deps: IngestDependencies,
 ): Promise<IngestOutcome> {
-  const { filename, bytes } = file
+  const { filename, bytes, documentKind } = file
   const assessment = assess({ contentType: file.contentType, bytes })
 
   if (assessment.outcome === 'rejected') {
@@ -191,7 +205,7 @@ async function ingestOne(
     // Everything above is durable now. Reading happens after, so a document
     // that cannot be read is still held and a corrected export needs no
     // re-upload — and a failed read cannot cost what was already stored.
-    const reading = read(assessment.contentType, bytes, deps)
+    const reading = read(assessment.contentType, bytes, documentKind, deps)
 
     if (reading === 'no-reader') {
       // Already-held wins here. The treasurer uploaded this file before, and
@@ -344,16 +358,21 @@ const SPREADSHEET_TYPES = [
 
 type Reading = ReturnType<typeof readTable> | 'no-reader'
 
-function read(contentType: string, bytes: Uint8Array, deps: IngestDependencies): Reading {
+function read(
+  contentType: string,
+  bytes: Uint8Array,
+  documentKind: DocumentKind,
+  deps: IngestDependencies,
+): Reading {
   if (contentType === 'text/csv') {
-    return readTable(new TextDecoder().decode(bytes))
+    return readTable(new TextDecoder().decode(bytes), documentKind)
   }
 
   if (SPREADSHEET_TYPES.includes(contentType)) {
     if (deps.workbooks === undefined) return 'no-reader'
     const decoded = deps.workbooks.decode(bytes)
     if (!decoded.ok) return { ok: false, problems: [{ reason: 'unreadable-file' }] }
-    return readRows(decoded.rows)
+    return readRows(decoded.rows, documentKind)
   }
 
   return 'no-reader'

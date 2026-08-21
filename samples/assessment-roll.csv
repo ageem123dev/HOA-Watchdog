@@ -1,5 +1,5 @@
-date,description,amount,type,unit,cycle,year
-2026-01-01,Dana Whitfield,3600.00,assessment_roll,4B,monthly,2026
-2026-01-01,Marcus Oyelaran,3600.00,assessment_roll,5C,monthly,2026
-2026-01-01,Priya Raghunathan,4200.00,assessment_roll,6A,six_monthly,2026
-2026-01-01,Tomas Lindqvist,4200.00,assessment_roll,7D,annual,2026
+date,description,amount,unit,cycle,year
+2026-01-01,Dana Whitfield,3600.00,4B,monthly,2026
+2026-01-01,Marcus Oyelaran,3600.00,5C,monthly,2026
+2026-01-01,Priya Raghunathan,4200.00,6A,six_monthly,2026
+2026-01-01,Tomas Lindqvist,4200.00,7D,annual,2026

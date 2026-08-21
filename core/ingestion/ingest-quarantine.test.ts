@@ -33,12 +33,13 @@ const KNOWN = 'Evergreen Landscaping'
  * `unreadable` for reasons that had nothing to do with quarantine.
  */
 const csv = (vendor: string) => ({
+  documentKind: 'invoice' as const,
   filename: 'invoices.csv',
   contentType: 'text/csv',
   bytes: new TextEncoder().encode(
     [
-      'type,description,reference,date,amount',
-      `invoice,"${vendor}",INV-1,2026-06-01,1450.00`,
+      'description,reference,date,amount',
+      `"${vendor}",INV-1,2026-06-01,1450.00`,
       '',
     ].join('\n'),
   ),
@@ -157,12 +158,12 @@ describe('a spreadsheet whose vendor nobody recognises', () => {
     // document could not be read. Raised in review, twice.
     const filler = Array.from(
       { length: 200 },
-      (_unused, index) => `invoice,"Filler Vendor ${index}",INV-${index},2026-06-01,10.00`,
+      (_unused, index) => `"Filler Vendor ${index}",INV-${index},2026-06-01,10.00`,
     )
     const rows = [
-      'type,description,reference,date,amount',
+      'description,reference,date,amount',
       ...filler,
-      'invoice,"Late\u0000Vendor",INV-X,2026-06-01,1450.00',
+      '"Late\u0000Vendor",INV-X,2026-06-01,1450.00',
       '',
     ].join('\n')
 
@@ -170,7 +171,7 @@ describe('a spreadsheet whose vendor nobody recognises', () => {
 
     const f = harness({ known: [KNOWN] })
     const [outcome] = await ingest(
-      [{ filename: 'big.csv', contentType: 'text/csv', bytes: new TextEncoder().encode(rows) }],
+      [{ documentKind: 'statement', filename: 'big.csv', contentType: 'text/csv', bytes: new TextEncoder().encode(rows) }],
       UPLOADER,
       f,
     )

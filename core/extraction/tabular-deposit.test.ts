@@ -18,7 +18,7 @@ import { OPTIONAL_HEADERS, readRows, readTable } from './tabular'
 
 /** A deposit table, header row first. `type` is what makes it a deposit. */
 const deposit = (rows: readonly (readonly string[])[]) => [
-  ['date', 'description', 'amount', 'type', 'unit', 'reference'],
+  ['date', 'description', 'amount', 'unit', 'reference'],
   ...rows,
 ]
 
@@ -30,7 +30,7 @@ const recordsOf = (result: ReturnType<typeof readRows>) => {
 describe('reading the unit off a deposit row', () => {
   it('carries the unit column into the record', () => {
     const records = recordsOf(
-      readRows(deposit([['2026-03-01', 'March dues', '250.00', 'deposit', '4B', 'DEP-1']])),
+      readRows(deposit([['2026-03-01', 'March dues', '250.00', '4B', 'DEP-1']]), 'deposit'),
     )
 
     expect(records[0]!.unitReference).toBe('4B')
@@ -40,7 +40,7 @@ describe('reading the unit off a deposit row', () => {
     // The whole reason for a new column. If `reference` were reused, this row
     // could not say both things, and `DEP-1` would be looked up as a unit.
     const records = recordsOf(
-      readRows(deposit([['2026-03-01', 'March dues', '250.00', 'deposit', '4B', 'DEP-1']])),
+      readRows(deposit([['2026-03-01', 'March dues', '250.00', '4B', 'DEP-1']]), 'deposit'),
     )
 
     expect(records[0]!.unitReference).toBe('4B')
@@ -52,7 +52,7 @@ describe('reading the unit off a deposit row', () => {
     // right outcome. It gets there from null just as well, and null is what the
     // column genuinely is.
     const records = recordsOf(
-      readRows(deposit([['2026-03-01', 'March dues', '250.00', 'deposit', '   ', '']])),
+      readRows(deposit([['2026-03-01', 'March dues', '250.00', '   ', '']]), 'deposit'),
     )
 
     expect(records[0]!.unitReference).toBeNull()
@@ -62,9 +62,10 @@ describe('reading the unit off a deposit row', () => {
     // Optional means optional: a bank export that names no units is still a
     // readable document whose lines will all be held.
     const result = readRows([
-      ['date', 'description', 'amount', 'type'],
-      ['2026-03-01', 'March dues', '250.00', 'deposit'],
-    ])
+      ['date', 'description', 'amount'],
+      ['2026-03-01', 'March dues', '250.00'],
+    ],
+    'deposit')
 
     expect(recordsOf(result)[0]!.unitReference).toBeNull()
   })
@@ -77,10 +78,13 @@ describe('reading the unit off a deposit row', () => {
     // Ignored rather than refused: a unit means nothing on an invoice, and
     // rejecting the upload over a column nobody asked about helps no treasurer.
     const records = recordsOf(
-      readRows([
-        ['date', 'description', 'amount', 'type', 'unit'],
-        ['2026-03-01', 'Acme Plumbing', '250.00', 'invoice', '4B'],
-      ]),
+      readRows(
+        [
+          ['date', 'description', 'amount', 'unit'],
+          ['2026-03-01', 'Acme Plumbing', '250.00', '4B'],
+        ],
+        'invoice',
+      ),
     )
 
     expect(records[0]!.unitReference).toBeNull()
@@ -93,10 +97,11 @@ describe('reading the unit off a deposit row', () => {
     const records = recordsOf(
       readRows(
         deposit([
-          ['2026-03-01', 'March dues', '250.00', 'deposit', '4B', 'DEP-1'],
-          ['2026-03-01', 'March dues', '250.00', 'deposit', '5C', 'DEP-2'],
-          ['2026-03-02', 'March dues', '250.00', 'deposit', '', 'DEP-3'],
+          ['2026-03-01', 'March dues', '250.00', '4B', 'DEP-1'],
+          ['2026-03-01', 'March dues', '250.00', '5C', 'DEP-2'],
+          ['2026-03-02', 'March dues', '250.00', '', 'DEP-3'],
         ]),
+        'deposit',
       ),
     )
 
@@ -109,12 +114,12 @@ describe('reading the unit off a deposit row', () => {
     // all between a treasurer's file and the ledger, and testing only the last
     // of the three is how a story ships a producer nothing can reach.
     const csv = [
-      'date,description,amount,type,unit,reference',
-      '2026-03-01,March dues,250.00,deposit,4B,DEP-1',
-      '2026-03-02,March dues,250.00,deposit,5C,DEP-2',
+      'date,description,amount,unit,reference',
+      '2026-03-01,March dues,250.00,4B,DEP-1',
+      '2026-03-02,March dues,250.00,5C,DEP-2',
     ].join('\n')
 
-    const records = recordsOf(readTable(csv))
+    const records = recordsOf(readTable(csv, 'deposit'))
 
     expect(records).toHaveLength(2)
     expect(records.map((record) => record.unitReference)).toEqual(['4B', '5C'])
@@ -126,9 +131,9 @@ describe('reading the unit off a deposit row', () => {
     // Headers are normalised for every other column; a treasurer's export
     // writes `Unit`, and a column matched only in lower case is a column that
     // silently is not there.
-    const csv = 'date,description,amount,type, Unit \n2026-03-01,March dues,250.00,deposit,4B'
+    const csv = 'date,description,amount, Unit \n2026-03-01,March dues,250.00,4B'
 
-    expect(recordsOf(readTable(csv))[0]!.unitReference).toBe('4B')
+    expect(recordsOf(readTable(csv, 'deposit'))[0]!.unitReference).toBe('4B')
   })
 
   it('declares unit as an optional header', () => {

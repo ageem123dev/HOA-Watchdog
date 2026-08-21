@@ -87,7 +87,6 @@ Amounts are exact decimals end to end and are never floats. A negative amount is
 | Column | Used by | Meaning |
 | --- | --- | --- |
 | `reference` | Any kind | The transaction reference. Not the unit |
-| `type` | Any kind | The document kind. Absent means `statement` |
 | `unit` | `deposit`, `assessment_roll` | The unit this row is about |
 | `cycle` | `assessment_roll` | One of the [billing cycles](#billing-cycles) |
 | `year` | `assessment_roll` | The assessment year, at most 2200 |
@@ -96,16 +95,29 @@ Amounts are exact decimals end to end and are never floats. A negative amount is
 unit it settles and the bank's own reference — and one column with two meanings depending on a
 sibling cell is a rule nobody can read off the header row.
 
-`cycle` and `year` are the roll's own two columns (`ROLL_HEADERS`). They are required only of a file
-that actually contains roll rows, so an invoice export is never asked for them.
+`cycle` and `year` are the roll's own two columns (`ROLL_HEADERS`). They are required of a file
+**declared** `assessment_roll`, so an invoice export is never asked for them.
+
+The distinction used to be the file's contents — the reader scanned for a row saying
+`type,assessment_roll` and demanded the columns only if it found one. It now asks what you
+declared, which is the point of declaring it: a roll exported without `year` is told which column is
+missing, rather than reporting every one of its rows as defective.
 
 ### Document kinds
 
-The `type` column, from `DOCUMENT_KINDS`. One file may mix kinds row by row.
+**Declared when you upload, from `DOCUMENT_KINDS`. One file is one kind.**
+
+It was a `type` column until this release, read row by row, and a file could mix kinds. It cannot
+now: you say what a document is when you send it, and every row in it is that. A file that still
+carries a `type` column is refused rather than having the column ignored — an ignored column is a
+file that looks like it said something it did not.
+
+There is no default. A submission that declares nothing is refused, because a default would put the
+decision back in the file by omission.
 
 | Kind | `description` holds | Extra columns | What it does |
 | --- | --- | --- | --- |
-| `statement` | The counterparty | — | Stores figures. The default when `type` is absent |
+| `statement` | The counterparty | — | Stores figures. The plainest kind, and nothing more |
 | `invoice` | The vendor | — | Stores figures. An unknown vendor is held for a human |
 | `deposit` | The payer | `unit` | Becomes payments against units |
 | `assessment_roll` | The unit holder | `unit`, `cycle`, `year` | **Creates units, holders, tenures and assessments** |
@@ -125,8 +137,8 @@ Counted in code points, so accented and non-Latin characters count as one each.
 
 ## Why a table cannot be read
 
-Six reasons (`TABULAR_PROBLEMS`). These are about the *columns and rows*, after the file itself was
-accepted.
+Eight reasons (`TABULAR_PROBLEMS`). These are about the *declaration, columns and rows*, after the
+file itself was accepted.
 
 | Reason | What happened |
 | --- | --- |
@@ -136,6 +148,8 @@ accepted.
 | `no-rows` | Headers and nothing under them |
 | `invalid-row` | A row broke a rule above — the message names the row number |
 | `duplicate-unit` | Two roll rows claim the same unit for the same year |
+| `unknown-kind` | The upload declared no document kind, or one this contract does not publish |
+| `kind-is-not-a-column` | The file carries a `type` column, which is no longer how a kind is stated |
 
 **One bad row refuses the whole document.** That is deliberate: storing the other 199 rows is how a
 ledger comes to be missing one line without saying so. Nothing is stored, so a corrected export can
