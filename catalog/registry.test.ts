@@ -8,7 +8,8 @@
  * invariant the second one is not held to, and nothing would say so.
  */
 
-import { describe, expect, it } from 'vitest'
+import { loadModule, parseSync } from 'libpg-query'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 import { ASSOCIATION_SCOPED_TABLES } from '../core/association/scoped-tables'
 import type { CatalogEntry } from './entry'
@@ -58,6 +59,17 @@ describe('resolving an entry', () => {
 })
 
 describe('every entry in the catalog', () => {
+  /**
+   * `parseSync` throws until the WASM module is resolved, which is why this is
+   * here rather than inside the sweep: loading it lazily on first use would make
+   * the sweep async, and every fixture and per-entry assertion below would have
+   * to become async with it. One await, once, keeps `sweepVerdict` a plain
+   * function returning a reason or `null`.
+   */
+  beforeAll(async () => {
+    await loadModule()
+  })
+
   /**
    * The same shape `migrations/020_query_log.sql` constrains `entry_id` to.
    *
@@ -178,634 +190,741 @@ describe('every entry in the catalog', () => {
   const SCOPED_TABLES = new Set<string>(ASSOCIATION_SCOPED_TABLES)
 
   /**
-   * The sweep, as one function.
+   * ## The sweep reads SQL. It no longer resembles it.
    *
-   * Returns the reason an entry is rejected, or `null` if it passes. **Both
-   * the per-entry sweep and the bypass fixtures call this**, because two
-   * copies drift: if the per-entry path later loses a stage, fixtures written
-   * against their own copy keep passing and stop proving the production path.
-   * Raised by CodeRabbit, and it had already happened in miniature — the
-   * fixtures below were passing for a reason the real sweep did not share.
+   * Story 5.1d. What stood here was a hand-written Postgres lexer inside a test
+   * file — comment stripping, literal blanking, dollar-tag recognition, a
+   * `from`/`join` regex with a keyword lookahead — and over MR !71 it was
+   * defeated **eight times**, each by a different lexical form, with two of the
+   * fixes introducing false positives of their own. That is a race against
+   * Postgres's grammar, and the way to stop losing it is to stop running it.
+   *
+   * `libpg-query` is the actual PostgreSQL parser compiled to WASM, so the
+   * lexical questions simply stop being questions: a nested block comment, an
+   * `E'…\'…'` escape string and a `$café$` tag are not puzzles to a parser that
+   * *is* Postgres. None of them survive into the tree.
+   *
+   * **What the parse buys that no scanner could: aliases resolved per query
+   * scope.** The bypass that ended the previous round —
+   * `from unit where exists (select 1 from assessment as unit where
+   * unit.association_id = $1)` — reads every association's units, because the
+   * predicate belongs to the *inner* `unit`. A flat namespace sees one `unit`
+   * and one predicate and is satisfied. Here each `SelectStmt` is its own scope
+   * and the outer `unit` is unbound, which is a refusal.
+   *
+   * **The sweep is still not the proof.** `adapters/db/catalog-isolation.test.ts`
+   * gives two associations the same unit number and runs the real query; that is
+   * what establishes isolation. This is the early warning, and this story is
+   * about making the early warning honest rather than promoting it.
    */
-  const sweepVerdict = (sql: string): string | null => {
-    for (const [pattern, what] of FORBIDDEN_LEXICAL) {
-      if (pattern.test(sql)) return `contains ${what}`
+
+  /** A table reference, as the parser reports it. */
+  interface Reference {
+    readonly table: string
+    readonly alias: string
+    readonly schema: string | null
+  }
+
+  type Node = Record<string, unknown>
+
+  const isNode = (value: unknown): value is Node =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+
+  /**
+   * A `union`, `intersect` or `except`, whose arms are **separate query scopes**.
+   *
+   * They need naming because the parser does not wrap them: a set operation is
+   * one `SelectStmt` whose `larg` and `rarg` are bare select bodies with no
+   * `{ SelectStmt: … }` key around them. A walk that recognises scopes only by
+   * that key therefore sees *one* scope and pours both arms into it.
+   *
+   * `jointype` is not `op`: a `JoinExpr` also has `larg`/`rarg`, and those are
+   * `from` items rather than scopes. `op` is the field only a select body
+   * carries, which is what makes this test exact rather than a guess.
+   *
+   * **Deliberately structural rather than typed.** CodeRabbit suggested taking
+   * `SelectStmt` from `@pgsql/types`, which `libpg-query` does re-export. It is
+   * declined on purpose, and the reason is recorded here so it is not
+   * re-litigated:
+   *
+   * - `parseSync` is declared `(query: string) => any`, so a generated type
+   *   here would be an unchecked assertion over untyped data. CodeRabbit's own
+   *   note concedes the runtime guards must stay regardless.
+   * - This predicate is asked about **every node in the tree**, most of which
+   *   are not select bodies. Typing its parameter as the thing it is testing
+   *   for inverts the question.
+   * - The drift it would nominally protect against — a future `libpg-query`
+   *   changing this field — is already caught by behaviour: disabling
+   *   `isSetOperation` turns three fixtures red, which is the mutation result
+   *   recorded in the story. A test that fails is worth more here than a
+   *   declaration that compiles.
+   */
+  const isSetOperation = (node: Node): boolean =>
+    typeof node.op === 'string' && node.op.startsWith('SETOP_') && node.op !== 'SETOP_NONE'
+
+  /**
+   * Every `SelectStmt` body in the tree — one per query scope, which is the
+   * unit the whole rule is written in terms of. A CTE's query, a derived table
+   * and an `EXISTS` subquery each arrive here as their own scope.
+   */
+  const scopesOf = (node: unknown, out: Node[] = []): Node[] => {
+    if (Array.isArray(node)) {
+      for (const child of node) scopesOf(child, out)
+      return out
+    }
+    if (!isNode(node)) return out
+
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'SelectStmt' && isNode(value)) out.push(value)
+      scopesOf(value, out)
     }
 
-    const commentless = stripComments(sql)
-    for (const [pattern, what] of UNANALYSABLE) {
-      if (pattern.test(commentless)) return `uses ${what}`
+    // The arms of a set operation, which carry no wrapper key of their own.
+    if (isSetOperation(node)) {
+      if (isNode(node.larg)) out.push(node.larg)
+      if (isNode(node.rarg)) out.push(node.rarg)
     }
-    if (unrecognisedDollar(commentless)) return 'uses an unreadable $-construct'
 
-    const readable = withoutComments(sql)
-    const references = tableReferences(readable).filter(([table]) => SCOPED_TABLES.has(table))
-    if (references.length === 0) return 'reads no association-owning table'
+    return out
+  }
 
-    for (const [table, alias] of references) {
-      const scoped = new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`)
-      if (!scoped.test(readable)) return `reads ${table} as "${alias}" without binding it to $1`
+  /**
+   * Walk one scope's own subtree, **stopping at any nested `SelectStmt`**.
+   *
+   * That boundary is the entire difference between this and what it replaced. A
+   * walk that descended would put an inner query's aliases and predicates in the
+   * outer scope's namespace, which is precisely the flat namespace the previous
+   * scanner had and the bypass it could not see.
+   */
+  const withinScope = (node: unknown, visit: (key: string, value: Node) => void): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) withinScope(child, visit)
+      return
+    }
+    if (!isNode(node)) return
+
+    // A set operation's arms are scopes, so they are boundaries here too.
+    // Scoped to `isSetOperation` rather than skipping `larg`/`rarg` outright,
+    // because a `JoinExpr` uses the same two field names for `from` items that
+    // very much do belong to this scope.
+    const arms = isSetOperation(node)
+
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'SelectStmt') continue
+      if (arms && (key === 'larg' || key === 'rarg')) continue
+      if (isNode(value)) visit(key, value)
+      withinScope(value, visit)
+    }
+  }
+
+  /**
+   * How many things this scope selects *from* — tables, derived tables, set
+   * functions alike.
+   *
+   * Only used to decide whether an unqualified `association_id = $1` is
+   * unambiguous, and that question is about **range items**, not about tables.
+   * Counting `RangeVar`s alone made
+   * `from (select 1 as association_id) d, unit where association_id = $1` look
+   * like a single-table scope, so the predicate was credited to `unit` when it
+   * might belong to `d`. Raised by CodeRabbit.
+   */
+  const rangeItemCount = (scope: Node): number => {
+    let items = 0
+
+    withinScope(scope.fromClause, (key) => {
+      if (key === 'RangeVar' || key === 'RangeSubselect' || key === 'RangeFunction') items += 1
+    })
+
+    return items
+  }
+
+  /** The tables this scope reads directly. */
+  const referencesIn = (scope: Node): Reference[] => {
+    const references: Reference[] = []
+
+    withinScope(scope, (key, value) => {
+      if (key !== 'RangeVar') return
+      const table = String(value.relname ?? '')
+      const alias = isNode(value.alias) ? String(value.alias.aliasname ?? '') : ''
+
+      references.push({
+        table: table.toLowerCase(),
+        alias: (alias || table).toLowerCase(),
+        schema: typeof value.schemaname === 'string' ? value.schemaname.toLowerCase() : null,
+      })
+    })
+
+    return references
+  }
+
+  /**
+   * The conjuncts of a boolean expression — the predicates that must **all**
+   * hold.
+   *
+   * `OR` and `NOT` contribute nothing, and that is a real bypass this closes
+   * rather than a technicality. `where u.association_id = $1 or 1 = 1` contains
+   * the scoping predicate and scopes nothing; the text scan this replaces
+   * matched it, and so would a parse-based rule that merely looked for the
+   * predicate somewhere in the tree. Reachability through `AND` is the property
+   * that actually means "this constrains every row returned".
+   */
+  const conjunctsOf = (node: unknown, out: Node[] = []): Node[] => {
+    if (!isNode(node)) return out
+
+    if (isNode(node.BoolExpr)) {
+      if (node.BoolExpr.boolop === 'AND_EXPR' && Array.isArray(node.BoolExpr.args)) {
+        for (const argument of node.BoolExpr.args) conjunctsOf(argument, out)
+      }
+      return out
+    }
+    if (isNode(node.A_Expr)) out.push(node.A_Expr)
+
+    return out
+  }
+
+  /**
+   * The alias an `= $1` comparison scopes, or `null`.
+   *
+   * Both operand orders, because `$1 = u.association_id` is the same predicate.
+   * An unqualified `association_id = $1` is resolved only when the scope reads
+   * exactly one range item — otherwise which one it constrains is genuinely
+   * ambiguous, and guessing is the habit this story exists to remove.
+   *
+   * **Casts are unwrapped on both sides.** `$1::uuid` wraps the placeholder in a
+   * `TypeCast`, and the catalog already writes `$2::date` elsewhere, so refusing
+   * the shape would be a false rejection of SQL an author will reasonably write.
+   * Raised by CodeRabbit.
+   */
+  /** `x::type` and `x` are the same operand for this purpose. */
+  const withoutCast = (operand: unknown): unknown => {
+    let current = operand
+    while (isNode(current) && isNode(current.TypeCast)) current = current.TypeCast.arg
+    return current
+  }
+
+  const aliasScopedBy = (expression: Node, soleAlias: string | null): string | null => {
+    if (expression.kind !== 'AEXPR_OP') return null
+
+    const name = expression.name
+    if (!Array.isArray(name) || name.length !== 1) return null
+    const operator = isNode(name[0]) && isNode(name[0].String) ? name[0].String.sval : null
+    if (operator !== '=') return null
+
+    const left = withoutCast(expression.lexpr)
+    const right = withoutCast(expression.rexpr)
+    const sides = [
+      [left, right],
+      [right, left],
+    ] as const
+
+    for (const [column, parameter] of sides) {
+      if (!isNode(column) || !isNode(parameter)) continue
+      if (!isNode(parameter.ParamRef) || parameter.ParamRef.number !== 1) continue
+      if (!isNode(column.ColumnRef) || !Array.isArray(column.ColumnRef.fields)) continue
+
+      const fields = column.ColumnRef.fields
+        .map((field) => (isNode(field) && isNode(field.String) ? String(field.String.sval) : null))
+        .filter((field): field is string => field !== null)
+        .map((field) => field.toLowerCase())
+
+      if (fields.length === 2 && fields[1] === 'association_id') return fields[0]!
+      if (fields.length === 1 && fields[0] === 'association_id') return soleAlias
     }
 
     return null
   }
 
   /**
-   * The word that cannot follow a table name and still be its alias.
+   * The aliases this scope proves are bound to `$1`.
    *
-   * Without this the scanner reads `from assessment join unit` as "assessment
-   * aliased to join", then demands `join.association_id = $1` and fails an entry
-   * that is perfectly scoped. Found by this test failing on its own first run.
-   */
-  const NOT_AN_ALIAS = [
-    'on',
-    'using',
-    'where',
-    'group',
-    'order',
-    'having',
-    'limit',
-    'offset',
-    'join',
-    'left',
-    'right',
-    'inner',
-    'outer',
-    'full',
-    'cross',
-    'natural',
-    'union',
-  ]
-
-  /**
-   * The keyword list is a **lookahead**, not a post-hoc filter, and the
-   * difference is the whole correctness of this scanner.
+   * Two sources, both of which constrain every row the scope returns: the
+   * `where` clause, and the `on` conditions of its **inner** joins. Leaving
+   * joins out entirely would refuse a correctly scoped entry that binds in `on`
+   * — a false rejection is as much a broken guard as a false pass, and harder
+   * to notice because somebody simply rewrites the entry until the sweep stops
+   * complaining.
    *
-   * Written as a filter — match the alias, then discard it if it turns out to be
-   * a keyword — the optional group still *consumes* the word. So
-   * `from assessment join unit` matched as "assessment, aliased join", ate the
-   * `join`, and the next scan began at `unit on …` with no `from`/`join` in
-   * front of it. `unit` was never seen, and the sweep below silently checked two
-   * of this entry's three tables. Deleting `unit.association_id = $1` left the
-   * suite green; the sensitivity check is what found it.
+   * **An outer join's `on` clause constrains one side, not both**, and getting
+   * that wrong is a false pass in the exact direction this sweep exists to
+   * prevent. `from unit u left join m on u.association_id = $1` returns every
+   * unit row — unmatched ones simply come back with nulls — so crediting `u`
+   * would accept a query reading every association's units.
+   *
+   * The *nullable* side is genuinely filtered by the same clause, and that is
+   * not a hypothetical: `dues_status@1` scopes `payment` exactly that way, in
+   * the `on` of a `left join`. So the rule is per side rather than per join:
+   *
+   * - `JOIN_INNER` — the clause filters both sides;
+   * - `JOIN_LEFT` — only the right (nullable) side;
+   * - `JOIN_RIGHT` — only the left;
+   * - `JOIN_FULL`, and anything unrecognised — neither side is filtered, so the
+   *   clause credits nothing and the entry must scope in `where`.
+   *
+   * Raised by Argus, whose finding was right about the preserved side. The
+   * first fix here refused outer joins outright, which was blunter than the
+   * semantics and **rejected the one entry the catalog actually has** — caught
+   * by the per-entry sweep, which is what it is for.
    */
-  const TABLE_REFERENCE = new RegExp(
-    `\\b(?:from|join)\\s+([a-z_][a-z0-9_]*)` +
-      `(?:\\s+(?:as\\s+)?(?!(?:${NOT_AN_ALIAS.join('|')})\\b)([a-z_][a-z0-9_]*))?`,
-    'gi',
-  )
+  const boundAliasesIn = (scope: Node): Set<string> => {
+    const references = referencesIn(scope)
+    // One *range item*, not one table: a derived table beside a real one makes
+    // an unqualified predicate ambiguous even though only one `RangeVar` exists.
+    const soleAlias =
+      rangeItemCount(scope) === 1 && references.length === 1 ? references[0]!.alias : null
 
-  /** Every `from`/`join` target, as `[table, alias]`; the alias defaults to the table. */
-  function tableReferences(sql: string): [string, string][] {
-    return [...sql.matchAll(TABLE_REFERENCE)].map((match) => [
-      match[1]!.toLowerCase(),
-      (match[2] ?? match[1]!).toLowerCase(),
-    ])
+    const bound = new Set<string>()
+
+    /** `filtered === null` means the predicates constrain whatever they name. */
+    const credit = (predicates: Node[], filtered: Set<string> | null): void => {
+      for (const predicate of predicates) {
+        const alias = aliasScopedBy(predicate, soleAlias)
+        if (alias === null) continue
+        if (filtered !== null && !filtered.has(alias)) continue
+
+        bound.add(alias)
+      }
+    }
+
+    /** The aliases one side of a join brings, so a side can be credited alone. */
+    const aliasesOf = (side: unknown): Set<string> =>
+      new Set(isNode(side) ? referencesIn(side).map((reference) => reference.alias) : [])
+
+    credit(conjunctsOf(scope.whereClause), null)
+
+    withinScope(scope.fromClause, (key, value) => {
+      if (key !== 'JoinExpr') return
+
+      const quals = conjunctsOf(value.quals)
+      if (value.jointype === 'JOIN_INNER') credit(quals, null)
+      else if (value.jointype === 'JOIN_LEFT') credit(quals, aliasesOf(value.rarg))
+      else if (value.jointype === 'JOIN_RIGHT') credit(quals, aliasesOf(value.larg))
+      // JOIN_FULL preserves both sides, so its `on` clause filters neither.
+      // Anything unrecognised is treated the same way, on purpose.
+    })
+
+    return bound
   }
 
   /**
-   * The scanner gets its own tests because the sweep below is only as good as
-   * it is, and a table it fails to see is a table nobody checks — which is a
-   * green suite reporting an invariant it never tested.
+   * The sweep, as one function.
+   *
+   * Returns the reason an entry is rejected, or `null` if it passes. **Both the
+   * per-entry sweep and the bypass fixtures call this**, because two copies
+   * drift: if the per-entry path later loses a stage, fixtures written against
+   * their own copy keep passing and stop proving the production path. Raised by
+   * CodeRabbit on MR !71, and it had already happened in miniature.
    */
-  describe('the table scanner the sweep depends on', () => {
-    it('sees every table in a from/join/left-join chain', () => {
-      expect(
-        tableReferences('from assessment join unit on unit.id = 1 left join payment on 2 = 2'),
-      ).toEqual([
-        ['assessment', 'assessment'],
-        ['unit', 'unit'],
-        ['payment', 'payment'],
-      ])
-    })
+  const sweepVerdict = (
+    sql: string,
+    // The parser is an argument for one reason: the branch below that tells a
+    // *broken harness* apart from an *unparseable entry* is unreachable
+    // otherwise, and it is the branch whose failure would be silent. The same
+    // reasoning `core/auth/actor-assertion.ts` records about its key and clock —
+    // the case worth testing hardest is the one you cannot set up.
+    parse: (sql: string) => unknown = parseSync,
+  ): string | null => {
+    let parsed: Node
+    try {
+      parsed = parse(sql) as Node
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
 
-    it('reads a real alias, with and without AS', () => {
-      expect(tableReferences('from assessment a join unit as u on 1 = 1')).toEqual([
-        ['assessment', 'a'],
-        ['unit', 'u'],
-      ])
-    })
+      // **A broken harness is not a refusal.** `parseSync` throws "WASM module
+      // not initialized" when `loadModule()` has not been awaited, and a sweep
+      // that folded that into "refused" would turn a setup failure into a suite
+      // where every bypass fixture passes for a reason none of them are about.
+      // Rethrown so it fails as what it is.
+      if (/not initialized/i.test(message)) throw error
 
+      return `is not SQL PostgreSQL can parse (${message.split('\n')[0]!.trim()})`
+    }
+
+    const statements = Array.isArray(parsed.stmts) ? parsed.stmts : []
+    if (statements.length !== 1) {
+      return `is ${statements.length} statements rather than exactly one`
+    }
+
+    // **The top-level node, not "a select somewhere in the tree".** `scopesOf`
+    // finds every `SelectStmt` anywhere, so `update … where id in (select …
+    // where u.association_id = $1)` offered a perfectly scoped subquery and was
+    // accepted as a whole. AD-5's "reads rather than writes" assertion covers
+    // the catalog, but this function is what the fixtures treat as *the*
+    // verdict — and a verdict function that accepts an `update` is wrong
+    // whatever else happens to catch it. Raised by CodeRabbit.
+    const only = statements[0]
+    const top = isNode(only) && isNode(only.stmt) ? Object.keys(only.stmt)[0] : undefined
+    if (top !== 'SelectStmt') return 'is not a select statement'
+
+    const scopes = scopesOf(parsed)
+    if (scopes.length === 0) return 'is not a select statement'
+
+    let scopedReferences = 0
+
+    for (const scope of scopes) {
+      const bound = boundAliasesIn(scope)
+
+      for (const reference of referencesIn(scope)) {
+        // Refused, though the parser reads it perfectly well. Whether
+        // `public.unit` *is* the scoped `unit` depends on `search_path`, which
+        // this sweep does not know and must not assume. The previous version
+        // refused it because the scanner misread it; this one refuses it
+        // because the question is genuinely open.
+        if (reference.schema !== null) {
+          return `names ${reference.schema}.${reference.table}, whose identity depends on search_path`
+        }
+        if (!SCOPED_TABLES.has(reference.table)) continue
+
+        scopedReferences += 1
+        if (!bound.has(reference.alias)) {
+          return `reads ${reference.table} as "${reference.alias}" without binding it to $1 in its own query scope`
+        }
+      }
+    }
+
+    // Not vacuous: an entry reading no scoped table at all would otherwise pass
+    // by touching nothing.
+    if (scopedReferences === 0) return 'reads no association-owning table'
+
+    return null
+  }
+
+  describe('the scoping sweep', () => {
     /**
-     * The three shapes the scanner reads *wrongly* rather than not at all, which
-     * is why they are refused above instead of tolerated. Each was verified
-     * against the real regex before the refusal was written; `from public.unit`
-     * yields `public`, and `from assessment, unit` yields `assessment` alone.
-     */
-    it.each([
-      ['a schema-qualified name', 'select 1 from public.unit', ['public']],
-      ['a comma-separated list', 'select 1 from assessment, unit', ['assessment']],
-    ])('misreads %s, which is why UNANALYSABLE refuses it', (_label, sql, expected) => {
-      expect(tableReferences(sql).map(([table]) => table)).toEqual(expected)
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(true)
-    })
-
-    it.each([
-      ['a WITH RECURSIVE CTE', 'with recursive t as (select 1 from unit) select 1 from t'],
-      ['a plain CTE', 'with t as (select 1 from unit) select 1 from t'],
-      ['a derived table', 'select 1 from (select id from unit) u'],
-      ['a quoted identifier', 'select 1 from "unit"'],
-    ])('refuses %s', (_label, sql) => {
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(true)
-    })
-
-    it('does not refuse the ordinary shape the catalog actually uses', () => {
-      const sql = 'select 1 from assessment join unit on unit.id = assessment.unit_id'
-
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(false)
-    })
-
-    /**
-     * The forms this scanner cannot lex. Each one exposed
-     * `unit.association_id = $1` from inside a literal before it was refused —
-     * verified against the scanner, not assumed.
-     */
-    it.each([
-      ['an escape string', "select E'it\\'s unit.association_id = $1' from unit"],
-      ['a unicode escape string', "select U&'unit.association_id = $1' from unit"],
-    ])('refuses %s', (_label, sql) => {
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(true)
-    })
-
-    it.each([
-      ['a non-ASCII dollar tag', 'select $café$unit.association_id = $1$café$ from unit'],
-      ['a stray dollar', 'select 1 from unit where x = $ and 1=1'],
-    ])('refuses %s', (_label, sql) => {
-      expect(unrecognisedDollar(stripComments(sql))).toBe(true)
-    })
-
-    it.each([
-      ['a placeholder', 'select 1 from unit where unit.association_id = $1'],
-      ['an untagged dollar quote', 'select $$noise$$ from unit'],
-      ['an ASCII-tagged dollar quote', 'select $tag$noise$tag$ from unit'],
-    ])('accepts %s', (_label, sql) => {
-      expect(unrecognisedDollar(stripComments(sql))).toBe(false)
-    })
-
-    /**
-     * The identifier that is not an escape string. `where name='x'` ends in a
-     * bare `e` before a quote, and a naive `E'` match would refuse every entry
-     * that filtered on a column whose name ends in E.
-     */
-    /**
-     * The identifier that is not an escape string, and the fixture has to end
-     * in `e` to test it. The first version used `unit_number`, which ends in
-     * `r` — so it exercised nothing and would have passed with the negative
-     * lookbehind deleted. Caught by Argus.
-     */
-    it.each([
-      ['a typed literal', "select 1 from unit where unit.paid_on > date'2020-01-01'"],
-      ['an uppercase typed literal', "select 1 from unit where unit.paid_on > DATE'2020-01-01'"],
-    ])('does not mistake %s for an escape string', (_label, sql) => {
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(false)
-    })
-
-    /**
-     * **Through the whole sweep, not one stage of it.**
+     * The harness itself, asserted rather than assumed.
      *
-     * The refusals above were added, tested against raw SQL in isolation, and
-     * were *dead in the pipeline*: the sweep ran them on `withoutComments(sql)`,
-     * which had already blanked the literal, so `E'…'` read as a bare `E` and
-     * the pattern never matched. Green tests, live bypass. Argus caught it.
-     *
-     * So the check that matters is this one: take SQL that scopes nothing,
-     * hides the predicate in a form the scanner cannot lex, and assert **the
-     * sweep as a whole rejects it** — by refusal or by finding no predicate,
-     * either is a red suite. A stage-level assertion cannot say that.
+     * Every refusal case below is satisfied by a sweep that refuses
+     * *everything*, and an unloaded WASM module is exactly that sweep. So this
+     * says out loud that the parser is working and that a real entry passes,
+     * before any of the refusals mean anything.
      */
-    const sweepAccepts = (sql: string) => sweepVerdict(sql) === null
-
-    it.each([
-      ['a line comment', 'select 1 from unit -- unit.association_id = $1'],
-      ['a nested block comment', 'select 1 from unit /* a /* b */ unit.association_id = $1 */'],
-      // `from unit` comes **before** the literal in each of these, deliberately.
-      // With it after, blanking the literal also eats the table reference, the
-      // sweep bails on "no scoped tables", and the case passes for a reason that
-      // has nothing to do with the refusal under test. The first version of
-      // these fixtures did exactly that and survived a mutation of the ordering.
-      ['a plain literal', "select 1 from unit where 'unit.association_id = $1' is not null"],
-      ['an escape string', "select 1 from unit where E'x\\' unit.association_id = $1' is not null"],
-      ['a dollar-quoted body', 'select 1 from unit where $t$unit.association_id = $1$t$ is not null'],
-      ['a non-ASCII dollar tag', 'select 1 from unit where $café$unit.association_id = $1$café$ is not null'],
-    ])('rejects an unscoped entry hiding its predicate in %s', (_label, sql) => {
-      expect(sweepAccepts(sql)).toBe(false)
-    })
-
-    it('still accepts a genuinely scoped entry', () => {
-      expect(sweepAccepts('select 1 from unit where unit.association_id = $1')).toBe(true)
+    it('has a working parser, so the refusals below are not refusing everything', () => {
+      expect(sweepVerdict('select u.unit_number from unit u where u.association_id = $1')).toBeNull()
     })
 
     /**
-     * **Which stage rejected it, not merely that something did.**
+     * The distinction the sweep is built to preserve, and the reason the parser
+     * is injectable at all.
      *
-     * Every fixture above contains a quote, a comment marker or a stray `$`, so
-     * all six now stop at `FORBIDDEN_LEXICAL` — the later stages they were
-     * written to exercise are never reached. Rejected-for-the-wrong-reason is
-     * the shape this whole story keeps tripping over, so these name the reason,
-     * and the cases below carry none of the forbidden characters so they reach
-     * the stages after it. Raised by CodeRabbit.
+     * An uninitialised WASM module makes `parseSync` throw. Folded into the
+     * `catch` below it, that becomes "this entry is unanalysable" — and then
+     * **every refusal fixture in this file passes while the parser is not
+     * running at all**, which is a green suite proving nothing. So the two are
+     * told apart, and both directions are asserted here rather than reasoned
+     * about.
+     */
+    it('rethrows a harness failure instead of reporting it as a refused entry', () => {
+      const uninitialised = () => {
+        throw new Error('WASM module not initialized. Call `loadModule()` first.')
+      }
+
+      expect(() => sweepVerdict('select 1 from unit', uninitialised)).toThrow(/not initialized/i)
+    })
+
+    it('reports a genuine parse failure as a refusal, not as a crash', () => {
+      const syntaxError = () => {
+        throw new Error('syntax error at or near "this"')
+      }
+
+      expect(sweepVerdict('this is not sql', syntaxError)).toMatch(
+        /is not SQL PostgreSQL can parse/,
+      )
+    })
+
+    /**
+     * All eight bypasses found on MR !71, plus the ones the parser makes
+     * newly expressible. Each names the reason, so a case that starts passing
+     * for a *different* reason than it was written for shows up as a changed
+     * message rather than as a silent pass.
      */
     it.each([
-      ["a literal", "select 1 from unit where 'x' is not null", /contains a string literal/],
-      ['a comment', 'select 1 from unit -- x', /contains a comment/],
-      ['a CTE', 'with t as (select 1 from unit) select 1 from t', /common table expression/],
-      ['a derived table', 'select 1 from (select 1 from unit) u', /derived table/],
-      ['a schema-qualified name', 'select 1 from public.unit', /schema-qualified/],
-      ['a comma-separated list', 'select 1 from assessment, unit', /comma-separated/],
-      ['no scoped table at all', 'select 1 from schema_migration', /reads no association-owning/],
+      // --- the eight from MR !71 ---------------------------------------------
       [
-        'a scoped table left unbound',
-        'select 1 from unit where unit.id = $1',
-        /reads unit as "unit" without binding it/,
+        'a predicate hidden in a line comment',
+        'select 1 from unit -- unit.association_id = $1',
+        /without binding it to \$1/,
       ],
-      /**
-       * The alias-shadowing bypass. Both references find the predicate, but it
-       * belongs to the inner query and the outer `unit` reads every
-       * association's rows. Nothing before the subquery rule caught it — the
-       * derived-table rule looks for a parenthesis after `from`, and this one
-       * follows `exists`.
-       */
+      [
+        'a predicate hidden in a nested block comment',
+        'select 1 from unit /* outer /* inner */ unit.association_id = $1 */ where 1 = 1',
+        /without binding it to \$1/,
+      ],
+      [
+        'a predicate hidden in a string literal',
+        "select 'unit.association_id = $1' from unit",
+        /without binding it to \$1/,
+      ],
+      [
+        'a predicate hidden in an E-string with an escaped quote',
+        "select 1 from unit where x = E'unit.association_id = $1 \\' '",
+        /without binding it to \$1/,
+      ],
+      [
+        'a predicate hidden in a non-ASCII dollar tag',
+        'select 1 from unit where x = $café$unit.association_id = $1$café$',
+        /without binding it to \$1/,
+      ],
+      [
+        'a schema-qualified name',
+        'select 1 from public.unit where unit.association_id = $1',
+        /depends on search_path/,
+      ],
+      [
+        'a comma-separated list leaving the second table unbound',
+        'select 1 from assessment a, unit u where a.association_id = $1',
+        /reads unit as "u" without binding it/,
+      ],
       [
         'an alias shadowed inside a subquery',
         'select 1 from unit where exists (select 1 from assessment as unit where unit.association_id = $1)',
-        /subquery/,
+        /reads unit as "unit" without binding it/,
+      ],
+      // --- what the parser makes newly checkable -----------------------------
+      [
+        'a scoping predicate disarmed by OR',
+        'select 1 from unit u where u.association_id = $1 or 1 = 1',
+        /without binding it to \$1/,
       ],
       [
-        'an IN subquery',
-        'select 1 from unit where unit.id in (select assessment.unit_id from assessment)',
-        /subquery/,
+        'a scoping predicate negated',
+        'select 1 from unit u where not (u.association_id = $1)',
+        /without binding it to \$1/,
       ],
-    ])('rejects %s, and says so', (_label, sql, reason) => {
+      [
+        'a CTE whose inner query is unscoped',
+        'with t as (select 1 from unit) select 1 from t',
+        /reads unit as "unit" without binding it/,
+      ],
+      [
+        'a derived table whose inner query is unscoped',
+        'select 1 from (select 1 from unit) u',
+        /reads unit as "unit" without binding it/,
+      ],
+      [
+        'an IN subquery reading a scoped table unbound',
+        'select 1 from unit u where u.association_id = $1 and u.id in (select a.unit_id from assessment a)',
+        /reads assessment as "a" without binding it/,
+      ],
+      [
+        'a placeholder that is not the association one',
+        'select 1 from unit u where u.association_id = $2',
+        /without binding it to \$1/,
+      ],
+      [
+        'an ambiguous unqualified predicate with two tables in scope',
+        'select 1 from assessment a join unit u on u.id = a.unit_id where association_id = $1',
+        /without binding it to \$1/,
+      ],
+      // --- not analysable at all ---------------------------------------------
+      ['SQL that does not parse', 'select from where', /is not SQL PostgreSQL can parse/],
+      ['not SQL at all', 'this is not sql', /is not SQL PostgreSQL can parse/],
+      [
+        'two statements',
+        'select 1 from unit u where u.association_id = $1; select 1',
+        /2 statements rather than exactly one/,
+      ],
+      /**
+       * A write carrying a perfectly scoped `select` inside it.
+       *
+       * `scopesOf` finds every `SelectStmt` anywhere in the tree, so the nested
+       * one satisfied the scoping rule and the statement as a whole was
+       * accepted. AD-5's separate "reads rather than writes" assertion covers
+       * the catalog, but this function is what the fixtures treat as *the*
+       * verdict, and a verdict function that accepts an `update` is wrong
+       * whatever else happens to catch it. Raised by CodeRabbit.
+       */
+      [
+        'an update carrying a scoped subquery',
+        'update unit set unit_number = $2 where id in (select u.id from unit u where u.association_id = $1)',
+        /is not a select statement/,
+      ],
+      [
+        'an insert carrying a scoped select',
+        'insert into unit (id) select u.id from unit u where u.association_id = $1',
+        /is not a select statement/,
+      ],
+      [
+        'a delete carrying a scoped subquery',
+        'delete from unit where id in (select u.id from unit u where u.association_id = $1)',
+        /is not a select statement/,
+      ],
+      /**
+       * A derived table beside a real one. The unqualified `association_id`
+       * could belong to either, so crediting it to the only `RangeVar` in scope
+       * is a guess — and guessing is the habit this story removes. `soleAlias`
+       * has to count every range item, not only the plain tables.
+       */
+      [
+        'an unqualified predicate with a derived table also in scope',
+        'select 1 from (select 1 as association_id) d, unit where association_id = $1',
+        /without binding it to \$1/,
+      ],
+      ['no scoped table at all', 'select 1 from schema_migration', /reads no association-owning/],
+      /**
+       * An outer join's `on` clause does not filter the **preserved** side.
+       * `unit left join … on u.association_id = $1` returns every unit row
+       * regardless of the predicate — unmatched ones simply come back with
+       * nulls for the other table. Crediting `u` there would accept a query
+       * that reads every association's units.
+       *
+       * Raised by Argus on the first review of this rewrite, and it is a defect
+       * the *previous* scanner could not even have had, because it never looked
+       * at join conditions at all. Reading SQL properly means owning SQL's
+       * semantics, not just its syntax.
+       */
+      [
+        'a predicate on the preserved side of a left join',
+        'select 1 from unit u left join schema_migration m on u.association_id = $1',
+        /reads unit as "u" without binding it/,
+      ],
+      [
+        'a predicate on the preserved side of a right join',
+        'select 1 from schema_migration m right join unit u on u.association_id = $1',
+        /reads unit as "u" without binding it/,
+      ],
+      [
+        'a predicate in a full join, which preserves both sides',
+        'select 1 from unit u full join schema_migration m on u.association_id = $1',
+        /reads unit as "u" without binding it/,
+      ],
+      /**
+       * **Set operations are scopes too, and this is the alias-shadowing bypass
+       * wearing a different hat.**
+       *
+       * A `union` arrives as one `SelectStmt` whose `larg` and `rarg` are bare
+       * select bodies — *not* wrapped in a `{ SelectStmt: … }` key. So a walk
+       * that recognises scopes only by that wrapper finds a single scope and
+       * pours both arms into it, which is precisely the flat namespace this
+       * story exists to remove. Give the two arms the same alias and one
+       * predicate satisfies both, while the second arm reads every
+       * association's rows.
+       *
+       * Raised by CodeRabbit as a trivial "add a fixture, the code already
+       * refuses this". The code did not: its example used different aliases and
+       * was refused by accident of naming rather than by scope separation.
+       */
+      [
+        'a union arm reusing the bound arm\'s alias',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from unit u',
+        /reads unit as "u" without binding it/,
+      ],
+      [
+        'a union arm that reads a scoped table unbound',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from unit',
+        /reads unit as "unit" without binding it/,
+      ],
+      [
+        'an intersect arm reusing the bound alias',
+        'select 1 from unit u where u.association_id = $1 intersect select 1 from unit u',
+        /reads unit as "u" without binding it/,
+      ],
+      [
+        'an except arm reusing the bound alias',
+        'select 1 from unit u where u.association_id = $1 except select 1 from unit u',
+        /reads unit as "u" without binding it/,
+      ],
+    ])('rejects %s, and says why', (_label, sql, reason) => {
       expect(sweepVerdict(sql)).toMatch(reason)
     })
-  })
-
-  /**
-   * Comment stripping, in both directions. Without it the scoping sweep is
-   * satisfied by a promise: `-- unit.association_id = $1` is text, and the check
-   * is a text match.
-   */
-  describe('stripping comments before anything is matched', () => {
-    it('removes a line comment and a block comment', () => {
-      expect(withoutComments('select 1 -- unit.association_id = $1\nfrom unit')).not.toContain(
-        'association_id',
-      )
-      expect(withoutComments('select 1 /* unit.association_id = $1 */ from unit')).not.toContain(
-        'association_id',
-      )
-    })
-
-    it('leaves the SQL that actually runs alone', () => {
-      const sql = 'select 1 from unit where unit.association_id = $1'
-
-      expect(withoutComments(sql)).toContain('unit.association_id = $1')
-    })
 
     /**
-     * The regression for the nested case. Postgres nests block comments, so the
-     * whole of the fixture below is a comment — and a non-greedy regex ends it
-     * at the first close marker, releasing the predicate into the text the
-     * guard then matches.
-     */
-    it('does not release a predicate hidden inside a nested block comment', () => {
-      const sql = 'select 1 from unit /* outer /* inner */ unit.association_id = $1 */ where 1=1'
-
-      const stripped = withoutComments(sql)
-
-      expect(stripped).not.toContain('association_id')
-      expect(/\bunit\.association_id\s*=\s*\$1\b/.test(stripped)).toBe(false)
-    })
-
-    it('keeps a placeholder that is outside the nested comment', () => {
-      const sql = 'select 1 from unit /* outer /* inner */ noise */ where unit.association_id = $1'
-
-      expect(withoutComments(sql)).toContain('unit.association_id = $1')
-    })
-
-    it('treats a line comment inside a block comment as comment text', () => {
-      const sql = 'select 1 /* -- unit.association_id = $1 */ from unit'
-
-      expect(withoutComments(sql)).not.toContain('association_id')
-    })
-
-    /**
-     * A predicate is not a predicate because it appears in the text. Each of
-     * these scopes nothing, and each satisfied the guard before literals were
-     * neutralised.
+     * The inverse, and the half that keeps the block above honest. Each of these
+     * is a shape a correct entry may legitimately take, and a sweep that refused
+     * them would be pushing entry authors to rewrite correct SQL until the guard
+     * stopped complaining.
      */
     it.each([
-      ['a single-quoted literal', "select 'unit.association_id = $1' from unit"],
-      ['a literal with an escaped quote', "select 'it''s unit.association_id = $1' from unit"],
-      ['a dollar-quoted literal', 'select $tag$unit.association_id = $1$tag$ from unit'],
-      ['an untagged dollar-quoted literal', 'select $$unit.association_id = $1$$ from unit'],
-    ])('does not release a predicate hidden in %s', (_label, sql) => {
-      expect(withoutComments(sql)).not.toContain('association_id')
-    })
-
-    /**
-     * And the placeholder survives. A dollar-quote tag must start with a letter
-     * or underscore, so `$1` is not one — eating it would break the placeholder
-     * count the binding sweep depends on.
-     */
-    it('leaves $1 alone while blanking dollar-quoted bodies', () => {
-      const sql = "select $$noise$$ from unit where unit.association_id = $1"
-
-      const stripped = withoutComments(sql)
-
-      expect(stripped).toContain('unit.association_id = $1')
-      expect(stripped).not.toContain('noise')
-    })
-
-    it('does not let a commented-out table hide from the scanner either', () => {
-      // The reverse direction: a table named only in a comment is not read by
-      // the query, so demanding a predicate for it would fail a correct entry.
-      expect(tableReferences(withoutComments('select 1 -- from payment\n from unit'))).toEqual([
-        ['unit', 'unit'],
-      ])
+      ['a single table bound in where', 'select 1 from unit u where u.association_id = $1'],
+      ['no alias, bound by table name', 'select 1 from unit where unit.association_id = $1'],
+      [
+        'an unqualified predicate with exactly one table in scope',
+        'select 1 from unit where association_id = $1',
+      ],
+      ['the operands reversed', 'select 1 from unit u where $1 = u.association_id'],
+      ['AS spelled out', 'select 1 from unit as u where u.association_id = $1'],
+      [
+        'two tables, each bound in where',
+        'select 1 from assessment a join unit u on u.id = a.unit_id where a.association_id = $1 and u.association_id = $1',
+      ],
+      [
+        'a table bound in the join condition rather than the where clause',
+        'select 1 from assessment a join unit u on u.id = a.unit_id and u.association_id = $1 where a.association_id = $1',
+      ],
+      [
+        'a subquery whose own scoped table is bound in its own scope',
+        'select 1 from unit u where u.association_id = $1 and exists (select 1 from assessment a where a.association_id = $1 and a.unit_id = u.id)',
+      ],
+      [
+        'an unscoped table alongside a scoped one',
+        'select 1 from unit u join schema_migration m on true where u.association_id = $1',
+      ],
+      /**
+       * The nullable side of an outer join, scoped in the `on` clause — which
+       * is not a contrived shape: it is exactly how `dues_status@1` scopes
+       * `payment`. Refusing this was the first, too-blunt fix for the
+       * preserved-side defect, and the per-entry sweep caught it.
+       */
+      [
+        'the nullable side of a left join, scoped in its on clause',
+        'select 1 from unit u left join payment p on p.unit_id = u.id and p.association_id = $1 where u.association_id = $1',
+      ],
+      [
+        'the nullable side of a right join, scoped in its on clause',
+        'select 1 from payment p right join unit u on p.unit_id = u.id and p.association_id = $1 where u.association_id = $1',
+      ],
+      /**
+       * An explicitly cast placeholder. `$1::uuid` wraps the `ParamRef` in a
+       * `TypeCast`, and refusing it would be a false rejection of correct SQL —
+       * the catalog already writes `$2::date` elsewhere, so this is a shape an
+       * entry author will reach for. Raised by CodeRabbit.
+       */
+      ['a cast placeholder', 'select 1 from unit u where u.association_id = $1::uuid'],
+      ['a cast column', 'select 1 from unit u where u.association_id::uuid = $1'],
+      /**
+       * The inverse for set operations: each arm scoped in its own right. A
+       * rule that refused set operations outright would pass the bypass cases
+       * above while making a legitimate one impossible to write.
+       */
+      [
+        'both arms of a union bound in their own scopes',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from assessment a where a.association_id = $1',
+      ],
+      [
+        'both arms of a union reusing one alias, each bound',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from unit u where u.association_id = $1',
+      ],
+    ])('accepts %s', (_label, sql) => {
+      expect(sweepVerdict(sql)).toBeNull()
     })
   })
 
-  /**
-   * Constructs the scanner cannot see into, each of which would make it skip a
-   * table **silently** — which is worse than not having the sweep at all, since
-   * a green result would say the entry was checked.
-   *
-   * - a CTE (`with x as (…)`) puts its tables outside any `from`/`join` the
-   *   scanner reaches;
-   * - a derived table (`from (select … from unit) u`) is read as the alias `u`,
-   *   and `unit` is never seen;
-   * - a quoted identifier (`from "unit"`) does not match the bare-word pattern.
-   *
-   * So the sweep refuses them rather than passing over them. This is a
-   * deliberate restriction on what a catalog entry may look like, not a
-   * limitation being papered over: the day one is genuinely needed, the scanner
-   * is extended and this list shrinks. Raised by `ocr` reviewing story 5.1b.
-   */
-  const UNANALYSABLE = [
-    [/\bwith\s+(?:recursive\s+)?[a-z_][a-z0-9_]*\s+as\s*\(/i, 'a common table expression'],
-    [/\b(?:from|join)\s*\(/i, 'a derived table'],
-    [/\b(?:from|join)\s+"/i, 'a quoted identifier'],
-    // `from public.unit` captures `public` and never sees `unit`.
-    [/\b(?:from|join)\s+[a-z_][a-z0-9_]*\s*\./i, 'a schema-qualified table name'],
-    // `from assessment, unit` captures `assessment` and never sees `unit`.
-    [/\b(?:from|join)\s+[a-z_][a-z0-9_]*(?:\s+(?:as\s+)?[a-z_][a-z0-9_]*)?\s*,/i,
-      'a comma-separated table list'],
-    // `E'it\'s …'` escapes its quote with a backslash, which the literal
-    // scanner below does not model — it would end the literal at the escaped
-    // quote and emit the rest as if it were SQL.
-    [/(?<![A-Za-z0-9_])(?:E|U&)'/i, 'a PostgreSQL escape or unicode string literal'],
-    // `U&"tbl"` is a quoted identifier the plain `"` rule above does not match.
-    [/\b(?:from|join)\s+U&"/i, 'a unicode-escaped quoted identifier'],
-    /**
-     * Any parenthesised SELECT — a subquery, an `EXISTS`, an `IN (select …)`.
-     *
-     * **Aliases are scoped per query, and this scanner has one flat namespace.**
-     * `select 1 from unit where exists (select 1 from assessment as unit where
-     * unit.association_id = $1)` reads every association's units: the predicate
-     * belongs to the *inner* `unit`, Postgres resolves it there, and the outer
-     * `unit` is unconstrained. The scanner sees `unit` twice and one predicate
-     * that satisfies both. The derived-table rule above does not catch it,
-     * because the parenthesis follows `exists` rather than `from`.
-     *
-     * Tracking aliases per scope means parsing SQL. Refusing the construct
-     * costs nothing here — `dues_status@1` contains no subquery at all — and it
-     * is the same trade this file has now made five times: refuse what cannot
-     * be analysed rather than analyse it nearly correctly. Raised by CodeRabbit.
-     */
-    [/\(\s*select\b/i, 'a subquery, whose aliases this scanner cannot scope'],
-  ] as const
-
-  /**
-   * Lexical forms a catalog entry may not contain **at all**, checked against
-   * the raw SQL before anything is stripped.
-   *
-   * ## Why this rule replaced six rounds of lexer patching
-   *
-   * The sweep below decides whether an entry scopes its tables by matching
-   * text. Every review for six rounds found another way to put
-   * `unit.association_id = $1` somewhere it would be matched but never
-   * executed — a line comment, a nested block comment, a plain literal, an
-   * `E'…\'…'` escape string, a `$café$` tag — and each fix was a little more
-   * hand-written Postgres lexer inside a test file. The last round's fixes
-   * introduced two *false positives* of their own: a `--` inside a literal
-   * truncated correct SQL, and `'$USD'` was refused as a bad dollar construct.
-   *
-   * That is a race against Postgres's grammar, and it is not winnable this way.
-   * So the rule inverts. `dues_status@1` contains **no** single quote, no
-   * dollar-quote opener and no comment — measured, not assumed. Every embedding
-   * vector those rounds found needs one of them. Forbidding them outright
-   * removes the whole class, and it makes the scanner's job trivially correct
-   * rather than nearly correct.
-   *
-   * The cost is real and small: an entry wanting a constant must bind it as a
-   * parameter, and an entry wanting a comment puts it in the TypeScript
-   * docblock around the SQL, which is where every existing one already is. If a
-   * future entry genuinely needs a literal, extending this is a deliberate act
-   * with a scanner that handles it — not a silent pass.
-   */
-  const FORBIDDEN_LEXICAL = [
-    [/'/, 'a string literal'],
-    [/--|\/\*/, 'a comment'],
-    [/\$(?![0-9])/, 'a dollar-quoted body or a stray dollar'],
-  ] as const
-
-  /**
-   * A `$` that opens neither a placeholder nor a dollar quote this scanner
-   * recognises — `$café$` for instance, since Postgres allows any identifier
-   * character in a tag and the scanner only models ASCII ones.
-   *
-   * Detected as "not one of the two known shapes" rather than by listing the
-   * forms that break it. **That inversion is the point of this round.** Four
-   * reviews in a row found another way to embed text — a comment, a nested
-   * comment, a plain literal, now escape strings and non-ASCII tags — and
-   * enumerating lexical forms is a race against Postgres's grammar that a
-   * hand-written scanner does not win. Refusing what it cannot parse ends the
-   * class instead of adding to it: a new form is a red suite, not a silent pass.
-   */
-  const unrecognisedDollar = (sql: string) => {
-    let i = sql.indexOf('$')
-
-    while (i !== -1) {
-      const rest = sql.slice(i)
-
-      if (/^\$[0-9]/.test(rest)) {
-        i = sql.indexOf('$', i + 1) // a placeholder
-        continue
-      }
-
-      const opener = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest)
-      if (opener) {
-        // Jump past the *closing* delimiter. Advancing one `$` at a time would
-        // re-examine the closer of a construct already accepted and report it
-        // as unrecognised — which is what the first version of this did.
-        const close = sql.indexOf(opener[0], i + opener[0].length)
-        if (close === -1) return true // opened and never closed
-        i = sql.indexOf('$', close + opener[0].length)
-        continue
-      }
-
-      return true
-    }
-
-    return false
-  }
-
-  /**
-   * SQL with its comments removed.
-   *
-   * **The scoping sweep is a text match, so a comment can satisfy it.** Left in,
-   * `-- unit.association_id = $1` makes an entry that scopes nothing look
-   * scoped, and the guard the whole story rests on passes on a promise rather
-   * than a predicate. Raised by CodeRabbit on MR !71 and confirmed:
-   * `/\\bunit\\.association_id\\s*=\\s*\\$1\\b/` matched inside a comment.
-   *
-   * Applied to the reference scan too — a table named only in a comment is not
-   * read by the query, and demanding a predicate for it would fail a correct
-   * entry.
-   *
-   * **Depth-aware, because Postgres nests block comments.** The first version
-   * of this stripped with a non-greedy regex, which ends at the first close
-   * marker rather than the matching one. Given an outer comment containing an
-   * inner one it stripped only as far as the inner close, leaving the rest —
-   * including a scoping predicate that was never real — sitting in the text the
-   * guard then matched. Fixing the comment hole with a regex reopened it one
-   * level down. See the nested fixture in the tests below; raised by CodeRabbit
-   * on the round that reviewed the first fix.
-   *
-   * **String literals go the same way**, for the same reason:
-   * `select 'unit.association_id = $1' from unit` scopes nothing and satisfied
-   * a text match. Single-quoted (with `''` escapes) and dollar-quoted bodies
-   * are blanked. `$1` survives — a dollar-quote tag must start with a letter or
-   * underscore, so a placeholder is not one.
-   *
-   * ## The limit, stated rather than implied
-   *
-   * This is the third embedding this guard has been defeated by — comment,
-   * nested comment, literal — and **a text scan over SQL will always be
-   * best-effort.** It is worth having because it is cheap and it fails loudly
-   * on the shapes we know about, but it is not what proves rows do not leak.
-   * That is `adapters/db/catalog-isolation.test.ts`, which gives two
-   * associations the same unit number and runs the query: no way of embedding
-   * text can make a real query return the wrong rows. Read this sweep as "the
-   * entry looks scoped" and that one as "the entry is scoped".
-   */
-  /** Comments only. Literals are still intact after this — deliberately. */
-  const stripComments = (sql: string) => {
-    let out = ''
-    let depth = 0
-    let i = 0
-
-    while (i < sql.length) {
-      if (sql.startsWith('/*', i)) {
-        depth += 1
-        i += 2
-        continue
-      }
-      if (depth > 0 && sql.startsWith('*/', i)) {
-        depth -= 1
-        i += 2
-        out += ' '
-        continue
-      }
-      // A `--` inside a block comment is just text; only strip one at depth 0.
-      if (depth === 0 && sql.startsWith('--', i)) {
-        const newline = sql.indexOf('\n', i)
-        i = newline === -1 ? sql.length : newline
-        out += ' '
-        continue
-      }
-      if (depth === 0) out += sql[i]
-      i += 1
-    }
-
-    return out
-  }
-
-  /** Literals only, run after comments have gone. */
-  const stripLiterals = (sql: string) => {
-    let out = ''
-    let i = 0
-
-    while (i < sql.length) {
-      // `$tag$ … $tag$` or `$$ … $$`. A tag must start with a letter or
-      // underscore, so `$1` is a placeholder and survives.
-      const dollar = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
-      if (dollar) {
-        const close = sql.indexOf(dollar[0], i + dollar[0].length)
-        i = close === -1 ? sql.length : close + dollar[0].length
-        out += ' '
-        continue
-      }
-
-      if (sql[i] === "'") {
-        i += 1
-        while (i < sql.length) {
-          if (sql[i] === "'" && sql[i + 1] === "'") {
-            i += 2
-            continue
-          }
-          if (sql[i] === "'") {
-            i += 1
-            break
-          }
-          i += 1
-        }
-        out += ' '
-        continue
-      }
-
-      out += sql[i]
-      i += 1
-    }
-
-    return out
-  }
-
-  /**
-   * What the structural sweeps read: no comments, no literal bodies.
-   *
-   * **The lexical refusals must NOT use this.** They ask whether the SQL
-   * contains a form this scanner cannot lex, and by here the form is gone —
-   * `E'…'` has had its literal blanked and reads as a bare `E`, so the refusal
-   * never fires. That is exactly what happened: the refusal was added, tested
-   * against raw SQL in isolation, and was dead in the pipeline. Argus caught it.
-   */
-  const withoutComments = (sql: string) => stripLiterals(stripComments(sql))
-
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
-    '%s uses only SQL the scoping scanner can analyse',
+    '%s scopes every association-owning table it reads to the association placeholder',
     (_label, entry) => {
-      // The same `sweepVerdict` the bypass fixtures use. One implementation, so
-      // a stage dropped here is a stage dropped there — rather than fixtures
-      // that keep passing against a pipeline the entries no longer go through.
+      // The same `sweepVerdict` the fixtures above use. One implementation, so a
+      // stage dropped here is a stage dropped there — rather than fixtures that
+      // keep passing against a pipeline the entries no longer go through.
+      //
+      // The second sweep that used to sit here re-implemented the check with its
+      // own copy of the scanner, which is the duplication the comment above
+      // warns about, present in the same file. Story 5.1d removed it.
       expect(
         sweepVerdict(entry.sql),
-        `${entry.id}@${entry.version} was rejected by the scoping sweep. A literal or comment ` +
-          `is how a predicate gets somewhere the sweep matches but the database never runs: bind ` +
-          `a constant as a parameter, and put prose in the docblock. A construct the scanner ` +
-          `cannot read is refused rather than guessed at — extend it deliberately.`,
+        `${entry.id}@${entry.version} was rejected by the scoping sweep. Every association-owning ` +
+          `table an entry reads must be bound to $1 within the query scope that reads it, and a ` +
+          `construct whose meaning depends on something the sweep cannot see — a schema ` +
+          `qualification, an ambiguous unqualified predicate — is refused rather than guessed at.`,
       ).toBeNull()
     },
   )
 
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
-    // No `$1` in this title: vitest reads `$name` in an `it.each` title as a
-    // property of the case object, so it would print the whole entry.
-    '%s scopes every association-owning table it reads to the association placeholder',
+    '%s reads at least one association-owning table, so the sweep above is not vacuous',
     (_label, entry) => {
-      const sql = withoutComments(entry.sql)
-      const references = tableReferences(sql).filter(([table]) => SCOPED_TABLES.has(table))
+      const scoped = scopesOf(parseSync(entry.sql) as Node)
+        .flatMap((scope) => referencesIn(scope))
+        .filter((reference) => SCOPED_TABLES.has(reference.table))
 
-      // Not vacuous: an entry that reads no scoped table at all would pass this
-      // sweep by touching nothing, so say out loud that it touched something.
-      expect(references.length).toBeGreaterThan(0)
-
-      for (const [table, alias] of references) {
-        expect(
-          sql,
-          `${entry.id}@${entry.version} reads ${table} as "${alias}" without binding it to $1`,
-        ).toMatch(new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`))
-      }
+      expect(scoped.length).toBeGreaterThan(0)
     },
   )
 })
