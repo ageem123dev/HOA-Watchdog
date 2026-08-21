@@ -178,6 +178,39 @@ describe('every entry in the catalog', () => {
   const SCOPED_TABLES = new Set<string>(ASSOCIATION_SCOPED_TABLES)
 
   /**
+   * The sweep, as one function.
+   *
+   * Returns the reason an entry is rejected, or `null` if it passes. **Both
+   * the per-entry sweep and the bypass fixtures call this**, because two
+   * copies drift: if the per-entry path later loses a stage, fixtures written
+   * against their own copy keep passing and stop proving the production path.
+   * Raised by CodeRabbit, and it had already happened in miniature — the
+   * fixtures below were passing for a reason the real sweep did not share.
+   */
+  const sweepVerdict = (sql: string): string | null => {
+    for (const [pattern, what] of FORBIDDEN_LEXICAL) {
+      if (pattern.test(sql)) return `contains ${what}`
+    }
+
+    const commentless = stripComments(sql)
+    for (const [pattern, what] of UNANALYSABLE) {
+      if (pattern.test(commentless)) return `uses ${what}`
+    }
+    if (unrecognisedDollar(commentless)) return 'uses an unreadable $-construct'
+
+    const readable = withoutComments(sql)
+    const references = tableReferences(readable).filter(([table]) => SCOPED_TABLES.has(table))
+    if (references.length === 0) return 'reads no association-owning table'
+
+    for (const [table, alias] of references) {
+      const scoped = new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`)
+      if (!scoped.test(readable)) return `reads ${table} as "${alias}" without binding it to $1`
+    }
+
+    return null
+  }
+
+  /**
    * The word that cannot follow a table name and still be its alias.
    *
    * Without this the scanner reads `from assessment join unit` as "assessment
@@ -340,21 +373,7 @@ describe('every entry in the catalog', () => {
      * sweep as a whole rejects it** — by refusal or by finding no predicate,
      * either is a red suite. A stage-level assertion cannot say that.
      */
-    const sweepAccepts = (sql: string) => {
-      const refused =
-        FORBIDDEN_LEXICAL.some(([pattern]) => pattern.test(sql)) ||
-        UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql))) ||
-        unrecognisedDollar(stripComments(sql))
-      if (refused) return false
-
-      const readable = withoutComments(sql)
-      const references = tableReferences(readable).filter(([table]) => SCOPED_TABLES.has(table))
-      if (references.length === 0) return false
-
-      return references.every(([, alias]) =>
-        new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`).test(readable),
-      )
-    }
+    const sweepAccepts = (sql: string) => sweepVerdict(sql) === null
 
     it.each([
       ['a line comment', 'select 1 from unit -- unit.association_id = $1'],
@@ -374,6 +393,33 @@ describe('every entry in the catalog', () => {
 
     it('still accepts a genuinely scoped entry', () => {
       expect(sweepAccepts('select 1 from unit where unit.association_id = $1')).toBe(true)
+    })
+
+    /**
+     * **Which stage rejected it, not merely that something did.**
+     *
+     * Every fixture above contains a quote, a comment marker or a stray `$`, so
+     * all six now stop at `FORBIDDEN_LEXICAL` — the later stages they were
+     * written to exercise are never reached. Rejected-for-the-wrong-reason is
+     * the shape this whole story keeps tripping over, so these name the reason,
+     * and the cases below carry none of the forbidden characters so they reach
+     * the stages after it. Raised by CodeRabbit.
+     */
+    it.each([
+      ["a literal", "select 1 from unit where 'x' is not null", /contains a string literal/],
+      ['a comment', 'select 1 from unit -- x', /contains a comment/],
+      ['a CTE', 'with t as (select 1 from unit) select 1 from t', /common table expression/],
+      ['a derived table', 'select 1 from (select 1 from unit) u', /derived table/],
+      ['a schema-qualified name', 'select 1 from public.unit', /schema-qualified/],
+      ['a comma-separated list', 'select 1 from assessment, unit', /comma-separated/],
+      ['no scoped table at all', 'select 1 from schema_migration', /reads no association-owning/],
+      [
+        'a scoped table left unbound',
+        'select 1 from unit where unit.id = $1',
+        /reads unit as "unit" without binding it/,
+      ],
+    ])('rejects %s, and says so', (_label, sql, reason) => {
+      expect(sweepVerdict(sql)).toMatch(reason)
     })
   })
 
@@ -695,32 +741,16 @@ describe('every entry in the catalog', () => {
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
     '%s uses only SQL the scoping scanner can analyse',
     (_label, entry) => {
-      // Raw SQL, before anything is stripped: these are the forms that make
-      // stripping necessary in the first place.
-      for (const [pattern, what] of FORBIDDEN_LEXICAL) {
-        expect(
-          pattern.test(entry.sql),
-          `${entry.id}@${entry.version} contains ${what}. A catalog entry may not: it is how a ` +
-            `predicate gets somewhere the sweep below matches but the database never runs. Bind a ` +
-            `constant as a parameter, and put prose in the docblock.`,
-        ).toBe(false)
-      }
-
-      for (const [pattern, what] of UNANALYSABLE) {
-        expect(
-          pattern.test(stripComments(entry.sql)),
-          `${entry.id}@${entry.version} uses ${what}, which the scoping scanner ` +
-            `below cannot see into — it would skip a table and still report success. ` +
-            `Extend tableReferences before allowing it.`,
-        ).toBe(false)
-      }
-
+      // The same `sweepVerdict` the bypass fixtures use. One implementation, so
+      // a stage dropped here is a stage dropped there — rather than fixtures
+      // that keep passing against a pipeline the entries no longer go through.
       expect(
-        unrecognisedDollar(stripComments(entry.sql)),
-        `${entry.id}@${entry.version} uses a $-construct that is neither a placeholder nor ` +
-          `a dollar quote this scanner reads. Its body would be scanned as if it were SQL, ` +
-          `so a predicate inside it would satisfy the sweep below without scoping anything.`,
-      ).toBe(false)
+        sweepVerdict(entry.sql),
+        `${entry.id}@${entry.version} was rejected by the scoping sweep. A literal or comment ` +
+          `is how a predicate gets somewhere the sweep matches but the database never runs: bind ` +
+          `a constant as a parameter, and put prose in the docblock. A construct the scanner ` +
+          `cannot read is refused rather than guessed at — extend it deliberately.`,
+      ).toBeNull()
     },
   )
 
