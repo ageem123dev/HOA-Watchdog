@@ -33,6 +33,18 @@ const mint = (overrides: Partial<Parameters<typeof mintActorAssertion>[1]> = {},
 const verify = (assertion: string, overrides: Partial<Parameters<typeof verifyActorAssertion>[1]> = {}) =>
   verifyActorAssertion(assertion, { key: KEY, now: NOW, audience: AUDIENCE, ...overrides })
 
+/**
+ * A correctly signed assertion over an arbitrary payload, so the claim guards
+ * inside `verify` can be reached. Signing with the real key is what gets past
+ * the signature check — a hand-written payload with a junk signature stops one
+ * guard earlier and proves nothing about the claims.
+ */
+const signedWith = (claims: unknown) => {
+  const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url')
+
+  return `${payload}.${createHmac('sha256', KEY).update(payload).digest('base64url')}`
+}
+
 /** Asserts the verifier has not simply stopped accepting anything. */
 const stillAcceptsAValidAssertion = () => {
   expect(verify(mint())).toEqual({ ok: true, subject: SUBJECT })
@@ -145,6 +157,60 @@ describe('verifying an actor assertion', () => {
   ])('refuses %s without throwing, and still accepts a valid one', (_label, malformed) => {
     expect(() => verify(malformed)).not.toThrow()
     expect(verify(malformed).ok).toBe(false)
+    stillAcceptsAValidAssertion()
+  })
+
+  /**
+   * A caller that hands `verify` something that is not a string at all. The
+   * route parses before verifying so this cannot arrive over HTTP today, but
+   * the guard exists and an untested guard is one somebody removes as dead.
+   */
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 42],
+    ['an object', { sub: SUBJECT }],
+    ['an array', ['a', 'b']],
+  ])('refuses %s without throwing, and still accepts a valid one', (_label, value) => {
+    expect(() => verify(value as unknown as string)).not.toThrow()
+    expect(verify(value as unknown as string)).toEqual({ ok: false, reason: 'malformed' })
+    stillAcceptsAValidAssertion()
+  })
+
+  /**
+   * The claim guards, reached only by a payload that is **correctly signed** —
+   * which is the point. A malformed-JSON test stops at the parse and never
+   * exercises them, so each of these signs a crafted payload with the real key.
+   *
+   * The one that matters most is a non-numeric `exp`: with the guard removed,
+   * `now >= claims.exp` compares a number against a string, which is `false`,
+   * and the assertion never expires. That is the failure this block exists for
+   * — silent, permanent, and invisible to every other test in the file.
+   */
+  it.each([
+    ['a subject that is not a string', { sub: 7, exp: NOW + TTL_MS, aud: AUDIENCE }],
+    ['an empty subject', { sub: '', exp: NOW + TTL_MS, aud: AUDIENCE }],
+    ['a blank subject', { sub: '   ', exp: NOW + TTL_MS, aud: AUDIENCE }],
+    ['no subject at all', { exp: NOW + TTL_MS, aud: AUDIENCE }],
+    ['an expiry that is not a number', { sub: SUBJECT, exp: 'soon', aud: AUDIENCE }],
+    ['an expiry that is NaN', { sub: SUBJECT, exp: Number.NaN, aud: AUDIENCE }],
+    ['an expiry that is Infinity', { sub: SUBJECT, exp: Number.POSITIVE_INFINITY, aud: AUDIENCE }],
+    ['no expiry at all', { sub: SUBJECT, aud: AUDIENCE }],
+    ['an audience that is not a string', { sub: SUBJECT, exp: NOW + TTL_MS, aud: 7 }],
+    ['no audience at all', { sub: SUBJECT, exp: NOW + TTL_MS }],
+  ])('refuses a correctly signed payload with %s', (_label, claims) => {
+    expect(verify(signedWith(claims))).toEqual({ ok: false, reason: 'malformed' })
+    stillAcceptsAValidAssertion()
+  })
+
+  /** A signed payload that is valid JSON but not an object. */
+  it.each([
+    ['null', null],
+    ['an array', [{ sub: SUBJECT, exp: NOW + TTL_MS, aud: AUDIENCE }]],
+    ['a string', 'not-an-object'],
+    ['a number', 7],
+  ])('refuses a correctly signed payload that is %s rather than an object', (_label, value) => {
+    expect(verify(signedWith(value))).toEqual({ ok: false, reason: 'malformed' })
     stillAcceptsAValidAssertion()
   })
 

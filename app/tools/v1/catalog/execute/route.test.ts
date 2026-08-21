@@ -16,6 +16,8 @@
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { createHmac } from 'node:crypto'
+
 import { mintActorAssertion } from '@/core/auth/actor-assertion'
 
 const execute = vi.fn()
@@ -339,9 +341,16 @@ describe('POST /tools/v1/catalog/execute', () => {
       expect(execute).toHaveBeenCalledWith(expect.objectContaining({ actorId: ACTOR }))
     })
 
+    /**
+     * Signed with the wrong key, **not** truncated. A short signature is
+     * refused by the length pre-check before `timingSafeEqual` is reached, so a
+     * truncated forgery passes this test against a gateway whose signature
+     * comparison has been removed entirely — which is what the first draft did,
+     * caught by mutating that comparison away and watching this stay green.
+     */
     it('refuses a forged signature, and still accepts a valid assertion', async () => {
       const [payload] = assertionFor(ACTOR).split('.')
-      const forged = `${payload}.bm90LXRoZS1zaWduYXR1cmU`
+      const forged = `${payload}.${createHmac('sha256', 'not-the-key').update(payload!).digest('base64url')}`
 
       const response = await callWith(forged)
 

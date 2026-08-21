@@ -434,6 +434,87 @@ for, asserted end to end against a real database.
 - `adapters/agent/chat-client.test.ts` — AC5's bounds test
 
 
+### Review Findings
+
+#### The AC audit (step 4c) - tenth consecutive story it has found something
+
+AC1 says the gateway verifies the assertion **before the provenance write**. Every refusal case
+asserted `execute` was not called, which is the right seam at the unit level - but at the *database*
+level the only refusal proved was a **bad service token**, refused by AD-15's check on an earlier
+line than AD-18's. A forged assertion had never been shown to leave `query_log` untouched against a
+real database. Added, with its inverse in the same run.
+
+The same pass found the accepted-path db test still titled *"naming the actor the request
+supplied"* - the pre-AD-18 contract, on a test that no longer checks it - and a stale `AC7`
+reference the split from 5.1b carried over.
+
+#### The forgery that proved nothing (found by mutation, during the audit)
+
+Adding the db-level case above, the mutation that should have proved it - deleting the
+`timingSafeEqual` comparison - **left the suite green**. The forged signature was
+`bm90LXRoZS1zaWduYXR1cmU`, 23 characters, where a real base64url SHA-256 is 43. It was being refused
+by the *length* pre-check and never reached the comparison at all.
+
+So the case named "refuses a forged signature" did not prove the signature was checked. **The same
+weak forgery was in the unit test**, where it had read as covered since task 2. Both now sign the
+payload with the wrong key, which is the right length by construction; the mutation turns both red.
+
+`actor-assertion.test.ts` was already correct here - it used `createHmac('sha256', 'not-the-key')`
+from the start. The two route tests copied the shape of the idea and not the property.
+
+#### Local CodeRabbit CLI round (0.7.3, `9fb1c41`)
+
+`review_completed`, 20 of 20 diff files reviewed, 5 findings. Three confirmed, two refuted.
+
+| # | Severity | Finding | Verdict |
+| --- | --- | --- | --- |
+| 1 | trivial | `route.test.ts` should use `ACTOR_ASSERTION_AUDIENCE`/`_TTL_MS` instead of the `'tools/v1'` and `60_000` literals | **Refuted** |
+| 2 | trivial | `actor-assertion.test.ts` never reaches the claim guards, or a non-string assertion | **Confirmed** |
+| 3 | major | `chat-client.ts` should require the signing key to be base64url decoding to >=32 bytes | **Refuted** |
+| 4 | minor | `test_chat_service.py` never sends a non-string `actorAssertion` | **Confirmed** |
+| 5 | minor | `test_relay_holds_no_key.py`'s collector is over-broad, and nothing proves it detects a read | **Confirmed in part** |
+
+**1 - refuted, and it is backwards.** The literal `'tools/v1'` in the test is what makes it sensitive
+to a change in the constant: the test mints with the literal and the route verifies with the
+constant, so if the constant moved, the test would fail. Replacing the literal with the constant
+would make both sides read the same value and the test blind to exactly the change it currently
+catches. The literal is the pin, not a duplication.
+
+**2 - confirmed, and the most valuable of the five.** Four guards inside `verifyActorAssertion` were
+reachable only by a **correctly signed** payload, and no test signed one: a malformed-JSON case stops
+at the parse. The one that matters is a non-numeric `exp` - with that guard removed,
+`now >= claims.exp` compares a number against a string, which is `false`, and **the assertion never
+expires**. Silent, permanent, and invisible to every other test in the file. Each of the four guards
+is now mutation-proved: 4, 4, 2 and 5 cases fail respectively.
+
+**3 - refuted, and it is a policy change rather than a defect.** It would refuse a perfectly good
+high-entropy passphrase for not being base64url, and it is inconsistent with the two sibling
+secrets: `verifyServiceToken` requires only that `AGENT_SERVICE_TOKEN` and `GATEWAY_SERVICE_TOKEN`
+be non-blank. Making one of three secrets stricter, in the adapter rather than in the shared
+primitive, spreads the rule rather than establishing it. Worth raising as its own decision across
+all three, not settling here. **Action item.**
+
+**4 - confirmed.** `payload.get` returns `None` when the key is absent, so the absent case exercised
+the `isinstance` guard through the branch a wrong *type* would take, and the distinct case was never
+driven. Five type cases added.
+
+**5 - confirmed in part, and it found a vacuity in the file written to prevent vacuity.** The
+valuable half: **nothing proved the collector finds anything.** Every assertion in the file is
+satisfied by `_environment_names()` returning the empty set, which is what a broken AST walk, a
+renamed package or a wrong root produces - and the package by design contains no key, so scanning
+the real source can never demonstrate the collector works. Closed with a fixture module that reads a
+key four ways; breaking the walk now turns two cases red where it previously turned none.
+
+The other half - narrow the collector to `os.getenv`/`os.environ.get` by name - is **declined and
+recorded**: the breadth is deliberate. The pattern that matters is the one nobody predicted (a
+settings wrapper, a `dotenv` call, a name passed through a constant), and matching the two spellings
+anybody would think of is precise about exactly the cases that were never the risk. The fixture
+includes a wrapper call for that reason.
+
+**Ingest:** the two refuted findings were removed from the stream before `argus_ingest`, so the
+false positive at `major` could not be written to memory as an Argus miss. Joined on `9fb1c41`, 1
+review compared, 0 skipped, 0 lessons - Argus and CodeRabbit agreed at critical/major.
+
 ## Change Log
 
 | Date | Change |
@@ -444,4 +525,6 @@ for, asserted end to end against a real database.
 | 2026-08-21 | Context pass: the seven-file chain read and recorded, four design decisions made, ready-for-dev |
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
+| 2026-08-21 | 4b/4c: the AC audit found an unproved db-level refusal, and mutation found the forgery too short to test the signature check |
+| 2026-08-21 | CodeRabbit CLI round: 3 of 5 confirmed; four claim guards had no test that could reach them |
 | 2026-08-21 | Tasks 3 and 5: the expiry window gains a bound that can fail, and `actorId` is refused rather than ignored. All tasks complete |

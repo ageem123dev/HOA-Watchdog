@@ -39,23 +39,42 @@ KEY_SHAPED = re.compile(
 )
 
 
+def _names_in(source: str) -> set[str]:
+    """Every string constant this source could be naming a variable with.
+
+    **Deliberately over-broad**, and it was raised as too broad in review. It
+    collects the arguments of *every* call rather than matching ``os.getenv``
+    and ``os.environ.get`` by name, because the pattern that matters is the one
+    nobody predicted: a helper, a settings wrapper, a ``dotenv`` call, a name
+    passed through a constant. Narrowing this to the two spellings anybody would
+    think of makes it precise about exactly the cases that were never the risk.
+
+    The cost of the breadth is a false positive on an unrelated string that
+    happens to look like a key name, which fails loudly and is fixed in a
+    minute. The cost of the precision is a key the sweep does not see.
+    """
+    asked: set[str] = set()
+
+    for node in ast.walk(ast.parse(source)):
+        # os.getenv("NAME") / os.environ.get("NAME") / anything("NAME")
+        if isinstance(node, ast.Call):
+            for argument in node.args:
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    asked.add(argument.value)
+        # os.environ["NAME"]
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+            if isinstance(node.slice.value, str):
+                asked.add(node.slice.value)
+
+    return asked
+
+
 def _environment_names() -> set[str]:
-    """Every string this package passes to ``os.environ`` / ``os.getenv``."""
+    """Every such name across the package."""
     asked: set[str] = set()
 
     for path in PACKAGE.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-
-        for node in ast.walk(tree):
-            # os.getenv("NAME") / os.environ.get("NAME")
-            if isinstance(node, ast.Call):
-                for argument in node.args:
-                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-                        asked.add(argument.value)
-            # os.environ["NAME"]
-            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-                if isinstance(node.slice.value, str):
-                    asked.add(node.slice.value)
+        asked |= _names_in(path.read_text(encoding="utf-8"))
 
     return asked
 
@@ -76,6 +95,56 @@ def test_the_agent_asks_its_environment_for_no_signing_key() -> None:
         f"({', '.join(offenders)}). AD-18: it relays the assertion and holds no key - "
         "a relay that can mint is not a relay."
     )
+
+
+#: A module that reads the key four different ways. The guard's whole value
+#: rests on the collector finding names like these, and the package itself
+#: contains none of them by design — so scanning the real source can never
+#: demonstrate that the collector works. Raised by CodeRabbit.
+A_MODULE_THAT_READS_THE_KEY = """
+import os
+from os import environ
+
+DIRECT = os.getenv("ACTOR_ASSERTION_KEY")
+VIA_GET = os.environ.get("ACTOR_SIGNING_KEY", "")
+VIA_SUBSCRIPT = environ["HMAC_KEY"]
+
+
+def _settings(name):
+    return os.environ.get(name)
+
+
+THROUGH_A_WRAPPER = _settings("JWT_SECRET")
+"""
+
+
+def test_the_collector_finds_a_key_a_module_actually_reads() -> None:
+    """Without this, an empty collector reports the package clean forever.
+
+    Every other assertion here is satisfied by ``_environment_names()``
+    returning nothing at all — which is exactly what a broken AST walk, a
+    renamed package or a wrong root produces.
+    """
+    found = _names_in(A_MODULE_THAT_READS_THE_KEY)
+
+    assert "ACTOR_ASSERTION_KEY" in found
+    assert "ACTOR_SIGNING_KEY" in found
+    assert "HMAC_KEY" in found
+    # The wrapper case: the name is a literal at a call site that is not
+    # `os.getenv`, which is the reason the collector matches every call.
+    assert "JWT_SECRET" in found
+
+
+def test_the_guard_refuses_that_module_end_to_end() -> None:
+    """Collector and matcher composed, which is how the real sweep runs them."""
+    offenders = sorted(n for n in _names_in(A_MODULE_THAT_READS_THE_KEY) if KEY_SHAPED.search(n))
+
+    assert offenders == ["ACTOR_ASSERTION_KEY", "ACTOR_SIGNING_KEY", "HMAC_KEY", "JWT_SECRET"]
+
+
+def test_the_real_package_yields_names_to_check() -> None:
+    """The package does read *some* environment variables — just not a key."""
+    assert _environment_names(), "the collector found no names at all in the package"
 
 
 def test_the_matcher_would_notice_a_key_if_one_were_added() -> None:

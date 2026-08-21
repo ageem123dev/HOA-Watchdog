@@ -271,7 +271,18 @@ class TestTheRequestCarriesAQuestionAndNothingElse:
             {"question": "   ", "actorAssertion": ASSERTION},
             {"question": "q"},
             {"question": "q", "actorAssertion": ""},
+            {"question": "q", "actorAssertion": "   "},
             {"question": 42, "actorAssertion": ASSERTION},
+            # A non-string assertion. `payload.get` returns `None` when the key
+            # is absent, so the absent case above exercises the `isinstance`
+            # guard through the same branch a wrong *type* would take — these
+            # reach it with the key present, which is the shape a caller that
+            # thinks it is sending something actually produces.
+            {"question": "q", "actorAssertion": 42},
+            {"question": "q", "actorAssertion": None},
+            {"question": "q", "actorAssertion": True},
+            {"question": "q", "actorAssertion": ["a", "b"]},
+            {"question": "q", "actorAssertion": {"sub": "somebody"}},
         ],
     )
     def test_refuses_a_malformed_request(

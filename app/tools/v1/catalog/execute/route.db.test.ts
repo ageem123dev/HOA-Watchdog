@@ -15,7 +15,7 @@
  * different connection.
  */
 
-import { randomBytes } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
@@ -202,8 +202,14 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     expect(payload.provenanceId).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  /** AC7. The row is the assertion, and only the real database can produce it. */
-  it('leaves exactly one provenance row naming the actor the request supplied', async () => {
+  /**
+   * AC1. The row is the assertion, and only the real database can produce it.
+   *
+   * "the actor the request **supplied**" is what this said until story 5.1c,
+   * which is the contract AD-18 removed — nothing is supplied now, and the row
+   * must name the subject the signature proved.
+   */
+  it('leaves exactly one provenance row naming the actor the assertion proved', async () => {
     const before = await logRowCount()
 
     const response = await call({
@@ -238,12 +244,61 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
     const before = await logRowCount()
 
     const response = await call(
-      { entryId: 'dues_status', version: 1, parameters: { unitNumber, assessmentYear: 2026 }, actorAssertion: assertionFor(actorId) },
+      {
+        entryId: 'dues_status',
+        version: 1,
+        parameters: { unitNumber, assessmentYear: 2026 },
+        actorAssertion: assertionFor(actorId),
+      },
       'not-the-token',
     )
 
     expect(response.status).toBe(401)
     expect(await logRowCount()).toBe(before)
+  })
+
+  /**
+   * AC1's other half, and the one the case above does not reach. That call
+   * carries a bad **service token**, which is refused by AD-15's check before
+   * the assertion is even read. This one carries a *valid* service token and a
+   * forged assertion, so it is refused by AD-18's check — a different guard, on
+   * a different line, and until now proved only against a mocked executor.
+   *
+   * A row written here would be the worst kind: well-formed, authorised-looking,
+   * and attributing a query to a board member who did not make it. The unit test
+   * asserts the executor is not reached; this asserts the database agrees.
+   */
+  it('writes no provenance row for a forged actor assertion', async () => {
+    const before = await logRowCount()
+
+    // Signed with the wrong key and therefore the *right length*. A truncated
+    // signature is refused by the length pre-check, so it would never reach the
+    // comparison this case exists to exercise.
+    const [payload] = assertionFor(actorId).split('.')
+    const forged = `${payload}.${createHmac('sha256', 'not-the-signing-key').update(payload!).digest('base64url')}`
+
+    const response = await call({
+      entryId: 'dues_status',
+      version: 1,
+      parameters: { unitNumber, assessmentYear: 2026 },
+      actorAssertion: forged,
+    })
+
+    expect(response.status).toBe(401)
+    expect(await logRowCount()).toBe(before)
+
+    // The inverse, in the same run: the identical request with a genuine
+    // assertion is accepted and *does* write a row. Without it this passes
+    // against a gateway that has stopped executing anything at all.
+    const accepted = await call({
+      entryId: 'dues_status',
+      version: 1,
+      parameters: { unitNumber, assessmentYear: 2026 },
+      actorAssertion: assertionFor(actorId),
+    })
+
+    expect(accepted.status).toBe(200)
+    expect(await logRowCount()).toBe(before + 1)
   })
 
   it('answers 404 for an entry the catalog does not hold, and logs nothing', async () => {
