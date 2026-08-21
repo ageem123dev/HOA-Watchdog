@@ -418,6 +418,23 @@ describe('every entry in the catalog', () => {
         'select 1 from unit where unit.id = $1',
         /reads unit as "unit" without binding it/,
       ],
+      /**
+       * The alias-shadowing bypass. Both references find the predicate, but it
+       * belongs to the inner query and the outer `unit` reads every
+       * association's rows. Nothing before the subquery rule caught it — the
+       * derived-table rule looks for a parenthesis after `from`, and this one
+       * follows `exists`.
+       */
+      [
+        'an alias shadowed inside a subquery',
+        'select 1 from unit where exists (select 1 from assessment as unit where unit.association_id = $1)',
+        /subquery/,
+      ],
+      [
+        'an IN subquery',
+        'select 1 from unit where unit.id in (select assessment.unit_id from assessment)',
+        /subquery/,
+      ],
     ])('rejects %s, and says so', (_label, sql, reason) => {
       expect(sweepVerdict(sql)).toMatch(reason)
     })
@@ -539,6 +556,23 @@ describe('every entry in the catalog', () => {
     [/(?<![A-Za-z0-9_])(?:E|U&)'/i, 'a PostgreSQL escape or unicode string literal'],
     // `U&"tbl"` is a quoted identifier the plain `"` rule above does not match.
     [/\b(?:from|join)\s+U&"/i, 'a unicode-escaped quoted identifier'],
+    /**
+     * Any parenthesised SELECT — a subquery, an `EXISTS`, an `IN (select …)`.
+     *
+     * **Aliases are scoped per query, and this scanner has one flat namespace.**
+     * `select 1 from unit where exists (select 1 from assessment as unit where
+     * unit.association_id = $1)` reads every association's units: the predicate
+     * belongs to the *inner* `unit`, Postgres resolves it there, and the outer
+     * `unit` is unconstrained. The scanner sees `unit` twice and one predicate
+     * that satisfies both. The derived-table rule above does not catch it,
+     * because the parenthesis follows `exists` rather than `from`.
+     *
+     * Tracking aliases per scope means parsing SQL. Refusing the construct
+     * costs nothing here — `dues_status@1` contains no subquery at all — and it
+     * is the same trade this file has now made five times: refuse what cannot
+     * be analysed rather than analyse it nearly correctly. Raised by CodeRabbit.
+     */
+    [/\(\s*select\b/i, 'a subquery, whose aliases this scanner cannot scope'],
   ] as const
 
   /**
