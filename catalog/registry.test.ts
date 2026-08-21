@@ -331,6 +331,34 @@ describe('every entry in the catalog', () => {
       expect(withoutComments(sql)).not.toContain('association_id')
     })
 
+    /**
+     * A predicate is not a predicate because it appears in the text. Each of
+     * these scopes nothing, and each satisfied the guard before literals were
+     * neutralised.
+     */
+    it.each([
+      ['a single-quoted literal', "select 'unit.association_id = $1' from unit"],
+      ['a literal with an escaped quote', "select 'it''s unit.association_id = $1' from unit"],
+      ['a dollar-quoted literal', 'select $tag$unit.association_id = $1$tag$ from unit'],
+      ['an untagged dollar-quoted literal', 'select $$unit.association_id = $1$$ from unit'],
+    ])('does not release a predicate hidden in %s', (_label, sql) => {
+      expect(withoutComments(sql)).not.toContain('association_id')
+    })
+
+    /**
+     * And the placeholder survives. A dollar-quote tag must start with a letter
+     * or underscore, so `$1` is not one — eating it would break the placeholder
+     * count the binding sweep depends on.
+     */
+    it('leaves $1 alone while blanking dollar-quoted bodies', () => {
+      const sql = "select $$noise$$ from unit where unit.association_id = $1"
+
+      const stripped = withoutComments(sql)
+
+      expect(stripped).toContain('unit.association_id = $1')
+      expect(stripped).not.toContain('noise')
+    })
+
     it('does not let a commented-out table hide from the scanner either', () => {
       // The reverse direction: a table named only in a comment is not read by
       // the query, so demanding a predicate for it would fail a correct entry.
@@ -388,6 +416,23 @@ describe('every entry in the catalog', () => {
    * guard then matched. Fixing the comment hole with a regex reopened it one
    * level down. See the nested fixture in the tests below; raised by CodeRabbit
    * on the round that reviewed the first fix.
+   *
+   * **String literals go the same way**, for the same reason:
+   * `select 'unit.association_id = $1' from unit` scopes nothing and satisfied
+   * a text match. Single-quoted (with `''` escapes) and dollar-quoted bodies
+   * are blanked. `$1` survives — a dollar-quote tag must start with a letter or
+   * underscore, so a placeholder is not one.
+   *
+   * ## The limit, stated rather than implied
+   *
+   * This is the third embedding this guard has been defeated by — comment,
+   * nested comment, literal — and **a text scan over SQL will always be
+   * best-effort.** It is worth having because it is cheap and it fails loudly
+   * on the shapes we know about, but it is not what proves rows do not leak.
+   * That is `adapters/db/catalog-isolation.test.ts`, which gives two
+   * associations the same unit number and runs the query: no way of embedding
+   * text can make a real query return the wrong rows. Read this sweep as "the
+   * entry looks scoped" and that one as "the entry is scoped".
    */
   const withoutComments = (sql: string) => {
     let out = ''
@@ -413,6 +458,38 @@ describe('every entry in the catalog', () => {
         out += ' '
         continue
       }
+
+      if (depth === 0) {
+        // A dollar-quoted body: `$tag$ … $tag$`, or `$$ … $$`. The tag must
+        // start with a letter or underscore, so `$1` is a placeholder and is
+        // left alone — eating those would break the placeholder count above.
+        const dollar = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
+        if (dollar) {
+          const close = sql.indexOf(dollar[0], i + dollar[0].length)
+          i = close === -1 ? sql.length : close + dollar[0].length
+          out += ' '
+          continue
+        }
+
+        // A single-quoted literal, with `''` as the escaped quote.
+        if (sql[i] === "'") {
+          i += 1
+          while (i < sql.length) {
+            if (sql[i] === "'" && sql[i + 1] === "'") {
+              i += 2
+              continue
+            }
+            if (sql[i] === "'") {
+              i += 1
+              break
+            }
+            i += 1
+          }
+          out += ' '
+          continue
+        }
+      }
+
       if (depth === 0) out += sql[i]
       i += 1
     }

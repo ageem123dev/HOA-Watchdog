@@ -33,6 +33,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { ALL_ENTRIES } from '../../catalog/registry'
+import { validateParameters } from '../../catalog/validate-parameters'
 
 const REPO_ROOT = process.cwd()
 
@@ -64,6 +65,52 @@ describe('the model is never offered an actor to choose', () => {
         expect(name).not.toMatch(/actor/i)
         expect(name).not.toMatch(/association/i)
         expect(name).not.toMatch(/tenant/i)
+      }
+    },
+  )
+
+  /**
+   * Asserted here rather than borrowed from `registry.test.ts`.
+   *
+   * Checking the declared *names* only holds if nothing undeclared is accepted:
+   * with `additionalProperties` open, an `actorId` nobody declared would be
+   * passed straight through. That property is enforced in three places — the
+   * type is the literal `false`, the registry sweep asserts it, and now this
+   * file — and the reason to repeat it is that this test's own conclusion
+   * depends on it. A guard that relies on a fact asserted only in another file
+   * goes quiet when that file changes. Raised by CodeRabbit on MR !71.
+   */
+  it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
+    '%s accepts nothing it did not declare',
+    (_label, entry) => {
+      expect(entry.parameters.additionalProperties).toBe(false)
+    },
+  )
+
+  /**
+   * The runtime half. The two checks above read the schema; this one runs the
+   * validator that actually governs what reaches a query, so an `actorId`
+   * smuggled alongside legitimate arguments is refused in fact and not only by
+   * declaration.
+   */
+  it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
+    '%s refuses an actorId supplied alongside its real arguments',
+    (_label, entry) => {
+      const legitimate = Object.fromEntries(
+        Object.entries(entry.parameters.properties).map(([name, declaration]) => [
+          name,
+          declaration.type === 'integer' ? 2026 : 'x',
+        ]),
+      )
+
+      // The arguments on their own are accepted, so the refusal below is about
+      // the smuggled field and not about a malformed set.
+      expect(() => validateParameters(entry.parameters, legitimate)).not.toThrow()
+
+      for (const smuggled of ['actorId', 'associationId', 'actor_id']) {
+        expect(() =>
+          validateParameters(entry.parameters, { ...legitimate, [smuggled]: 'other-member' }),
+        ).toThrow()
       }
     },
   )
@@ -105,6 +152,36 @@ describe('a surface that asks the agent takes its actor from the session', () =>
       expect(line).not.toMatch(/request\./)
       expect(line).not.toMatch(/headers/)
     }
+  })
+
+  /**
+   * The line-by-line check above is not enough on its own, and CodeRabbit was
+   * right about why: a request-derived value assigned to some *other* name and
+   * then passed through defeats it —
+   * `const raw = searchParams.who` … `askOracle({ question, actorId: raw })`.
+   * Neither line trips a request-shaped match.
+   *
+   * So pin the two things that leave no room for an intermediate: `actorId` is
+   * bound exactly once, from the session, and the call site passes the binding
+   * by shorthand rather than an expression.
+   */
+  it.each(ASKING_SURFACES)('%s binds the actor exactly once, from the session', (path) => {
+    const source = read(path)
+
+    const bindings = [...source.matchAll(/const\s+actorId\s*=\s*([^\n]+)/g)].map((m) =>
+      m[1]!.trim().replace(/;$/, ''),
+    )
+
+    expect(bindings).toEqual(['session.user.id'])
+  })
+
+  it.each(ASKING_SURFACES)('%s passes the binding itself to the agent', (path) => {
+    const source = read(path)
+
+    // Shorthand only: `actorId: <anything>` is an expression, and an expression
+    // is where a smuggled value would go.
+    expect(source).toMatch(/askOracle\(\{[^}]*\bactorId\b[^}]*\}\)/)
+    expect(source).not.toMatch(/askOracle\(\{[^}]*actorId\s*:/)
   })
 
   /**
