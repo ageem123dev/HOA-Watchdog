@@ -156,15 +156,30 @@ the index or they resolve against nothing.
 
 ### Open question for Matt, to answer before or during this story
 
-**Deriving the association from `actorId` moves the trust anchor to `actorId`, and the agent service
-chooses it.** A prompt-injected agent cannot author SQL and, after AC2, cannot name an association —
-but it can pass another board member's id and be answered honestly about their association. That
-defeats AD-5's purpose while obeying its letter, which is the threat AC2's own parenthetical names.
+**CORRECTED 2026-08-21 — the mechanism stated here was wrong.** This said a prompt-injected agent
+"can pass another board member's id". It cannot, and the correction matters because the wrong
+version overstates the threat and misdirects the fix:
 
-Options, in increasing cost: accept it for a single-association pilot and write it down; or have the
-Next.js side mint a short-lived signed token binding `actorId` (and the association) that the agent
-service relays opaquely and this route verifies. The second changes AD-15/AD-17's wire contract, so
-it is an architecture decision rather than a story fix. **This story does not decide it.**
+- `route_question(question, *, actor_id, ...)` takes the actor as a Python keyword argument threaded
+  from the chat request. The model returns only `choice.name` and `choice.arguments`.
+- `choice.arguments` is validated against the entry's own schema, which is
+  `additionalProperties: false`, and no entry declares an actor parameter —
+  `core/security/actor-is-never-chosen.test.ts` now pins that.
+- Nothing in the declarations handed to the model mentions an actor.
+- `/chat` is token-authenticated, with a *different* token from the gateway's (AD-17).
+
+**What is actually true is narrower.** `actorId` is a plain field in the body of
+`/tools/v1/catalog/execute`, so anything *holding a service token* can name any board member. A
+token-holder already has full catalog read access, so the marginal gain is choosing *which
+association* — which needs a second association to mean anything, and AC5 forbids the product from
+creating one. The likelier failure is duller: **our own code passing the wrong id**, which is what
+the new guard catches.
+
+**Split on 2026-08-21.** The guard — pinning that the model is never offered an actor, and that the
+asking surface takes it from the session — is in this story:
+`core/security/actor-is-never-chosen.test.ts`, with both halves proved by mutation. The signed actor
+token relayed by the agent service is **story 5.1c**, because it changes AD-15/AD-17's wire contract
+and is not a fix to make under review pressure.
 
 ### References
 

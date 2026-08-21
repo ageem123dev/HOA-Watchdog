@@ -304,6 +304,33 @@ describe('every entry in the catalog', () => {
       expect(withoutComments(sql)).toContain('unit.association_id = $1')
     })
 
+    /**
+     * The regression for the nested case. Postgres nests block comments, so the
+     * whole of the fixture below is a comment — and a non-greedy regex ends it
+     * at the first close marker, releasing the predicate into the text the
+     * guard then matches.
+     */
+    it('does not release a predicate hidden inside a nested block comment', () => {
+      const sql = 'select 1 from unit /* outer /* inner */ unit.association_id = $1 */ where 1=1'
+
+      const stripped = withoutComments(sql)
+
+      expect(stripped).not.toContain('association_id')
+      expect(/\bunit\.association_id\s*=\s*\$1\b/.test(stripped)).toBe(false)
+    })
+
+    it('keeps a placeholder that is outside the nested comment', () => {
+      const sql = 'select 1 from unit /* outer /* inner */ noise */ where unit.association_id = $1'
+
+      expect(withoutComments(sql)).toContain('unit.association_id = $1')
+    })
+
+    it('treats a line comment inside a block comment as comment text', () => {
+      const sql = 'select 1 /* -- unit.association_id = $1 */ from unit'
+
+      expect(withoutComments(sql)).not.toContain('association_id')
+    })
+
     it('does not let a commented-out table hide from the scanner either', () => {
       // The reverse direction: a table named only in a comment is not read by
       // the query, so demanding a predicate for it would fail a correct entry.
@@ -352,9 +379,46 @@ describe('every entry in the catalog', () => {
    * Applied to the reference scan too — a table named only in a comment is not
    * read by the query, and demanding a predicate for it would fail a correct
    * entry.
+   *
+   * **Depth-aware, because Postgres nests block comments.** The first version
+   * of this stripped with a non-greedy regex, which ends at the first close
+   * marker rather than the matching one. Given an outer comment containing an
+   * inner one it stripped only as far as the inner close, leaving the rest —
+   * including a scoping predicate that was never real — sitting in the text the
+   * guard then matched. Fixing the comment hole with a regex reopened it one
+   * level down. See the nested fixture in the tests below; raised by CodeRabbit
+   * on the round that reviewed the first fix.
    */
-  const withoutComments = (sql: string) =>
-    sql.replaceAll(/\/\*[\s\S]*?\*\//g, ' ').replaceAll(/--[^\n]*/g, ' ')
+  const withoutComments = (sql: string) => {
+    let out = ''
+    let depth = 0
+    let i = 0
+
+    while (i < sql.length) {
+      if (sql.startsWith('/*', i)) {
+        depth += 1
+        i += 2
+        continue
+      }
+      if (depth > 0 && sql.startsWith('*/', i)) {
+        depth -= 1
+        i += 2
+        out += ' '
+        continue
+      }
+      // A `--` inside a block comment is just text; only strip one at depth 0.
+      if (depth === 0 && sql.startsWith('--', i)) {
+        const newline = sql.indexOf('\n', i)
+        i = newline === -1 ? sql.length : newline
+        out += ' '
+        continue
+      }
+      if (depth === 0) out += sql[i]
+      i += 1
+    }
+
+    return out
+  }
 
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
     '%s uses only SQL the scoping scanner can analyse',

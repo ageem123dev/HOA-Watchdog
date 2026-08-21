@@ -199,10 +199,23 @@ describeWithDatabase('resolving a vendor name that two associations both use', (
   it('constrains the fallback lookup to the document association, in the SQL itself', () => {
     const source = readFileSync(join(REPO_ROOT, 'adapters/db/vendor-resolution-postgres.ts'), 'utf8')
 
-    const fallback = source.slice(source.indexOf('const existing'))
+    // The fallback statement alone, not "everything after it". Slicing to the
+    // end of the file lets this pass if the predicate is deleted here and the
+    // same text appears in any later query or comment — an assertion that can
+    // hold without the protected behaviour being present. Raised by CodeRabbit
+    // on the round that reviewed this test.
+    const start = source.indexOf('const existing')
+    expect(start).toBeGreaterThan(-1)
+
+    const fallback = source.slice(start, source.indexOf(')', source.indexOf('`,', start)))
 
     expect(fallback).toMatch(/select id from vendor/i)
     expect(fallback).toMatch(/association_id\s*=\s*\(\s*select association_id from document/i)
+
+    // And the slice really is just this statement: the next query's text must
+    // not be inside it, or the narrowing bought nothing.
+    expect(fallback).not.toContain('matchToExisting')
+    expect(fallback.length).toBeLessThan(600)
   })
 
   it('leaves two vendors standing, one per association', async () => {
