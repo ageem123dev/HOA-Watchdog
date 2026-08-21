@@ -1,5 +1,5 @@
 ---
-Status: review
+Status: done
 baseline_commit: 17b6794bbea06cea3a7c55a1504c9061cb615cc7
 merge_request: 74
 ---
@@ -660,8 +660,20 @@ All three are the same failure in different clothing: **absence of evidence read
 absence.** The convergence rule that survives them is the one that names a positive artefact - a
 review body, for this head, in one of the four shapes - rather than the absence of complaints.
 
-**Terminal state: ready to merge, not merged.** The story stays at `review`; status moves to `done`
-only after the merge.
+**Terminal state: ready to merge.**
+
+**And the close-out was written wrong, again.** `Status: done` belongs on the *unmerged branch* —
+the skill says so in as many words: "`done` means ready-to-merge, not merged — it is written on an
+unmerged branch." This story instead held the status at `review` until after the merge, on the
+reasoning that `done` would overclaim.
+
+That is the sixth occurrence of one cause and the **second distinct misreading** of it. The first
+was "which round is final is not knowable, so defer the close-out"; this one was "`done` would mean
+merged, so defer the close-out". Two different arguments reaching the same deferral — and the
+deferral is the defect: `main` then records a merged story as `review`, and story discovery
+re-picks a finished story.
+
+Repaired on `chore/close-out-story-5-1c` rather than by pushing to `main`.
 
 ## Change Log
 
@@ -675,6 +687,7 @@ only after the merge.
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
 | 2026-08-21 | 4b/4c: the AC audit found an unproved db-level refusal, and mutation found the forgery too short to test the signature check |
 | 2026-08-21 | MR !74 converged: clean on 42fdf04 after three rounds; ready to merge |
+| 2026-08-21 | Merged as aca42b4. Status moved to done in a follow-up close-out — it should have ridden in each review round's commit |
 | 2026-08-21 | MR !74 round 2: the client signed with a trimmed copy of the key the gateway verifies raw - fixed on f3e1045 |
 | 2026-08-21 | MR !74 round 1: four CodeRabbit findings, all confirmed and fixed on f619c30 |
 | 2026-08-21 | Step 6 integration review: Argus clean; the chain matches end to end, and ACTOR_ASSERTION_KEY is missing from .env.local |
