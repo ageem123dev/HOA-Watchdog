@@ -95,8 +95,13 @@ Amounts are exact decimals end to end and are never floats. A negative amount is
 unit it settles and the bank's own reference — and one column with two meanings depending on a
 sibling cell is a rule nobody can read off the header row.
 
-`cycle` and `year` are the roll's own two columns (`ROLL_HEADERS`). They are required only of a file
-that actually contains roll rows, so an invoice export is never asked for them.
+`cycle` and `year` are the roll's own two columns (`ROLL_HEADERS`). They are required of a file
+**declared** `assessment_roll`, so an invoice export is never asked for them.
+
+The distinction used to be the file's contents — the reader scanned for a row saying
+`type,assessment_roll` and demanded the columns only if it found one. It now asks what you
+declared, which is the point of declaring it: a roll exported without `year` is told which column is
+missing, rather than reporting every one of its rows as defective.
 
 ### Document kinds
 

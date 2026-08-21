@@ -298,6 +298,23 @@ cases still passed. With the filler corrected, deleting that check turns the tes
 That is a test this story quietly hollowed out - the same class as the 21 destroyed above, and
 invisible for the same reason: nothing fails when a test stops meaning what its name says.
 
+#### MR !77, CodeRabbit round 1 - stale prose in the published contract
+
+One finding, minor, and correct. `docs/upload-contract.md` still said `cycle` and `year` are
+required of *"a file that actually contains roll rows"* - the old rule, where the reader scanned
+rows for a `type,assessment_roll` and demanded the columns only if it found one. The code now asks
+what the upload **declared**. I rewrote the kinds section and the optional-columns table and missed
+the sentence between them.
+
+Not cosmetic: this is the document a treasurer is pointed at, and it stated a rule the software no
+longer follows.
+
+**Why the contract test did not catch it.** `docs/upload-contract.test.ts` pins the *vocabularies*
+exhaustively - every optional header, every refusal reason, and no others - which is why removing
+`type` and adding two reasons both failed loudly until the document was updated. It cannot pin a
+prose *rule*, and this was a prose rule. Recorded as a limitation rather than left looking like
+coverage: the lists are held to the code, the sentences around them are not.
+
 ### File List
 
 - `core/extraction/tabular.ts` - the kind is a parameter; `kindOf`, `DEFAULT_DOCUMENT_KIND` and the
@@ -323,4 +340,5 @@ invisible for the same reason: nothing fails when a test stops meaning what its 
 | 2026-08-21 | AC4 was shipped broken - the action required a field the form never sent, with every gate green. Control and render test added |
 | 2026-08-21 | CodeRabbit: one kind is stamped on every file of a multi-select batch. Affordance added; per-file declaration raised as a follow-up |
 | 2026-08-21 | Argus: the quarantine filler still carried the retired column, making a NUL-guard test pass on malformed rows instead. Fixed and proved |
+| 2026-08-21 | MR !77 round 1: the contract still stated the row-scanning rule for cycle and year. Corrected |
 | 2026-08-21 | Status done, written in this commit rather than after the merge |
