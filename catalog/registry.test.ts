@@ -271,6 +271,27 @@ describe('every entry in the catalog', () => {
     }
   }
 
+  /**
+   * How many things this scope selects *from* — tables, derived tables, set
+   * functions alike.
+   *
+   * Only used to decide whether an unqualified `association_id = $1` is
+   * unambiguous, and that question is about **range items**, not about tables.
+   * Counting `RangeVar`s alone made
+   * `from (select 1 as association_id) d, unit where association_id = $1` look
+   * like a single-table scope, so the predicate was credited to `unit` when it
+   * might belong to `d`. Raised by CodeRabbit.
+   */
+  const rangeItemCount = (scope: Node): number => {
+    let items = 0
+
+    withinScope(scope.fromClause, (key) => {
+      if (key === 'RangeVar' || key === 'RangeSubselect' || key === 'RangeFunction') items += 1
+    })
+
+    return items
+  }
+
   /** The tables this scope reads directly. */
   const referencesIn = (scope: Node): Reference[] => {
     const references: Reference[] = []
@@ -320,9 +341,21 @@ describe('every entry in the catalog', () => {
    *
    * Both operand orders, because `$1 = u.association_id` is the same predicate.
    * An unqualified `association_id = $1` is resolved only when the scope reads
-   * exactly one table — otherwise which table it constrains is genuinely
+   * exactly one range item — otherwise which one it constrains is genuinely
    * ambiguous, and guessing is the habit this story exists to remove.
+   *
+   * **Casts are unwrapped on both sides.** `$1::uuid` wraps the placeholder in a
+   * `TypeCast`, and the catalog already writes `$2::date` elsewhere, so refusing
+   * the shape would be a false rejection of SQL an author will reasonably write.
+   * Raised by CodeRabbit.
    */
+  /** `x::type` and `x` are the same operand for this purpose. */
+  const withoutCast = (operand: unknown): unknown => {
+    let current = operand
+    while (isNode(current) && isNode(current.TypeCast)) current = current.TypeCast.arg
+    return current
+  }
+
   const aliasScopedBy = (expression: Node, soleAlias: string | null): string | null => {
     if (expression.kind !== 'AEXPR_OP') return null
 
@@ -331,9 +364,11 @@ describe('every entry in the catalog', () => {
     const operator = isNode(name[0]) && isNode(name[0].String) ? name[0].String.sval : null
     if (operator !== '=') return null
 
+    const left = withoutCast(expression.lexpr)
+    const right = withoutCast(expression.rexpr)
     const sides = [
-      [expression.lexpr, expression.rexpr],
-      [expression.rexpr, expression.lexpr],
+      [left, right],
+      [right, left],
     ] as const
 
     for (const [column, parameter] of sides) {
@@ -386,7 +421,10 @@ describe('every entry in the catalog', () => {
    */
   const boundAliasesIn = (scope: Node): Set<string> => {
     const references = referencesIn(scope)
-    const soleAlias = references.length === 1 ? references[0]!.alias : null
+    // One *range item*, not one table: a derived table beside a real one makes
+    // an unqualified predicate ambiguous even though only one `RangeVar` exists.
+    const soleAlias =
+      rangeItemCount(scope) === 1 && references.length === 1 ? references[0]!.alias : null
 
     const bound = new Set<string>()
 
@@ -459,6 +497,17 @@ describe('every entry in the catalog', () => {
     if (statements.length !== 1) {
       return `is ${statements.length} statements rather than exactly one`
     }
+
+    // **The top-level node, not "a select somewhere in the tree".** `scopesOf`
+    // finds every `SelectStmt` anywhere, so `update … where id in (select …
+    // where u.association_id = $1)` offered a perfectly scoped subquery and was
+    // accepted as a whole. AD-5's "reads rather than writes" assertion covers
+    // the catalog, but this function is what the fixtures treat as *the*
+    // verdict — and a verdict function that accepts an `update` is wrong
+    // whatever else happens to catch it. Raised by CodeRabbit.
+    const only = statements[0]
+    const top = isNode(only) && isNode(only.stmt) ? Object.keys(only.stmt)[0] : undefined
+    if (top !== 'SelectStmt') return 'is not a select statement'
 
     const scopes = scopesOf(parsed)
     if (scopes.length === 0) return 'is not a select statement'
@@ -627,6 +676,42 @@ describe('every entry in the catalog', () => {
         'select 1 from unit u where u.association_id = $1; select 1',
         /2 statements rather than exactly one/,
       ],
+      /**
+       * A write carrying a perfectly scoped `select` inside it.
+       *
+       * `scopesOf` finds every `SelectStmt` anywhere in the tree, so the nested
+       * one satisfied the scoping rule and the statement as a whole was
+       * accepted. AD-5's separate "reads rather than writes" assertion covers
+       * the catalog, but this function is what the fixtures treat as *the*
+       * verdict, and a verdict function that accepts an `update` is wrong
+       * whatever else happens to catch it. Raised by CodeRabbit.
+       */
+      [
+        'an update carrying a scoped subquery',
+        'update unit set unit_number = $2 where id in (select u.id from unit u where u.association_id = $1)',
+        /is not a select statement/,
+      ],
+      [
+        'an insert carrying a scoped select',
+        'insert into unit (id) select u.id from unit u where u.association_id = $1',
+        /is not a select statement/,
+      ],
+      [
+        'a delete carrying a scoped subquery',
+        'delete from unit where id in (select u.id from unit u where u.association_id = $1)',
+        /is not a select statement/,
+      ],
+      /**
+       * A derived table beside a real one. The unqualified `association_id`
+       * could belong to either, so crediting it to the only `RangeVar` in scope
+       * is a guess — and guessing is the habit this story removes. `soleAlias`
+       * has to count every range item, not only the plain tables.
+       */
+      [
+        'an unqualified predicate with a derived table also in scope',
+        'select 1 from (select 1 as association_id) d, unit where association_id = $1',
+        /without binding it to \$1/,
+      ],
       ['no scoped table at all', 'select 1 from schema_migration', /reads no association-owning/],
       /**
        * An outer join's `on` clause does not filter the **preserved** side.
@@ -704,6 +789,14 @@ describe('every entry in the catalog', () => {
         'the nullable side of a right join, scoped in its on clause',
         'select 1 from payment p right join unit u on p.unit_id = u.id and p.association_id = $1 where u.association_id = $1',
       ],
+      /**
+       * An explicitly cast placeholder. `$1::uuid` wraps the `ParamRef` in a
+       * `TypeCast`, and refusing it would be a false rejection of correct SQL —
+       * the catalog already writes `$2::date` elsewhere, so this is a shape an
+       * entry author will reach for. Raised by CodeRabbit.
+       */
+      ['a cast placeholder', 'select 1 from unit u where u.association_id = $1::uuid'],
+      ['a cast column', 'select 1 from unit u where u.association_id::uuid = $1'],
     ])('accepts %s', (_label, sql) => {
       expect(sweepVerdict(sql)).toBeNull()
     })

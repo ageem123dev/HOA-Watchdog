@@ -125,7 +125,7 @@ development_status:
   5-1-the-association-exists: done  # the schema retrofit and the write path
   5-1b-the-catalog-answers-for-one-association: done  # split from 5.1: the read path
   5-1c-the-actor-is-proved-not-relayed: done          # split from 5.1b: a signed actor, not a claimed one
-  5-1d-the-sweep-parses-sql: in-progress  # split from 5.1c: the scoping guard reads SQL rather than resembling it
+  5-1d-the-sweep-parses-sql: done  # split from 5.1c: the scoping guard reads SQL rather than resembling it
   5-2-a-document-declares-its-kind: backlog  # kind moves from the row to the upload; contract change
   5-3-the-headers-we-were-given: backlog  # duplicates and blanks reported, not guessed
   5-4-mapping-one-column-to-another: backlog  # drag AND keyboard, neither the poor relation

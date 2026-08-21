@@ -1,5 +1,5 @@
 ---
-Status: in-progress
+Status: done
 baseline_commit: ad56237e79a4eefc45592e14c4dc0d711d797c06
 merge_request:
 ---
@@ -251,6 +251,74 @@ Worth naming because the sequence is the argument for the whole pipeline: an ind
 found a real defect, the obvious fix introduced a worse one, and the per-entry sweep over the real
 catalog caught that within a single test run.
 
+### Review Findings
+
+#### The AC audit (step 4c)
+
+Each criterion, the test that fails if the behaviour is removed, and the evidence that it does.
+
+| AC | Test | Sensitivity |
+| --- | --- | --- |
+| 1 - reads SQL, per-scope aliases | `registry.test.ts::the scoping sweep > rejects an alias shadowed inside a subquery` | Mutation *scope boundary removed* - red. The bypass that ended 5.1b. |
+| 1 - the scanner is actually gone | the rewrite asserts none of `stripComments`, `stripLiterals`, `unrecognisedDollar`, `NOT_AN_ALIAS`, `TABLE_REFERENCE`, `tableReferences`, `UNANALYSABLE`, `FORBIDDEN_LEXICAL` survive | Structural, checked at apply time |
+| 2 - all eight bypasses | eight cases in `rejects %s, and says why`: line comment, nested block comment, string literal, `E'…\'…'`, `$café$`, schema-qualified, comma list, shadowed alias | Each asserts **which reason**, so a case passing for a different reason shows as a changed message rather than a silent pass |
+| 3 - refuse what cannot be analysed | `SQL that does not parse`, `not SQL at all`, `two statements`, `a schema-qualified name`, `an ambiguous unqualified predicate with two tables in scope` | Mutations *statement-count guard removed*, *schema qualification accepted*, *unqualified predicate credited by guess* - all red |
+
+**The check that matters most is not in the ACs.** A sweep can satisfy every criterion above against
+fixtures while doing nothing to the catalog it exists to guard. So: `dues_status@1`'s
+`and unit.association_id = $1` was replaced with `and unit.id = unit.id` and the suite re-run.
+
+```
+FAIL  dues_status@1 scopes every association-owning table it reads to the association placeholder
+      Tests  1 failed | 50 passed (51)
+```
+
+Restored, 51 passed. The guard guards the real thing, and that is the assertion no fixture can make
+on its own.
+
+#### Argus, whole branch
+
+Clean. **`selectivity` 0.20**, which is low - it reasoned over a thin slice of what it discovered,
+so the verdict carries correspondingly less weight and the CLI round below does more of the work.
+Recorded rather than glossed, per `_bmad/custom/argus-review-routing.md` §3.
+
+Its earlier review of the task diff is where the outer-join defect came from; that one is in the
+Completion Notes above because it changed the implementation rather than the record.
+
+#### The local CodeRabbit round - three findings, three confirmed
+
+`review_completed`, 5 of 5 diff files reviewed. Every finding verified against the parser with a
+probe before it was acted on, and all three were real.
+
+**1 (major) - a write carrying a scoped select was accepted.** `scopesOf` finds every `SelectStmt`
+*anywhere* in the tree, so `update unit set … where id in (select … where u.association_id = $1)`
+offered a perfectly scoped subquery and the statement as a whole passed. AD-5's separate "reads
+rather than writes" assertion covers the catalog, so no entry could have exploited this - but
+`sweepVerdict` is what every fixture treats as *the* verdict, and a verdict function that accepts an
+`update` is wrong whatever else happens to catch it. Now the **top-level** node must be a
+`SelectStmt`. Confirmed with the parser first: `UpdateStmt`, `InsertStmt` and `DeleteStmt` are the
+top-level nodes, so the distinction is exact rather than heuristic.
+
+**2 (minor) - a cast placeholder was refused.** `$1::uuid` wraps the `ParamRef` in a `TypeCast`, so
+the predicate was not credited and correct SQL would have been rejected. A **false rejection**, and
+those matter as much as false passes here: an author who cannot get correct SQL past the guard
+rewrites it until the guard stops complaining, which teaches people to work around the check. The
+catalog already writes `$2::date` elsewhere, so this is a shape somebody would have hit. Casts are
+unwrapped on both operands now.
+
+**3 (minor) - a derived table beside a real one made an unqualified predicate look unambiguous.**
+`soleAlias` counted `RangeVar`s, so `from (select 1 as association_id) d, unit where association_id
+= $1` read as a single-table scope and the predicate was credited to `unit` when it might belong to
+`d`. That is a guess, and guessing is the habit this story removes. The count is over **range
+items** now - `RangeVar`, `RangeSubselect`, `RangeFunction`.
+
+Each fix was driven by a failing test first: six cases red, then green. **Fifteen mutations, fifteen
+caught** - the twelve from the rewrite plus one per fix here.
+
+**Ingested:** `argus_ingest` on `5dd22be` scored the major as a genuine Argus miss and wrote the
+lesson *"Look harder in TypeScript under catalog/** for input validation."* Argus had reviewed this
+exact code twice and not found it, which is the whole reason both reviewers run.
+
 ### File List
 
 - `catalog/registry.test.ts` - the sweep rewritten around the parse; the hand-written lexer and its
@@ -264,3 +332,5 @@ catalog caught that within a single test run.
 | 2026-08-21 | Split from 5.1c, which had absorbed it from 5.1b. Same theme, no shared files |
 | 2026-08-21 | Task 1: libpg-query 17.7.4 chosen as a devDependency, measured against all eight bypasses; ready-for-dev |
 | 2026-08-21 | Tasks 2-4: the sweep parses. 642 lines of hand-written lexer removed; Argus found the outer-join semantics the rewrite had wrong |
+| 2026-08-21 | Local CodeRabbit round: three findings, three confirmed - a write carrying a scoped select was accepted, a cast placeholder refused, a derived table hiding ambiguity |
+| 2026-08-21 | Status done, written in the review round's commit rather than after the merge - the mistake 5.1c made |
