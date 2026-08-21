@@ -98,7 +98,7 @@ describeWithDatabase('POST /tools/v1/catalog/execute, end to end', () => {
 
   beforeAll(async () => {
     vi.stubEnv('AGENT_SERVICE_TOKEN', TOKEN)
-  vi.stubEnv('ACTOR_ASSERTION_KEY', ASSERTION_KEY)
+    vi.stubEnv('ACTOR_ASSERTION_KEY', ASSERTION_KEY)
 
     writer = new Client({ connectionString: writerUrl })
     await writer.connect()
