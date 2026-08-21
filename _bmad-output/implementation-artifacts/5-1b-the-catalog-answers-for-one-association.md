@@ -434,7 +434,7 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 
 ### File List
 
-**Production (19)**
+**Production (20)**
 
 - `README.md`
 - `adapters/auth/auth.ts`
@@ -455,8 +455,9 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 - `core/ports/user-directory.ts`
 - `migrations/025_association_scoped_identity.sql`
 - `package.json`
+- `vitest.config.ts`
 
-**Tests (17)**
+**Tests (18)**
 
 - `adapters/auth/session-claims.test.ts`
 - `adapters/auth/user-directory-postgres.test.ts`
@@ -470,6 +471,7 @@ the identity from the SELECT through `authenticate` to the JWT and the session.
 - `catalog/registry.test.ts`
 - `core/auth/authenticate.test.ts`
 - `core/ports/query-log.test.ts`
+- `core/security/dual-llm-boundary.test.ts`
 - `core/security/no-association-creation.test.ts`
 - `migrations/association-scoped-identity.test.ts`
 - `migrations/association.test.ts`
@@ -589,17 +591,31 @@ assertion guarded on `'vendorId' in created` silently did not run, and the case 
 earlier test having run first. Rewritten to seed its own holds and to assert
 `second.outcome === 'matched'` — which is what proves it exercised the fallback path at all.
 
-### The suite was flaky, and this story made it so
+### The suite was flaky, and this story aggravated it
 
-Three of six full runs failed with 5s timeouts in `dual-llm-boundary.test.ts` — on a commit already
-reported green. Not the fix round: it reproduced with the round stashed. `no-association-creation.test.ts`
-called `productSources()` in the `describe` body, so its whole-tree walk ran at **collection** time
-and blocked the worker before any test started, alongside four other guards that scan the tree under
-the default timeout. Memoised and moved out of collection, plus `withFileTypes` to halve the
-syscalls. Five consecutive green runs since.
+Roughly one full run in four failed with a 5s timeout — on code that was correct. It surfaced only
+because a fix round happened to run the suite two dozen times; a single green run on a flaky suite is
+not evidence, and this project's local gate is the only evidence there is.
 
-Worth stating plainly: a green run on a flaky suite is not evidence, and this was found only because
-a fix round happened to run the suite six times.
+**It was not one test.** Timeouts appeared in `dual-llm-boundary.test.ts`, `sole-chat-path.test.ts`
+and others — a different one each run. The common shape: half a dozen structural guards each walk
+the whole source tree synchronously, and under parallel workers they contend for I/O. Three things
+were wrong, and the first two were mine:
+
+1. `no-association-creation.test.ts` called `productSources()` in the `describe` body, so its walk
+   ran at **collection** time and blocked the worker before a single test started. Memoised and
+   moved out of collection.
+2. Both that walk and `dual-llm-boundary`'s used `readdirSync` plus a `statSync` per entry.
+   `withFileTypes` halves the syscalls; the slowest assertion went from 921ms to 347ms.
+3. The 5s default itself. **No scanner asserts anything about how long it takes** — the limit is
+   incidental to what they check, and the test-design reference argues against wall-clock strictness
+   for this exact reason. Raised to 15s in `vitest.config.ts`, which weakens no assertion; a
+   genuinely hung test still fails, later.
+
+Seven of eight runs green afterwards. The eighth was a **different and pre-existing** flake —
+`app/findings/register/export-control.test.tsx` asserting `revokeObjectURL` is "not called at all"
+within a real-time window, last touched in story 4.7 and untouched here. Recorded as an action item
+rather than absorbed into this story's numbers.
 
 ### What the checks found that the tests did not
 

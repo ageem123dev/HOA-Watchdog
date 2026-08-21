@@ -137,6 +137,10 @@ development_status:
   epic-6-retrospective: optional
 
 action_items:
+  - epic: 4
+    action: "app/findings/register/export-control.test.tsx > 'does not revoke the file before the browser has taken it' is flaky - it failed once in eight full-suite runs during story 5.1b with 'expected revokeObjectURL to not be called at all, but actually been called 1 times'. It asserts an absence within a real-time window, which is the 'R - Repeatable' violation the test-design reference names: no real clock, inject the timer. Pre-existing (last touched in story 4.7) and untouched by 5.1b, but recorded because a suite that fails one run in eight teaches people to re-run a red gate rather than read it, and this project has no CI"
+    owner: "Dev"
+    status: open
   - epic: 5
     action: "Amend AD-14's wording in the spine to name the pre-production exception. Story 5.1b edited dues_status@1 in place and re-pinned its digest, by explicit ruling from Matt on 2026-08-20, because AC3 (every entry scopes by association) and AD-14 (a published entry is frozen) could not both hold - published-versions.test.ts also forbids removing a published entry, since a query_log (entry_id, version) resolving to nothing breaks the trail exactly as an edit does. The grounds were that the pilot database holds test data only. As the spine reads today that decision looks like a violation rather than a ruling, and the next person to want an edit has a precedent with no stated limit"
     owner: "Matt"

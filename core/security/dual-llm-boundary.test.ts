@@ -58,12 +58,20 @@ function loadManifest(): DeployManifest {
 function sourceFiles(): { path: string; text: string }[] {
   const found: { path: string; text: string }[] = []
 
+  /**
+   * `withFileTypes`, so the directory read answers "file or directory?" instead
+   * of a `statSync` per entry. This walk took ~920ms against vitest's default 5s
+   * timeout, and under parallel workers all doing synchronous I/O it began
+   * timing out intermittently — a suite that fails one run in eight teaches
+   * everyone to re-run rather than read the failure. Halving the syscalls is the
+   * fix; raising the timeout would only have made the symptom rarer.
+   */
   const walk = (directory: string): void => {
-    for (const entry of readdirSync(directory)) {
-      if (entry === 'node_modules' || entry === '.next') continue
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === '.next') continue
 
-      const full = join(directory, entry)
-      if (statSync(full).isDirectory()) {
+      const full = join(directory, entry.name)
+      if (entry.isDirectory()) {
         walk(full)
         continue
       }
@@ -71,7 +79,7 @@ function sourceFiles(): { path: string; text: string }[] {
       // This file names both credentials by necessity; it is the boundary's
       // own check, not a module that reaches across it.
       if (full === __filename) continue
-      if (!SCANNED_EXTENSIONS.some((extension) => entry.endsWith(extension))) continue
+      if (!SCANNED_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue
 
       found.push({ path: relative(REPO_ROOT, full), text: readFileSync(full, 'utf8') })
     }
