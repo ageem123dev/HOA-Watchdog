@@ -1,7 +1,7 @@
 ---
 Status: review
 baseline_commit: 17b6794bbea06cea3a7c55a1504c9061cb615cc7
-merge_request:
+merge_request: 74
 ---
 
 # Story 5.1c: The actor is proved, not relayed
