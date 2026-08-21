@@ -87,8 +87,16 @@ function productSources(): string[] {
  * `association` and not `association_id`: `\b` does not fall between `n` and
  * `_`, so the column name cannot match. Every insert in this repository is a
  * literal string, so matching the text is matching the statement.
+ *
+ * **The optional schema qualifier is not decoration.** Without it
+ * `insert into public.association` walks straight past this guard, and
+ * `public.` is the form somebody reaches for the moment a `search_path` looks
+ * ambiguous. Verified against the old pattern before this was written: plain
+ * matched, `public.association` and `"public"."association"` both bypassed.
+ * Raised by CodeRabbit on story 5.1b, in both the CLI round and the MR round.
  */
-const CREATES_AN_ASSOCIATION = /insert\s+into\s+"?association"?\b/i
+const CREATES_AN_ASSOCIATION =
+  /insert\s+into\s+(?:(?:"[^"]+"|[a-z_][a-z0-9_$]*)\s*\.\s*)?"?association"?\b/i
 
 describe('the matcher itself', () => {
   /**
@@ -100,6 +108,10 @@ describe('the matcher itself', () => {
     'insert into association (name) values ($1)',
     'INSERT INTO association(name) VALUES ($1)',
     'insert   into\n  "association" (name) values ($1)',
+    // Schema-qualified, which the first version of this matcher walked past.
+    'insert into public.association (name) values ($1)',
+    'INSERT INTO "public"."association" (name) VALUES ($1)',
+    'insert into public . association (name) values ($1)',
   ])('recognises %j as creating an association', (statement) => {
     expect(CREATES_AN_ASSOCIATION.test(statement)).toBe(true)
   })
@@ -108,6 +120,9 @@ describe('the matcher itself', () => {
     'insert into board_member (email, association_id) values ($1, $2)',
     'select association_id from board_member where id = $1',
     'insert into document (association_id) values ($1)',
+    // The qualifier must not make the matcher greedy: these are other tables.
+    'insert into public.board_member (email, association_id) values ($1, $2)',
+    'insert into association_audit (name) values ($1)',
   ])('does not mistake %j for creating one', (statement) => {
     expect(CREATES_AN_ASSOCIATION.test(statement)).toBe(false)
   })

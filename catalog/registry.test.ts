@@ -252,6 +252,65 @@ describe('every entry in the catalog', () => {
         ['unit', 'u'],
       ])
     })
+
+    /**
+     * The three shapes the scanner reads *wrongly* rather than not at all, which
+     * is why they are refused above instead of tolerated. Each was verified
+     * against the real regex before the refusal was written; `from public.unit`
+     * yields `public`, and `from assessment, unit` yields `assessment` alone.
+     */
+    it.each([
+      ['a schema-qualified name', 'select 1 from public.unit', ['public']],
+      ['a comma-separated list', 'select 1 from assessment, unit', ['assessment']],
+    ])('misreads %s, which is why UNANALYSABLE refuses it', (_label, sql, expected) => {
+      expect(tableReferences(sql).map(([table]) => table)).toEqual(expected)
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(sql))).toBe(true)
+    })
+
+    it.each([
+      ['a WITH RECURSIVE CTE', 'with recursive t as (select 1 from unit) select 1 from t'],
+      ['a plain CTE', 'with t as (select 1 from unit) select 1 from t'],
+      ['a derived table', 'select 1 from (select id from unit) u'],
+      ['a quoted identifier', 'select 1 from "unit"'],
+    ])('refuses %s', (_label, sql) => {
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(sql))).toBe(true)
+    })
+
+    it('does not refuse the ordinary shape the catalog actually uses', () => {
+      const sql = 'select 1 from assessment join unit on unit.id = assessment.unit_id'
+
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(sql))).toBe(false)
+    })
+  })
+
+  /**
+   * Comment stripping, in both directions. Without it the scoping sweep is
+   * satisfied by a promise: `-- unit.association_id = $1` is text, and the check
+   * is a text match.
+   */
+  describe('stripping comments before anything is matched', () => {
+    it('removes a line comment and a block comment', () => {
+      expect(withoutComments('select 1 -- unit.association_id = $1\nfrom unit')).not.toContain(
+        'association_id',
+      )
+      expect(withoutComments('select 1 /* unit.association_id = $1 */ from unit')).not.toContain(
+        'association_id',
+      )
+    })
+
+    it('leaves the SQL that actually runs alone', () => {
+      const sql = 'select 1 from unit where unit.association_id = $1'
+
+      expect(withoutComments(sql)).toContain('unit.association_id = $1')
+    })
+
+    it('does not let a commented-out table hide from the scanner either', () => {
+      // The reverse direction: a table named only in a comment is not read by
+      // the query, so demanding a predicate for it would fail a correct entry.
+      expect(tableReferences(withoutComments('select 1 -- from payment\n from unit'))).toEqual([
+        ['unit', 'unit'],
+      ])
+    })
   })
 
   /**
@@ -271,17 +330,38 @@ describe('every entry in the catalog', () => {
    * is extended and this list shrinks. Raised by `ocr` reviewing story 5.1b.
    */
   const UNANALYSABLE = [
-    [/\bwith\s+[a-z_][a-z0-9_]*\s+as\s*\(/i, 'a common table expression'],
+    [/\bwith\s+(?:recursive\s+)?[a-z_][a-z0-9_]*\s+as\s*\(/i, 'a common table expression'],
     [/\b(?:from|join)\s*\(/i, 'a derived table'],
     [/\b(?:from|join)\s+"/i, 'a quoted identifier'],
+    // `from public.unit` captures `public` and never sees `unit`.
+    [/\b(?:from|join)\s+[a-z_][a-z0-9_]*\s*\./i, 'a schema-qualified table name'],
+    // `from assessment, unit` captures `assessment` and never sees `unit`.
+    [/\b(?:from|join)\s+[a-z_][a-z0-9_]*(?:\s+(?:as\s+)?[a-z_][a-z0-9_]*)?\s*,/i,
+      'a comma-separated table list'],
   ] as const
+
+  /**
+   * SQL with its comments removed.
+   *
+   * **The scoping sweep is a text match, so a comment can satisfy it.** Left in,
+   * `-- unit.association_id = $1` makes an entry that scopes nothing look
+   * scoped, and the guard the whole story rests on passes on a promise rather
+   * than a predicate. Raised by CodeRabbit on MR !71 and confirmed:
+   * `/\\bunit\\.association_id\\s*=\\s*\\$1\\b/` matched inside a comment.
+   *
+   * Applied to the reference scan too — a table named only in a comment is not
+   * read by the query, and demanding a predicate for it would fail a correct
+   * entry.
+   */
+  const withoutComments = (sql: string) =>
+    sql.replaceAll(/\/\*[\s\S]*?\*\//g, ' ').replaceAll(/--[^\n]*/g, ' ')
 
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
     '%s uses only SQL the scoping scanner can analyse',
     (_label, entry) => {
       for (const [pattern, what] of UNANALYSABLE) {
         expect(
-          pattern.test(entry.sql),
+          pattern.test(withoutComments(entry.sql)),
           `${entry.id}@${entry.version} uses ${what}, which the scoping scanner ` +
             `below cannot see into — it would skip a table and still report success. ` +
             `Extend tableReferences before allowing it.`,
@@ -295,7 +375,8 @@ describe('every entry in the catalog', () => {
     // property of the case object, so it would print the whole entry.
     '%s scopes every association-owning table it reads to the association placeholder',
     (_label, entry) => {
-      const references = tableReferences(entry.sql).filter(([table]) => SCOPED_TABLES.has(table))
+      const sql = withoutComments(entry.sql)
+      const references = tableReferences(sql).filter(([table]) => SCOPED_TABLES.has(table))
 
       // Not vacuous: an entry that reads no scoped table at all would pass this
       // sweep by touching nothing, so say out loud that it touched something.
@@ -303,7 +384,7 @@ describe('every entry in the catalog', () => {
 
       for (const [table, alias] of references) {
         expect(
-          entry.sql,
+          sql,
           `${entry.id}@${entry.version} reads ${table} as "${alias}" without binding it to $1`,
         ).toMatch(new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`))
       }

@@ -60,8 +60,9 @@ describeWithDatabase('a catalog query, with two associations in the database', (
   /** The same number on both boards' rolls. That is the whole point. */
   const unitNumber = `${RUN_PREFIX}-4B`
 
-  let a: Board
-  let b: Board
+  /** Undefined until `beforeAll` assigns them; the teardown must not assume otherwise. */
+  let a: Board | undefined
+  let b: Board | undefined
 
   /**
    * One association with a unit, an assessment and its payments — the smallest
@@ -125,9 +126,14 @@ describeWithDatabase('a catalog query, with two associations in the database', (
   afterAll(async () => {
     // Children before parents, and `query_log` needs the owner: migration 020
     // revokes DELETE on it from the writer.
-    await owner.query('delete from query_log where actor_id = any($1::uuid[])', [
-      [a.actorId, b.actorId],
-    ])
+    // Optional access, because `a` and `b` are only assigned if `beforeAll` got
+    // that far. Reading `a!.actorId` on a partial setup throws a `TypeError`
+    // here, and vitest then reports *that* instead of the seed failure that
+    // caused it — the original error, which is the one worth reading, is lost.
+    const actors = [a?.actorId, b?.actorId].filter(Boolean)
+    if (actors.length > 0) {
+      await owner.query('delete from query_log where actor_id = any($1::uuid[])', [actors])
+    }
     await writer.query('delete from payment where unit_id in (select id from unit where unit_number = $1)', [unitNumber])
     await writer.query('delete from assessment where unit_id in (select id from unit where unit_number = $1)', [unitNumber])
     await writer.query('delete from unit where unit_number = $1', [unitNumber])
@@ -158,7 +164,7 @@ describeWithDatabase('a catalog query, with two associations in the database', (
   })
 
   it("answers association A with A's figures and nobody else's", async () => {
-    const { rows } = await ask(a.actorId)
+    const { rows } = await ask(a!.actorId)
 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
@@ -170,7 +176,7 @@ describeWithDatabase('a catalog query, with two associations in the database', (
   })
 
   it("answers association B with B's figures and nobody else's", async () => {
-    const { rows } = await ask(b.actorId)
+    const { rows } = await ask(b!.actorId)
 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
@@ -187,7 +193,7 @@ describeWithDatabase('a catalog query, with two associations in the database', (
    * neither can see the other's ledger.
    */
   it('gives the two boards different answers to the identical question', async () => {
-    const [first, second] = await Promise.all([ask(a.actorId), ask(b.actorId)])
+    const [first, second] = await Promise.all([ask(a!.actorId), ask(b!.actorId)])
 
     expect(first.rows).toHaveLength(1)
     expect(second.rows).toHaveLength(1)
@@ -201,13 +207,13 @@ describeWithDatabase('a catalog query, with two associations in the database', (
    * never to a mixture. There is no request field that widens the answer.
    */
   it('records each execution against the association it answered for', async () => {
-    const { provenanceId } = await ask(a.actorId)
+    const { provenanceId } = await ask(a!.actorId)
 
     const { rows } = await writer.query<{ association_id: string }>(
       'select association_id from query_log where id = $1',
       [provenanceId],
     )
 
-    expect(rows[0]!.association_id).toBe(a.associationId)
+    expect(rows[0]!.association_id).toBe(a!.associationId)
   })
 })

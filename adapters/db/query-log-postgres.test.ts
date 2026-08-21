@@ -158,7 +158,13 @@ describeWithDatabase('the Postgres query log', () => {
   it('refuses to record a query for an actor that does not exist', async () => {
     const absent = '00000000-0000-7000-8000-0000000000ff'
 
-    await expect(log.record(entryFor(absent))).rejects.toThrow()
+    // The SQLSTATE, not a bare `rejects.toThrow()`. `23502` is not-null
+    // violation — the subquery found no board member, so `association_id` came
+    // out NULL against a NOT NULL column, which is *why* this is refused. A
+    // generic assertion passes just as happily if the table is missing, the
+    // credential is wrong, or the column was renamed, so it would keep reporting
+    // success long after it had stopped testing anything.
+    await expect(log.record(entryFor(absent))).rejects.toMatchObject({ code: '23502' })
 
     const { rows } = await client.query('select id from query_log where actor_id = $1', [absent])
 
