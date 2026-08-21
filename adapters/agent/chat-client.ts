@@ -158,6 +158,20 @@ export async function askAgent(question: Question, options: AskAgentOptions = {}
   const doFetch = options.fetch ?? globalThis.fetch
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
+  // **Minted before the `try`, deliberately.** `mintActorAssertion` throws when
+  // the subject names nobody, and that is this caller's bug, not the agent being
+  // down. Inside the try, the catch below would relabel it
+  // `AgentUnavailableError` — and a caller that retries on an outage would
+  // then retry a request that can never succeed. Raised by CodeRabbit on MR !74.
+  //
+  // It also means a request that cannot be signed never leaves the process.
+  const actorAssertion = mintActorAssertion(question.actorId, {
+    key: assertionKey,
+    now: Date.now(),
+    ttlMs: ACTOR_ASSERTION_TTL_MS,
+    audience: ACTOR_ASSERTION_AUDIENCE,
+  })
+
   let response: Response
   try {
     response = await doFetch(`${baseUrl}${CHAT_PATH}`, {
@@ -168,15 +182,7 @@ export async function askAgent(question: Question, options: AskAgentOptions = {}
       // AD-18's from the minting end. `actorId` does not travel at all: leaving
       // it beside the assertion would keep the believable path open and make the
       // assertion decoration.
-      body: JSON.stringify({
-        question: question.question,
-        actorAssertion: mintActorAssertion(question.actorId, {
-          key: assertionKey,
-          now: Date.now(),
-          ttlMs: ACTOR_ASSERTION_TTL_MS,
-          audience: ACTOR_ASSERTION_AUDIENCE,
-        }),
-      }),
+      body: JSON.stringify({ question: question.question, actorAssertion }),
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (error) {

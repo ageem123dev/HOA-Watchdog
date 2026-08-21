@@ -238,6 +238,9 @@ describe('verifying an actor assertion', () => {
     ['an empty key', ''],
     ['a blank key', '   '],
   ])('refuses every assertion when the key is %s', (_label, key) => {
-    expect(verify(mint(), { key }).ok).toBe(false)
+    // The *reason*, not merely the refusal. `.ok === false` also passes against
+    // a verifier answering `malformed` or `signature` here, which would hide the
+    // fail-closed behaviour this case exists to pin. Raised by CodeRabbit.
+    expect(verify(mint(), { key })).toEqual({ ok: false, reason: 'unconfigured' })
   })
 })

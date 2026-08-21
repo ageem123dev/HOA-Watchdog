@@ -59,6 +59,36 @@ const ask = (options: Partial<Parameters<typeof askAgent>[1]> = {}) =>
     { env: ENV, fetch: respondWith(200, TURN), ...options },
   )
 
+describe('a blank actor is a caller bug, not an outage', () => {
+  /**
+   * `mintActorAssertion` refuses a subject that names nobody. That throw has to
+   * escape *as itself*: the `catch` around the fetch reports everything it sees
+   * as `AgentUnavailableError`, and a caller that retries on an outage would
+   * then retry a request that can never succeed, forever, over a bug in its own
+   * arguments. Raised by CodeRabbit on MR !74.
+   */
+  it.each([
+    ['an empty actorId', ''],
+    ['a blank actorId', '   '],
+  ])('throws the minting error rather than an outage for %s', async (_label, actorId) => {
+    const fetch = respondWith(200, TURN)
+
+    await expect(
+      askAgent({ question: 'What does 4B owe?', actorId }, { env: ENV, fetch }),
+    ).rejects.toThrow(/subject/i)
+
+    // Not merely "some error": the type is the whole finding, and a bare
+    // `rejects.toThrow()` passes against the outage wrapper too.
+    await expect(
+      askAgent({ question: 'What does 4B owe?', actorId }, { env: ENV, fetch }),
+    ).rejects.not.toBeInstanceOf(AgentUnavailableError)
+
+    // And it never left the process: a request that cannot be signed must not
+    // reach the agent at all.
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
 describe('the ordinary turn', () => {
   it('returns the answer, the provenance id and the rows', async () => {
     const turn = await ask()

@@ -56,15 +56,22 @@ def _names_in(source: str) -> set[str]:
     asked: set[str] = set()
 
     for node in ast.walk(ast.parse(source)):
-        # os.getenv("NAME") / os.environ.get("NAME") / anything("NAME")
+        # os.getenv("NAME") / os.environ.get("NAME") / anything("NAME"), and the
+        # keyword spellings of each. Positional-only was the first draft, and it
+        # let `os.getenv(key="ACTOR_ASSERTION_KEY")` through in silence """ + EM + """ which
+        # is exactly the "spelling nobody predicted" the breadth exists for.
+        # Raised by CodeRabbit on MR !74.
         if isinstance(node, ast.Call):
-            for argument in node.args:
+            for argument in [*node.args, *(keyword.value for keyword in node.keywords)]:
                 if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
                     asked.add(argument.value)
         # os.environ["NAME"]
-        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-            if isinstance(node.slice.value, str):
-                asked.add(node.slice.value)
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            asked.add(node.slice.value)
 
     return asked
 
@@ -108,6 +115,8 @@ from os import environ
 DIRECT = os.getenv("ACTOR_ASSERTION_KEY")
 VIA_GET = os.environ.get("ACTOR_SIGNING_KEY", "")
 VIA_SUBSCRIPT = environ["HMAC_KEY"]
+BY_KEYWORD = os.getenv(key="ACTOR_KEY")
+BY_KEYWORD_WITH_DEFAULT = os.environ.get(key="SIGNING_KEY", default="")
 
 
 def _settings(name):
@@ -130,6 +139,9 @@ def test_the_collector_finds_a_key_a_module_actually_reads() -> None:
     assert "ACTOR_ASSERTION_KEY" in found
     assert "ACTOR_SIGNING_KEY" in found
     assert "HMAC_KEY" in found
+    # The keyword spellings. Positional-only collection let these through.
+    assert "ACTOR_KEY" in found
+    assert "SIGNING_KEY" in found
     # The wrapper case: the name is a literal at a call site that is not
     # `os.getenv`, which is the reason the collector matches every call.
     assert "JWT_SECRET" in found
@@ -139,7 +151,14 @@ def test_the_guard_refuses_that_module_end_to_end() -> None:
     """Collector and matcher composed, which is how the real sweep runs them."""
     offenders = sorted(n for n in _names_in(A_MODULE_THAT_READS_THE_KEY) if KEY_SHAPED.search(n))
 
-    assert offenders == ["ACTOR_ASSERTION_KEY", "ACTOR_SIGNING_KEY", "HMAC_KEY", "JWT_SECRET"]
+    assert offenders == [
+        "ACTOR_ASSERTION_KEY",
+        "ACTOR_KEY",
+        "ACTOR_SIGNING_KEY",
+        "HMAC_KEY",
+        "JWT_SECRET",
+        "SIGNING_KEY",
+    ]
 
 
 def test_the_real_package_yields_names_to_check() -> None:

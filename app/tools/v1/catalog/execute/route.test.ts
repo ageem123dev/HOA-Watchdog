@@ -320,12 +320,22 @@ describe('POST /tools/v1/catalog/execute', () => {
    */
   describe('the actor assertion', () => {
     const KEY = ASSERTION_KEY
-    const NOW = Date.now()
 
+    /**
+     * `Date.now()` per call, not a `NOW` captured when the suite is registered.
+     * A describe-level constant is read at collection time, so every assertion
+     * from this helper expires sixty seconds after *registration* — and if
+     * the suite takes longer than that to reach this block, the valid-assertion
+     * cases fail on test scheduling rather than on route behaviour.
+     *
+     * `validAssertion` at the top of this file already records that decision for
+     * itself; this helper had drifted from it. Cases needing a controlled clock
+     * take their own local timestamp. Raised by CodeRabbit on MR !74.
+     */
     const assertionFor = (subject: string, overrides: Record<string, unknown> = {}) =>
       mintActorAssertion(subject, {
         key: KEY,
-        now: NOW,
+        now: Date.now(),
         ttlMs: 60_000,
         audience: 'tools/v1',
         ...overrides,
@@ -363,9 +373,10 @@ describe('POST /tools/v1/catalog/execute', () => {
 
     /** The attack: a legitimate assertion with the subject swapped. */
     it('refuses a subject altered after signing, and still accepts a valid assertion', async () => {
-      const [, signature] = assertionFor(ACTOR).split('.')
+      const now = Date.now()
+      const [, signature] = assertionFor(ACTOR, { now }).split('.')
       const otherMember = Buffer.from(
-        JSON.stringify({ sub: 'somebody-else', exp: NOW + 60_000, aud: 'tools/v1' }),
+        JSON.stringify({ sub: 'somebody-else', exp: now + 60_000, aud: 'tools/v1' }),
         'utf8',
       ).toString('base64url')
 
@@ -379,7 +390,7 @@ describe('POST /tools/v1/catalog/execute', () => {
     })
 
     it('refuses an expired assertion, and still accepts a valid assertion', async () => {
-      const response = await callWith(assertionFor(ACTOR, { now: NOW - 120_000 }))
+      const response = await callWith(assertionFor(ACTOR, { now: Date.now() - 120_000 }))
 
       expect(response.status).toBe(401)
       expect(execute).not.toHaveBeenCalled()
