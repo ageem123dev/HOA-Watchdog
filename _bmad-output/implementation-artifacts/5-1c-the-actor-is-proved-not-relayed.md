@@ -558,6 +558,44 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 environment. **Not** the agent service's - `test_relay_holds_no_key.py` exists to make holding it
 there a failing test, and AD-18's whole claim is that the relay cannot mint.
 
+#### MR !74, CodeRabbit round 1 - four findings, four confirmed
+
+Reviewed `d027aa0`; `e1c49e1` had landed seconds earlier and changed only the story markdown, so
+the findings applied to identical code. Fixed on `f619c30`, each answered on its own thread.
+
+**1. `chat-client.ts` - a caller bug reported as an outage.** `mintActorAssertion` throws when the
+subject names nobody, and the call sat inside the `try` whose `catch` relabels everything
+`AgentUnavailableError`. A caller that retries on an outage would retry a request that can never
+succeed, forever, over a bug in its own arguments. The mint is above the `try` now, so the error
+escapes as itself - and an unsignable request never leaves the process. Proved by RED: two cases
+failed before the move, asserting the error *type* rather than merely that something threw.
+
+**2. `test_relay_holds_no_key.py` - a hole in the capability sweep.** `_names_in` walked positional
+arguments only, so `os.getenv(key="ACTOR_ASSERTION_KEY")` passed in silence. **The docstring was
+arguing against the code beneath it**: it says the breadth exists to catch the spelling nobody
+predicted, and the keyword form is one. Fixed, with the fixture module reading a key two further
+ways. Mutation-proved: positional-only turns two cases red.
+
+**3. `route.test.ts` - a clock captured at collection time.** Every assertion was minted against a
+`NOW` read when Vitest registered the suite, against a 60-second TTL. A slow run would fail the
+valid-assertion cases on scheduling rather than on the route. **The file already argued this for
+itself** - `validAssertion` carries a comment explaining why it is minted per call rather than once
+at module scope - and this helper had drifted from that decision. Fixed; the two cases needing a
+controlled clock take their own timestamp.
+
+**Recorded as a robustness fix, not claimed as proved.** The failure is timing-dependent, so
+reverting it turns nothing red. Saying so is the honest form: a mutation result that does not exist
+must not be implied by listing this beside the three that have one.
+
+**4. `actor-assertion.test.ts` - a refusal without a reason.** The unconfigured-key cases asserted
+`.ok === false` only, which passes against a verifier answering `malformed` or `signature` and so
+did not pin the fail-closed behaviour the module documents. Now `toEqual({ ok: false, reason:
+'unconfigured' })`. Mutation-proved.
+
+**The pattern in 2 and 3 is worth naming:** both are places where this story had *written down the
+right rule* and then not followed it a few lines later. Neither reviewer that read the code alone
+found them; both were found by a reviewer comparing the code against its own stated intent.
+
 ## Change Log
 
 | Date | Change |
@@ -569,6 +607,7 @@ there a failing test, and AD-18's whole claim is that the relay cannot mint.
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
 | 2026-08-21 | 4b/4c: the AC audit found an unproved db-level refusal, and mutation found the forgery too short to test the signature check |
+| 2026-08-21 | MR !74 round 1: four CodeRabbit findings, all confirmed and fixed on f619c30 |
 | 2026-08-21 | Step 6 integration review: Argus clean; the chain matches end to end, and ACTOR_ASSERTION_KEY is missing from .env.local |
 | 2026-08-21 | CodeRabbit CLI round: 3 of 5 confirmed; four claim guards had no test that could reach them |
 | 2026-08-21 | Tasks 3 and 5: the expiry window gains a bound that can fail, and `actorId` is refused rather than ignored. All tasks complete |
