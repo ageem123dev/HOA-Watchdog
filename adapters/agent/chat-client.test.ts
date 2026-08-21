@@ -59,6 +59,68 @@ const ask = (options: Partial<Parameters<typeof askAgent>[1]> = {}) =>
     { env: ENV, fetch: respondWith(200, TURN), ...options },
   )
 
+describe('the signing key is used exactly as configured', () => {
+  /**
+   * **The gateway verifies with the raw variable.** `route.ts` passes
+   * `process.env.ACTOR_ASSERTION_KEY` straight to `verifyActorAssertion`, which
+   * trims only to decide whether the key is blank and signs with the value it
+   * was given. A client that trims before signing therefore signs with a
+   * *different key* than the one the gateway checks against — and because
+   * both sides read the **same variable**, that is a mismatch this system
+   * inflicts on itself rather than one an operator can see.
+   *
+   * The symptom would be every turn refused with reason `signature`, which
+   * reads as somebody forging assertions rather than as a stray space in
+   * `.env.local`. Raised by CodeRabbit on MR !74.
+   */
+  it.each([
+    ['a trailing space', 'a-signing-key-that-is-long-enough '],
+    ['a leading space', ' a-signing-key-that-is-long-enough'],
+    ['a trailing newline', 'a-signing-key-that-is-long-enough\n'],
+    ['surrounding whitespace', '  a-signing-key-that-is-long-enough\t'],
+  ])('mints a verifiable assertion when the key has %s', async (_label, key) => {
+    const fetch = respondWith(200, TURN)
+
+    await askAgent(
+      { question: 'What does 4B owe?', actorId: ACTOR },
+      { env: { ...ENV, ACTOR_ASSERTION_KEY: key }, fetch },
+    )
+
+    const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    const payload = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>
+
+    // Verified with the key **exactly as configured**, which is what the
+    // gateway does.
+    expect(
+      verifyActorAssertion(payload.actorAssertion as string, {
+        key,
+        now: Date.now(),
+        audience: ACTOR_ASSERTION_AUDIENCE,
+      }),
+    ).toEqual({ ok: true, subject: ACTOR })
+  })
+
+  /**
+   * The other half: a key that is *only* whitespace is still no key, and must
+   * refuse to send rather than signing with an empty string.
+   */
+  it.each([
+    ['an empty key', ''],
+    ['a blank key', '   '],
+  ])('still refuses to send for %s', async (_label, key) => {
+    const fetch = respondWith(200, TURN)
+
+    await expect(
+      askAgent(
+        { question: 'What does 4B owe?', actorId: ACTOR },
+        { env: { ...ENV, ACTOR_ASSERTION_KEY: key }, fetch },
+      ),
+    ).rejects.toBeInstanceOf(AgentNotConfiguredError)
+
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
 describe('a blank actor is a caller bug, not an outage', () => {
   /**
    * `mintActorAssertion` refuses a subject that names nobody. That throw has to

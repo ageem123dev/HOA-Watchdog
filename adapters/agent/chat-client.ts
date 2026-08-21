@@ -127,14 +127,32 @@ function readConfig(env: Readonly<Record<string, string | undefined>>) {
 
   const baseUrl = env[BASE_URL_VARIABLE]?.trim()
   const token = env[TOKEN_VARIABLE]?.trim()
-  const assertionKey = env[ASSERTION_KEY_VARIABLE]?.trim()
+
+  // **Not trimmed.** `verifyActorAssertion` signs with the value it is handed
+  // and trims only to decide whether a key is blank; `route.ts` hands it
+  // `process.env.ACTOR_ASSERTION_KEY` raw. Trimming here would sign with a
+  // different key than the gateway verifies with — and since both sides read
+  // the **same variable**, that is a mismatch the system inflicts on itself.
+  //
+  // The symptom is every turn refused with reason `signature`, which reads as
+  // somebody forging assertions rather than as a stray space in `.env.local`.
+  // Raised by CodeRabbit on MR !74.
+  //
+  // `baseUrl` and `token` above stay trimmed, and the difference is real rather
+  // than an inconsistency: the URL is parsed, not compared, and the token is a
+  // *different variable* from the `AGENT_SERVICE_TOKEN` it is checked against,
+  // so trimming there cannot desynchronise one value from itself.
+  const assertionKey = env[ASSERTION_KEY_VARIABLE]
 
   if (!baseUrl) missing.push(BASE_URL_VARIABLE)
   if (!token) missing.push(TOKEN_VARIABLE)
   // Refuse to send rather than sending a turn the gateway will reject: a
   // failure at the far end costs a model call and reads as an outage instead of
-  // as a missing variable.
-  if (!assertionKey) missing.push(ASSERTION_KEY_VARIABLE)
+  // as a missing variable. Blankness is judged on the trimmed form; what gets
+  // *used* is the original.
+  if (typeof assertionKey !== 'string' || assertionKey.trim() === '') {
+    missing.push(ASSERTION_KEY_VARIABLE)
+  }
   if (missing.length > 0) throw new AgentNotConfiguredError(missing)
 
   // Absolute https, for the reason story 3.3 gave in the other direction: the
