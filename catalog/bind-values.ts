@@ -12,7 +12,19 @@
 import type { CatalogEntry } from './entry'
 
 /**
- * The values for `$1 … $n`, in the entry's declared order.
+ * The values for `$1 … $n`: the association first, then the entry's declared
+ * order.
+ *
+ * **`$1` is always the association and is never an entry parameter.** It is
+ * prepended here rather than at the call site because this function is the one
+ * place the ordering contract is applied, and an offset applied somewhere else
+ * is an offset that can disagree with the one applied here. `registry.test.ts`
+ * holds every entry to `bind.length === highest placeholder - 1` and refuses a
+ * parameter named `associationId`, so an entry cannot quietly reclaim `$1` and
+ * let a caller choose whose records it reads.
+ *
+ * The association is supplied by the executor from the provenance write, not by
+ * the caller — see `core/ports/query-log.ts`.
  *
  * **An absent optional parameter binds as `null`, never as `undefined`** — as
  * this function's own contract, not as a workaround for the driver. An earlier
@@ -49,8 +61,12 @@ import type { CatalogEntry } from './entry'
 export function bindValues(
   entry: CatalogEntry,
   parameters: Readonly<Record<string, unknown>>,
+  associationId: string,
 ): readonly unknown[] {
-  return entry.bind.map((name) =>
-    Object.hasOwn(parameters, name) ? (parameters[name] ?? null) : null,
-  )
+  return [
+    associationId,
+    ...entry.bind.map((name) =>
+      Object.hasOwn(parameters, name) ? (parameters[name] ?? null) : null,
+    ),
+  ]
 }

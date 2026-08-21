@@ -24,6 +24,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { executable } from './executable-sql'
 
+import { ASSOCIATION_SCOPED_TABLES } from '../core/association/scoped-tables'
+
 const writerUrl = process.env.WATCHDOG_WRITER_DATABASE_URL
 const configured = Boolean(writerUrl)
 
@@ -49,22 +51,7 @@ const DEMO_ID = '00000000-0000-7000-8000-000000000001'
  * Task 1 decision records why none was judged to reach its association through a
  * parent instead.
  */
-const SCOPED_TABLES = [
-  'board_member',
-  'document',
-  'extraction',
-  'vendor',
-  'quarantine_item',
-  'unit',
-  'unit_holder',
-  'unit_membership',
-  'assessment',
-  'payment',
-  'held_payment',
-  'query_log',
-  'finding',
-  'finding_alert',
-]
+const SCOPED_TABLES = ASSOCIATION_SCOPED_TABLES
 
 /** Tables that legitimately carry no `association_id`, and why. */
 const UNSCOPED_TABLES = new Set([

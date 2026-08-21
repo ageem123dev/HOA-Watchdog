@@ -1,6 +1,6 @@
 ---
 name: bmad-ship-story
-description: 'Run a single story end-to-end on its own branch: create it, implement it test-first, review it locally with Argus and open-code-review, open a merge request to main, and stop at ready-to-merge. Use when the user says "ship a story", "ship the next story", "run the story pipeline", or "ship story <id>". Reviews are local and synchronous, so one run goes end to end; called in a loop by bmad-implement-epic.'
+description: 'Run a single story end-to-end on its own branch: create it, implement it test-first, review it locally with Argus and the CodeRabbit CLI, open a merge request to main, and stop at ready-to-merge. Use when the user says "ship a story", "ship the next story", "run the story pipeline", or "ship story <id>". The MR review is asynchronous, so a run may end at a wait; called in a loop by bmad-implement-epic.'
 ---
 
 # Ship Story Pipeline
@@ -69,61 +69,38 @@ Status `ready-for-dev`/`in-progress` → invoke **`bmad-dev-tdd`** (failure-mode
 
 Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`) and `git push -u origin story/{story_key}`.
 
-### 4b — Local review, before the MR exists
+### 4b — The one local CodeRabbit review, before the MR exists
 
-**The reviewer is local and synchronous.** Nothing reviews the MR, so every review this change gets, it gets here. Rounds are no longer scarce — `ocr` has no rate limit, only cost (~0.9–2.1M tokens a run) — so iterate until a round comes back clean.
+**Exactly one CLI round per story.** Fix everything it raises, then Section 5 — CodeRabbit reviews the MR itself, and that is the second look at the fixes.
 
-**One base for the whole step: local `main`, fast-forwarded at step 2.** Argus, `ocr` and the diff checks all use it; mixing in `origin/main` means they score different diffs the moment anyone merges upstream mid-round.
+The first review finds the most. Story 1.6b took 8 rounds and ~11 pushes; moving the first round here took 1.6c and 1.6d to one each.
 
-1. **`argus_review` first** (`git_range: main...HEAD`). Fix test-first, run 8a's gate on the fix diff, and commit. `ocr` reads tests too once coverage is configured (below), but it is **measurably weak on them** — so this is not a warm-up for `ocr`.
+**One base for the whole step: local `main`, fast-forwarded at step 2.** Argus, the CLI and the diff checks all use it; mixing in `origin/main` means they score different diffs the moment anyone merges upstream mid-round.
 
-2. **`ocr`, with the story as its background. The background file is not optional:**
+The CLI is Linux/macOS only, so it runs in WSL against the Windows checkout.
+
+1. **`argus_review` first** (`git_range: main...HEAD`). Fix what it finds test-first, run 8e's *gate* on the fix diff — sensitivity check and test-value pass, not its push — and commit. The CLI round is the scarce one; spending it on defects Argus already named wastes it.
+2. **`argus_review` again on that commit**, unless item 1 found nothing and nothing was committed. `argus_ingest` joins the two reviews on commit SHA and *skips* a CodeRabbit review with no Argus run on it, so the CLI round must see a SHA an Argus run saw.
+3. **Record the SHA, then review.** The stream carries no commit, so the join key is whatever is captured here — nothing may commit between these two lines:
 
    ```bash
-   ocr review --from main --to HEAD --audience agent -f json \
-     -B {story_file} --max-tokens-budget 250000 > .argus/ocr.json 2> .argus/ocr.err
+   COMMIT=$(git rev-parse HEAD)
+   wsl.exe -e bash -lc 'export PATH="$HOME/.local/bin:$PATH"; cd {repo_path_wsl} && coderabbit review --base main --committed --agent' > .argus/cr.jsonl 2> .argus/cr.err
    ```
 
-   Measured on commit `3450d7d`, the same six files both ways: given the ACs it found a real defect — a reviewed finding could still be emailed — and rated it critical. Blind, it missed that entirely and returned eleven generic nitpicks (missing error handling, missing JSDoc, a magic number). **A run without `-B` has reviewed the code's form, not the story.**
+   `--dir` is a **filter** in CLI 0.7.3 ("review only git changes inside this directory"), not a working directory — `cd` first, or the review scopes to nothing. No user action, and it does not re-trigger on a push. Minutes, not seconds. Capture stderr — an error otherwise leaves an empty file and no reason.
+4. **Accept only `status: "review_completed"` on the `complete` event.** `review_skipped` is not a clean review, and neither is an empty or unparseable file: the adapter returns *zero reviews* for those, which is not the same as one review with zero findings. Treating them alike is the false-clean 8c exists to refuse.
+5. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Otherwise every path in `A` must appear in the `complete` event's `reviewedFiles`; a path in neither is unreviewed. `reviewedFiles` also names the files reviewed and *clean* — 25 against 10 findings in the first capture — which a finding list cannot express.
+6. **Validate every finding before any of it reaches `argus_ingest`.** This rule was written for a different reviewer and it applies here unchanged: CodeRabbit's output was once treated as ground truth and ingested unverified, and `argus_ingest` writes *everything in its input that Argus did not find* to memory as a miss — so a false positive there is not noise, it is a lesson teaching Argus to reproduce it.
 
-3. **Read `retry_report.failed_requests` before reading `comments`.** A failed request drops that file from the review and the run **still exits 0 with a finding count** — three files vanished that way on the first real run here, and the result read as clean. Non-zero means the review is incomplete: fix it and re-run rather than triaging a partial. The known cause is in `{reviewer_config}`.
-
-4. **Reconcile against the diff, and fail on empty.** Let `A` = `git diff --name-only main...HEAD`. **If `A` is empty, stop — you are on the wrong branch.** Every remaining path must appear in the run's manifest; one that appears in neither is unreviewed.
-
-5. **Triage.** Expect the same defect filed once per file it touches — three times on `3450d7d` — and a tail of documentation-comment nits. Verify each finding against the real file before acting on it (step 7); `ocr` re-files comments across files itself and warns when it does. Fix test-first, run 8a's gate, commit, then go back to 1.
-
-6. **Push before Section 5** — `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
-
-**Coverage is configured, not compiled in — check it before trusting a clean run.** `ocr` skips test files (`default_path`) and `.md` (`unsupported_ext`) **by default**. `rule.json`'s `include` key overrides both, and `{reviewer_config}` records the global file that does it here. Confirm it is live rather than assuming: `ocr review --from main --to HEAD --preview` must list your `.test.ts` files and your story file under *Will review*.
-
-**Precedence, from `internal/agent/preview.go` `whyExcluded`:** user `exclude` (and `--exclude`) beats user `include`, which beats *both* built-in lists. `include` is additive — a path that does not match still gets the default treatment. So coverage goes up globally and is dialled back per run, never the other way about.
-
-**`ocr` reading a test file is not the test-value pass, and does not replace it.** Measured on story 4.8's five test files at `5ebca8c^`, against four vacuous tests a reviewer had already found: it caught **one** — `expect(source).toContain('notifyFindings')` standing in for "alerting cannot fail the upload", named precisely and well argued. It missed the `toContain('12')` against a fixture amount of `1240.00`, the two reads of an unchanged table asserted to agree, and the assertion restating its neighbour. It also produced a **`high`-severity false positive** claiming green tests "will fail", specific enough and confident enough to act on — acting on it would have damaged a correct test.
-
-It was tuned on a benchmark that excludes test files, so its judgement is weakest exactly where this project's defect class lives. **Argus and 8a's test-value pass stay load-bearing**, and every test-file finding is verified against the code before it is acted on.
-
-**7. Validate every finding before any of it reaches `argus_ingest`.** CodeRabbit's output was treated as ground truth and ingested unverified. `ocr`'s must not be. `argus_ingest` writes *everything in its input that Argus did not find* to memory as a miss — so a false positive there is not noise, it is a lesson teaching Argus to reproduce it. On the story 4.8 test scan a `high` finding claimed green tests "will fail"; it was wrong, specific, and confidently argued. Ingested, it would have taught Argus to flag correct tests as broken.
-
-   1. **Verify each finding against the real file.** Confirmed = the cited code exists, says what the finding claims, and the defect would actually manifest. Everything else is refuted — including "plausible, but the code does not do that".
-   2. **Dedup before counting.** `ocr` files one defect once per file it touches — three times on `3450d7d`. Three copies would become three lessons and skew the weighting.
+   1. **Verify each finding against the real file.** Confirmed = the cited code exists, says what the finding claims, and the defect would actually manifest. Everything else is refuted — including "plausible, but the code does not do that". On story 5.1b CodeRabbit correctly caught that a scoping guard could be satisfied by SQL inside a comment, and in the same round asserted a migration number that was wrong.
+   2. **Dedup before counting.** One defect filed once per file it touches would otherwise become several lessons and skew the weighting.
    3. **Only confirmed, deduped findings are ingested.** Record the refuted ones in Review Findings rather than discarding them silently: a reviewer's false-positive rate is a fact about the reviewer, and this one's is not zero.
-   4. **Severity maps into CodeRabbit's vocabulary**, which is what `argus_ingest` reads: `critical→critical`, `high→major`, `medium→minor`, `low→trivial`. It records critical and major by default, so an `ocr` `medium` is ingested only with `severities` overridden.
-   5. **Ingest before fixing, and pass `commit` explicitly.** A later round reviews different code and cannot score this one; without `commit` the join finds nothing and it silently learns nothing.
+7. **`argus_ingest` with both `from` and `commit`.** `from: .argus/cr.jsonl`, `commit: $COMMIT`. **Without `commit` it silently learns nothing**, because the stream has no SHA to join on and an unjoinable review is skipped. Severities come from committed `argus.config.json` (critical + major). **Default `dry_run: false`** — that is the call that writes. Ingest before fixing; a later round reviews different code and cannot score this one.
+8. Fix test-first, run the same gate, commit. **Do not run a second CLI round.** Then `argus_review` on that fix commit, so the MR round has a SHA to join on.
+9. **Push before Section 5** (*Merge request to main*). `glab mr create` builds the MR from the *remote* branch, so fix commits left unpushed are silently absent from it.
 
-   **The converter is `scripts/ocr-to-argus.mjs`.** No change was needed in the argus repo: its CLI adapter reads generic field names (`comment`, `fileName`, `line`, `severity`, `category`) and guards only on the event `type`, so a synthesised stream is accepted like any other.
-
-   ```bash
-   node scripts/ocr-to-argus.mjs --in .argus/ocr.json --list        # verify each, then
-   node scripts/ocr-to-argus.mjs --in .argus/ocr.json --commit $COMMIT \
-     --confirmed 4,9 --reviewed-from main...HEAD --out .argus/ocr-review.jsonl
-   ```
-
-   `--confirmed` is required — there is no carry-everything path — and `--confirmed none` is legitimate: a review that confirmed nothing is not the same as a review that never ran. It refuses outright when `retry_report.failed_requests` is non-zero, so a partial review cannot become a lesson. Give it `--reviewed-from` or `--reviewed`: `reviewedFiles` carries what was reviewed **and clean**, which a finding list cannot express, and deriving it from the findings would tell Argus that every clean file went unreviewed.
-
-   Then `argus_ingest` with `from: .argus/ocr-review.jsonl` and `commit: $COMMIT`.
-
-   **Findings ingest as `source: "coderabbit"`** — the adapter hard-codes it. Harmless to what Argus learns, wrong in the record; correcting it is a change in the argus repo, not this one.
-
+**The CLI ignores `.coderabbit.yaml` `path_filters`.** The 2026-08-09 capture reviewed `_bmad-output/**`, which the file excludes. Expect the local round to review more than the merge request will.
 ### 4c — The AC audit, before the MR
 
 **For each acceptance criterion, name the test that would fail if the behaviour were removed — and show it would.** Record `path::case`, then for each either cite the round where its sensitivity was already proven or run the Step 9 check now: break the covered behaviour, confirm that case fails, restore.
@@ -143,7 +120,7 @@ Cheap and mechanical. Do not skip it because the story felt thorough — that is
 
 ### 6 — Local adversarial review: the **integration** pass
 
-**Not the only review.** `_bmad/custom/review-gate.md` is the authoritative contract: **every diff that will reach `main` gets both checks** — each task's diff (Step 9 of `bmad-dev-tdd`), this whole-story pass, and **every review-fix push in Step 8a**. This step is what per-task reviews structurally cannot be: a look at the whole change at once, where an interaction between task 2's schema and task 3's write path is visible.
+**Not the only review.** `_bmad/custom/review-gate.md` is the authoritative contract: **every diff that will reach `main` gets all three checks** — the sensitivity check, the test-value pass and the adversarial review — at each of three moments: each task's diff (Step 9 of `bmad-dev-tdd`), this whole-story pass, and **every review-fix push in Step 8e**. This line said "both checks" until CodeRabbit caught it on MR !71; three checks at three moments is a pair of threes, and naming one of them "both" is how a check gets quietly dropped. This step is what per-task reviews structurally cannot be: a look at the whole change at once, where an interaction between task 2's schema and task 3's write path is visible.
 
 **This step is not optional and has been skipped before.** Stories 1.5c and 1.5d were implemented, gated and nearly shipped without it, with per-task mutation testing silently standing in for it. It does not stand in for it: on 1.5d the review found **four** defects after 29 mutations had found none of them, one of which showed "Reading" to a treasurer forever for a document that had been read.
 
@@ -163,15 +140,46 @@ Run `{gate}` — the whole of it — **on the exact head the MR points at**. Not
 
 Report it as what it is: "gates green locally on `<sha>`".
 
-### 8 — The fix-diff gate, and the close-out
+### 8 — CodeRabbit loop (the `/loop` tick)
 
-**8a. Every fix diff gets the gate before it is committed** — sensitivity check, **test-value pass**, and one `argus_review` scoped to what the round touched. `_bmad/custom/review-gate.md` is the authoritative contract. This applies to fixes from 4b, from Section 6, and to anything Section 7 turns up.
+**8a. Request, then wait.** Where `{review_trigger}` is manual, **no review happens until it is asked for** — time the wait from *your request*, not from `created_at` or the push. A review takes ~20 min on a new MR, ~4 after a fix push; checking earlier cannot succeed. Under `/loop` that wait is the next `ScheduleWakeup`; standalone, say when the review is due and STOP.
 
-**One commit and one push per round.** Fix every finding in the round first, then gate, then commit. Batching gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
+**On waking, before reading anything:** confirm the MR is still `opened` and its `sha` is still yours. A merge can land while you sleep — that happened on story 1.5 — and 8e would then push fixes to a branch about to be deleted. If either changed, stop and move any unmerged commits to a fresh branch and MR.
 
-**A finding that asks you to weaken one of `{invariants}` is an architecture decision for the user, not a fix** — route it there and say so. Verify factual claims before acting: read the installed types, run the probe, grep the config. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
+**8b. Read the review.** CodeRabbit posts as a **service account** (`{reviewer_account}`), not a name containing "coderabbit" — filtering on the name finds nothing and looks like "no review yet". Fetch `.../merge_requests/{iid}/notes?per_page=100&sort=desc` and match **`Actionable comments posted: N`**; that line is the review. Threads from `.../discussions`. Only trust one whose commit matches the current head.
 
-**Caps:** ~3–4 rounds; a round that only repeats already-skipped findings counts as clean.
+`per_page=100` is **one page** — story 1.5's MR reached 64 notes, and replies push a review down fast. Follow `X-Next-Page` until the current-head review is found or the pages run out. Concluding "no review" from page one is the same absence-of-evidence error in a new place.
+
+A review announces itself in **four** shapes. Match all of them, and read the note body rather than trusting its first line:
+
+| Shape | Means |
+| --- | --- |
+| `Actionable comments posted: N` | N findings |
+| **`No actionable comments were generated`** | **reviewed and clean — this is how convergence actually arrives** |
+| `Duplicate comments (N)` | an incremental re-review of repeats; carries **no** actionable line |
+| `Outside diff range comments (N)` | findings that could not be posted inline |
+
+The clean shape is the one that matters most: keying only on `Actionable comments posted:` means a clean MR **never converges** and the loop waits forever for a line that is never coming. That happened on MR !8 — reviewed clean in 24 seconds, reported as "awaiting review" for an hour.
+
+**A clean re-review can arrive as an *edit*, not a new note.** CodeRabbit updates its existing summary comment in place, so a poll that only looks for new notes sees nothing and waits forever. Match on the body and on `updated_at`, not on note id or position.
+
+A note is a review only if it carries a `Commits` / `Files selected for processing` block. The **summary comment** (`<!-- … summarize by coderabbit.ai -->`) does not, and carries no findings. Do not treat a stray `rate limited` string as proof either — it appears in stale fragments of otherwise-complete reviews. A **live** refusal is its own note, posted within seconds of the request, and says which: `Review rate limited`, or `Head commit changed`.
+
+**8c. Convergence.** Precondition: a service-account review matching the current head, in any of 8b's four shapes. Without it nothing below applies — "zero unresolved threads" and "no review yet" are both true *before* any review, so a predicate lacking this precondition reports a never-reviewed story clean. An earlier version of this file did.
+
+Converged = the local gates green on the current head AND every finding **fixed** (push → new head → back to 8a), **skipped** with a reason on its thread, or **resolved by CodeRabbit**. Anything else is pending — including a review still missing after the wait.
+
+**8d. Triage.** Fix real correctness/security/accessibility issues. A finding that asks you to weaken one of `{invariants}` is an architecture decision for the user, not a fix — route it there and say so. **Verify factual claims first** — read the installed types, run the probe, grep the config; CodeRabbit correctly caught that `requestTimeout` doesn't bound socket idleness, and in the same round wrongly asserted the repo runs markdownlint. Skip low-value nits with a written reason, preferably recorded in the code or migration itself.
+
+**8e. Apply — one commit and one push per round.** Fix **every** finding in the round first, then **run the review gate on the whole round's diff before pushing** — sensitivity check, **test-value pass**, and one `argus_review` scoped to what the round touched (`_bmad/custom/review-gate.md`). Then **one** commit, **one** push.
+
+**A push does not trigger a review.** Where `{review_trigger}` is manual it never does; where it is automatic, CodeRabbit still pauses after `auto_pause_after_reviewed_commits` (`{auto_pause}` here, default 5) and stays paused until asked. Either way the rule is the same: **after every push, request a review and then confirm a review body exists for the current head.** An unrequested MR, a paused branch and a clean review are indistinguishable from outside — the false-clean 8c exists to refuse.
+
+Post it with `glab mr note create`, never `glab api --field`: a body starting with `@` is read as a filename and the request silently posts nothing. `@coderabbitai review` covers the latest changes; `@coderabbitai full review` re-reviews everything.
+
+**Not a commit per finding.** Story 1.6b answered 4 rounds with 12 commits, and each one cost a re-review and a place in CodeRabbit's `auto_pause_after_reviewed_commits` budget — it paused itself mid-story twice, which from outside is indistinguishable from a clean review. Batching also gives the reviewer the round as one diff, which is how a fix that breaks a sibling fix becomes visible; on 1.6b two such defects were found only because something looked at the fix diff whole.
+
+Keep the reasoning that would have gone in several messages — write it as sections of one commit body rather than losing it.
 
 The test-value pass matters most *here*, because a fix diff is where a test's premise expires. `python3 _bmad/scripts/tests_touched.py <range>` lists the cases the fix touched; for each, ask **vacuous?** and **expired?**
 
@@ -180,18 +188,25 @@ The test-value pass matters most *here*, because a fix diff is where a test's pr
 
 **A fix is the highest-risk diff in the story, not the lowest.** On story 1.5d, rounds 2 and 3 produced **8 findings and every one was in a fix from a previous round** — a swallowed 404, a stale read that reintroduced the bug it was fixing, a `NULL` token written against a check constraint. Fixes are written under time pressure, against a narrower model, on machinery with invariants already in place. Skipping the gate here is skipping it where it pays most.
 
-**8b. The close-out rides in the last round's commit, not after it.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`, and the round's Review Findings — all in the **same commit and push** as the round's fixes. Not a commit of its own once the reviews come back clean.
+**8e-close. The close-out rides in the round's commit, not after it.** Story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`, and the round's Review Findings — all in the **same commit and push** as the round's fixes. Not a commit of its own once the review comes back clean.
 
 Because a story with no fixes this round still has a round: if the review was clean and nothing needed changing, the close-out *is* the commit.
 
 **Why: a close-out pushed after convergence races the merge, and loses.** You announce ready-to-merge, the user merges the head they were shown, and the close-out lands on the branch behind them — so `main` keeps `Status: review`. Step 1 then picks the *finished* story again instead of the next one. That has needed a follow-up docs MR five times: stories 2.1, 2.6, 2.7, 3.2 and 4.4 (MR !57).
 
-Marking `done` before the final gate run is safe because Section 9 re-runs it on the exact head and 9.3 specifies the undo. `done` on an unmerged branch means ready-to-merge, and a further round simply amends it.
+Marking `done` before the final review returns is safe because **8c still decides convergence** and 9.3 already specifies the undo. `done` on an unmerged branch means ready-to-merge, and a further round simply amends it.
 
+**8f. Reply per thread** — Fixed (what changed) or Skipped (why). **Write bodies to files** and post with `--field "body=$(cat file)"`.
+
+**Caps:** ~3–4 rounds; only-already-skipped findings recurring counts as converged.
+
+**On a rate limit, wait half of `{review_window}` and re-request.** The window is *rolling*, so capacity returns gradually as the oldest request ages out rather than all at once; half is a probe, not a guarantee. Still limited → wait another half. **Never push to force a review**: a push spends nothing and resets nothing.
+
+**"Head commit changed" is a different failure and needs no wait.** The request was voided because the branch moved between asking and processing — which a force-push will do to you. Re-request once the head is settled, and check local, remote and MR heads agree before asking again.
 ### 9 — Ready-to-merge (terminal)
 
-1. **The docs are already pushed** — 8b put them in the round's commit. Confirm rather than write: story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`, and `epic-{N} = done` if this was the epic's last not-`done` story (otherwise `in-progress` if unset). **If any is missing, this step is the bug** — commit and push it now, and expect step 2 to cost a re-review.
-2. **Verify on the exact head the MR points at.** No new push means the Step 7/8 evidence still stands; re-run the gates anyway, because with no pipeline that run is the *whole* of the evidence. If you did have to push in step 1, re-run 8a's gate on the new head — a docs-only push is still a diff that reaches `main`.
+1. **The docs are already pushed** — 8e-close put them in the round's commit. Confirm rather than write: story `Status: done`, Change Log entry, `development_status[{story_key}] = done` + `last_updated`, and `epic-{N} = done` if this was the epic's last not-`done` story (otherwise `in-progress` if unset). **If any is missing, this step is the bug** — commit and push it now, and expect step 2 to cost a re-review.
+2. **Verify on the exact head the MR points at.** No new push means the Step 7/8 evidence still stands; re-run the gates anyway, because with no pipeline that run is the *whole* of the evidence. If you did have to push in step 1, re-run 8e's gate on the new head — a docs-only push is still a diff that reaches `main`.
 3. **If verification fails, undo the status before stopping.** Restore the story to `Status: review`, restore `development_status[{story_key}]` and any `epic-{N}` change, commit and push, then STOP with the failure. A story left reading `done` on a red head both breaks the hard rule above and makes `bmad-implement-epic` skip it, since the loop iterates only over not-`done` stories.
 4. **Confirm the MR is still open at your head** before reporting.
 5. Report MR URL, review outcome, and the **local gate results on the final head** — naming them as local, since no pipeline corroborates them. Then **"Ready to merge — leaving the merge to you."**
@@ -205,9 +220,9 @@ If the user wants to keep building without merging, branch off the previous *sto
 
 ## Driving with /loop
 
-`/loop ship story {id}`. **The review is synchronous now, so there is no watch phase and nothing to wait for** — one tick runs 0–9 and the loop ends at Step 9. Under `/loop` choose **Apply every patch** in Section 6, and STOP on anything needing a human call.
+`/loop ship story {id}`. One tick runs 0–7, opens the MR, requests a review and **ends at a scheduled wait** — the MR reviewer is asynchronous, so the tick that asks is not the tick that reads. Under `/loop` choose **Apply every patch** in Section 6, and STOP on anything needing a human call.
 
-The scheduled waits this section used to specify went with the MR-side reviewer. A step that blocks now blocks on a real failure: surface it and stop, rather than scheduling a retry.
+**Time the wait from the request, not from the push** (8a): ~20 minutes on a new MR, ~4 after a fix push. Waking early cannot succeed and spends a tick. The local CLI round in 4b is synchronous and needs no wait; only Section 8 does.
 
 ## Project bindings
 
@@ -218,7 +233,11 @@ The scheduled waits this section used to specify went with the MR-side reviewer.
 | `{project}` | `ageem123/hoa-treasurer-assistant` |
 | `{project_encoded}` | `ageem123%2Fhoa-treasurer-assistant` |
 | `{glab_path}` | `/c/Users/magee/AppData/Local/Programs/glab` |
-| `{reviewer_config}` | `ocr` (alibaba/open-code-review) v1.9.7 via OpenRouter, model `qwen/qwen3.7-plus`. Two files, both at `~/.opencodereview/`, **outside the repo**, so a fresh checkout carries neither. **`config.json`** — `custom_providers.<name>.extra_body` must set `{"reasoning":{"enabled":false},"enable_thinking":false}`, because Qwen returns a 400 on `tool_choice: required` in thinking mode and that is what drops files at 4b.3; setting `llm.extra_body` instead does nothing while a provider is active, and `ocr` says so. **`rule.json`** — `{"include": ["**/*.test.{js,jsx,ts,tsx}", "**/*.spec.{js,jsx,ts,tsx}", "**/__tests__/**", "**/*_test.py", "**/*_test.go", "**/*.md"]}`, which is what makes tests and markdown reviewable at all. |
+| `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part). CLI **0.7.3** at `~/.local/bin/coderabbit`; in this version `--dir` filters which changes are reviewed rather than setting the working directory, so `cd` first |
+| `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
+| `{auto_pause}` | 25 |
+| `{review_window}` | **1 hour, rolling, and the allowance is per *account*, across every repository connected to it** — another project's reviews spend this one's window, so an MR's own history tells you nothing about what is left. **The plan changed on 2026-08-20** from Free/OSS to a paid subscription, so the old measured figures (3 CLI reviews/hr; rate-limited at 21:54, a re-request 50 min later succeeded) no longer describe this account. **Re-measure before relying on a number** — and treat a rate limit as evidence, not the absence of one as proof of headroom. |
+| `{review_trigger}` | **automatic, measured 2026-08-21.** On MR !71 a push at 02:08:56 drew a review at 02:09:12 — sixteen seconds, with no request before it; the manual `@coderabbitai review` went out at 02:09:37, *after*. So **do not request one as a matter of course**: it is redundant, and it spends the rate-limit budget the automatic review needs. CodeRabbit's own refusal says as much — *"this command is applicable only when automatic reviews are paused"*. Request explicitly only when a push has drawn no review after 8a's wait, or when the branch is paused by `{auto_pause}`. This binding read **manual** for its first hour, which is what produced two rate-limited requests in one session. Still confirm a review body exists for the current head: automatic and merely-not-yet-arrived look identical from outside. |
 | `{ci}` | **none** — removed 2026-08-07, per-minute billing (AD-2's amendment). `.github/workflows/ci.yml` is vestigial |
 | `{tsc_baseline}` | 8 pre-existing errors |
 
@@ -243,6 +262,7 @@ The scheduled waits this section used to specify went with the MR-side reviewer.
 These hold in any repository and travel with the skill unchanged.
 
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.
-- **`ocr` (alibaba/open-code-review):** local, synchronous, no rate limit — cost is the only budget. Precision-first by design; its README states the lower recall openly. It skips tests and non-code extensions by default; `rule.json`'s `include` re-enables them and outranks both built-in filters. Re-enabling is not the same as being good at them — on tests it scored 1 of 4 known defects and added a confident false positive, so **it is never the whole review**. It needs the spec supplied via `-B` to find anything but form, and it reports a finding count even when requests failed — check `retry_report.failed_requests` first, every time.
+- **CodeRabbit, twice per story and never once.** The CLI round in 4b and the MR round in Section 8 are different reviewers of different diffs: the first sees the story whole before anyone else has looked, the second sees the fixes. Neither is the whole review — on story 5.1b the MR round raised ten findings against code Argus had already passed twice, including a scoping guard satisfiable by SQL inside a comment.
+- **A reviewer's output is a second opinion to verify, never ground truth.** CodeRabbit's was once ingested unverified. In one round it correctly caught that `requestTimeout` does not bound socket idleness and wrongly asserted the repo runs markdownlint; in another it named the wrong migration. Confirm each finding against the real file before acting on it or feeding it to `argus_ingest`, which turns a false positive into a lesson.
 - **Any scripted edit is read back afterwards.** Not "be careful with heredocs" — that rule existed and was broken anyway. An anchored replacement whose assertion fails is a change that did not happen: one was reported as fixed on a review thread and the reviewer's next round caught it. Verify the **replacement**, not just the presence of new text: a grep for the new string passes when that string already existed elsewhere, or when the old text is still sitting at the target. Check the old text is gone and the match count is what you expected.
 - **Shell gotchas:** backticks inside double-quoted bash strings are command-substituted (write bodies to files); `glab api --field "body=$(cat f)"` **fails if the body starts with `@`** — glab reads a leading `@` as a filename and errors with "The filename, directory name, or volume label syntax is incorrect", or silently posts nothing; use `glab mr note create` for any body that could start with one; PowerShell here-strings don't work in the Bash tool; `git show origin/branch:path` is mangled by Windows path conversion (use `git cat-file -p <blob>`); run one test file with `npm test -- <substring>`, never `npx vitest run` (fails here, and `npx` fetches unpinned packages); never `npx prettier` — no config, and its defaults fight the house style.

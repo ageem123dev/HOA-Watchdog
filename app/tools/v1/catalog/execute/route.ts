@@ -54,6 +54,17 @@ interface ExecuteRequest {
 function readRequest(payload: unknown): ExecuteRequest | null {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null
 
+  // Whose records a query runs against is not a request field. The association
+  // is derived from the board member named in `actorId`, inside the provenance
+  // write itself, so there is nothing here that could influence it — and this
+  // refusal exists so that a caller which tries is told, rather than quietly
+  // served its own association and left believing the parameter worked.
+  //
+  // The *presence* of the key is the refusal, whatever it holds. Written as a
+  // truthiness check it would wave through `null`, `''` and `0`, which is a
+  // caller learning exactly which shapes the endpoint does not mind receiving.
+  if (Object.hasOwn(payload, 'associationId')) return null
+
   const { entryId, version, parameters, actorId } = payload as Record<string, unknown>
 
   if (typeof entryId !== 'string' || entryId.trim() === '') return null

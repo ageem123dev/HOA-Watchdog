@@ -1,7 +1,7 @@
 ---
-Status: backlog
-baseline_commit:
-merge_request:
+Status: done
+baseline_commit: 04a94fefe53900c0b20b8902f3b127fc8e6f7ad9
+merge_request: 71
 ---
 
 # Story 5.1b: The catalog answers for one association
@@ -52,15 +52,15 @@ precisely why this story must precede a second.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The session carries the association.** `core/auth/authenticate.ts` and its adapter.
+- [x] **Task 1 — The session carries the association.** `core/auth/authenticate.ts` and its adapter.
       (AC1)
-- [ ] **Task 2 — The gateway binds it.** `/tools/v1/*` resolves the association from the session,
+- [x] **Task 2 — The gateway binds it.** `/tools/v1/*` resolves the association from the session,
       not the request body; prove a supplied id cannot choose. (AC2)
-- [ ] **Task 3 — Catalog scoping and its registry test.** `duesStatusV1` is the only entry today;
+- [x] **Task 3 — Catalog scoping and its registry test.** `duesStatusV1` is the only entry today;
       the test must bind *every* entry, present and future, in the shape `registry.test.ts` already
       applies to entry ids. (AC3)
-- [ ] **Task 4 — The isolation proof, and the creation guard.** (AC4, AC5)
-- [ ] **Task 5 — Make the identity keys association-scoped.** `unit (normalised_number)` and
+- [x] **Task 4 — The isolation proof, and the creation guard.** (AC4, AC5)
+- [x] **Task 5 — Make the identity keys association-scoped.** `unit (normalised_number)` and
       `vendor (normalised_name)` are global unique indexes from migrations 011 and 009, so a second
       association cannot hold a unit or vendor whose name collides with the first — and
       `roll-repository`'s `on conflict (normalised_number) do update` would silently resolve to the
@@ -94,6 +94,93 @@ asserts it sees A's rows passes whether or not the predicate exists, because A's
 there is unless B's are too. So: give B rows of its own, in the same tables, and assert A's answer
 excludes them — then delete the predicate and watch the test fail before trusting it.
 
+Story 5.1 shipped exactly this defect in its AC8 and the audit caught it: with one association,
+any derivation — correct, wrong, or a hard-coded constant — produced the same answer.
+
+### The code as it stands today
+
+Read in full while preparing this story. Each is an UPDATE, not a NEW file.
+
+- **`core/auth/authenticate.ts`** returns `{ kind: 'authenticated', user: { id, email } }`. It knows
+  nothing of associations. `core/ports/user-directory.ts`'s `DirectoryUser` carries
+  `id / email / passwordHash / disabledAt`.
+- **`adapters/auth/auth.ts`** uses `session: { strategy: 'jwt' }` — Auth.js does not support database
+  sessions with the Credentials provider, and the file already records that a session cannot be
+  revoked server-side. The `jwt` callback carries `token.sub` only; the `session` callback copies it
+  to `session.user.id`.
+- **`app/oracle/page.tsx:73`** takes `actorId = session.user.id` and hands it to `askOracle`.
+- **`app/tools/v1/catalog/execute/route.ts`** authenticates a **service token**
+  (`AGENT_SERVICE_TOKEN`), reads `{ entryId, version, parameters, actorId }` from the body, and calls
+  the executor. Order is verify → parse → execute, and a rejected caller must not reach the executor.
+- **`adapters/db/catalog-executor-postgres.ts`** resolves the entry, validates parameters, writes the
+  provenance row, *then* runs the SQL on `readerPool()` as `watchdog_reader`. Logging before
+  executing is AD-12 made structural; do not reorder it.
+- **`catalog/bind-values.ts`** maps `entry.bind` names to the positional `$1 … $n` array.
+- **`catalog/entries/dues-status-v1.ts`** is the only entry. Its SQL reads `assessment`, `unit` and
+  `payment` — three scoped tables — and filters on `$1` (unit) and `$2` (year) with no association
+  predicate.
+
+### Three constraints this will hit
+
+**1 — There is no board-member session at `/tools/v1/*`, so AC2's "from the session" needs restating
+in terms of what that endpoint actually holds.** It authenticates the *agent service*, not a user;
+the board member arrives as an `actorId` string that has round-tripped
+`page.tsx → askOracle → chat-client → chat_service.py → tools_client.py → this route`. The
+association must therefore be **derived server-side from `actorId`** — the same derive-never-accept
+rule story 5.1 applied to every write — rather than read from a session object that is not there.
+
+AC2 stays exactly as written and is satisfiable as written: an `associationId` in the request body
+must not change which records come back, and a test must prove it. What that does **not** close is
+that `actorId` is itself caller-supplied. See the open question below; do not quietly widen this
+story to cover it.
+
+**2 — The registry sweep already constrains `bind`, and scoping breaks it.** `catalog/registry.test.ts`
+asserts, for every entry, that `entry.bind.length` equals the highest `$n` in the SQL, and that every
+bound name is a key of `parameters.properties`. A placeholder reserved for the association satisfies
+neither: nothing in `parameters` may name it, or the model could supply it. Amend those two
+assertions **deliberately** — reserving `$1` for the association and offsetting the declared
+parameters — rather than discovering the failure and loosening the test to make it pass. Loosening it
+is what removes the protection AC3 is asking for.
+
+For AC3, prefer a check with teeth over a substring match: for each of the fourteen scoped tables
+named in `migrations/024_association.sql`, if an entry's SQL references it, require a predicate
+binding that reference to the association placeholder. A test that only greps for the string
+`association_id` passes on an entry that mentions it in a comment.
+
+**3 — Task 5 is a new migration and it is not additive.** `unit (normalised_number)` and
+`vendor (normalised_name)` are global unique indexes from migrations 011 and 009. Replacing them with
+`(association_id, …)` composites means a `drop index`, and `migrations/association.test.ts` asserts
+024 is strictly additive — that assertion is about 024 and must not be widened to excuse 025. Two
+`on conflict` clauses name those indexes (`roll-repository`, and the vendor path); both change with
+the index or they resolve against nothing.
+
+### Open question for Matt, to answer before or during this story
+
+**CORRECTED 2026-08-21 — the mechanism stated here was wrong.** This said a prompt-injected agent
+"can pass another board member's id". It cannot, and the correction matters because the wrong
+version overstates the threat and misdirects the fix:
+
+- `route_question(question, *, actor_id, ...)` takes the actor as a Python keyword argument threaded
+  from the chat request. The model returns only `choice.name` and `choice.arguments`.
+- `choice.arguments` is validated against the entry's own schema, which is
+  `additionalProperties: false`, and no entry declares an actor parameter —
+  `core/security/actor-is-never-chosen.test.ts` now pins that.
+- Nothing in the declarations handed to the model mentions an actor.
+- `/chat` is token-authenticated, with a *different* token from the gateway's (AD-17).
+
+**What is actually true is narrower.** `actorId` is a plain field in the body of
+`/tools/v1/catalog/execute`, so anything *holding a service token* can name any board member. A
+token-holder already has full catalog read access, so the marginal gain is choosing *which
+association* — which needs a second association to mean anything, and AC5 forbids the product from
+creating one. The likelier failure is duller: **our own code passing the wrong id**, which is what
+the new guard catches.
+
+**Split on 2026-08-21.** The guard — pinning that the model is never offered an actor, and that the
+asking surface takes it from the session — is in this story:
+`core/security/actor-is-never-chosen.test.ts`, with both halves proved by mutation. The signed actor
+token relayed by the agent service is **story 5.1c**, because it changes AD-15/AD-17's wire contract
+and is not a fix to make under review pressure.
+
 ### References
 
 - `.../ARCHITECTURE-SPINE.md` — AD-4 and AD-5 with their 2026-08-18 amendments; the multi-tenancy
@@ -105,14 +192,464 @@ excludes them — then delete the predicate and watch the test fail before trust
 
 ### Agent Model Used
 
+### Test Design
+
+#### Task 1 — The session carries the association
+
+**Behaviour 1.1 — `findByEmail` returns the row's association.**
+
+*Observable signal:* `DirectoryUser.associationId` equals the `association_id` of that
+`board_member` row, read back from a real database.
+*Seam:* the adapter owns its own pool, so a live database is the only honest test.
+`describeWithDatabase` self-skips without `WATCHDOG_WRITER_DATABASE_URL`, matching `adapters/db/`.
+Nothing runs `adapters/auth/` today, so `test:db` must widen to include it — see the gate note in
+Completion Notes.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1.1a | The SELECT omits `association_id`. `pg` returns only the columns asked for, `UserRow` is hand-written, so the absent column arrives as `undefined` and TypeScript never notices | GUARD — assert the value equals a known association id, not that the field is present |
+| 1.1b | Two members in different associations; a query that lost its `where email = $1` returns the other one's association | GUARD — zero/one/many: seed two, assert each resolves to its own |
+| 1.1c | Email not found | GUARD — still `null`, association or not |
+| 1.1d | `association_id` is null | OUT-OF-SCOPE — `not null` since migration 024, asserted by `migrations/association.test.ts` |
+
+*Cross-check (required by `require_inverse_or_crosscheck`):* the id the port returns must equal the
+one a direct `select association_id from board_member` reports — the same fact by an independent
+path.
+
+**Behaviour 1.2 — `authenticate` carries it into the authenticated result.**
+
+*Observable signal:* `result.user.associationId` on the `authenticated` branch.
+*Seam:* the existing fake directory. No database, no framework.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1.2a | An association reaches a *rejected* result, telling an anonymous caller which association an address belongs to | GUARD — assert all three rejection paths (absent user, wrong password, disabled) carry no user object at all |
+| 1.2b | Sign-in behaviour changes — AC1's second sentence. The absent-user timing equalisation, the disabled-checked-after-password ordering, and the opportunistic rehash must all still hold | GUARD — the existing tests are the assertion; a new one would restate them |
+| 1.2c | An existing fake directory omits `associationId` | PROPAGATE — compile error, caught by `tsc` |
+
+**Behaviour 1.3 — the session exposes it.**
+
+*Observable signal:* `session.user.associationId`.
+*Seam:* the `jwt` and `session` callbacks are pure functions of their arguments. Extract them so a
+test calls them directly instead of booting Auth.js.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1.3a | A JWT issued **before** this change carries no `associationId`, and every signed-in director holds one for up to 8 hours (`SESSION_MAX_AGE_SECONDS`) | GUARD — the session callback must tolerate absence rather than write `undefined` onto a field typed `string` |
+| 1.3b | `user` is undefined on refresh. The `jwt` callback runs on every request and receives `user` only at sign-in, so an unguarded read erases the claim on the first refresh | GUARD |
+| 1.3c | The `next-auth` module augmentation is missing | PROPAGATE — does not compile |
+
+**The session claim is not the authorization boundary.** Task 2 derives the association server-side
+from `actorId`; 1.3a is therefore a correctness bug rather than a security hole, and the guard is
+about not handing `undefined` to code that expects a string.
+
 ### Debug Log References
+
+#### Tasks 5 and 4 — run in that order, deliberately
+
+**Task 5 had to precede task 4.** AC4 is only non-vacuous if both associations hold the *same* unit
+number — otherwise deleting the predicate changes nothing, because B's rows could never have matched
+A's query anyway. The same unit number in two associations is exactly what migration 011's global
+unique index forbade. Doing them in the listed order would have produced the vacuous test the story
+warned about on its own first page.
+
+**The isolation test was vacuous when first written, and the sensitivity check is what said so.**
+Deleting `assessment.association_id = $1` left all five cases green. The three predicates are
+mutually redundant: with `unit.association_id = $1` still in the join, B's assessment cannot reach
+A's unit, so scoping *either* root suffices behaviourally. Removing **both** root predicates fails
+it properly — `expected [ …, … ] to have a length of 1 but got 2`, both boards' assessments in one
+answer.
+
+That redundancy is a property of migration 024, not an accident: composite foreign keys make a
+child's association follow its parent's. It means **no behavioural test can isolate a single
+predicate**, and the division of labour is explicit — `registry.test.ts` holds each predicate
+structurally (proved sensitive on its own), and `catalog-isolation.test.ts` holds the behaviour.
+
+**The creation guard was proved by planting one.** An `insert into association` added to
+`adapters/db/query-log-postgres.ts` failed the sweep by name. Its matcher has its own tests in both
+directions, because a guard whose regex never matches anything reports success forever.
+
+**Two existing guards caught the schema change on their own** — `migrations/unit.test.ts` and
+`vendor.test.ts` both assert which *columns* the identity index covers, not just its name, and both
+went red. Updated to the composite form, which is narrower than what they asserted before, not
+looser. `docs/readme.test.ts` caught the migration count.
+
+**One scripted edit failed its own anchor** (Python escaping against a CRLF file) and wrote nothing;
+the two index assertions were then made with exact edits instead.
+
+#### Tasks 2 and 3
+
+**Two reviewer findings were real and one was mine to be embarrassed by.**
+
+- *Task 2, `[high]`:* `core/ports/query-log.test.ts` pins the port's declared members as exact
+  signature strings, including `record(entry: QueryLogEntry): Promise<string>`. Changing the return
+  type broke it. **My own gate reading had missed this**: I piped `npm test` through `tail -5`, saw
+  `exit 0`, and read it as green — but that exit code is `tail`'s, not vitest's, and the summary line
+  four rows further up said `1 failed`. Fixed by updating the expected signature; the surviving
+  `Promise<string>` at line 46 is a synthetic sample that exercises the parser, not a claim about the
+  port. **Read the summary line, never the exit code of a pipeline.**
+- *Task 3, `[info]`:* an orphaned `##` heading, left when new sections were inserted in front of an
+  existing one. Confirmed and removed.
+
+**The sensitivity check found a vacuity in a test I had just written**, which is the reason it exists.
+Deleting `unit.association_id = $1` from the entry left the registry sweep **green**. Cause: the
+alias scanner's optional group consumed the following keyword, so `from assessment join unit` parsed
+as "assessment, aliased `join`" and the scan resumed past the `join` — `unit` was never seen and the
+sweep silently checked two of three tables. The keyword list is now a lookahead rather than a
+post-hoc filter, the scanner has two tests of its own, and the same mutation now fails with
+`reads unit as "unit" without binding it to $1`.
+
+**Other mutations, all caught:** dropping `association_id` from the query log's `RETURNING` (3 of 5
+fail); removing the route's `associationId` refusal (all 5 refusal tests fail); seeding both members
+into one association (only the two-association case fails).
+
+**One mutation did not apply and would have read as a pass.** The route guard was first mutated with
+a `\n` anchor against a CRLF file; the replacement silently matched nothing and the suite came back
+green. The script's own assertion caught it. Re-run CRLF-aware, it failed all five.
+
+**`argus_review` returned `CANCELED` once** on the task 3 diff and succeeded on retry with
+`provider: "auto"`.
+
+
+**Task 1 red, then green.** `session-claims.test.ts` failed 2 of 8 on assertions
+(`expected undefined to be 'association-a'`) with the other 6 green — those pin the behaviour the
+seam extraction had to preserve. `user-directory-postgres.test.ts` failed 3 of 5, each
+`expected undefined to be '<a real uuid>'`. No failure was an import or missing-symbol error.
+
+**Sensitivity, both directions.**
+
+- *Code:* dropped `association_id` from the adapter's SELECT list → 3 of 5 failed. Restored.
+- *Fixture:* seeded both members into association A, leaving the code and the expected values alone
+  → exactly `keeps two members in two associations apart` failed, which is the only case that
+  depends on them differing. Restored and re-run green.
+
+**One review had to be discarded.** The first `argus_review` was passed
+`diff_file: "/tmp/task1.diff"` and returned a confident clean verdict describing
+`core/ports/finding-reader.ts` and `core/ports/checked-documents.ts` — epic-4 files, not in the
+diff — with `files_discovered: 5` against a 10-file change. The MCP server resolves the path
+itself, so the POSIX form did not reach the file. Re-run with `C:/tmp/task1.diff`:
+`files_discovered: 12`, every file named correctly. Recorded in
+`_bmad/custom/argus-review-routing.md`, since it is the same silent-wrong-target shape that file
+already warns about for `repo_root`.
+
 
 ### Completion Notes List
 
+**Task 5 — the identity keys are association-scoped.** Migration 025 replaces the global unique
+indexes on `unit (normalised_number)` and `vendor (normalised_name)` with composite ones on
+`(association_id, …)`, creating each replacement before dropping the index it replaces so
+uniqueness is never briefly unenforced. Both `on conflict` clauses that named the old indexes were
+updated — they would have failed outright otherwise.
+
+The quiet half was worse than the refusal, and is why this could not wait: `roll-repository`'s
+`on conflict (normalised_number) do update` would not have *failed* on a second board's roll. It
+would have resolved onto the **first** association's unit row and renamed it, leaving one row where
+two belong and both boards' dues computed against it. A composite foreign key cannot catch that —
+no row ends up in the wrong association; one simply never gets created.
+
+**Applied to the pilot database** with `npm run migrate` (`apply 025_…`), as 024 was.
+
+⚠️ **What task 5 deliberately did not do, and why it matters.** Eight product read paths still match
+on the normalised value alone — `unit-directory` (three), `vendor-directory` (three),
+`vendor-resolution` (two) and `roll-repository`'s unit lookup. With one association they return
+exactly what they did before. **With two they are ambiguous.** Scoping them is the product read
+path, not the catalog read path, and no acceptance criterion here covers it. This is the strongest
+argument for AC5's guard: the second association must not be creatable until that work is done.
+
+**Task 4 — the isolation proof and the creation guard.**
+
+- `adapters/db/catalog-isolation.test.ts` gives two boards the same unit number and the same year,
+  with figures chosen so no answer of A's equals or divides one of B's, and asserts each gets one
+  row and its own numbers. It also asserts the seed really produced two units, so the sweep cannot
+  pass by there being nothing to leak.
+- `core/security/no-association-creation.test.ts` globs every production source file rather than
+  naming a path list — the claim is about the whole product, and a list stops covering the directory
+  somebody adds next. `migrations/` is excluded on purpose: seeding the pilot association there is
+  the arrangement being protected, not the thing forbidden.
+
+
+**Task 2 — the gateway binds it.** The association is derived from the board member the query is
+run for, and no request shape can influence it.
+
+- **One derivation, not two.** `query_log`'s INSERT already resolved the association from the actor
+  in SQL (story 5.1). Rather than resolve it a second time for the query itself — two statements of
+  one rule with nothing failing on disagreement — `QueryLog.record` now returns what it wrote. The
+  property that buys: **the association a query runs under is the association its audit row
+  records.** They cannot drift, because there is only one of them.
+- **An unknown actor fails loudly and logs nothing.** The subquery yields NULL against a `not null`
+  column, so the insert is refused, no provenance id comes back, and the executor never runs the
+  SELECT. Asserted directly.
+- **A supplied `associationId` is refused, not ignored.** AC2 allows either; refusal was chosen
+  because ignoring is safe *silently*, and a caller that passes a parameter and gets a 200 has been
+  told it worked. The **presence** of the key is the refusal — a truthiness check would wave through
+  `null`, `''` and `0`, which teaches a prober which shapes the endpoint tolerates. 401 still
+  outranks it, so an unauthenticated caller learns nothing about the field.
+- **`adapters/db/query-log-postgres.ts` had no test of its own** before this. It has one now, and it
+  needs `DATABASE_URL` as well as the writer: migration 020 revokes DELETE on `query_log` from
+  `watchdog_writer`, so the role that writes the audit trail deliberately cannot clean up after
+  itself. That is the constraint working, and the first version of the teardown fell foul of it.
+
+**Task 3 — catalog scoping and its registry test.** `$1` is the association in every entry, supplied
+by the executor and never by a caller.
+
+- **The offset lives in `bindValues`**, the one place the ordering contract is already applied. An
+  offset applied at a call site is an offset that can disagree with this one.
+- **`registry.test.ts` enforces scoping structurally**: it walks each entry's `from`/`join` clauses,
+  takes the alias each association-owning table is bound to, and requires a predicate joining *that
+  alias* to `$1`. A grep for the string `association_id` would pass on an entry that mentions it in
+  a comment or scopes one table of three. It also refuses a parameter named `associationId` and
+  holds `bind.length === highest placeholder - 1`, so an entry cannot quietly reclaim `$1`.
+- **`payment`'s predicate is in the `ON`, not the `WHERE`.** In the `WHERE` it reads identically and
+  turns the left join inner, so every unit that has never paid disappears from the answer instead of
+  reporting `amountPaid` `0.00` — a silently wrong financial answer.
+- **AD-14: `dues_status@1` was edited in place and its digest re-pinned, by explicit decision.**
+  AC3 and AD-14 could not both hold: the entry's SQL is frozen once published, and
+  `published-versions.test.ts` also forbids removing a published entry, because a `query_log`
+  `(entry_id, version)` that resolves to nothing breaks the trail exactly as an edit does. Put to
+  Matt on 2026-08-20 with three options; the ruling was to amend `@1`, on the grounds that the pilot
+  database holds test data only and no row records a real board member's question. The alternative
+  left `@1` runnable and unscoped — the exact hole this story closes. Recorded in the entry's own
+  header so the next reader meets it there, and **it does not license a second edit**.
+  *Follow-up for Matt: AD-14's wording in the spine now overstates the freeze and should be amended
+  to name the pre-production exception, or this decision will read as a violation rather than a
+  ruling.*
+
+
+**Task 1 — the session carries the association.** `board_member.association_id` now travels with
+the identity from the SELECT through `authenticate` to the JWT and the session.
+
+- **It travels *with* the identity, not behind a second lookup.** A separate query keyed on the
+  member id would leave a window between the two answers with nothing failing when they disagree —
+  the shape migration 007's comment warns about.
+- **The port types it `string`, the token types it optional, and that is not a contradiction.** A
+  `board_member` row cannot exist without an association; a *token* can, because
+  `SESSION_MAX_AGE_SECONDS` is eight hours and every director signed in when this ships holds a JWT
+  minted before the claim existed. `applyClaimsToSession` copies a claim only when it is present,
+  so an old token yields a session with no `associationId` rather than one holding `undefined`
+  behind a type that says `string`.
+- **The session claim is deliberately not an authorization input**, stated in `next-auth.d.ts`
+  where someone about to use it will read it. A JWT is not revocable with the Credentials provider,
+  and `/tools/v1/*` — the path that actually reads scoped records — has no session at all. Task 2
+  derives the association server-side instead.
+- **AC1's "otherwise unchanged" is held by the existing tests**, not a new one: the absent-user
+  timing equalisation, the disabled-checked-after-password ordering and the opportunistic rehash all
+  still pass, and `never reports why it rejected` is an exact `toEqual({ kind: 'rejected' })` that
+  would fail if an association leaked onto a refusal.
+- **Gate change:** `test:db` now names `adapters/auth/`. Nothing ran that directory before, so
+  `user-directory-postgres.ts` had no database test at all and the new one would have been collected
+  and skipped forever. The adapter keeps its own module-scoped pool — story 3.2's widening of
+  `test:db` caused pool-contention timeouts, so this is worth watching, though one file at `max: 5`
+  is a far smaller change than that one was.
+- **Sibling shape found, not fixed here** (Step 8 question 4): every `adapters/**/*-postgres.ts`
+  maps a hand-written row interface over a SELECT list, so any column omitted from the list arrives
+  as `undefined` behind a non-optional type. Task 1 fixes the one instance the story needs. The
+  general answer is a database test per adapter that asserts values rather than shapes, which is
+  well outside this story.
+
+
 ### File List
+
+**Production (20)**
+
+- `README.md`
+- `adapters/auth/auth.ts`
+- `adapters/auth/next-auth.d.ts`
+- `adapters/auth/session-claims.ts`
+- `adapters/auth/user-directory-postgres.ts`
+- `adapters/db/catalog-executor-postgres.ts`
+- `adapters/db/query-log-postgres.ts`
+- `adapters/db/roll-repository-postgres.ts`
+- `adapters/db/vendor-resolution-postgres.ts`
+- `app/tools/v1/catalog/execute/route.ts`
+- `catalog/bind-values.ts`
+- `catalog/entries/dues-status-v1.ts`
+- `catalog/published-versions.json`
+- `core/association/scoped-tables.ts`
+- `core/auth/authenticate.ts`
+- `core/ports/query-log.ts`
+- `core/ports/user-directory.ts`
+- `migrations/025_association_scoped_identity.sql`
+- `package.json`
+- `vitest.config.ts`
+
+**Tests (18)**
+
+- `adapters/auth/session-claims.test.ts`
+- `adapters/auth/user-directory-postgres.test.ts`
+- `adapters/db/catalog-execution.test.ts`
+- `adapters/db/catalog-executor-postgres.test.ts`
+- `adapters/db/catalog-isolation.test.ts`
+- `adapters/db/query-log-postgres.test.ts`
+- `adapters/db/vendor-resolution-isolation.test.ts`
+- `app/tools/v1/catalog/execute/route.test.ts`
+- `catalog/bind-values.test.ts`
+- `catalog/registry.test.ts`
+- `core/auth/authenticate.test.ts`
+- `core/ports/query-log.test.ts`
+- `core/security/dual-llm-boundary.test.ts`
+- `core/security/no-association-creation.test.ts`
+- `migrations/association-scoped-identity.test.ts`
+- `migrations/association.test.ts`
+- `migrations/unit.test.ts`
+- `migrations/vendor.test.ts`
+
+**Docs and planning (3)**
+
+- `_bmad-output/implementation-artifacts/5-1b-the-catalog-answers-for-one-association.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad/custom/argus-review-routing.md`
+
+## Review Findings
+
+### The AC audit (before the merge request)
+
+Each criterion names the test that fails if the behaviour is removed, **and the sensitivity result
+that proves it would**. A name alone is what a vacuous test satisfies.
+
+| AC | Test | Sensitivity |
+| --- | --- | --- |
+| 1 | `adapters/auth/user-directory-postgres.test.ts::returns the association the member belongs to` | Dropped `association_id` from the SELECT → 3 of 5 fail |
+| 2 | `app/tools/v1/catalog/execute/route.test.ts::is refused when associationId is …` (4 values) | Removed the guard → all 5 refusal cases fail |
+| 3 | `catalog/registry.test.ts::scopes every association-owning table it reads…` | Deleted `unit.association_id = $1` → fails, naming the table |
+| 4 | `adapters/db/catalog-isolation.test.ts::answers association A with A's figures and nobody else's` | Removed both root predicates → 2 rows, not 1 |
+| 5 | `core/security/no-association-creation.test.ts::finds no INSERT into association in any of them` | Planted an insert in a product file → caught, named the file |
+
+**The audit's own limitation, stated.** AC4 is sensitive to the scoping *as a whole* and not to any
+single predicate, because migration 024's composite foreign keys make a child's association follow
+its parent's — so scoping either root suffices behaviourally and no behavioural test can isolate
+one. `registry.test.ts` is what holds each predicate individually, and its sensitivity was proved
+separately.
+
+### Reviews
+
+**The `ocr` half of step 4b was skipped on the first pass and run afterwards.** The story was
+closed out and reported ready-to-merge on the strength of Argus alone, which is half the reviewer
+setup. It found a real bug. Recorded here rather than quietly folded in, because "the review was
+clean" and "half the review never ran" are not the same sentence.
+
+Six `argus_review` calls: one per task, the integration pass, and one on the fix round below. Plus
+the integration pass over
+`04a94fe..HEAD` (33 files, story and planning documents excluded — they are the review's spec, and
+reviewing them as a diff reviews the prose against itself).
+
+**Confirmed and fixed (2):**
+
+1. `[high]` `core/ports/query-log.test.ts` pins the port's members as exact signature strings, so
+   changing `record`'s return type broke it. **My own gate reading had missed it** — `npm test` was
+   piped through `tail -5`, which showed `exit 0`; that is `tail`'s exit code, and the summary four
+   lines above said `1 failed`. Fixed, and the habit corrected: read the summary line, never a
+   pipeline's exit code.
+2. `[info]` an orphaned `##` heading in `dues-status-v1.ts`, left when new sections were inserted
+   ahead of an existing one. Removed.
+
+**Refuted: none.** Nothing had to be argued down this time.
+
+**The integration pass returned no findings**, at `confidence: 1`, `audit_chain_ok: true`,
+`reflection_converged: true` — but `files_selected: 32` of `files_discovered: 38`
+(`selectivity: 0.75`), so it reasoned from a slice rather than the whole tree. Recorded because a
+clean verdict over three quarters of the context is weaker evidence than a clean verdict over all
+of it.
+
+**One review was discarded rather than used.** The first call passed
+`diff_file: "/tmp/task1.diff"` and returned a fluent, confident review of `core/ports/finding-reader.ts`
+and `core/ports/checked-documents.ts` — epic-4 files, absent from the diff — with
+`files_discovered: 5` against a 10-file change. Every signal said success. The MCP server resolves
+the path itself, so the POSIX form did not reach the file. Re-run with `C:/tmp/task1.diff` it
+reviewed the real change. Recorded in `_bmad/custom/argus-review-routing.md`, since it is the same
+silent-wrong-target shape that file already warns about for `repo_root`.
+
+### `ocr` (qwen3.7-plus), run after the fact
+
+**The first run was incomplete and said it was fine.** `summary.files_reviewed: 33` against
+`manifest.coverage.completed: 9` and `coverage.failed: 24`, every one `classification: "budget"`,
+with `budget_exceeded: true` — and exit code 0 with four findings. There is no `retry_report` key in
+this output shape at all, so `manifest.coverage` is the only honest signal. The 24 dropped files
+included `registry.test.ts`, `route.ts` and `query-log-postgres.ts` — the three that carry the
+story. Re-run at `--max-tokens-budget 3000000`: **33 of 33, 0 failed**, and coverage reconciles
+exactly against `git diff --name-only main...HEAD` minus the planning documents.
+
+**Cost: 3.80M tokens for 33 files** (115k/file). Story 5.1 was 11.2M for 63 (178k/file).
+
+Twenty-two findings. **Four confirmed, three refuted, fifteen skipped as nits.**
+
+*Confirmed:*
+
+1. `[high]` **A real bug, and one this story introduced.** `vendor-resolution-postgres.ts`'s
+   fallback SELECT reads `vendor` by normalised name alone, directly after an
+   `on conflict (association_id, normalised_name)`. Task 5 made the INSERT association-scoped and
+   left its paired SELECT global, so a document could be attached to **another association's
+   vendor** — with a real id and the right name, so nothing downstream would look wrong.
+   `roll-repository`'s unit lookup had the identical shape and is fixed with it. Regression test:
+   `adapters/db/vendor-resolution-isolation.test.ts`, proved to fail against the pre-fix code
+   (`expected <A's vendor id> to be <B's>`).
+2. `[medium]` `SCOPED_TABLES` was copied into `registry.test.ts` from `migrations/association.test.ts`
+   — two statements of one rule with nothing failing on disagreement. Now
+   `core/association/scoped-tables.ts`, imported by both, so the migration drift guard holds the
+   schema to the same list the catalog sweep uses.
+3. `[low]` `[medium]` The scoping scanner silently skips CTEs, derived tables and quoted
+   identifiers — it would pass an entry while checking none of its tables. It now **refuses** SQL it
+   cannot analyse, naming the construct.
+4. `[low]` A stale `unit_normalised_number($1)` in a comment, now `$2`.
+
+*Refuted:*
+
+- `[medium]` "the comment says migration 024 but should be 025" — migration 024 line 61 sets
+  `board_member.association_id` not null; 025 does not touch that table.
+- `[low]` "migration 025 references a dropped index name" — that line **is** the `drop index`
+  statement, which must name it.
+- `[low]` "the scanner only matches lowercase identifiers" — the `i` flag already covers case;
+  verified against `FROM Assessment`.
+
+*The fix round got its own review*, and it found one more: the regression test confirmed
+`b.firstDocument` without seeding a hold, so `confirmAsNew` returned `already-resolved`, the
+assertion guarded on `'vendorId' in created` silently did not run, and the case depended on an
+earlier test having run first. Rewritten to seed its own holds and to assert
+`second.outcome === 'matched'` — which is what proves it exercised the fallback path at all.
+
+### The suite was flaky, and this story aggravated it
+
+Roughly one full run in four failed with a 5s timeout — on code that was correct. It surfaced only
+because a fix round happened to run the suite two dozen times; a single green run on a flaky suite is
+not evidence, and this project's local gate is the only evidence there is.
+
+**It was not one test.** Timeouts appeared in `dual-llm-boundary.test.ts`, `sole-chat-path.test.ts`
+and others — a different one each run. The common shape: half a dozen structural guards each walk
+the whole source tree synchronously, and under parallel workers they contend for I/O. Three things
+were wrong, and the first two were mine:
+
+1. `no-association-creation.test.ts` called `productSources()` in the `describe` body, so its walk
+   ran at **collection** time and blocked the worker before a single test started. Memoised and
+   moved out of collection.
+2. Both that walk and `dual-llm-boundary`'s used `readdirSync` plus a `statSync` per entry.
+   `withFileTypes` halves the syscalls; the slowest assertion went from 921ms to 347ms.
+3. The 5s default itself. **No scanner asserts anything about how long it takes** — the limit is
+   incidental to what they check, and the test-design reference argues against wall-clock strictness
+   for this exact reason. Raised to 15s in `vitest.config.ts`, which weakens no assertion; a
+   genuinely hung test still fails, later.
+
+Seven of eight runs green afterwards. The eighth was a **different and pre-existing** flake —
+`app/findings/register/export-control.test.tsx` asserting `revokeObjectURL` is "not called at all"
+within a real-time window, last touched in story 4.7 and untouched here. Recorded as an action item
+rather than absorbed into this story's numbers.
+
+### What the checks found that the tests did not
+
+Both vacuities in this story were found by the **sensitivity check**, not by a reviewer and not by
+the suite, which was green throughout:
+
+- the registry sweep's alias scanner silently skipped `unit`, so it verified two of three tables;
+- the isolation proof stayed green with a predicate deleted.
+
+Neither is a defect a mutation of *production* code could surface on its own — the first was a bug
+in a test's helper, the second a redundancy between predicates. This is the third story in a row
+where the gate found something the suite could not.
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-19 | Split from story 5.1 |
+| 2026-08-20 | Context pass: files read, three constraints and one open question recorded; ready-for-dev |
+| 2026-08-20 | Tasks 1-5 implemented test-first; AD-14 decision taken by Matt; ready for review |
+| 2026-08-20 | Reviews triaged, AC audit clean, gates green, MR !71 opened — ready to merge |
+| 2026-08-20 | `ocr` review run (it had been skipped); one real bug fixed, suite flakiness fixed |

@@ -27,15 +27,45 @@
  * `unit_membership` and its exclusion constraint. A real question, and not this
  * one.
  *
+ * ## Scoping, and why `payment`'s predicate is in the `ON` and not the `WHERE`
+ *
+ * `$1` is the association and no parameter binds it — the executor supplies it
+ * from the provenance write, so `unitNumber` is `$2` and `assessmentYear` is
+ * `$3`. Every table this reads carries its own `association_id` (migration 024),
+ * and each is bound to `$1` rather than left to reach the association through a
+ * parent: uniform is what `registry.test.ts` can actually enforce.
+ *
+ * **`payment.association_id = $1` sits in the left join's `ON` clause.** Moved
+ * to the `WHERE` it would read identically and behave differently — a `WHERE`
+ * predicate on the nullable side turns a left join into an inner one, so every
+ * unit that has never paid would vanish from the answer rather than reporting
+ * `amountPaid` of `0.00`. That is a silently wrong financial answer, which is
+ * the failure this epic exists to prevent.
+ *
+ * ## This entry was edited after publication, once, deliberately
+ *
+ * AD-14 freezes a published version's SQL, and this comment previously said the
+ * scoping fix would have to be `dues_status@2`. It was taken to Matt on
+ * 2026-08-20 as an explicit decision and the ruling was to amend `@1` in place
+ * and re-pin its digest, on the grounds that the pilot database holds test data
+ * only and no `query_log` row here records a real board member's question. The
+ * alternative left `@1` runnable and unscoped, which is the exact hole story
+ * 5.1b exists to close.
+ *
+ * **This does not license a second edit.** The moment a real question is asked
+ * of this entry, the freeze is live and a change is `dues_status@2`.
+ *
  * ## The attribution rule, stated because it is a limitation
  *
  * `payment` records `paid_on` and no period. This entry therefore attributes a
  * payment to the assessment year its `paid_on` falls in, so a January 2027
  * payment settling 2026 dues counts against 2027. Fixing that means knowing
  * which period a payment settles, which is data the ingestion path does not
- * capture — and when it does, the fix is `dues_status@2`. It is never an edit
- * here: every `query_log` row naming `dues_status@1` claims to identify this
- * exact text, forever (AD-14).
+ * capture — and when it does, the fix is `dues_status@2` rather than an edit
+ * here. That is a change to what this entry *answers*, and every `query_log`
+ * row naming `dues_status@1` claims to identify one SQL text (AD-14). The
+ * scoping amendment recorded above is the single, ruled-on exception, and it
+ * changed which rows are visible rather than what the question means.
  */
 
 import type { CatalogEntry } from '../entry'
@@ -43,7 +73,7 @@ import type { CatalogEntry } from '../entry'
 /**
  * Notes on the SQL, in the order a reader meets them.
  *
- * `unit_normalised_number($1)` rather than the raw column, so `4b ` off a roll
+ * `unit_normalised_number($2)` rather than the raw column, so `4b ` off a roll
  * finds `4B`. Migration 011 defines the folding and pins its `search_path`;
  * `adapters/db/assessment-directory-postgres.ts` matches the same way, and the
  * two must not diverge.
@@ -99,12 +129,15 @@ export const duesStatusV1: CatalogEntry = {
        max(payment.paid_on)                                  as "lastPaidOn"
   from assessment
   join unit on unit.id = assessment.unit_id
+   and unit.association_id = $1
   left join payment
     on payment.unit_id = unit.id
+   and payment.association_id = $1
    and payment.paid_on >= make_date(assessment.assessment_year, 1, 1)
    and payment.paid_on <  make_date(assessment.assessment_year + 1, 1, 1)
- where unit.normalised_number = unit_normalised_number($1)
-   and assessment.assessment_year = $2
+ where assessment.association_id = $1
+   and unit.normalised_number = unit_normalised_number($2)
+   and assessment.assessment_year = $3
  group by unit.unit_number, assessment.assessment_year, assessment.annual_amount`,
 
   parameters: {

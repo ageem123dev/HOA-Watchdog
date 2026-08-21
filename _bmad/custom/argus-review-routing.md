@@ -49,6 +49,26 @@ Its schema default is `"."`, which resolves against the **MCP server process's**
 directory — not this repo. Omitting it silently reviews the wrong codebase and reports
 success. Always pass the absolute path above. Never pass the Argus repo.
 
+### A `diff_file` path must be Windows-absolute
+
+`diff_file: "/tmp/task1.diff"` **silently reviews something else.** The path is resolved by the
+MCP server process, not by the shell that wrote the file, so a POSIX path Git Bash maps to
+`C:\tmp\` does not necessarily land there. What comes back is not an error: on story 5.1b's task 1
+it was a confident, well-written, `audit_chain_ok: true` review of `core/ports/finding-reader.ts`
+and `checked-documents.ts` — epic-4 files, absent from the diff entirely. Re-running the identical
+call with `C:/tmp/task1.diff` reviewed the real change.
+
+Write the file to a Windows-absolute path and pass it as one. **Then check that the verdict names
+files which are actually in your diff**, before reading a word of its judgement — this is the same
+silent-wrong-target shape as the `repo_root` default above.
+
+**Check the names, not `files_discovered`.** That number counts the files Argus gathered as
+*context*, not the contents of your diff, so it is only loosely related to the diff's size and
+proves nothing about the target: on one run it read 38 for a 33-file diff, on another 6 for a
+4-file diff. An earlier version of this note said to compare it against your file count, which
+would have passed a wrong-target review whose context happened to be a similar size. Compare the
+verdict's file names against `git diff --name-only` for the same range.
+
 ### Pass `diff`, not `git_range`
 
 Step 1 has already constructed `{diff_output}`, validated it non-empty, shown its stats at

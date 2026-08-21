@@ -45,7 +45,7 @@ function harness(options: { logFails?: Error; queryFails?: Error; rows?: unknown
       state.recorded.push(entry)
       if (options.logFails) throw options.logFails
 
-      return 'provenance-row-id'
+      return { provenanceId: 'provenance-row-id', associationId: 'association-a' }
     },
   }
 
@@ -127,7 +127,12 @@ describe('executing a catalog entry', () => {
       })
 
       expect(duesStatusV1.bind).toEqual(['unitNumber', 'assessmentYear'])
-      expect(state.queries[0]!.values).toEqual(['4B', 2026])
+
+      // `$1` is the association and it is not in `bind`. It arrives from the
+      // provenance write — the fake returns 'association-a' — so this also
+      // pins that the value bound into the query is the one the audit row
+      // recorded, and not anything the request carried.
+      expect(state.queries[0]!.values).toEqual(['association-a', '4B', 2026])
     })
   })
 

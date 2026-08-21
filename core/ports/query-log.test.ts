@@ -23,7 +23,7 @@ const source = readFileSync(join(HERE, 'query-log.ts'), 'utf8')
 describe('the QueryLog port', () => {
   it('declares exactly the one member AD-12 needs', () => {
     expect(declaredMembers(source, 'QueryLog')).toEqual([
-      'record(entry: QueryLogEntry): Promise<string>',
+      'record(entry: QueryLogEntry): Promise<QueryLogRecord>',
     ])
   })
 

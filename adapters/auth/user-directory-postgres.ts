@@ -61,13 +61,21 @@ interface UserRow {
   email: string
   password_hash: string
   disabled_at: Date | null
+  association_id: string
 }
 
 export function createPostgresUserDirectory(): UserDirectory {
   return {
     async findByEmail(email: string): Promise<DirectoryUser | null> {
       const { rows } = await getPool().query<UserRow>(
-        'SELECT id, email, password_hash, disabled_at FROM board_member WHERE email = $1',
+        // `association_id` comes off this member's own row rather than through a
+        // join. It is on `board_member` directly since migration 024, and a
+        // column named here is a column `UserRow` can be trusted about — `pg`
+        // returns exactly what the SELECT list asks for, so anything omitted
+        // arrives as `undefined` behind a type that says `string`.
+        `SELECT id, email, password_hash, disabled_at, association_id
+           FROM board_member
+          WHERE email = $1`,
         [email],
       )
 
@@ -79,6 +87,7 @@ export function createPostgresUserDirectory(): UserDirectory {
         email: row.email,
         passwordHash: row.password_hash,
         disabledAt: row.disabled_at,
+        associationId: row.association_id,
       }
     },
 
