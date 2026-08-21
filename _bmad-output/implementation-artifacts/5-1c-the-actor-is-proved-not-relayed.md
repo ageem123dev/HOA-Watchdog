@@ -630,6 +630,39 @@ distinction, and it is what makes "trim everything for consistency" the wrong fi
 Proved by RED: four whitespace cases failed before the change and pass after, while the two
 blank-key cases passed throughout - so the guard that refuses to send was never what moved.
 
+#### Convergence, and the two false-cleans on the way to it
+
+**Clean on `42fdf04`:** "No actionable comments were generated in the recent review", run
+`8661cfe7`, over `bd802bd..42fdf04`, both reviewable files covered. Cumulatively the three rounds
+cover the whole MR: base..`d027aa0` (initial), `d027aa0..bd802bd` (round 1's fixes),
+`bd802bd..42fdf04` (round 2's).
+
+Getting there passed through **three** states that each look identical to "reviewed and clean" from
+outside, and none of which are:
+
+1. **Rate limited.** The push at 18:04 drew no review: the allowance was spent, and the refusal was
+   written *into the summary comment* rather than posted as its own note - "Review limit reached...
+   Next review available in: 25 minutes", carrying the range it would have reviewed. The note list
+   showed nothing new. **Cause was self-inflicted:** pushing the code fix and the story-document
+   update a minute apart spends two of ~5 hourly reviews on one logical change. Recorded so the next
+   story batches them.
+
+2. **A request that never posted.** `glab api --input` without `--header "Content-Type:
+   application/json"` returns `HTTP 415` **and still exits 0**. An unposted request looks exactly
+   like a paused branch, which looks exactly like a clean review. Caught by re-reading the notes and
+   seeing nothing newer than 18:04.
+
+3. **A clean verdict with no new note.** CodeRabbit edited the 17:30 summary comment in place at
+   18:45 rather than posting. Matching on `updated_at` and body is what found it; matching on new
+   notes would have waited forever.
+
+All three are the same failure in different clothing: **absence of evidence read as evidence of
+absence.** The convergence rule that survives them is the one that names a positive artefact - a
+review body, for this head, in one of the four shapes - rather than the absence of complaints.
+
+**Terminal state: ready to merge, not merged.** The story stays at `review`; status moves to `done`
+only after the merge.
+
 ## Change Log
 
 | Date | Change |
@@ -641,6 +674,7 @@ blank-key cases passed throughout - so the guard that refuses to send was never 
 | 2026-08-21 | Narrowed back to the actor after task 2: the parser half becomes story 5.1d |
 | 2026-08-21 | Task 4: the Python relay carries the assertion and is proved unable to mint one |
 | 2026-08-21 | 4b/4c: the AC audit found an unproved db-level refusal, and mutation found the forgery too short to test the signature check |
+| 2026-08-21 | MR !74 converged: clean on 42fdf04 after three rounds; ready to merge |
 | 2026-08-21 | MR !74 round 2: the client signed with a trimmed copy of the key the gateway verifies raw - fixed on f3e1045 |
 | 2026-08-21 | MR !74 round 1: four CodeRabbit findings, all confirmed and fixed on f619c30 |
 | 2026-08-21 | Step 6 integration review: Argus clean; the chain matches end to end, and ACTOR_ASSERTION_KEY is missing from .env.local |
