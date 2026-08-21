@@ -264,7 +264,7 @@ describe('every entry in the catalog', () => {
       ['a comma-separated list', 'select 1 from assessment, unit', ['assessment']],
     ])('misreads %s, which is why UNANALYSABLE refuses it', (_label, sql, expected) => {
       expect(tableReferences(sql).map(([table]) => table)).toEqual(expected)
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(sql))).toBe(true)
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(true)
     })
 
     it.each([
@@ -273,13 +273,107 @@ describe('every entry in the catalog', () => {
       ['a derived table', 'select 1 from (select id from unit) u'],
       ['a quoted identifier', 'select 1 from "unit"'],
     ])('refuses %s', (_label, sql) => {
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(sql))).toBe(true)
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(true)
     })
 
     it('does not refuse the ordinary shape the catalog actually uses', () => {
       const sql = 'select 1 from assessment join unit on unit.id = assessment.unit_id'
 
-      expect(UNANALYSABLE.some(([pattern]) => pattern.test(sql))).toBe(false)
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(false)
+    })
+
+    /**
+     * The forms this scanner cannot lex. Each one exposed
+     * `unit.association_id = $1` from inside a literal before it was refused —
+     * verified against the scanner, not assumed.
+     */
+    it.each([
+      ['an escape string', "select E'it\\'s unit.association_id = $1' from unit"],
+      ['a unicode escape string', "select U&'unit.association_id = $1' from unit"],
+    ])('refuses %s', (_label, sql) => {
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(true)
+    })
+
+    it.each([
+      ['a non-ASCII dollar tag', 'select $café$unit.association_id = $1$café$ from unit'],
+      ['a stray dollar', 'select 1 from unit where x = $ and 1=1'],
+    ])('refuses %s', (_label, sql) => {
+      expect(unrecognisedDollar(stripComments(sql))).toBe(true)
+    })
+
+    it.each([
+      ['a placeholder', 'select 1 from unit where unit.association_id = $1'],
+      ['an untagged dollar quote', 'select $$noise$$ from unit'],
+      ['an ASCII-tagged dollar quote', 'select $tag$noise$tag$ from unit'],
+    ])('accepts %s', (_label, sql) => {
+      expect(unrecognisedDollar(stripComments(sql))).toBe(false)
+    })
+
+    /**
+     * The identifier that is not an escape string. `where name='x'` ends in a
+     * bare `e` before a quote, and a naive `E'` match would refuse every entry
+     * that filtered on a column whose name ends in E.
+     */
+    /**
+     * The identifier that is not an escape string, and the fixture has to end
+     * in `e` to test it. The first version used `unit_number`, which ends in
+     * `r` — so it exercised nothing and would have passed with the negative
+     * lookbehind deleted. Caught by Argus.
+     */
+    it.each([
+      ['a typed literal', "select 1 from unit where unit.paid_on > date'2020-01-01'"],
+      ['an uppercase typed literal', "select 1 from unit where unit.paid_on > DATE'2020-01-01'"],
+    ])('does not mistake %s for an escape string', (_label, sql) => {
+      expect(UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql)))).toBe(false)
+    })
+
+    /**
+     * **Through the whole sweep, not one stage of it.**
+     *
+     * The refusals above were added, tested against raw SQL in isolation, and
+     * were *dead in the pipeline*: the sweep ran them on `withoutComments(sql)`,
+     * which had already blanked the literal, so `E'…'` read as a bare `E` and
+     * the pattern never matched. Green tests, live bypass. Argus caught it.
+     *
+     * So the check that matters is this one: take SQL that scopes nothing,
+     * hides the predicate in a form the scanner cannot lex, and assert **the
+     * sweep as a whole rejects it** — by refusal or by finding no predicate,
+     * either is a red suite. A stage-level assertion cannot say that.
+     */
+    const sweepAccepts = (sql: string) => {
+      const refused =
+        FORBIDDEN_LEXICAL.some(([pattern]) => pattern.test(sql)) ||
+        UNANALYSABLE.some(([pattern]) => pattern.test(stripComments(sql))) ||
+        unrecognisedDollar(stripComments(sql))
+      if (refused) return false
+
+      const readable = withoutComments(sql)
+      const references = tableReferences(readable).filter(([table]) => SCOPED_TABLES.has(table))
+      if (references.length === 0) return false
+
+      return references.every(([, alias]) =>
+        new RegExp(`\\b${alias}\\.association_id\\s*=\\s*\\$1\\b`).test(readable),
+      )
+    }
+
+    it.each([
+      ['a line comment', 'select 1 from unit -- unit.association_id = $1'],
+      ['a nested block comment', 'select 1 from unit /* a /* b */ unit.association_id = $1 */'],
+      // `from unit` comes **before** the literal in each of these, deliberately.
+      // With it after, blanking the literal also eats the table reference, the
+      // sweep bails on "no scoped tables", and the case passes for a reason that
+      // has nothing to do with the refusal under test. The first version of
+      // these fixtures did exactly that and survived a mutation of the ordering.
+      ['a plain literal', "select 1 from unit where 'unit.association_id = $1' is not null"],
+      ['an escape string', "select 1 from unit where E'x\\' unit.association_id = $1' is not null"],
+      ['a dollar-quoted body', 'select 1 from unit where $t$unit.association_id = $1$t$ is not null'],
+      ['a non-ASCII dollar tag', 'select 1 from unit where $café$unit.association_id = $1$café$ is not null'],
+    ])('rejects an unscoped entry hiding its predicate in %s', (_label, sql) => {
+      expect(sweepAccepts(sql)).toBe(false)
+    })
+
+    it('still accepts a genuinely scoped entry', () => {
+      expect(sweepAccepts('select 1 from unit where unit.association_id = $1')).toBe(true)
     })
   })
 
@@ -393,7 +487,88 @@ describe('every entry in the catalog', () => {
     // `from assessment, unit` captures `assessment` and never sees `unit`.
     [/\b(?:from|join)\s+[a-z_][a-z0-9_]*(?:\s+(?:as\s+)?[a-z_][a-z0-9_]*)?\s*,/i,
       'a comma-separated table list'],
+    // `E'it\'s …'` escapes its quote with a backslash, which the literal
+    // scanner below does not model — it would end the literal at the escaped
+    // quote and emit the rest as if it were SQL.
+    [/(?<![A-Za-z0-9_])(?:E|U&)'/i, 'a PostgreSQL escape or unicode string literal'],
+    // `U&"tbl"` is a quoted identifier the plain `"` rule above does not match.
+    [/\b(?:from|join)\s+U&"/i, 'a unicode-escaped quoted identifier'],
   ] as const
+
+  /**
+   * Lexical forms a catalog entry may not contain **at all**, checked against
+   * the raw SQL before anything is stripped.
+   *
+   * ## Why this rule replaced six rounds of lexer patching
+   *
+   * The sweep below decides whether an entry scopes its tables by matching
+   * text. Every review for six rounds found another way to put
+   * `unit.association_id = $1` somewhere it would be matched but never
+   * executed — a line comment, a nested block comment, a plain literal, an
+   * `E'…\'…'` escape string, a `$café$` tag — and each fix was a little more
+   * hand-written Postgres lexer inside a test file. The last round's fixes
+   * introduced two *false positives* of their own: a `--` inside a literal
+   * truncated correct SQL, and `'$USD'` was refused as a bad dollar construct.
+   *
+   * That is a race against Postgres's grammar, and it is not winnable this way.
+   * So the rule inverts. `dues_status@1` contains **no** single quote, no
+   * dollar-quote opener and no comment — measured, not assumed. Every embedding
+   * vector those rounds found needs one of them. Forbidding them outright
+   * removes the whole class, and it makes the scanner's job trivially correct
+   * rather than nearly correct.
+   *
+   * The cost is real and small: an entry wanting a constant must bind it as a
+   * parameter, and an entry wanting a comment puts it in the TypeScript
+   * docblock around the SQL, which is where every existing one already is. If a
+   * future entry genuinely needs a literal, extending this is a deliberate act
+   * with a scanner that handles it — not a silent pass.
+   */
+  const FORBIDDEN_LEXICAL = [
+    [/'/, 'a string literal'],
+    [/--|\/\*/, 'a comment'],
+    [/\$(?![0-9])/, 'a dollar-quoted body or a stray dollar'],
+  ] as const
+
+  /**
+   * A `$` that opens neither a placeholder nor a dollar quote this scanner
+   * recognises — `$café$` for instance, since Postgres allows any identifier
+   * character in a tag and the scanner only models ASCII ones.
+   *
+   * Detected as "not one of the two known shapes" rather than by listing the
+   * forms that break it. **That inversion is the point of this round.** Four
+   * reviews in a row found another way to embed text — a comment, a nested
+   * comment, a plain literal, now escape strings and non-ASCII tags — and
+   * enumerating lexical forms is a race against Postgres's grammar that a
+   * hand-written scanner does not win. Refusing what it cannot parse ends the
+   * class instead of adding to it: a new form is a red suite, not a silent pass.
+   */
+  const unrecognisedDollar = (sql: string) => {
+    let i = sql.indexOf('$')
+
+    while (i !== -1) {
+      const rest = sql.slice(i)
+
+      if (/^\$[0-9]/.test(rest)) {
+        i = sql.indexOf('$', i + 1) // a placeholder
+        continue
+      }
+
+      const opener = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest)
+      if (opener) {
+        // Jump past the *closing* delimiter. Advancing one `$` at a time would
+        // re-examine the closer of a construct already accepted and report it
+        // as unrecognised — which is what the first version of this did.
+        const close = sql.indexOf(opener[0], i + opener[0].length)
+        if (close === -1) return true // opened and never closed
+        i = sql.indexOf('$', close + opener[0].length)
+        continue
+      }
+
+      return true
+    }
+
+    return false
+  }
 
   /**
    * SQL with its comments removed.
@@ -434,7 +609,8 @@ describe('every entry in the catalog', () => {
    * text can make a real query return the wrong rows. Read this sweep as "the
    * entry looks scoped" and that one as "the entry is scoped".
    */
-  const withoutComments = (sql: string) => {
+  /** Comments only. Literals are still intact after this — deliberately. */
+  const stripComments = (sql: string) => {
     let out = ''
     let depth = 0
     let i = 0
@@ -458,38 +634,6 @@ describe('every entry in the catalog', () => {
         out += ' '
         continue
       }
-
-      if (depth === 0) {
-        // A dollar-quoted body: `$tag$ … $tag$`, or `$$ … $$`. The tag must
-        // start with a letter or underscore, so `$1` is a placeholder and is
-        // left alone — eating those would break the placeholder count above.
-        const dollar = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
-        if (dollar) {
-          const close = sql.indexOf(dollar[0], i + dollar[0].length)
-          i = close === -1 ? sql.length : close + dollar[0].length
-          out += ' '
-          continue
-        }
-
-        // A single-quoted literal, with `''` as the escaped quote.
-        if (sql[i] === "'") {
-          i += 1
-          while (i < sql.length) {
-            if (sql[i] === "'" && sql[i + 1] === "'") {
-              i += 2
-              continue
-            }
-            if (sql[i] === "'") {
-              i += 1
-              break
-            }
-            i += 1
-          }
-          out += ' '
-          continue
-        }
-      }
-
       if (depth === 0) out += sql[i]
       i += 1
     }
@@ -497,17 +641,86 @@ describe('every entry in the catalog', () => {
     return out
   }
 
+  /** Literals only, run after comments have gone. */
+  const stripLiterals = (sql: string) => {
+    let out = ''
+    let i = 0
+
+    while (i < sql.length) {
+      // `$tag$ … $tag$` or `$$ … $$`. A tag must start with a letter or
+      // underscore, so `$1` is a placeholder and survives.
+      const dollar = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
+      if (dollar) {
+        const close = sql.indexOf(dollar[0], i + dollar[0].length)
+        i = close === -1 ? sql.length : close + dollar[0].length
+        out += ' '
+        continue
+      }
+
+      if (sql[i] === "'") {
+        i += 1
+        while (i < sql.length) {
+          if (sql[i] === "'" && sql[i + 1] === "'") {
+            i += 2
+            continue
+          }
+          if (sql[i] === "'") {
+            i += 1
+            break
+          }
+          i += 1
+        }
+        out += ' '
+        continue
+      }
+
+      out += sql[i]
+      i += 1
+    }
+
+    return out
+  }
+
+  /**
+   * What the structural sweeps read: no comments, no literal bodies.
+   *
+   * **The lexical refusals must NOT use this.** They ask whether the SQL
+   * contains a form this scanner cannot lex, and by here the form is gone —
+   * `E'…'` has had its literal blanked and reads as a bare `E`, so the refusal
+   * never fires. That is exactly what happened: the refusal was added, tested
+   * against raw SQL in isolation, and was dead in the pipeline. Argus caught it.
+   */
+  const withoutComments = (sql: string) => stripLiterals(stripComments(sql))
+
   it.each(ALL_ENTRIES.map((entry) => [`${entry.id}@${entry.version}`, entry] as const))(
     '%s uses only SQL the scoping scanner can analyse',
     (_label, entry) => {
+      // Raw SQL, before anything is stripped: these are the forms that make
+      // stripping necessary in the first place.
+      for (const [pattern, what] of FORBIDDEN_LEXICAL) {
+        expect(
+          pattern.test(entry.sql),
+          `${entry.id}@${entry.version} contains ${what}. A catalog entry may not: it is how a ` +
+            `predicate gets somewhere the sweep below matches but the database never runs. Bind a ` +
+            `constant as a parameter, and put prose in the docblock.`,
+        ).toBe(false)
+      }
+
       for (const [pattern, what] of UNANALYSABLE) {
         expect(
-          pattern.test(withoutComments(entry.sql)),
+          pattern.test(stripComments(entry.sql)),
           `${entry.id}@${entry.version} uses ${what}, which the scoping scanner ` +
             `below cannot see into — it would skip a table and still report success. ` +
             `Extend tableReferences before allowing it.`,
         ).toBe(false)
       }
+
+      expect(
+        unrecognisedDollar(stripComments(entry.sql)),
+        `${entry.id}@${entry.version} uses a $-construct that is neither a placeholder nor ` +
+          `a dollar quote this scanner reads. Its body would be scanned as if it were SQL, ` +
+          `so a predicate inside it would satisfy the sweep below without scoping anything.`,
+      ).toBe(false)
     },
   )
 
