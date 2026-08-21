@@ -69,6 +69,30 @@ describe('declaring what the documents are', () => {
     expect(control.value).toBe('')
   })
 
+  /**
+   * The declaration is per submission while `IngestibleFile.documentKind` is per
+   * file, and the form allows `multiple`. So a treasurer can select a roll and a
+   * bank feed together and have both stamped with one kind.
+   *
+   * **One direction of that fails loudly and the other does not.** A deposit
+   * file declared `assessment_roll` is refused for having no `cycle` or
+   * `year`; a roll declared `deposit` is read happily — its `unit` column is
+   * one a deposit has — and its rows become payments instead of units. Silent,
+   * and wrong.
+   *
+   * Until the kind can be chosen per file, the affordance says so. Asserted
+   * here because an unasserted sentence is one a later tidy-up deletes.
+   * Raised by CodeRabbit.
+   */
+  it('says the declaration applies to every file chosen', () => {
+    render(<UploadForm />)
+
+    const control = document.querySelector('select[name="documentKind"]') as HTMLSelectElement
+    const hint = document.getElementById(control.getAttribute('aria-describedby') ?? '')
+
+    expect(hint?.textContent).toMatch(/every file you choose is uploaded as this kind/i)
+  })
+
   it('still offers the file input, so the kind was added rather than substituted', () => {
     render(<UploadForm />)
 

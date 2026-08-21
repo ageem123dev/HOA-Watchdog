@@ -57,7 +57,16 @@ export function UploadForm() {
         <label htmlFor="documentKind" style={styles.label}>
           What are these documents?
         </label>
-        <select id="documentKind" name="documentKind" defaultValue="" style={styles.field}>
+        <p id="documentKind-hint" style={styles.hint}>
+          Every file you choose is uploaded as this kind. Send a roll and a bank feed separately.
+        </p>
+        <select
+          id="documentKind"
+          name="documentKind"
+          defaultValue=""
+          aria-describedby="documentKind-hint"
+          style={styles.field}
+        >
           <option value="" disabled>
             Choose a kind…
           </option>
@@ -165,6 +174,11 @@ const styles = {
     fontSize: 'var(--type-scale-label)',
     letterSpacing: 'var(--type-tracking-label)',
     textTransform: 'uppercase',
+    color: 'var(--color-ink-muted)',
+  },
+  hint: {
+    margin: 0,
+    fontSize: 'var(--type-scale-label)',
     color: 'var(--color-ink-muted)',
   },
   field: { font: 'inherit', maxWidth: '100%' },

@@ -260,6 +260,30 @@ omission, and a roll uploaded as a bank statement fails silently: the units simp
 nothing is pre-selected. Three mutations prove it - removing the control (4 red), giving it a
 default (1 red), renaming the field (3 red). The first of those is the bug that shipped.
 
+#### The local CodeRabbit round - one finding, confirmed, and only partly fixed
+
+`review_completed`, 22 of 22 diff files reviewed, one `major`: **`IngestibleFile.documentKind` is
+per file, but the action stamps one declared kind onto every file in a `multiple` selection.**
+
+Confirmed, and the asymmetry is what makes it a `major` rather than a nuisance:
+
+- a **deposit** file declared `assessment_roll` is refused for having no `cycle` or `year` - loud,
+  and harmless;
+- a **roll** declared `deposit` is read happily, because `unit` is a column a deposit has. Its rows
+  become payments instead of creating units. Silent, and wrong.
+
+**Fixed only in part, deliberately.** CodeRabbit's stronger option - collect a kind per file - means
+listing the chosen files and putting a control on each, which is a different upload surface and
+beyond this story's ACs (AC4 says *the upload surface declares the kind*, singular). What is here
+now is the affordance: the control carries an `aria-describedby` hint reading *"Every file you
+choose is uploaded as this kind. Send a roll and a bank feed separately"*, asserted by a test and
+mutation-proved, because an unasserted sentence is one a later tidy-up deletes.
+
+**Residual risk, stated rather than closed:** a treasurer who mixes kinds in one selection and
+ignores the hint can still have a roll read as deposits. **Raised as a follow-up** - per-file
+declaration, or refusing a multi-file selection whose kind cannot be per-file - rather than pretended
+away here.
+
 ### File List
 
 - `core/extraction/tabular.ts` - the kind is a parameter; `kindOf`, `DEFAULT_DOCUMENT_KIND` and the
@@ -283,4 +307,5 @@ default (1 red), renaming the field (3 red). The first of those is the bug that 
 | 2026-08-21 | All five tasks: the kind is declared by the upload. `type` refused rather than ignored, samples regenerated, contract rewritten |
 | 2026-08-21 | Argus found that a helper script had truncated an existing 21-test file; restored and merged, 42 cases |
 | 2026-08-21 | AC4 was shipped broken - the action required a field the form never sent, with every gate green. Control and render test added |
+| 2026-08-21 | CodeRabbit: one kind is stamped on every file of a multi-select batch. Affordance added; per-file declaration raised as a follow-up |
 | 2026-08-21 | Status done, written in this commit rather than after the merge |
