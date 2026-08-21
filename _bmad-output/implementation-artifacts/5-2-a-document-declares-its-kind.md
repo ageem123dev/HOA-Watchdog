@@ -284,6 +284,20 @@ ignores the hint can still have a roll read as deposits. **Raised as a follow-up
 declaration, or refusing a multi-file selection whose kind cannot be per-file - rather than pretended
 away here.
 
+#### Argus found a vacuous test this story created
+
+Removing the retired `type` column from `ingest-quarantine.test.ts` fixed the **header** and missed
+the **filler generator**, which kept emitting a leading `invoice,` - five columns against a
+four-column header. Every filler row was then invalid, the document was refused as `invalid-row`,
+and the test asserting `outcome === 'unreadable'` passed.
+
+**It is named for the NUL guard past 8192 bytes, and it had stopped testing it.** Demonstrated
+rather than asserted: with the broken filler *and* `isStorableName`'s NUL check deleted, all six
+cases still passed. With the filler corrected, deleting that check turns the test red.
+
+That is a test this story quietly hollowed out - the same class as the 21 destroyed above, and
+invisible for the same reason: nothing fails when a test stops meaning what its name says.
+
 ### File List
 
 - `core/extraction/tabular.ts` - the kind is a parameter; `kindOf`, `DEFAULT_DOCUMENT_KIND` and the
@@ -308,4 +322,5 @@ away here.
 | 2026-08-21 | Argus found that a helper script had truncated an existing 21-test file; restored and merged, 42 cases |
 | 2026-08-21 | AC4 was shipped broken - the action required a field the form never sent, with every gate green. Control and render test added |
 | 2026-08-21 | CodeRabbit: one kind is stamped on every file of a multi-select batch. Affordance added; per-file declaration raised as a follow-up |
+| 2026-08-21 | Argus: the quarantine filler still carried the retired column, making a NUL-guard test pass on malformed rows instead. Fixed and proved |
 | 2026-08-21 | Status done, written in this commit rather than after the merge |

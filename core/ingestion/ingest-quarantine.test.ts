@@ -158,7 +158,7 @@ describe('a spreadsheet whose vendor nobody recognises', () => {
     // document could not be read. Raised in review, twice.
     const filler = Array.from(
       { length: 200 },
-      (_unused, index) => `invoice,"Filler Vendor ${index}",INV-${index},2026-06-01,10.00`,
+      (_unused, index) => `"Filler Vendor ${index}",INV-${index},2026-06-01,10.00`,
     )
     const rows = [
       'description,reference,date,amount',
