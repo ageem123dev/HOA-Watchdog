@@ -103,8 +103,10 @@ Two things follow. Neither is urgent today; both get worse on the day a second a
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The amendment.** AD-15 and AD-17, stating what the third credential is and why the
-      existing two do not cover it. (AC6) **Blocked on Matt; nothing else starts until it lands.**
+- [x] **Task 1 — The amendment.** Written 2026-08-21 as **AD-18**, with amendments on AD-15 and
+      AD-17 pointing to it. A new AD rather than widening either, following AD-17's own precedent:
+      both existing tokens authenticate *runtimes*, and neither carries a subject, so widening one
+      to cover a per-turn per-actor credential would blur the claim its own test enforces. (AC6)
 - [ ] **Task 2 — Mint and verify.** The signing on the Next.js side, the verification at the
       gateway, and the key's home. (AC1)
 - [ ] **Task 3 — The refusals.** Forged, expired, altered, wrong audience. (AC2, AC5)
@@ -112,9 +114,11 @@ Two things follow. Neither is urgent today; both get worse on the day a second a
       key; the structural test that says so. (AC3)
 - [ ] **Task 5 — Retire the believable `actorId`.** (AC4)
 - [ ] **Task 6 — Replace the scanner with a parser.** Choose one, add it, and rewrite
-      `sweepVerdict` around per-scope alias resolution. **A new dependency needs Matt's approval** —
-      it parses SQL that decides which association's records are returned, so its supply chain is
-      part of the decision. (AC7, AC9)
+      `sweepVerdict` around per-scope alias resolution. **Dependency approved by Matt 2026-08-21**;
+      the specific parser is still to be chosen and named here before it is added, with its
+      resolution behaviour checked against the eight bypasses rather than assumed. It parses SQL
+      that decides which association's records are returned, so the choice is part of the decision
+      and not an implementation detail. (AC7, AC9)
 - [ ] **Task 7 — Carry the eight bypasses over, then delete the dead rules.** Once the parser lands,
       `FORBIDDEN_LEXICAL` subsumes the `E'`/`U&'` and dollar-construct entries in `UNANALYSABLE` —
       anything containing `E'` contains `'` and is already refused. That redundancy was left in
@@ -195,3 +199,4 @@ component that would have to be trusted to apply it.
 | --- | --- |
 | 2026-08-21 | Split from 5.1b after a CodeRabbit finding on MR !71; the finding's stated mechanism was refuted and the real one recorded |
 | 2026-08-21 | Widened on Matt's instruction after !71 merged: the SQL scanner replacement joins the actor token, both being properties asserted by resemblance rather than construction |
+| 2026-08-21 | AD-18 written and the parser dependency approved — both blockers cleared, story is implementable once the spine change merges |
