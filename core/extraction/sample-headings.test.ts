@@ -69,6 +69,47 @@ describe('reading the headings of an uploaded sample', () => {
     ])
   })
 
+  /**
+   * **What a browser actually sends.** `acceptance.ts` has canonicalised
+   * content types since story 1.x, with the comment "Browsers send
+   * `text/csv; charset=utf-8` and vary the case" — and `ingest` passes the
+   * already-canonical value, so `toRectangle` never met a raw one until this
+   * story added a second caller.
+   *
+   * A sample arrives straight from a form. Unnormalised, every CSV a browser
+   * labels with a charset would come back `no-reader`: "we cannot read this
+   * format", about the format the wizard exists to read. Raised by CodeRabbit.
+   */
+  it.each([
+    ['a charset parameter', 'text/csv; charset=utf-8'],
+    ['no space before the parameter', 'text/csv;charset=utf-8'],
+    ['upper case', 'TEXT/CSV'],
+    ['surrounding space', '  text/csv  '],
+  ])('reads a CSV sample whose content type carries %s', (_label, contentType) => {
+    const result = readSampleHeadings({
+      filename: 'sample.csv',
+      contentType,
+      bytes: new TextEncoder().encode('date,amount\n2026-01-01,10.00'),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.headings.map((h) => h.text)).toEqual(['date', 'amount'])
+  })
+
+  it('reads a workbook sample whose content type carries a parameter', () => {
+    const result = readSampleHeadings(
+      {
+        filename: 's.xls',
+        contentType: 'application/vnd.ms-excel; charset=binary',
+        bytes: new Uint8Array([1]),
+      },
+      { workbooks: workbookYielding([['date']]) },
+    )
+
+    expect(result.ok && result.headings).toHaveLength(1)
+  })
+
   it.each([
     ['a type nothing reads', 'application/pdf', 'no-reader'],
     ['a workbook with no decoder supplied', 'application/vnd.ms-excel', 'no-reader'],
@@ -105,15 +146,24 @@ describe('reading the headings of an uploaded sample', () => {
   })
 
   /**
-   * The property the whole decision rests on, asserted rather than assumed: a
-   * sample is read without anything being stored. Nothing here is given a
-   * repository, a store or a hash — and if this function ever needs one, that
-   * is the signal the seam has moved.
+   * The property the whole decision rests on: a sample is read without anything
+   * being stored.
+   *
+   * The first version of this asserted `readSampleHeadings.length <= 2`, which
+   * proves nothing — `Function.length` counts parameters *before* the first
+   * default, so it reads 1 here and would keep reading 1 however many
+   * dependencies were added after `deps`. A vacuous assertion written while
+   * trying to prevent vacuity. Raised by CodeRabbit.
+   *
+   * What is observable instead: the call succeeds given nothing but a file.
+   * There is no store to inject and no kind to declare, so a version that
+   * needed either could not pass this.
    */
-  it('needs no store, no repository and no document kind', () => {
-    // The one-argument call in every other case above is the assertion; this
-    // states it, so a later signature change has to face the question.
-    expect(readSampleHeadings.length).toBeLessThanOrEqual(2)
-    expect(readSampleHeadings(csv('date\n1')).ok).toBe(true)
+  it('reads a sample given nothing but the file itself', () => {
+    const result = readSampleHeadings(csv('date,amount\n1,2'))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.headings.map((h) => h.text)).toEqual(['date', 'amount'])
   })
 })

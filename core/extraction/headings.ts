@@ -64,8 +64,16 @@ export type HeadingsResult =
       readonly reason: 'no-rows' | 'no-headings'
     }
 
-/** The same folding `readRows` matches with, so the two cannot disagree. */
-const normalise = (heading: string): string => heading.trim().toLowerCase()
+/**
+ * How a heading is matched.
+ *
+ * **Exported, and `readRows` imports it**, so the sample report and the
+ * importer cannot classify a heading differently. Two copies of
+ * `trim().toLowerCase()` behave identically until one changes, and the symptom
+ * then is a wizard showing columns the importer would treat as something else —
+ * worse than either behaviour on its own. Raised by CodeRabbit.
+ */
+export const normaliseHeading = (heading: string): string => heading.trim().toLowerCase()
 
 export function readHeadings(rows: readonly (readonly string[])[]): HeadingsResult {
   const [headerRow] = rows
@@ -74,7 +82,7 @@ export function readHeadings(rows: readonly (readonly string[])[]): HeadingsResu
   const headings: Heading[] = headerRow.map((text, index) => ({
     position: index + 1,
     text,
-    normalised: normalise(text),
+    normalised: normaliseHeading(text),
   }))
 
   // A row of cells that are all blank names nothing, and neither does a row of

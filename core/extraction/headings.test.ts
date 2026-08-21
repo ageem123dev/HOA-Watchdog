@@ -18,15 +18,51 @@
  * problems still yields its headings — the wizard needs both halves.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import { readHeadings } from './headings'
+import { normaliseHeading, readHeadings } from './headings'
 
 const headingsOf = (rows: readonly (readonly string[])[]) => {
   const result = readHeadings(rows)
   if (!result.ok) throw new Error(`expected headings, got ${result.reason}`)
   return result
 }
+
+/**
+ * The folding is shared with `readRows`, not merely identical to it.
+ *
+ * Two copies of `trim().toLowerCase()` classify headings the same way until one
+ * changes — and then a sample reports columns the importer would treat
+ * differently, which is worse than either behaviour alone. Raised by CodeRabbit.
+ */
+describe('the folding this shares with the importer', () => {
+  it.each([
+    ['padding', '  Unit  ', 'unit'],
+    ['case', 'UNIT', 'unit'],
+    ['both', ' Unit Number ', 'unit number'],
+    ['neither', 'unit', 'unit'],
+  ])('folds %s the way a header row is matched', (_label, written, expected) => {
+    expect(normaliseHeading(written)).toBe(expected)
+  })
+
+  /**
+   * **The behavioural test above cannot see sharing.** It asserts that this
+   * folding is correct; a `tabular.ts` that quietly kept its own identical copy
+   * would pass it and drift the moment either changed. So this reads the source,
+   * in the shape `test_no_data_credentials.py` uses for AD-3: the property is
+   * structural, so the check is too.
+   */
+  it('is the folding tabular uses, not merely one that matches it', () => {
+    const source = readFileSync(join(import.meta.dirname, 'tabular.ts'), 'utf8')
+
+    expect(source).toContain('normaliseHeading')
+    // No second definition. A bare `trim().toLowerCase()` in there is a copy.
+    expect(source).not.toMatch(/trim\(\)\.toLowerCase\(\)/)
+  })
+})
 
 describe('reading the headings a file was given', () => {
   it('returns every heading in file order, with its position', () => {

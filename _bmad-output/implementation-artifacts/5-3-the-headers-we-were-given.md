@@ -204,6 +204,65 @@ Also worth recording: the `TABULAR_CONTENT_TYPES` round-trip test **passed again
 when first written, because a loop over nothing reports success. It now asserts the list is
 non-empty first.
 
+### Review Findings
+
+#### The AC audit (step 4c)
+
+| AC | Test | Mutation that turns it red |
+| --- | --- | --- |
+| 1 - same rectangle, CSV and workbook | `rectangle.test.ts` CSV and xls/xlsx cases | an unknown type read as an empty rectangle - 11 red |
+| 2 - duplicates named | `names a duplicated heading and where it occurs` | duplicates not reported - 4 red |
+| 3 - blanks named by position | `names the position of an empty heading` | blanks dropped - 5 red |
+| 4 - every problem at once | `reports a duplicate and a blank together` | only-the-first-problem - 1 red |
+| 5 - empty cases distinguished | the three refusal cases | `no-rows` folded into `no-headings` - 1 red; all-blank row accepted - 2 red |
+| 6 - written and matched forms | `reports a heading as written and as matched` | the written text discarded - 1 red |
+
+#### The local CodeRabbit round - three findings, three confirmed
+
+`review_completed`, 9 of 9 diff files, coverage reconciled. All three were real, and all three were
+defects this story introduced.
+
+**1 (major) - two copies of the folding.** `headings.ts` and `tabular.ts` each defined
+`trim().toLowerCase()`. Identical today; the risk is the day one changes, and the symptom then is a
+wizard reporting columns the importer treats as something else - worse than either behaviour alone.
+`normaliseHeading` is exported and `tabular` imports it.
+
+**The behavioural test could not see the sharing**, which is worth recording: it asserts the folding
+is *correct*, and a `tabular.ts` that quietly kept its own identical copy would pass. So a
+structural check reads the source and refuses a second definition, in the shape
+`test_no_data_credentials.py` uses for AD-3 - the property is structural, so the check is too.
+Reverting `tabular` to its own copy turns it red.
+
+**2 (major) - the content type was not canonicalised.** `acceptance.ts` has folded
+`text/csv; charset=utf-8` since epic 1, and `ingest` passes the already-folded value - so
+`toRectangle` never met a raw one until this story added a second caller. A sample arrives straight
+from a form. Unnormalised, **every CSV a browser labels with a charset would have come back
+`no-reader`**: "we cannot read this format", about the format the wizard exists to read.
+
+Canonicalised in `readSampleHeadings`, where the raw value arrives, rather than inside
+`toRectangle` - `ingest` already folds at its own boundary, and normalising twice would hide which
+caller was responsible.
+
+**3 (minor) - a vacuous assertion written while preventing vacuity.** The "needs no store" test
+asserted `readSampleHeadings.length <= 2`. `Function.length` counts parameters *before* the first
+default, so it reads 1 here and would keep reading 1 however many dependencies were added after
+`deps`. Replaced with the observable property: the call succeeds given nothing but a file.
+
+**Ingest scored it as two Argus misses** - `argus_ingest` on `2e57e28` wrote the lesson *"Look
+harder in TypeScript under core/extraction/** for input validation."* Argus had reviewed this exact
+code twice and found neither, which is the whole reason both reviewers run.
+
+#### A direction worth watching
+
+`core/extraction/sample-headings.ts` now imports from `core/ingestion/acceptance.ts`, which is the
+reverse of the usual direction here - `ingest` imports extraction, not the other way about. There is
+**no cycle today**: `acceptance.ts` imports nothing at all, and `core/ports/boundary.test.ts` passes
+(it enforces that `core/` imports nothing outward, which this respects).
+
+Recorded rather than resolved, because the alternative was a third copy of a five-line MIME fold and
+that is the defect this round was about. The latent trap is real though: an import of `extraction`
+added to `acceptance.ts` would close the loop.
+
 ### File List
 
 - `core/extraction/headings.ts` *(new)* - `readHeadings`, the reporting reader
@@ -214,12 +273,15 @@ non-empty first.
 - `core/extraction/sample-headings.ts` *(new)* - the composition, taking no store and no kind
 - `core/extraction/sample-headings.test.ts` *(new)* - 9 cases
 - `core/ingestion/ingest.ts` - `read` now uses the shared dispatch; behaviour unchanged
+- `core/extraction/tabular.ts` - imports the shared `normaliseHeading` instead of defining one
+- `core/ingestion/acceptance.ts` - `normalizeContentType` exported for the sample boundary
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-21 | Task 4: a sample is read without being stored; the bytes-to-rows dispatch is shared with ingest rather than copied |
+| 2026-08-21 | Local CodeRabbit round: three findings, three confirmed - a duplicated folding, an uncanonicalised content type, and a vacuous arity assertion |
 | 2026-08-21 | Status done, written in this commit rather than after the merge |
 | 2026-08-21 | Tasks 1-3: readHeadings reports duplicates and blanks by position, all at once, and distinguishes the empty cases |
 | 2026-08-21 | Created from epic 5's story spine, with the sample-is-not-a-document decision flagged for Task 4 |

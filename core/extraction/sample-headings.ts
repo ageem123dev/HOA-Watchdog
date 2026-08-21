@@ -29,6 +29,7 @@
  * lands with the screen that calls it.
  */
 
+import { normalizeContentType } from '../ingestion/acceptance'
 import { toRectangle } from './rectangle'
 import { readHeadings, type Heading, type HeadingProblem } from './headings'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
@@ -64,7 +65,13 @@ export function readSampleHeadings(
   file: SampleFile,
   deps: SampleDependencies = {},
 ): SampleHeadingsResult {
-  const rectangle = toRectangle(file.contentType, file.bytes, deps.workbooks)
+  // **Canonicalised here, because here is where the raw value arrives.** A
+  // sample comes straight from a form, carrying whatever the browser labelled
+  // it — `text/csv; charset=utf-8`, or upper case. `ingest` never meets one,
+  // because `assess` has already folded it before the reader is reached.
+  const contentType = normalizeContentType(file.contentType)
+
+  const rectangle = toRectangle(contentType, file.bytes, deps.workbooks)
   if (!rectangle.ok) {
     // An empty file and a rectangle with no rows are the same sentence to a
     // treasurer — "there is nothing in this file" — so they arrive as one
