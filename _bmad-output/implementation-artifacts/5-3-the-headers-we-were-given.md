@@ -1,6 +1,6 @@
 ---
-Status: ready-for-dev
-baseline_commit:
+Status: in-progress
+baseline_commit: 67acbd5
 merge_request:
 ---
 
@@ -60,11 +60,11 @@ it contains, before a mapping exists to say what it is for.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Read the headings.** A function over the same rectangle, returning headings in
+- [x] **Task 1 — Read the headings.** A function over the same rectangle, returning headings in
       order with their positions and both forms. No document kind, no ingestion. (AC1, AC6)
-- [ ] **Task 2 — Report duplicates and blanks, all of them.** Accumulated, not short-circuited.
+- [x] **Task 2 — Report duplicates and blanks, all of them.** Accumulated, not short-circuited.
       (AC2, AC3, AC4)
-- [ ] **Task 3 — Distinguish the empty cases.** No rows, no header row, all-blank header row.
+- [x] **Task 3 — Distinguish the empty cases.** No rows, no header row, all-blank header row.
       (AC5)
 - [ ] **Task 4 — Reach it from an upload.** A sample is uploaded and its headings come back. Where
       this surfaces is a decision to record before it is built — see Dev Notes.
@@ -121,14 +121,45 @@ marks them `-text` so nothing renormalises them. If this story adds a sample, it
 
 ### Test Design
 
-### Debug Log References
+#### Tasks 1-3 - failure modes of reading headings
+
+The interesting ones are all *reporting* failures. A reader that refuses is loudly wrong; a reader
+that reports the wrong thing is quietly wrong, and the treasurer acts on it.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | Positions reported 0-based, so a message names a column the treasurer cannot count to | GUARD - 1-based, asserted directly |
+| 1b | The written text discarded and the normalised form reported, sending the treasurer to look for a column their file does not contain | GUARD - both forms carried, and a padded mixed-case fixture proves they differ |
+| 2a | Duplication decided on the written form, so `Amount` and `amount ` read as distinct and the file is called fine | GUARD - decided on the matched form, which is what collides at ingestion |
+| 2b | A heading duplicated three times reported twice, as though it were two problems | GUARD - one report per heading, every position listed |
+| 3a | A blank heading dropped from the list, so it is a column the treasurer cannot map and is never told about | GUARD - reported, and still present in the headings |
+| 4a | Only the first problem reported, so a fixed duplicate is followed by a newly-revealed blank and a second upload | GUARD - a fixture with both, asserting both |
+| 5a | `no-rows` and `no-headings` collapsed into one reason, sending a treasurer to neither place | GUARD - distinguished, and each asserted |
+| 5b | "refuses an empty header row" passing against a reader that refuses everything | GUARD - the inverse in the same block: one named column is readable |
 
 ### Completion Notes List
 
+- **Reporting, not refusing, is the whole design.** A file with problems still yields its headings;
+  only a file with no headings at all is refused, because there is then nothing to report.
+- **Duplication is decided on the normalised form and reported with the written one.** Those are
+  different jobs: the match is what would collide at ingestion, the text is what the treasurer can
+  find in their spreadsheet. Mutating either direction turns the suite red.
+- **The stub came first.** A missing-module error is not a valid red - it says nothing about the
+  assertions - so `headings.ts` was written with real signatures and empty bodies. 16 of 17 then
+  failed on their own assertions. The one that passed was "finds no problems in a clean file",
+  which an empty stub satisfies, and that is worth noticing rather than counting as coverage.
+- **Eight mutations, eight caught**: 0-based positions, duplication on the written form, blanks
+  dropped, only-the-first-problem, duplicates not reported, an all-blank row accepted, `no-rows`
+  folded into `no-headings`, and the written text discarded.
+
 ### File List
+
+- `core/extraction/headings.ts` *(new)* - `readHeadings`, the reporting reader
+- `core/extraction/headings.test.ts` *(new)* - 17 cases
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Tasks 1-3: readHeadings reports duplicates and blanks by position, all at once, and distinguishes the empty cases |
 | 2026-08-21 | Created from epic 5's story spine, with the sample-is-not-a-document decision flagged for Task 4 |
