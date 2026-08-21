@@ -319,6 +319,51 @@ caught** - the twelve from the rewrite plus one per fix here.
 lesson *"Look harder in TypeScript under catalog/** for input validation."* Argus had reviewed this
 exact code twice and not found it, which is the whole reason both reviewers run.
 
+#### MR !76, CodeRabbit round 1 - one finding, and verifying it found something else
+
+The finding: *"Add a set-operation fixture."* Severity **trivial**, with the reasoning that
+`UNION`/`INTERSECT`/`EXCEPT` were untested and that **"the current code refuses that case, so the
+fixture pins existing behavior rather than changing it."**
+
+Applying the suggested patch would have added a passing fixture and closed the thread. Verifying it
+first found three different things, none of them what the finding said.
+
+**1. The parser does not wrap set-operation arms.** `larg` and `rarg` are bare select bodies with no
+`{ SelectStmt: … }` key. `scopesOf` recognised scopes *only* by that key, so a `union` produced
+**one** scope and `withinScope` poured both arms into it - the flat namespace this whole story
+exists to remove, resurrected for set operations.
+
+**2. So the refusal was accidental, not principled.** The union node carries no `whereClause` of its
+own; the arms do. The flat scope therefore collected both arms' *tables* and none of their
+*predicates*, and refused every set operation for lack of any binding at all. CodeRabbit's claim was
+true by outcome and wrong by mechanism.
+
+**3. Which made it a false rejection.** A legitimate `union` where each arm scopes itself was
+impossible to write. That is the same class as the outer-join over-strictness earlier in this story,
+and the reason it matters is recorded there: an author who cannot get correct SQL past the guard
+rewrites it until the guard stops complaining.
+
+**The fixture-only patch would have pinned all three as correct behaviour.** A test asserting the
+refusal, passing for a reason unrelated to the one in its name, is the exact defect this file's
+history is made of.
+
+Fixed by making a set operation's arms first-class scopes: `isSetOperation` keys on `op`
+(`SETOP_UNION` and friends, never `SETOP_NONE`), which is a field only a select body carries -
+`JoinExpr` shares the `larg`/`rarg` names but has `jointype` instead, so the two cannot be confused.
+Four refusal fixtures, each now failing in its own arm's scope, and two acceptance fixtures for
+unions that scope both arms properly.
+
+**Eighteen mutations, eighteen caught** - the fifteen before, plus arms-not-scopes, walk-descends,
+and `isSetOperation` disabled.
+
+#### A second suite flake, recorded
+
+`adapters/db/finding-reader-postgres.test.ts > counts the whole register even when it hands back a
+window of it` failed once during this round's gate and passed on re-run. This story touches nothing
+under `adapters/`. That is the second intermittent failure seen today, distinct from the known
+`export-control.test.tsx` one, and both are recorded rather than absorbed - a flake nobody writes
+down becomes a failure somebody learns to re-run past.
+
 ### File List
 
 - `catalog/registry.test.ts` - the sweep rewritten around the parse; the hand-written lexer and its
@@ -334,3 +379,4 @@ exact code twice and not found it, which is the whole reason both reviewers run.
 | 2026-08-21 | Tasks 2-4: the sweep parses. 642 lines of hand-written lexer removed; Argus found the outer-join semantics the rewrite had wrong |
 | 2026-08-21 | Local CodeRabbit round: three findings, three confirmed - a write carrying a scoped select was accepted, a cast placeholder refused, a derived table hiding ambiguity |
 | 2026-08-21 | Status done, written in the review round's commit rather than after the merge - the mistake 5.1c made |
+| 2026-08-21 | MR !76 round 1: a trivial "add a fixture" finding turned out to be a scope bypass, an accidental refusal and a false rejection; set-operation arms are now scopes |

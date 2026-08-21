@@ -231,6 +231,21 @@ describe('every entry in the catalog', () => {
     value !== null && typeof value === 'object' && !Array.isArray(value)
 
   /**
+   * A `union`, `intersect` or `except`, whose arms are **separate query scopes**.
+   *
+   * They need naming because the parser does not wrap them: a set operation is
+   * one `SelectStmt` whose `larg` and `rarg` are bare select bodies with no
+   * `{ SelectStmt: … }` key around them. A walk that recognises scopes only by
+   * that key therefore sees *one* scope and pours both arms into it.
+   *
+   * `jointype` is not `op`: a `JoinExpr` also has `larg`/`rarg`, and those are
+   * `from` items rather than scopes. `op` is the field only a select body
+   * carries, which is what makes this test exact rather than a guess.
+   */
+  const isSetOperation = (node: Node): boolean =>
+    typeof node.op === 'string' && node.op.startsWith('SETOP_') && node.op !== 'SETOP_NONE'
+
+  /**
    * Every `SelectStmt` body in the tree — one per query scope, which is the
    * unit the whole rule is written in terms of. A CTE's query, a derived table
    * and an `EXISTS` subquery each arrive here as their own scope.
@@ -246,6 +261,13 @@ describe('every entry in the catalog', () => {
       if (key === 'SelectStmt' && isNode(value)) out.push(value)
       scopesOf(value, out)
     }
+
+    // The arms of a set operation, which carry no wrapper key of their own.
+    if (isSetOperation(node)) {
+      if (isNode(node.larg)) out.push(node.larg)
+      if (isNode(node.rarg)) out.push(node.rarg)
+    }
+
     return out
   }
 
@@ -264,8 +286,15 @@ describe('every entry in the catalog', () => {
     }
     if (!isNode(node)) return
 
+    // A set operation's arms are scopes, so they are boundaries here too.
+    // Scoped to `isSetOperation` rather than skipping `larg`/`rarg` outright,
+    // because a `JoinExpr` uses the same two field names for `from` items that
+    // very much do belong to this scope.
+    const arms = isSetOperation(node)
+
     for (const [key, value] of Object.entries(node)) {
       if (key === 'SelectStmt') continue
+      if (arms && (key === 'larg' || key === 'rarg')) continue
       if (isNode(value)) visit(key, value)
       withinScope(value, visit)
     }
@@ -740,6 +769,42 @@ describe('every entry in the catalog', () => {
         'select 1 from unit u full join schema_migration m on u.association_id = $1',
         /reads unit as "u" without binding it/,
       ],
+      /**
+       * **Set operations are scopes too, and this is the alias-shadowing bypass
+       * wearing a different hat.**
+       *
+       * A `union` arrives as one `SelectStmt` whose `larg` and `rarg` are bare
+       * select bodies — *not* wrapped in a `{ SelectStmt: … }` key. So a walk
+       * that recognises scopes only by that wrapper finds a single scope and
+       * pours both arms into it, which is precisely the flat namespace this
+       * story exists to remove. Give the two arms the same alias and one
+       * predicate satisfies both, while the second arm reads every
+       * association's rows.
+       *
+       * Raised by CodeRabbit as a trivial "add a fixture, the code already
+       * refuses this". The code did not: its example used different aliases and
+       * was refused by accident of naming rather than by scope separation.
+       */
+      [
+        'a union arm reusing the bound arm\'s alias',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from unit u',
+        /reads unit as "u" without binding it/,
+      ],
+      [
+        'a union arm that reads a scoped table unbound',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from unit',
+        /reads unit as "unit" without binding it/,
+      ],
+      [
+        'an intersect arm reusing the bound alias',
+        'select 1 from unit u where u.association_id = $1 intersect select 1 from unit u',
+        /reads unit as "u" without binding it/,
+      ],
+      [
+        'an except arm reusing the bound alias',
+        'select 1 from unit u where u.association_id = $1 except select 1 from unit u',
+        /reads unit as "u" without binding it/,
+      ],
     ])('rejects %s, and says why', (_label, sql, reason) => {
       expect(sweepVerdict(sql)).toMatch(reason)
     })
@@ -797,6 +862,19 @@ describe('every entry in the catalog', () => {
        */
       ['a cast placeholder', 'select 1 from unit u where u.association_id = $1::uuid'],
       ['a cast column', 'select 1 from unit u where u.association_id::uuid = $1'],
+      /**
+       * The inverse for set operations: each arm scoped in its own right. A
+       * rule that refused set operations outright would pass the bypass cases
+       * above while making a legitimate one impossible to write.
+       */
+      [
+        'both arms of a union bound in their own scopes',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from assessment a where a.association_id = $1',
+      ],
+      [
+        'both arms of a union reusing one alias, each bound',
+        'select 1 from unit u where u.association_id = $1 union all select 1 from unit u where u.association_id = $1',
+      ],
     ])('accepts %s', (_label, sql) => {
       expect(sweepVerdict(sql)).toBeNull()
     })
