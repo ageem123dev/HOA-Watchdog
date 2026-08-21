@@ -1,6 +1,6 @@
 ---
-Status: backlog
-baseline_commit:
+Status: in-progress
+baseline_commit: ad56237e79a4eefc45592e14c4dc0d711d797c06
 merge_request:
 ---
 
@@ -45,11 +45,9 @@ trustworthy — it does not make it the thing that establishes isolation.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Choose and name the parser.** **The dependency is approved in principle (Matt,
-      2026-08-21); the specific library is not chosen.** Name it here with its resolution behaviour
-      checked against the eight bypasses rather than assumed, and record why it was picked over the
-      alternatives. It parses SQL that decides which association's records are returned, so its
-      supply chain is part of the decision. (AC1)
+- [x] **Task 1 — Choose and name the parser.** **`libpg-query` 17.7.4, as a `devDependency`.**
+      Chosen and measured 2026-08-21; see *The parser* below for the probe results and the rejected
+      alternatives. (AC1)
 - [ ] **Task 2 — Rewrite `sweepVerdict` around the parse.** Per-scope alias resolution replaces the
       flat namespace. Keep the shape that works: one function returning the reason or `null`, called
       by both the per-entry sweep and the fixtures, so the two cannot drift. (AC1)
@@ -88,6 +86,80 @@ associations the same unit number and runs the real query; none of the eight byp
 survived it. The sweep is an early warning that a *new* entry looks unscoped. It is not the proof,
 and 5.1b's own comments now say so.
 
+### The parser
+
+**`libpg-query` 17.7.4 — MIT, one transitive dependency (`@pgsql/types`), added as a
+`devDependency`.**
+
+#### The supply-chain question, corrected
+
+This task's original wording said the parser "parses SQL that decides which association's records
+are returned, so its supply chain is part of the decision". That overstates the exposure and the
+correction matters. **The sweep is test-only** — `sweepVerdict` has no production importer
+(verified: the only file mentioning it is `catalog/registry.test.ts`). So the parser never runs in
+the runtime that touches member data; it runs in the suite that checks the SQL which does. A
+`devDependency`, not a dependency, and the risk is a compromised *build* rather than a compromised
+*query path*. Still a real risk, and a smaller one than the story assumed.
+
+`npm audit` reports no advisory against `libpg-query` or `@pgsql/types`. The tree's five existing
+high advisories (`next`, `postcss`, `sharp`, `js-yaml`, `nanoid`) pre-date this change.
+
+#### Why this one
+
+**It is the actual PostgreSQL parser**, compiled to WASM — not a grammar that resembles Postgres.
+That is the whole argument, because this story exists to remove a guard that resembled a parser.
+Choosing a re-implementation would reintroduce the same failure one level up: a second grammar that
+can disagree with the database, and nothing failing when it does.
+
+`main` is `./wasm/index.cjs`, with no `os`/`cpu` restriction and no install script, so it needs no
+native toolchain. That was the historic objection to `libpg-query` and it no longer applies.
+
+#### Measured against the bypasses, not assumed
+
+Every case below was run through `pg.parse` before the choice was made. `refs` is table references
+tagged with the depth of the `SelectStmt` they belong to:
+
+| Case | Result |
+| --- | --- |
+| a plain literal | parses; one ref, `unit` |
+| a line comment | parses; comment gone from the tree entirely |
+| a **nested** block comment | parses — the real lexer, so `/* a /* b */ c */` is not a puzzle |
+| an `E'…\'…'` escape string | parses |
+| a `$tag$…$tag$` dollar construct | parses |
+| a CTE | `t` at scope 1, `unit` at scope 2 — distinguishable |
+| a derived table | `unit` at scope 2 |
+| a schema-qualified name | structured: `schema: "public"`, `table: "unit"` |
+| a comma-separated list | two refs at scope 1 |
+| **an alias shadowed in a subquery** | outer `unit` at scope 1, inner `assessment AS unit` at scope 2 |
+| an `IN` subquery | `unit` at scope 1, `assessment` at scope 2 |
+| `dues_status@1`'s real shape | one ref, `unit` aliased `u` |
+| not SQL at all | **throws** `syntax error at or near "this"` |
+| two statements | `stmts.length === 2` |
+
+**The alias-shadowing row is the point of the story.** It is the bypass the regex scanner
+structurally could not catch — both references found a predicate, but one belonged to the inner
+query — and per-scope resolution falls out of the parse tree rather than being something the sweep
+has to be clever about.
+
+**And most of `FORBIDDEN_LEXICAL` becomes unnecessary rather than merely redundant.** Comments,
+string literals and dollar constructs were forbidden because the scanner could not read them. A
+parser reads them, so the entries exist only if something still needs them — which Task 4 decides
+rather than assumes.
+
+#### AC3 gets a mechanical definition
+
+"What the parser cannot analyse is refused, not guessed at" was a judgement call against a regex.
+Against a parser it is exact: **a parse error is a refusal**, and so is `stmts.length !== 1`. There
+is no third state where the sweep proceeds on a partial understanding.
+
+#### Rejected
+
+| Candidate | Why not |
+| --- | --- |
+| `pgsql-ast-parser` 12.0.2 (MIT, pure TS) | A re-implementation of the grammar. Reintroduces exactly the "resembles Postgres" failure this story removes. |
+| `node-sql-parser` 5.4.0 (Apache-2.0) | Multi-dialect PEG — broader, and correspondingly less faithful to the Postgres-specific lexical forms that produced six of the eight bypasses. |
+| `sql-parser-cst` 0.42.1 | **GPL-2.0-or-later.** Not a licence to add to this tree without a deliberate decision, and there is no reason to when an MIT option is strictly better on the merits. |
+
 ### Where this sits
 
 Nothing depends on this story, and it depends on nothing. It touches one test file and whatever
@@ -122,3 +194,4 @@ that can be satisfied dishonestly is worse than none, because it is reported as 
 | Date | Change |
 | --- | --- |
 | 2026-08-21 | Split from 5.1c, which had absorbed it from 5.1b. Same theme, no shared files |
+| 2026-08-21 | Task 1: libpg-query 17.7.4 chosen as a devDependency, measured against all eight bypasses; ready-for-dev |
