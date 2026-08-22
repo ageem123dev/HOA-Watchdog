@@ -96,7 +96,7 @@ and the one that disagrees silently will be the keyboard one, because nobody dem
 - [x] **Task 4 — Pairing by keyboard, as the mechanism.** A selectable pairing surface: choose a
       column, choose a target, pair; and the inverse. Live region, visible focus, text state. (AC5,
       AC7)
-- [ ] **Task 5 — Dragging, over the same operation.** A pointer accelerator that calls the same
+- [x] **Task 5 — Dragging, over the same operation.** A pointer accelerator that calls the same
       pairing function and nothing else. (AC6)
 - [ ] **Task 6 — Duplicates and blanks, on the screen where they matter.** (AC8)
 
@@ -333,6 +333,25 @@ this story keeps finding.
 | 4i | The component keeps its own copy of the pairing rules rather than calling `assign`, so the screen and the domain drift | GUARD - the refusal cases only `assign` produces are asserted through the surface |
 | 4j | Targets rendered from a list written in the component rather than from `targetsForKind`, so an invoice offers `unit` | GUARD - asserted per kind against `targetsForKind` |
 
+#### Task 5 - dragging, over the same operation
+
+**If it ran correctly, how would I know?** A drag from a column onto a field leaves the surface in
+the state the two button presses leave it in - the *same* state, including the same refusal for a
+column another field holds.
+
+**How am I going to test it?** By observing that state, twice, and comparing. Not by reading the
+source: *"both paths call the same function"* is a claim a structural grep appears to prove and does
+not, which the story flagged before implementation and story 5.3 learned the expensive way when a
+sharing check passed against an import the module never used.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 5a | The drop handler sets state itself instead of calling `pair`, so the two paths drift - and the one that drifts silently is the keyboard one, because nobody demos it | GUARD - the same mapping built both ways and compared, refusals included |
+| 5b | `onDragOver` does not call `preventDefault`, so the browser never fires `drop` and dragging silently does nothing - green in jsdom, dead in a browser | GUARD - `preventDefault` asserted called |
+| 5c | The drag carries the heading *text* rather than the position, so the duplicate-column case works by keyboard and breaks under drag | GUARD - a drop from position 4 pairs position 4, not position 2 |
+| 5d | A drop carrying nothing, or a value that is not a position, assigns `NaN` | GUARD - refused, and the draft unchanged |
+| 5e | Dragging becomes the only way in, because the columns stop being buttons once they are draggable | GUARD - Task 4's whole suite still passes, and it is asserted here that removing the drag handlers leaves the surface operable |
+
 ### Completion Notes List
 
 #### Task 1 - the targets a kind actually has
@@ -459,6 +478,48 @@ Adding a sixth column did not, because nothing here is derived from the count - 
 every boundary case was. Pinned with a length assertion regardless, since that is exactly the
 reasoning that let Task 2's fixture rot unnoticed.
 
+#### Task 5 - dragging, over the same operation
+
+**The accelerator is eleven lines and sets no state of its own.** It reads a position off the
+`DataTransfer` and calls `pair`. The position travels, not the heading text - columns 2 and 4 of the
+fixture are both `amount`, and text would pair whichever a lookup found first, so the duplicate case
+would work by keyboard and break under drag.
+
+**AC6 is demonstrated rather than asserted.** The same mapping is built twice, once through the
+buttons and once through drag events, and the rendered surface is compared - fields, live region,
+refusal and what-remains. Refusals are compared too, because a drop handler that set state itself
+would most likely just move the column and nothing on screen would say so. And with the **entire
+drag layer deleted**, all 16 keyboard tests still pass: that is what "accelerator, not mechanism"
+means, checked rather than claimed.
+
+**Five production mutations, five caught**: the drop handler setting state instead of calling `pair`
+(2 red), `preventDefault` dropped from drag-over (1), the payload carrying heading text (3), the
+unusable-payload guard removed (2), and `draggable` removed (1).
+
+#### Task 5 - the defect Argus found, and the second one behind it
+
+**`disabled={selected === null}` on the field buttons.** A drag begins without a click, so nothing is
+selected when it starts, so the drop target was disabled - and a disabled button receives no pointer
+or drag events in Chromium, Firefox or Safari. **The accelerator was dead in every real browser and
+passing here**, because jsdom dispatches synthetic events to disabled elements regardless. Which is
+the same *passing in jsdom, dead in a browser* failure this task had already written a guard for,
+one level up, reintroduced two lines away from that guard.
+
+**And it cost something the review did not mention.** A disabled control is out of the tab order, so
+a treasurer navigating by keyboard could not reach the field list at all until they had already
+selected a column - they could not even discover what the importer needs. That is an AC5 failure, and
+**Task 4's own tab-order test missed it** because it checked `tabindex="-1"` and nothing else. The
+test asserted the nearest observable thing rather than the property, which is the third time this
+story has caught itself doing that.
+
+Fixed with `aria-disabled`, which advertises the state without removing the control; the `onClick`
+guard is what actually refuses, and a test now pins that it survives. Both halves have regression
+tests, and reverting either turns 2 red.
+
+**Neither regression test could be behavioural**, and that is stated in the file rather than papered
+over: jsdom cannot reproduce the event suppression, so a test that dragged and asserted success would
+pass either way. The assertion is structural on purpose.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
@@ -470,12 +531,14 @@ reasoning that let Task 2's fixture rot unnoticed.
 - `app/onboarding/mapping/actions.test.ts` *(new)* - 16 cases, one of them structural
 - `app/onboarding/mapping/sample-state.ts` *(new)* - the state the step holds between submissions
 - `app/onboarding/mapping/column-pairing.tsx` *(new)* - the pairing surface
-- `app/onboarding/mapping/column-pairing.test.tsx` *(new)* - 16 cases
+- `app/onboarding/mapping/column-pairing.test.tsx` *(new)* - 17 cases
+- `app/onboarding/mapping/drag.test.tsx` *(new)* - 9 cases, including the two paths compared
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 5: dragging as an accelerator; Argus found the drop target was `disabled`, so the drag path was dead in every real browser |
 | 2026-08-21 | Task 4: the pairing surface, native buttons as the mechanism, announced and stated in text |
 | 2026-08-21 | Task 3: the sample-reading server action, guarded and storing nothing |
 | 2026-08-21 | Task 2: a draft mapping keyed by position; the fixture pass found the collision fixture was prose, not data |

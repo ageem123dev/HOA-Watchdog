@@ -108,6 +108,12 @@ describe('every control is one the keyboard can reach', () => {
 
     expect(buttons.length).toBeGreaterThan(0)
     expect(buttons.filter((button) => button.getAttribute('tabindex') === '-1')).toEqual([])
+    // `disabled` takes a control out of the tab order too, and this test
+    // originally checked only `tabindex` — so it passed while the field buttons
+    // were unreachable by keyboard until a column had been selected. A
+    // treasurer tabbing through could not even discover what the importer
+    // needs. Found downstream of an Argus finding about the same attribute.
+    expect(buttons.filter((button) => button.hasAttribute('disabled'))).toEqual([])
   })
 })
 

@@ -47,6 +47,14 @@ const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
   year: 'Year',
 }
 
+/**
+ * The format the drag payload travels under.
+ *
+ * A custom type rather than `text/plain`, so a stray drop of selected text from
+ * anywhere else on the page carries nothing this reads.
+ */
+const DRAG_FORMAT = 'application/x-column-position'
+
 /** A column with no heading is identified by the only thing it has. */
 export const columnLabel = (heading: Heading): string =>
   heading.text.trim() === ''
@@ -111,6 +119,34 @@ export function ColumnPairing({ kind, headings }: ColumnPairingProps) {
     [draft],
   )
 
+  /**
+   * The drag accelerator, and the whole of it.
+   *
+   * It reads a position off the event and calls `pair`. It sets no state of its
+   * own — that is what keeps it an accelerator rather than a second
+   * implementation, and it is why `drag.test.tsx` builds the same mapping both
+   * ways and compares the surface rather than reading this file.
+   *
+   * The position travels on the `DataTransfer`, not the heading text: columns 2
+   * and 4 of a real export are both `amount`, and text would pair whichever a
+   * lookup found first.
+   */
+  const onDropInto = useCallback(
+    (target: TargetField) => (event: React.DragEvent) => {
+      event.preventDefault()
+
+      const position = Number(event.dataTransfer.getData(DRAG_FORMAT))
+
+      // A drop from somewhere else entirely carries nothing usable. Unguarded,
+      // `Number('')` is 0 and `Number('x')` is NaN, and the field would read
+      // "column NaN" with nothing refusing it.
+      if (!Number.isInteger(position) || position < 1) return
+
+      pair(target, position)
+    },
+    [pair],
+  )
+
   const positionFor = (target: TargetField) =>
     draft.pairings.find((pairing) => pairing.target === target)?.position
 
@@ -150,6 +186,14 @@ export function ColumnPairing({ kind, headings }: ColumnPairingProps) {
                     // Selection state carried in the accessible name and in
                     // `aria-pressed`, never by tint alone.
                     aria-pressed={isSelected}
+                    // The accelerator. Selecting and activating still works
+                    // exactly as it did; this adds a second way in, over the
+                    // same operation, rather than a second mechanism.
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData(DRAG_FORMAT, String(heading.position))
+                      event.dataTransfer.effectAllowed = 'move'
+                    }}
                     onClick={() => {
                       setRefusal(null)
                       setSelected(isSelected ? null : heading.position)
@@ -180,7 +224,19 @@ export function ColumnPairing({ kind, headings }: ColumnPairingProps) {
                 <li key={target} style={styles.item}>
                   <button
                     type="button"
-                    disabled={selected === null}
+                    // **`aria-disabled`, never `disabled`.** A disabled button
+                    // receives no drag events in any real browser, so the
+                    // accelerator would be dead there while passing here — jsdom
+                    // dispatches to disabled elements regardless. It is also out
+                    // of the tab order, which meant a treasurer could not tab to
+                    // these fields to discover what the importer needs until
+                    // they had already selected a column. The `onClick` below is
+                    // what actually refuses; this only says so.
+                    aria-disabled={selected === null}
+                    // Without `preventDefault` on drag-over the browser never
+                    // fires a drop at all: passing in jsdom, dead in a browser.
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={onDropInto(target)}
                     onClick={() => selected !== null && pair(target, selected)}
                     style={styles.control}
                   >
