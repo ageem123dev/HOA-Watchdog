@@ -1,7 +1,7 @@
 ---
-Status: review
+Status: done
 baseline_commit: 387f9e7
-merge_request:
+merge_request: 82
 ---
 
 # Story 5.5: What this mapping would produce
@@ -503,6 +503,32 @@ own gap, again.
 the `ocr` round was running `argus_review` **while HEAD was the reviewed commit**, so a run existed
 to score against. That is now the rule rather than a happy accident.
 
+#### The integration pass (step 6)
+
+Scope `387f9e7..HEAD`, **excluding `_bmad-output/**`** - the story document is this review's spec, and
+reviewing it as a diff reviews the prose against itself. Engine: **argus (MCP)**, one call.
+`audit_chain_ok: true`, context 20/20 files, selectivity 1, reflection converged.
+
+**Three `low` findings, all three refuted**, each against the real file:
+
+1. *`String(rollRow[rollField])` turns `undefined` into the string `"undefined"`.* `RollRow` declares
+   `billingCycle: BillingCycle` and `assessmentYear: number`, both non-optional, and `readRollRow`
+   returns `ok` only with them set. The state does not exist.
+2. *The refusal list's React key collides when two problems share a row.* It cannot: `readRows`
+   pushes `invalid-row` for a row **guarded by `if (validation.ok)`** and then returns, so a row
+   yields at most one, and problems without a row use the array index. Two rows with the same reason
+   differ in `row`.
+3. *`JSON.stringify(row).length` throws if a row is `undefined`.* `dataRows` comes from `toRectangle`,
+   which returns either `parseCsv`'s rows or the workbook decoder's - both dense - and the type is
+   `readonly (readonly string[])[]`.
+
+All three are defences against states the types forbid, and none was added: the Prime Directive is
+that a guard with no test behind it is a guard nobody asked for. Recorded rather than dropped,
+because a reviewer's precision is a fact about the reviewer.
+
+This is the pass per-task rounds structurally cannot be - and on this story it is the one that caught
+the roll preview missing `cycle` and `year`, which no single task's diff could show.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -528,6 +554,8 @@ to score against. That is now the rule rather than a happy accident.
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Integration pass: three lows, all three refuted against the types |
+| 2026-08-22 | MR !82 opened; status done, written in this commit rather than after the merge |
 | 2026-08-22 | Local CodeRabbit round: the row bound did not bound the payload, which was this story's own stated rationale |
 | 2026-08-22 | `ocr` round: 20 comments, 8 confirmed - the field labels existed twice, and a test that would have gone quiet |
 | 2026-08-22 | Branch Argus round: a roll preview was missing the two columns that make it a roll; a follow-up `critical` refuted |
