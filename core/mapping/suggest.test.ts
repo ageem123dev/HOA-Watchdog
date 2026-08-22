@@ -34,7 +34,7 @@ import {
   suggestColumns,
   type Suggestion,
 } from './suggest'
-import { targetsForKind, type TargetField } from './targets'
+import { targetsForKind, UnknownDocumentKindError, type TargetField } from './targets'
 
 /** Headings as `readHeadings` produces them: 1-based, in file order. */
 const headingsOf = (...texts: readonly string[]): readonly Heading[] =>
@@ -357,6 +357,8 @@ describe('what a real file actually contains', () => {
   it('refuses a kind the importer does not have', () => {
     // `targetsForKind` throws rather than defaulting, and this must not soften
     // that into a plausible-looking empty suggestion list.
-    expect(() => suggestColumns(headingsOf('Date'), 'ledger' as DocumentKind)).toThrow()
+    expect(() => suggestColumns(headingsOf('Date'), 'ledger' as DocumentKind)).toThrow(
+      UnknownDocumentKindError,
+    )
   })
 })

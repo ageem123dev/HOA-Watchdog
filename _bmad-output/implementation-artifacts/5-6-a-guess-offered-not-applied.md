@@ -370,6 +370,38 @@ no cast to be wrong.
 **Scope held:** no prompt, no key, no network. The only match for "prompt" in the diff is the doc
 comment quoting the epic.
 
+#### The merge request round (CodeRabbit, MR !83)
+
+Four actionable comments plus one outside the diff. **Four confirmed and fixed, one refuted.**
+
+- **Major - `suggester` must be referentially stable.** The reset compares it by reference and
+  writes state during render, so an inline `suggester={{ suggest }}` makes the condition true on
+  every pass and React aborts the tree with "Too many re-renders". No current caller is affected;
+  **5.6b is what makes it reachable**, since a model-backed suggester built in a component body is
+  the natural shape for that change. A ref instead of state would not help - the new identity
+  arrives every render either way - so the constraint is inherent and is now stated on the prop,
+  with a test for the stable case and one proving an unrelated re-render does not discard an
+  override.
+- **A vacuous guard in a test about markers.** `if (unit !== null) expect(...)` passes when the
+  element is absent. `deposit` is in `KINDS_WITH_UNIT_REFERENCE`, so the control is always rendered
+  and the guard only hid the assertion. Now unconditional.
+- **The prefill structural check scanned prose.** Both assertions ran against the raw file while the
+  module's own doc comment discusses `assign` and `pairings` - so the positive check could be
+  satisfied by a comment and the negative one broken by one. **Third occurrence of this exact shape
+  in this story**, after `matchKey`'s check and the AD-8 scan; now blanked with `neutralise` like
+  the others, with the "did the blanker eat the code" control beside it.
+- **A bare `toThrow()`.** It passes on any error, including a typo's `TypeError`. Now
+  `toThrow(UnknownDocumentKindError)`; making `targetsForKind` throw a plain `Error` turns 1 red,
+  where before it stayed green.
+
+**Refuted:** tokenise TypeScript instead of matching it, so specifiers are cooked and conditional
+dynamic imports are seen. Both gaps are real and both fail *open* - `import '@/adapters/db'`
+comes back raw, and `import(cond ? 'a' : 'b')` is not seen at all. Closing them means writing a
+parser, and these guards catch **architectural drift, not a determined evader**: nobody writes
+`@` by accident, and anyone deliberately encoding a specifier to slip past an architecture test
+can equally edit the test. Recorded in the module's own doc comment so the next reader sees the
+limit rather than inferring a guarantee.
+
 ### AC audit
 
 Each criterion, the test that fails if the behaviour is removed, and the evidence that it does. **A

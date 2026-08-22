@@ -83,6 +83,21 @@ const MODULE_SPECIFIER = new RegExp(
  * deliberate and callers must treat it as **indeterminate**: `import(`@/x/${e}`)`
  * cannot be resolved without running the program, and a scanner that cannot tell
  * must not answer "fine".
+ *
+ * ## What a regex cannot do, stated rather than implied
+ *
+ * Specifiers come back **raw, not cooked**: `import '\x40/adapters/db'` yields
+ * the literal `\x40/adapters/db`, which no caller's comparison recognises. A
+ * conditional dynamic import — `import(cond ? 'a' : 'b')` — is not seen at all.
+ * Both fail *open*.
+ *
+ * Closing them means tokenising TypeScript rather than matching it, which is a
+ * different piece of software. It is not done here because **these guards catch
+ * architectural drift, not a determined evader**: nobody writes `\x40` by
+ * accident, and anyone deliberately encoding a specifier to slip past an
+ * architecture test can equally edit the test. Raised by CodeRabbit; recorded
+ * rather than fixed, so the next person reads the limit instead of inferring a
+ * guarantee that is not here.
  */
 export function specifiersIn(source: string): readonly string[] {
   const { commentsBlanked } = neutralise(source)

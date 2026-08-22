@@ -127,9 +127,18 @@ describe('the guess arrives already made', () => {
 
     expect(nameOf(/^Reference — optional — reads Column 4 .*— suggested/)).toBeTruthy()
 
-    // `unit` is optional on a deposit and nothing here names it.
-    const unit = screen.queryByRole('button', { name: /^Unit — optional/ })
-    if (unit !== null) expect(unit.textContent).not.toContain('no suggestion')
+    /**
+     * `unit` is optional on a deposit — `deposit` is in
+     * `KINDS_WITH_UNIT_REFERENCE` — so the control is *always* rendered and
+     * nothing here names it.
+     *
+     * The first version guarded this with `if (unit !== null)`, which is a test
+     * that passes when the element is absent: the vacuous-guard shape this
+     * project keeps finding, written into a test whose whole job is to check a
+     * marker. Raised by CodeRabbit.
+     */
+    expect(nameOf(/^Unit — optional — no column yet$/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Unit — optional.*no suggestion/ })).toBeNull()
   })
 
   it('leaves the mapping unfinished when it could suggest nothing', () => {
@@ -291,6 +300,47 @@ describe('a second sample', () => {
     rerender(<ColumnPairing kind="deposit" headings={RECOGNISABLE} />)
 
     expect(screen.queryByRole('button', { name: /— suggested/ })).toBeNull()
+    expect(nameOf(/^Date — required — no column yet/)).toBeTruthy()
+  })
+
+  it('re-renders without looping when the same suggester is passed again', () => {
+    /**
+     * The other side of the referential-stability requirement now documented on
+     * the prop. Re-rendering with the *same* constant must not re-run the
+     * pre-fill, because the reset writes state during render — and a condition
+     * that stayed true every pass is how React reaches "Too many re-renders".
+     *
+     * A caller passing an inline `{{ suggest }}` object is the shape that
+     * breaks, and story 5.6b is what makes it reachable. That case is not
+     * asserted here: it fails by aborting the React tree, which is not a
+     * behaviour worth pinning in a test. The prop's doc comment carries the
+     * requirement. Raised by CodeRabbit.
+     */
+    const { rerender } = render(
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+    )
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      rerender(
+        <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      )
+    }
+
+    expect(nameOf(/^Date — required — reads Column 1 .*— suggested/)).toBeTruthy()
+  })
+
+  it('keeps an override across an unrelated re-render', () => {
+    // The reason the reset is conditional at all: a render that changes nothing
+    // must not throw away what the treasurer did.
+    const { rerender } = render(
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+    )
+
+    fireEvent.click(nameOf(/^Unpair Date/))
+    rerender(
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+    )
+
     expect(nameOf(/^Date — required — no column yet/)).toBeTruthy()
   })
 

@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import type { Heading } from '../extraction/headings'
+import { neutralise } from '../ports/declared-members'
 import { specifiersIn } from '../ports/module-specifiers'
 import { assign, completeness, emptyDraft, unassign, type DraftMapping } from './draft'
 import { draftFromSuggestion } from './prefill'
@@ -274,7 +275,20 @@ describe('nothing is stored, and nothing can be', () => {
      * story 5.3's finding, and Task 1 proved it again when a forked folding
      * passed every behavioural assertion.
      */
-    expect(SOURCE).toContain('assign(')
-    expect(SOURCE).not.toContain('pairings:')
+    /**
+     * **Scanned with the comments blanked**, like `suggest.test.ts`. Both
+     * assertions ran against the raw file, and this module's own doc comment
+     * discusses `assign` and `pairings` at length — so the positive check could
+     * be satisfied by prose and the negative one broken by it. That is the same
+     * defect twice over, and it is the third time this story has hit it: once on
+     * `matchKey`'s structural check, once on the AD-8 scan. Raised by CodeRabbit.
+     */
+    const code = neutralise(SOURCE).commentsBlanked
+
+    expect(code).toContain('assign(')
+    expect(code).not.toContain('pairings:')
+    // The blanker must not be what makes this pass — if it ate the code, both
+    // assertions above are about an empty string.
+    expect(code).toContain('export function draftFromSuggestion')
   })
 })

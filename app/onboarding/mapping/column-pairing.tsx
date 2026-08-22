@@ -57,6 +57,19 @@ export interface ColumnPairingProps {
    * plus a sentence saying nothing was suggested. Absent is a supported state,
    * not a degraded one, which is what keeps 5.6b's model a thing that can be
    * turned off rather than a thing the wizard depends on.
+   *
+   * **Must be referentially stable.** The reset below compares this *by
+   * reference*, so an object rebuilt on every render — `suggester={{ suggest }}`
+   * — makes the condition true on every pass, and React aborts the tree with
+   * "Too many re-renders". Pass a module constant, as `mapping-wizard.tsx` does,
+   * or `useMemo` it in the caller.
+   *
+   * A ref instead of state would not save it: the new identity arrives every
+   * render either way. The constraint is inherent to comparing a function by
+   * identity, so it is stated here rather than defended against. No current
+   * caller is affected; **story 5.6b is the one that makes it reachable**, since
+   * a model-backed suggester assembled in a component body is the natural shape
+   * for that change. Raised by CodeRabbit.
    */
   readonly suggester?: ColumnSuggester
 }
