@@ -93,7 +93,7 @@ implementation detail, and AC2 exists to pin it.
 
 - [x] **Task 1 — Apply a mapping to a rectangle.** Pure: rows plus a `DraftMapping` in, a rectangle
       headed with target names out, mapped columns only, in target order. (AC1, AC2)
-- [ ] **Task 2 — Carry a bounded slice of rows from the sample read.** The bound is a named constant,
+- [x] **Task 2 — Carry a bounded slice of rows from the sample read.** The bound is a named constant,
       and the total row count travels with it so AC5 can be honest. (AC7)
 - [ ] **Task 3 — The preview result.** Compose apply + `readRows` into **either** the records a
       clean sample produces **or** the refusal and every offending row — never both, because
@@ -205,6 +205,29 @@ that number is a place to get it wrong once.
 | 1f | An empty rectangle, or one with a header and no data rows | GUARD - a header-only rectangle out, not a crash |
 | 1g | Output column order taken from pairing insertion order, so the preview's columns rearrange as the treasurer re-pairs, and the tests are order-dependent | GUARD - deterministic `targetsForKind` order, asserted against a draft built in a different order |
 
+#### Task 2 - a bounded slice of rows, and an honest total
+
+**If it ran correctly, how would I know?** The read returns a rectangle of at most
+`PREVIEW_ROW_LIMIT` data rows **with its header row**, plus the number of data rows the file actually
+has. Those two numbers are what AC5's "20 of 143" is made of, and they must be able to differ.
+
+**How am I going to test it?** Pure, over a rectangle; the bound is a named constant so a fixture can
+be built at `LIMIT`, `LIMIT + 1` and either side. The header row travels with the slice because
+`applyMapping` expects a rectangle and drops row 0 — carrying bare data rows would mean prepending a
+dummy header at the call site, which is a seam nobody would remember.
+
+**Could this happen elsewhere?** Every "first N of M" in a UI is the same pair of off-by-ones. The
+count that is clamped and the count that is not must not be computed by the same expression.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | The bound applied to the rectangle *including* the header, so `LIMIT - 1` data rows are previewed while the screen says `LIMIT` | GUARD - fixture at exactly `LIMIT + 1` data rows, data-row count asserted |
+| 2b | `totalDataRows` counts the header row, so a one-row file reports two and every count on the screen is one too many | GUARD - asserted against a known small fixture |
+| 2c | The bound not applied at all, so the whole rectangle crosses the server-action boundary - the 25 MB state this design exists to avoid | GUARD - a fixture well over the limit, length asserted |
+| 2d | `totalDataRows` clamped by the same expression as the slice, so it can never exceed the limit and the screen can only ever say "20 of 20" | GUARD - asserted greater than the slice on an over-limit fixture |
+| 2e | A header-only file, or an empty one: no data rows to slice | GUARD - header preserved, total `0`, no crash |
+| 2f | The slice taken from the end, or the rows re-ordered, so "the first 20 rows" is not what the treasurer sees | GUARD - first and last slice rows asserted by their own values |
+
 ### Completion Notes List
 
 #### Task 1 - applying a mapping
@@ -237,14 +260,44 @@ turns it red.
 
 ### Review Findings
 
+#### Task 2 - the bounded slice, and two counts that must be able to differ
+
+**`totalDataRows` is deliberately not `Math.min`.** Clamped by the same expression as the slice it
+can only ever equal the slice, and the screen can only say "20 of 20" - which is UX-DR24's forbidden
+reassurance wearing a number. Mutating it to `Math.min` turns 4 red.
+
+**The bound is on the data rows, not the rectangle.** `rows.slice(0, limit)` yields `limit - 1` data
+rows while the screen says `limit`; that mutation turns 6 red. The header travels with the slice
+because `applyMapping` takes a rectangle and drops row 0 - carrying bare data rows would mean
+prepending a dummy header at every call site.
+
+**Four production mutations, four caught**: the bound on the rectangle (6 red), the total clamped
+(4), the slice taken from the end (2), and the header dropped (11).
+
+**Two fixture mutations, two caught**: making the rows indistinguishable (2 red - so the per-row
+`row-N` values are load-bearing for the ordering assertions) and reducing the over-limit fixture to
+exactly the limit (2 red - the unclamped-total test needs a file that genuinely exceeds it).
+
+**A scripted edit did not apply, and the read-back caught it.** The first attempt at wiring
+`boundedSample` into `sample-headings.ts` used `
+` anchors against a CRLF file: the assertion
+raised, nothing changed, and `grep -c` returned 0 for both new symbols. Re-applied with line-ending
+aware anchors and verified by reading back that the old `return` line is gone. That is the fourth
+instance this session and the third from CRLF.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
 - `core/mapping/apply.test.ts` *(new)* - 16 cases, including the `readRows` cross-check
+- `core/extraction/sample-rows.ts` *(new)* - `PREVIEW_ROW_LIMIT` and `boundedSample`
+- `core/extraction/sample-rows.test.ts` *(new)* - 11 cases
+- `core/extraction/sample-headings.ts` - the ok result now carries `rows` and `totalDataRows`
+- `core/extraction/sample-headings.test.ts` - 3 cases for the bounded rows
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Task 2: a bounded slice of rows carried from the sample read, with an unclamped file total |
 | 2026-08-22 | Task 1: a mapping applied to a rectangle, mapped columns only, cross-checked through `readRows` |
 | 2026-08-22 | Created from epic 5's spine, with the rows-are-gone decision and the rename-collision trap recorded before implementation |

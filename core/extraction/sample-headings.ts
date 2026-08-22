@@ -32,6 +32,7 @@
 import { normalizeContentType } from '../ingestion/acceptance'
 import { toRectangle } from './rectangle'
 import { readHeadings, type Heading, type HeadingProblem } from './headings'
+import { boundedSample } from './sample-rows'
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
 
 /** The shape an upload arrives in, minus everything ingestion would add. */
@@ -50,6 +51,16 @@ export type SampleHeadingsResult =
       readonly ok: true
       readonly headings: readonly Heading[]
       readonly problems: readonly HeadingProblem[]
+      /**
+       * The header row plus a bounded slice of data rows - story 5.5.
+       *
+       * Carried so the preview need not ask the treasurer to upload the same
+       * file twice, and *bounded* because this crosses a server-action boundary
+       * into React state.
+       */
+      readonly rows: readonly (readonly string[])[]
+      /** Data rows in the whole file, never clamped - UX-DR24's "of 143". */
+      readonly totalDataRows: number
     }
   | {
       readonly ok: false
@@ -82,5 +93,13 @@ export function readSampleHeadings(
   const headings = readHeadings(rectangle.rows)
   if (!headings.ok) return { ok: false, reason: headings.reason }
 
-  return { ok: true, headings: headings.headings, problems: headings.problems }
+  const bounded = boundedSample(rectangle.rows)
+
+  return {
+    ok: true,
+    headings: headings.headings,
+    problems: headings.problems,
+    rows: bounded.rows,
+    totalDataRows: bounded.totalDataRows,
+  }
 }

@@ -21,6 +21,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { WorkbookDecoder } from '../ports/workbook-decoder'
+import { PREVIEW_ROW_LIMIT } from './sample-rows'
 import { readSampleHeadings } from './sample-headings'
 
 const csv = (text: string) => ({
@@ -165,5 +166,46 @@ describe('reading the headings of an uploaded sample', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.headings.map((h) => h.text)).toEqual(['date', 'amount'])
+  })
+})
+
+describe('the bounded rows a preview reads (story 5.5)', () => {
+  const rowsOf = (n: number): string =>
+    [
+      'date,description,amount',
+      ...Array.from({ length: n }, (_, i) => `2026-01-0${(i % 9) + 1},row-${i + 1},${i + 1}.00`),
+    ].join('\n')
+
+  it('carries the header row and the data rows back', () => {
+    const result = readSampleHeadings(csv(rowsOf(2)))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // The header travels with the slice because `applyMapping` takes a
+    // rectangle and drops row 0.
+    expect(result.rows[0]).toEqual(['date', 'description', 'amount'])
+    expect(result.rows.slice(1)).toHaveLength(2)
+    expect(result.totalDataRows).toBe(2)
+  })
+
+  it('bounds the rows it carries, and still reports the file total', () => {
+    const over = PREVIEW_ROW_LIMIT + 5
+    const result = readSampleHeadings(csv(rowsOf(over)))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // Unbounded, a 25 MB sample becomes 25 MB of React state — this is the
+    // whole reason the rows are carried rather than the file re-uploaded.
+    expect(result.rows.slice(1)).toHaveLength(PREVIEW_ROW_LIMIT)
+    expect(result.totalDataRows).toBe(over)
+  })
+
+  it('reports no data rows for a header-only file, without refusing it', () => {
+    const result = readSampleHeadings(csv('date,description,amount'))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.totalDataRows).toBe(0)
+    expect(result.rows).toEqual([['date', 'description', 'amount']])
   })
 })
