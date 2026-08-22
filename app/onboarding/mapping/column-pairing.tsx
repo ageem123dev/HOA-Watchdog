@@ -4,7 +4,9 @@ import { useCallback, useState } from 'react'
 
 import type { DocumentKind } from '@/core/extraction/record'
 import type { Heading, HeadingProblem } from '@/core/extraction/headings'
-import { assign, completeness, emptyDraft, unassign, type DraftMapping } from '@/core/mapping/draft'
+import { assign, completeness, unassign, type DraftMapping } from '@/core/mapping/draft'
+import { draftFromSuggestion } from '@/core/mapping/prefill'
+import type { ColumnSuggester, Suggestion } from '@/core/mapping/suggest'
 import { targetsForKind, type TargetField } from '@/core/mapping/targets'
 import { TARGET_LABELS } from './target-labels'
 import { MappingPreview } from './mapping-preview'
@@ -48,6 +50,15 @@ export interface ColumnPairingProps {
   readonly rows?: readonly (readonly string[])[]
   /** Data rows the file holds, for the count UX-DR24 requires. */
   readonly totalDataRows?: number
+  /**
+   * Who guesses which column is which — story 5.6, and **optional on purpose**.
+   *
+   * AC7: with no suggester at all the screen is exactly what story 5.4 built,
+   * plus a sentence saying nothing was suggested. Absent is a supported state,
+   * not a degraded one, which is what keeps 5.6b's model a thing that can be
+   * turned off rather than a thing the wizard depends on.
+   */
+  readonly suggester?: ColumnSuggester
 }
 
 /**
@@ -80,14 +91,39 @@ export const columnLabel = (heading: Heading): string =>
     ? `Column ${heading.position} — no heading`
     : `Column ${heading.position} — ${heading.text}`
 
+/**
+ * The suggestion, and the draft it pre-fills.
+ *
+ * One function called from both the initialiser and the new-sample reset, so the
+ * two cannot drift. That drift is the whole risk here: the reset path is the one
+ * nobody demonstrates, and a pre-fill living only in the initialiser is silently
+ * absent from the second sample onward.
+ */
+const preFill = (
+  kind: DocumentKind,
+  headings: readonly Heading[],
+  suggester: ColumnSuggester | undefined,
+): { draft: DraftMapping; suggestions: readonly Suggestion[]; applied: number } => {
+  // No suggester means no suggestions — not an empty guess, which is a different
+  // thing the screen has to be able to say (AC7).
+  const suggestions = suggester?.suggest(headings, kind) ?? []
+  const { draft, applied } = draftFromSuggestion(headings, kind, suggestions)
+
+  return { draft, suggestions, applied }
+}
+
 export function ColumnPairing({
   kind,
   headings,
   problems = [],
   rows,
   totalDataRows,
+  suggester,
 }: ColumnPairingProps) {
-  const [draft, setDraft] = useState<DraftMapping>(() => emptyDraft(kind, headings.length))
+  const [initial] = useState(() => preFill(kind, headings, suggester))
+  const [draft, setDraft] = useState<DraftMapping>(initial.draft)
+  const [suggested, setSuggested] = useState<readonly Suggestion[]>(initial.suggestions)
+  const [appliedCount, setAppliedCount] = useState(initial.applied)
   const [selected, setSelected] = useState<number | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [refusal, setRefusal] = useState<string | null>(null)
@@ -118,8 +154,16 @@ export function ColumnPairing({
   const [renderedSample, setRenderedSample] = useState(sample)
 
   if (renderedSample !== sample) {
+    // **Re-suggested, not merely emptied.** Story 5.6: a pre-fill that only ran
+    // in the initialiser would leave the second sample blank with nothing to
+    // explain it — correct on the path anyone demonstrates, missing on the one
+    // they do not, which is exactly the shape story 5.2 shipped.
+    const fresh = preFill(kind, headings, suggester)
+
     setRenderedSample(sample)
-    setDraft(emptyDraft(kind, headings.length))
+    setDraft(fresh.draft)
+    setSuggested(fresh.suggestions)
+    setAppliedCount(fresh.applied)
     setSelected(null)
     setRefusal(null)
     setAnnouncement('')
@@ -219,6 +263,42 @@ export function ColumnPairing({
   const targetHolding = (position: number) =>
     draft.pairings.find((pairing) => pairing.position === position)?.target
 
+  /**
+   * What the suggester said about `target`, if it said anything.
+   *
+   * `undefined` — never mentioned — and `null` — considered, nothing found — are
+   * different answers, and AC2 exists for exactly that difference.
+   */
+  const suggestionFor = (target: TargetField): number | null | undefined =>
+    suggested.find((suggestion) => suggestion.target === target)?.position
+
+  /**
+   * **Derived from the current pairing, never from history.**
+   *
+   * The moment a treasurer moves or clears a suggested column, this stops being
+   * true and the marker goes. A screen that kept crediting the suggestion would
+   * be saying the machine chose what the human chose — against AC8, which is the
+   * point of the whole story.
+   */
+  const isStillTheSuggestion = (target: TargetField, position: number | undefined) =>
+    position !== undefined && suggestionFor(target) === position
+
+  /**
+   * The sentence under the heading, and it is deliberately three sentences
+   * rather than one conditional.
+   *
+   * Never asked, asked and found nothing, and asked and found some are three
+   * situations. Collapsing the first two would leave a treasurer unable to tell
+   * whether the tool looked at their file and gave up, or was never running —
+   * which is what they need to decide how much to trust it.
+   */
+  const suggestionSummary =
+    suggester === undefined
+      ? 'Nothing was suggested for this file. Pair each column yourself below.'
+      : appliedCount === 0
+        ? 'We could not suggest a column for any of these fields. Pair them yourself below.'
+        : `We suggested ${appliedCount} ${appliedCount === 1 ? 'column' : 'columns'} for you. Check each one before you continue — you can change any of them.`
+
   return (
     <div style={styles.surface}>
       {/*
@@ -234,6 +314,17 @@ export function ColumnPairing({
           {refusal}
         </p>
       )}
+
+      {/*
+        Static text, **not** a second live region. Story 5.4: "the only live
+        region on this screen — nesting one inside another is how an
+        announcement gets read twice or not at all." It is also not announced on
+        mount: a live region firing as the screen appears is read over whatever
+        the user was doing.
+      */}
+      <p data-testid="suggestion-summary" style={styles.suggestionSummary}>
+        {suggestionSummary}
+      </p>
 
       {problems.length > 0 && (
         <section data-testid="heading-problems" aria-labelledby="heading-problems-title">
@@ -347,6 +438,23 @@ export function ColumnPairing({
                     {heading === undefined
                       ? ' — no column yet'
                       : ` — reads ${columnLabel(heading)}`}
+                    {/*
+                      **In the accessible name, not in a tint.** Story 5.4 made
+                      this call for selection state and it holds here: a marker
+                      only sighted users can see is not a marker for the
+                      treasurer this project keeps in mind.
+
+                      "No suggestion" is said only for a field still empty and
+                      only when there was a suggester to say it — a field the
+                      treasurer has since filled does not need telling that
+                      nobody guessed it, and with no suggester the sentence
+                      above already covers the whole screen.
+                    */}
+                    {isStillTheSuggestion(target, position) && ' — suggested'}
+                    {suggester !== undefined &&
+                      position === undefined &&
+                      suggestionFor(target) === null &&
+                      ' — no suggestion'}
                   </button>
                   {position !== undefined && (
                     <button type="button" onClick={() => unpair(target)} style={styles.control}>
@@ -397,5 +505,6 @@ const styles = {
   item: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-inline)', padding: '0.25rem 0' },
   control: { minHeight: '2.75rem', minWidth: '2.75rem', textAlign: 'left' },
   controlSelected: { fontWeight: 600 },
+  suggestionSummary: { margin: 0, color: 'var(--color-ink-muted)' },
   remaining: { margin: 0 },
 } satisfies Record<string, React.CSSProperties>

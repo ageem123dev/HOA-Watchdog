@@ -256,6 +256,38 @@ second way to build a draft, and the two would agree until the day 5.4's rules c
 **Cross-check:** a draft pre-filled from a suggestion, then fully overridden, must equal the draft
 built by hand from the same choices. That is AC8 stated as an equality rather than as a feeling.
 
+#### Task 4 - the pairing surface says what was suggested, and what was not
+
+**If it ran correctly, how would I know?** A treasurer opening the mapping sees the suggested
+pairings already made *and can tell which ones were suggested*. Every required target with no
+suggestion says so. With no suggester at all the screen is exactly story 5.4's, plus a sentence
+saying nothing was suggested.
+
+**How am I going to test it?** Render tests, jsdom, `@testing-library/react`, per story 1.6c. The
+assertions read **accessible names**, not styles - a marker carried by tint alone is invisible to the
+treasurer this project keeps in mind, and story 5.4 already made that call for selection state.
+
+**Could this happen elsewhere?** The reset-on-new-sample path is the trap. Story 5.4 added it because
+a mapping outliving its file is "wrong in the worst direction, because the mapping still looks
+finished" - and it resets to `emptyDraft`. A pre-fill added only to the `useState` initialiser is
+silently absent on the second sample, which is exactly the shape story 5.2 shipped: correct on the
+path anyone demonstrates, missing on the one they do not.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4a | The pre-fill runs only in the `useState` initialiser, so a treasurer reading a **second** sample gets an empty draft with no explanation | GUARD - the reset path re-runs the pre-fill, asserted by re-rendering with new headings |
+| 4b | The "suggested" marker survives the treasurer overriding it, so the screen credits the machine with what the human chose - directly against AC8 | GUARD - the marker is derived from the *current* pairing, asserted after an override |
+| 4c | No suggester at all crashes, or renders an empty screen, or says nothing | GUARD - AC7, asserted with the prop absent |
+| 4d | The suggestion applied with nothing on screen to say so, so a treasurer submits a machine-made mapping believing they made it. **This is the difference between "offered" and "applied"** | GUARD - a summary line naming how many were filled in |
+| 4e | The marker carried by colour or weight alone | GUARD - asserted through the accessible name, never a style |
+| 4f | A required target with no suggestion showing the same blank as one nobody considered - AC2 at the surface | GUARD - "no suggestion" is said in words |
+| 4g | The suggestion recomputed on every render, resetting the draft in a loop the moment a `headings` array is rebuilt | GUARD - keyed off the same `sample` string story 5.4 already computes |
+| 4h | A second live region for the suggestion summary, so announcements are read twice or not at all | GUARD - static text, not a live region; story 5.4's is the only one |
+
+**Cross-check:** with a suggester supplying nothing, the surface must be indistinguishable from the
+no-suggester case in behaviour and distinguishable in wording - one had nothing to say, the other was
+never asked.
+
 ### Review Findings
 
 ### Completion Notes List
