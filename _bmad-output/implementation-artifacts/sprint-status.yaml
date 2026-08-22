@@ -45,7 +45,7 @@
 # after their stories are written to populate them here.
 
 generated: 2026-07-30
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 project: HOA-Treasurer-Assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -128,7 +128,7 @@ development_status:
   5-1d-the-sweep-parses-sql: done  # split from 5.1c: the scoping guard reads SQL rather than resembling it
   5-2-a-document-declares-its-kind: done  # kind moves from the row to the upload; contract change
   5-3-the-headers-we-were-given: done  # duplicates and blanks reported, not guessed
-  5-4-mapping-one-column-to-another: backlog  # drag AND keyboard, neither the poor relation
+  5-4-mapping-one-column-to-another: done  # drag AND keyboard, neither the poor relation
   5-5-what-this-mapping-would-produce: backlog  # the preview, before anything is stored
   5-6-a-guess-offered-not-applied: backlog  # FR-10; deterministic first, model on the residue
   5-7-the-mapping-is-remembered: backlog  # and a mapping change is a deliberate act
@@ -139,6 +139,10 @@ development_status:
   epic-6-retrospective: optional
 
 action_items:
+  - epic: 5
+    action: "A CSV is parsed with no cell-count cap while a workbook has one. adapters/extraction/workbook-sheetjs.ts stops at MAX_WORKBOOK_CELLS = 500,000; parseCsv has no equivalent, so a 25 MB file of commas becomes a rectangle of millions of empty cells in memory. MAX_DOCUMENT_BYTES bounds the bytes, not the cells. Pre-existing and reachable through ingest since epic 1 - story 5.4 only added a second entry point to it (readSampleHeadings), which is why it was not fixed there: capping one caller and not the other is worse than capping neither. Fix in toRectangle, where both callers meet. Raised by ocr on story 5.4"
+    owner: "Dev"
+    status: open
   - epic: 4
     action: "app/findings/register/export-control.test.tsx > 'does not revoke the file before the browser has taken it' is flaky - it failed once in eight full-suite runs during story 5.1b with 'expected revokeObjectURL to not be called at all, but actually been called 1 times'. It asserts an absence within a real-time window, which is the 'R - Repeatable' violation the test-design reference names: no real clock, inject the timer. Pre-existing (last touched in story 4.7) and untouched by 5.1b, but recorded because a suite that fails one run in eight teaches people to re-run a red gate rather than read it, and this project has no CI"
     owner: "Dev"
@@ -200,7 +204,7 @@ action_items:
     owner: "Matt"
     status: open
   - epic: 4
-    action: "docs/no-control-characters.test.ts reads markdown only, and the defect it exists for landed again on story 4.6 in a .ts file - a word-boundary escape written through a shell heredoc became a literal backspace byte inside a regex, which then compiled fine and matched nothing. That is the same failure its own header records from story 3.5, in the same position. A scan of all 396 source files found forbidden control bytes in exactly two, both deliberate fixtures (core/extraction/tabular-roll.test.ts and the guard's own file), so widening the glob to .ts/.tsx needs only a two-entry allow-list - and the allow-list itself needs justifying so it does not become a dumping ground. Worth checking the YAML too: this entry originally carried the escape verbatim, and a double-quoted YAML scalar would have turned it into the same byte. Not done in 4.6: a repo-wide guard change beyond that story's ACs, raised at ready-to-merge"
+    action: "docs/no-control-characters.test.ts reads markdown only, and the defect it exists for landed again on story 4.6 in a .ts file - a word-boundary escape written through a shell heredoc became a literal backspace byte inside a regex, which then compiled fine and matched nothing. That is the same failure its own header records from story 3.5, in the same position. A scan of all 396 source files found forbidden control bytes in exactly two, both deliberate fixtures (core/extraction/tabular-roll.test.ts and the guard's own file), so widening the glob to .ts/.tsx needs only a two-entry allow-list - and the allow-list itself needs justifying so it does not become a dumping ground. Worth checking the YAML too: this entry originally carried the escape verbatim, and a double-quoted YAML scalar would have turned it into the same byte. Not done in 4.6: a repo-wide guard change beyond that story's ACs, raised at ready-to-merge. THIRD occurrence, story 5.4: a Python heredoc meant to write the escapes u0000/u0001/u0002 into app/onboarding/mapping/column-pairing.tsx wrote the BYTES instead. Git reclassified the file as binary (numstat '- -'), ESLint could not read it, and all 134 tests stayed green - a NUL is a valid character in a template literal, so nothing failed. Found by Argus on the fix diff, not by any guard. Second .ts/.tsx instance after story 4.6, and the argument for widening the glob: the guard has never caught this defect in the file type where it keeps happening"
     owner: "Dev"
     status: open
   - epic: 1
