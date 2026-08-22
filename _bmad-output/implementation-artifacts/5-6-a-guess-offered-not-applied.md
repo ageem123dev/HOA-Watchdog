@@ -100,7 +100,7 @@ deterministic; a setup-time suggestion a human approves is a different thing.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Normalise a heading the way a person would.** Case, space, punctuation, and the
+- [x] **Task 1 — Normalise a heading the way a person would.** Case, space, punctuation, and the
       alias table. Pure, and the alias table is data. (AC1)
 - [ ] **Task 2 — Suggest a column for every required target, or say none.** The port and its
       deterministic implementation, bounded and credential-free. (AC1, AC2, AC4, AC5, AC6)
@@ -166,14 +166,89 @@ loud rather than subtle.
 
 ### Test Design
 
+#### Task 1 - `targetForHeading`: matching a heading the way a person would
+
+**If it ran correctly, how would I know?** A table of real-shaped headings maps to the targets a
+treasurer would say they mean: `Txn Date` to `date`, `Descr` to `description`, `Amt` to `amount`,
+`Unit #` to `unit`. And a heading that means nothing to the importer maps to nothing.
+
+**How am I going to test it?** Pure function over a string; no seam needed. The care goes into the
+fixture: headings taken from the shapes epics.md names, not invented ones that happen to suit the
+implementation.
+
+**Could this happen elsewhere?** Yes, and it already has. `normaliseHeading` is shared between the
+wizard and `readRows` precisely so the two cannot classify a heading differently - story 5.3 spent a
+review round on a duplicated `trim().toLowerCase()`. Matching must *build on* that folding, never
+fork it.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | A second folding written here, drifting from `normaliseHeading` - the exact defect 5.3 fixed, reintroduced one module over. The symptom is a wizard that matches a heading the importer will not | GUARD - built on the shared folding, and a test asserts the two agree on a case/space fixture |
+| 1b | Punctuation stripped so aggressively that two distinct headings collide - `Unit #` and `Unit Price` both landing on `unit` | GUARD - asserted that a heading meaning something else does *not* match |
+| 1c | An alias resolving to a target the kind does not publish (`cycle` on a deposit), which `assign` then refuses - so the suggestion silently vanishes and the treasurer sees nothing | GUARD - Task 2 filters by `targetsForKind`; here, the table is asserted to contain only real `TargetField` values |
+| 1d | A blank or whitespace-only heading matching something. Story 5.3 exists because real files have them | GUARD - matches nothing, asserted |
+| 1e | Case, surrounding space or punctuation defeating a match a person would make instantly - `  AMOUNT  `, `Amount:`, `amount.` | GUARD - each asserted |
+| 1f | The alias table carrying two entries for one key, so which target wins depends on object literal order | GUARD - a structural test that no key is defined twice |
+| 1g | The retired `type` column, or any string that is not a `TargetField`, reachable through the table | GUARD - every value asserted to be a published target |
+
+**Cross-check:** for every `TargetField`, matching its own canonical name returns that target. A
+table that drifted from the importer's vocabulary fails it without anyone maintaining a second list.
+
 ### Completion Notes List
 
 ### Review Findings
 
+### Completion Notes List
+
+#### Task 1 - matching a heading the way a person would
+
+**Built on `normaliseHeading`, not beside it.** `matchKey` calls the shared folding and then strips
+what a person ignores. The canonical set is derived from `targetsForKind`, so a target added to the
+importer is matched by its own name with nobody touching the alias table.
+
+**Two mutations survived the first pass, and both were real.**
+
+- *A forked folding* (`heading.toLowerCase()` instead of the shared one) passed **every** behavioural
+  assertion, because stripping non-alphanumerics subsumes `trim()` - the fork is identical *today*.
+  My parity test compared `matchKey(h)` to `matchKey(normaliseHeading(h))`, which is true of any
+  implementation and proved nothing. Replaced with story 5.3's pair: observed parity where the two
+  genuinely overlap, **plus** a structural check that the body calls the shared function and contains
+  no second folding. Neither alone suffices, which is 5.3's own finding.
+- *The blank-heading guard was unreachable.* `''` matches no alias and is not canonical, so it
+  already returned `null`. A guard with no test behind it is one the Prime Directive forbids;
+  deleted, and the blank cases still pass through the ordinary path.
+
+**The structural check needed narrowing twice**, which is worth recording because it is the same
+shape both times: a file-wide scan for `toLowerCase` matched the doc comment *explaining* the shared
+folding, and then the function body's own comment saying "not a second toLowerCase". Scanning prose
+for code is how the design-token guard flagged the word "green" earlier in this project. It now reads
+the body only, and the comment no longer names the method.
+
+**Fixture mutations, done properly the second time.** Removing a case from a `.each` list proves
+nothing - it just tests less. The check is to substitute an input for which the stated expectation is
+*wrong*: `Unit #` moved into the never-matches list (1 red), `Balance` into the always-amount list
+(1 red), and `Amt` given `date` as its expected target (1 red).
+
+**Argus found a defect neither pass could.** `HEADING_ALIASES[key]` on a plain object literal reaches
+`Object.prototype`, so a column headed `constructor` returned the `Object` **function** where the
+signature promises `TargetField | null`. Header text is user-supplied from a user-supplied file -
+exactly the input class AD-8 is about. Fixed with `Object.hasOwn`; reverting to a bare lookup turns
+1 red. On the re-review it also pointed out that `CANONICAL` as a `Set` plus `key as TargetField`
+would return a stripped string if a target were ever named with punctuation; now a `Map`, so there is
+no cast to be wrong.
+
+**Scope held:** no prompt, no key, no network. The only match for "prompt" in the diff is the doc
+comment quoting the epic.
+
 ### File List
+
+- `core/mapping/heading-match.ts` *(new)* - `matchKey`, `HEADING_ALIASES`, `targetForHeading`
+- `core/mapping/heading-match.test.ts` *(new)* - 49 cases, including the cross-check that every
+  published target names itself
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Task 1: deterministic heading matching, built on the shared folding |
 | 2026-08-22 | Created from FR-10. Scoped to the deterministic half plus the whole structural boundary; the model adapter is 5.6b |
