@@ -1,5 +1,5 @@
 ---
-Status: review
+Status: done
 baseline_commit: 658fb22
 merge_request: 80
 ---
@@ -689,10 +689,63 @@ unresolved threads" and "no review yet" are both true before any review has run,
 reading `done` on an unreviewed head is exactly the false-clean the convergence rule exists to
 refuse. No push was made to force a review: a push spends nothing and resets nothing.
 
+#### MR !80, CodeRabbit round 1 - eight findings, eight confirmed
+
+The automatic review sat at *"processing new changes"* for ninety minutes and only produced its
+verdict once the audit-trail commit was pushed. A manual `@coderabbitai review` in between was
+refused - *"applicable only when automatic reviews are paused"* - which is the binding's documented
+behaviour and confirms the automatic run owned the head. **No push was made to force it**; the push
+that unstuck it carried the step-7 gate record, which had to be written anyway.
+
+Reviewed `658fb22..709d439`, 15 files, path filter excluding `_bmad-output/**`. All eight verified
+against the real files; all eight real.
+
+**Three were vacuous or wrong assertions of mine**, which is the theme of this story:
+
+- *bounds the new mapping by the new file* checked **which buttons rendered** - and those come from
+  the `headings` prop, not from `draft.columns`. A stale bound would have passed it while the comment
+  claimed the opposite. Rewritten to try the thing: a drop carrying the old position 5 must be
+  refused, with a valid position accepted in the same block. Mutating the reset to keep the old bound
+  now turns it red; it did not before.
+- *names each column as the treasurer wrote it* asserted that `Amount` and `amount` appeared
+  **somewhere** - and `Amount` contains `amount`, so the second check proved almost nothing. Now each
+  written form is asserted against its own position, in order.
+- The wizard test asserted control *names* but never submitted the form. Now it submits and reads the
+  `FormData` the action received. **Its file half is deliberately not asserted**: jsdom builds
+  `FormData` from the real `files` property, which cannot be populated without a `DataTransfer` it
+  does not implement, so a test claiming the bytes arrived would claim something this environment
+  cannot show. Said in the file rather than left as a silent gap.
+
+**Two were user-facing defects:**
+
+- A screen-reader user pairing the last required field was never told the mapping was **finished** -
+  *"every required field has a column"* is static text, outside the live region. The completion now
+  rides on the same announcement rather than a second region.
+- *"Column 3 and Column 5 has no heading"*. The single-blank fixture never showed it. `columnList`
+  now gives `A`, `A and B`, `A, B and C`, with the verb and pronoun agreeing.
+
+**Three were correctness-of-contract:**
+
+- `accept` carried media types only. Windows commonly reports a `.csv` as
+  `application/vnd.ms-excel`, so a treasurer could find their own export greyed out in the picker
+  they were sent to. Extensions added; server-side validation unchanged.
+- The `CELL` fixture was duplicated across two suites and read with a `?? ''` fallback, so a new
+  target would have produced an empty cell silently. Now one typed `SAMPLE_CELLS` module, read
+  without a fallback - removing a target from it turns 3 red.
+- `'type' as TargetField` cast directly rather than through `unknown`.
+
+**Eight mutations run, and two of them found that two fixes had never applied.** `R3` and `R4` both
+stayed green: a Python heredoc had raised on an earlier assertion and exited before reaching findings
+6 and 8, and the partial output read like success. The tests written for those two branches were red
+for exactly that reason, which is what surfaced it. **This is the second time this story that a
+scripted edit did not do what its output implied** - the first wrote control bytes into a source
+file. Every fix in this round was grepped for afterwards rather than trusted.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
 - `core/mapping/targets.test.ts` *(new)* - 38 cases, four of them cross-checks against `readRows`
+- `core/mapping/sample-cells.ts` *(new)* - the one typed cell fixture, shared by both mapping suites
 - `core/mapping/draft.ts` *(new)* - the draft mapping: `assign`, `unassign`, `completeness`
 - `core/mapping/draft.test.ts` *(new)* - 32 cases, including a cross-check that a complete mapping
   lays out a header row `readRows` accepts
@@ -712,6 +765,8 @@ refuse. No push was made to force a review: a push spends nothing and resets not
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | MR !80 round 1: eight findings, eight confirmed - three vacuous assertions of mine, two user-facing defects, three contract fixes; two fixes had silently never applied |
+| 2026-08-22 | Status done, written in this commit rather than after the merge |
 | 2026-08-21 | Local CodeRabbit round: six findings, six confirmed, including a draft that outlived its sample; the fix round then wrote control bytes into a source file and Argus caught it |
 | 2026-08-21 | Task 6: duplicates and blanks reported where the mapping is built, and the page that reaches the action |
 | 2026-08-21 | Task 5: dragging as an accelerator; Argus found the drop target was `disabled`, so the drag path was dead in every real browser |

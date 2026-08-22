@@ -247,6 +247,26 @@ describe('what is still needed', () => {
     expect(remaining.textContent).toContain('Amount')
   })
 
+  it('announces completion in the live region, not only in the page text', () => {
+    // "Every required field has a column" is static text. A screen-reader user
+    // pairing the last field learns only that the field was paired, and never
+    // that the mapping is now finished. Raised by CodeRabbit.
+    render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
+
+    pair(1, 'Date')
+    pair(2, 'Amount')
+    expect(screen.getByRole('status').textContent).not.toMatch(/every required field/i)
+
+    pair(3, 'Description')
+
+    const status = screen.getByRole('status').textContent ?? ''
+
+    expect(status).toMatch(/every required field/i)
+    // The field just paired is still named — the completion notice adds to the
+    // announcement rather than replacing it.
+    expect(status).toContain('Description')
+  })
+
   it('says so plainly once every required field has a column', () => {
     render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
 

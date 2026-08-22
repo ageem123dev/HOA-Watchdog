@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { readHeadings } from '../extraction/headings'
 import { readRows } from '../extraction/tabular'
 import { assign, completeness, emptyDraft, unassign } from './draft'
+import { SAMPLE_CELLS } from './sample-cells'
 import { targetsForKind, type TargetField } from './targets'
 
 /**
@@ -159,7 +160,9 @@ describe('a target this kind does not have', () => {
   })
 
   it('refuses the retired `type` column', () => {
-    expect(assign(deposit(), 'type' as TargetField, 1)).toEqual({
+    // Through `unknown`: `type` is not a `TargetField` and never was, so a
+    // direct cast is one TypeScript would be right to refuse if it tightened.
+    expect(assign(deposit(), 'type' as unknown as TargetField, 1)).toEqual({
       ok: false,
       reason: 'not-a-target',
       target: 'type',
@@ -280,19 +283,10 @@ describe('a complete mapping is one the importer can read', () => {
       // whole wizard exists to produce, verified independently of both modules.
       const header: string[] = Array.from({ length: draft.columns }, () => '')
       const cells: string[] = Array.from({ length: draft.columns }, () => '')
-      const CELL: Record<string, string> = {
-        date: '2026-03-01',
-        description: 'Willow Creek Landscaping',
-        amount: '1240.00',
-        reference: 'DEP-9912',
-        unit: '12B',
-        cycle: 'monthly',
-        year: '2026',
-      }
 
       for (const pairing of draft.pairings) {
         header[pairing.position - 1] = pairing.target
-        cells[pairing.position - 1] = CELL[pairing.target] ?? ''
+        cells[pairing.position - 1] = SAMPLE_CELLS[pairing.target]
       }
 
       expect(readRows([header, cells], kind).ok).toBe(true)

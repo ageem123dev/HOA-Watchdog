@@ -27,6 +27,19 @@ const KIND_LABELS: Readonly<Record<DocumentKind, string>> = {
   other: 'Something else',
 }
 
+/**
+ * Extensions **as well as** media types.
+ *
+ * A file picker matches `accept` against both, and inconsistently: Windows
+ * commonly reports a `.csv` as `application/vnd.ms-excel`, and some browsers
+ * report nothing at all for an unregistered type. On media types alone a
+ * treasurer can find their own export greyed out in the picker they were sent
+ * to. The extensions only widen what is *offerable* — `readSample` still
+ * canonicalises and validates the content type server-side and refuses what it
+ * cannot read. Raised by CodeRabbit.
+ */
+const SAMPLE_ACCEPT = [...TABULAR_CONTENT_TYPES, '.csv', '.xls', '.xlsx'].join(',')
+
 export interface MappingWizardProps {
   /** For tests, and for a step that resumes; the form drives it otherwise. */
   readonly initialState?: SampleState
@@ -68,7 +81,7 @@ export function MappingWizard({ initialState = EMPTY_SAMPLE_STATE }: MappingWiza
             one the picker offers rather than one a treasurer discovers is
             refused.
           */}
-          <input name="sample" type="file" accept={TABULAR_CONTENT_TYPES.join(',')} required />
+          <input name="sample" type="file" accept={SAMPLE_ACCEPT} required />
         </label>
 
         <p style={styles.note}>

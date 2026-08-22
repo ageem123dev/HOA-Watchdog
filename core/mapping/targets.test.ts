@@ -17,25 +17,13 @@ import { describe, expect, it } from 'vitest'
 import { DOCUMENT_KINDS, KINDS_WITH_UNIT_REFERENCE, type DocumentKind } from '../extraction/record'
 import { readRows } from '../extraction/tabular'
 import { ROLL_REQUIRED_HEADERS } from '../extraction/roll'
+import { SAMPLE_CELLS } from './sample-cells'
 import { targetsForKind, UnknownDocumentKindError, type TargetField } from './targets'
 
-/**
- * A cell that satisfies `validate` for each target, so the only reason a row can
- * fail is a column the mapping got wrong.
- */
-const CELL: Record<TargetField, string> = {
-  date: '2026-03-01',
-  description: 'Willow Creek Landscaping',
-  amount: '1240.00',
-  reference: 'DEP-9912',
-  unit: '12B',
-  cycle: 'monthly',
-  year: '2026',
-}
 
 const fileFrom = (targets: readonly TargetField[]): readonly (readonly string[])[] => [
   [...targets],
-  targets.map((target) => CELL[target]),
+  targets.map((target) => SAMPLE_CELLS[target]),
 ]
 
 describe('the targets a kind actually has', () => {

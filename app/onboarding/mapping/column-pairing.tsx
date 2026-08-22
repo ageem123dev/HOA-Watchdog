@@ -60,6 +60,22 @@ const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
  */
 export const DRAG_FORMAT = 'application/x-column-position'
 
+/**
+ * `A`, `A and B`, `A, B and C` — the reading a treasurer expects.
+ *
+ * Joining with ` and ` alone produced "Column 3 and Column 5 has no heading",
+ * which the single-blank fixture never showed. Raised by CodeRabbit.
+ */
+const columnList = (
+  positions: readonly number[],
+  label: (position: number) => string = (position) => `Column ${position}`,
+): string => {
+  const parts = positions.map(label)
+
+  if (parts.length <= 1) return parts[0] ?? ''
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
 /** A column with no heading is identified by the only thing it has. */
 export const columnLabel = (heading: Heading): string =>
   heading.text.trim() === ''
@@ -141,8 +157,16 @@ export function ColumnPairing({ kind, headings, problems = [] }: ColumnPairingPr
       // they had finished with.
       setSelected(null)
       setRefusal(null)
+      // The completion notice rides on the same announcement rather than a
+      // second live region — nesting one inside another is how a message gets
+      // read twice or not at all. Without it, a screen-reader user pairing the
+      // last field hears only that the field was paired, never that the mapping
+      // is now finished; the "every required field" line is static text.
+      const paired = `${TARGET_LABELS[target]} now reads ${heading ? columnLabel(heading) : `column ${position}`}.`
+      const remaining = completeness(result.draft)
+
       setAnnouncement(
-        `${TARGET_LABELS[target]} now reads ${heading ? columnLabel(heading) : `column ${position}`}.`,
+        remaining.complete ? `${paired} Every required field now has a column.` : paired,
       )
     },
     [draft, headingAt],
@@ -223,17 +247,20 @@ export function ColumnPairing({ kind, headings, problems = [] }: ColumnPairingPr
                       headings. Reporting only `amount` sends someone looking for
                       a column their spreadsheet has not got.
                     */
-                    `${problem.positions
-                      .map((position) => {
+                    `${columnList(
+                      problem.positions,
+                      (position) => {
                         const heading = headingAt(position)
                         return heading === undefined
                           ? `Column ${position}`
                           : `Column ${position} (${heading.text.trim()})`
-                      })
-                      .join(' and ')} are the same column name to the importer. Map whichever you mean.`
-                  : `${problem.positions
-                      .map((position) => `Column ${position}`)
-                      .join(' and ')} has no heading. You can still map it by its position.`}
+                      },
+                    )} are the same column name to the importer. Map whichever you mean.`
+                  : `${columnList(problem.positions)} ${
+                      problem.positions.length === 1 ? 'has' : 'have'
+                    } no heading. You can still map ${
+                      problem.positions.length === 1 ? 'it' : 'them'
+                    } by position.`}
               </li>
             ))}
           </ul>

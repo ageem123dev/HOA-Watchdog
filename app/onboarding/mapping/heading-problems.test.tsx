@@ -64,10 +64,14 @@ describe('a duplicated heading', () => {
 
     const notice = screen.getByTestId('heading-problems').textContent ?? ''
 
-    // `Amount` and `amount` — the two written forms. Reporting only the folded
-    // `amount` sends them looking for a column their spreadsheet has not got.
-    expect(notice).toContain('Amount')
-    expect(notice).toMatch(/\bamount\b/)
+    // Each written form against *its own* position. Asserting only that both
+    // strings appear somewhere would pass with the two swapped, or with one
+    // position labelled from the other's heading - and `Amount` contains
+    // `amount`, so a substring check proves even less than it looks.
+    // Raised by CodeRabbit.
+    expect(notice).toContain('Column 2 (Amount)')
+    expect(notice).toContain('Column 4 (amount)')
+    expect(notice.indexOf('Column 2 (Amount)')).toBeLessThan(notice.indexOf('Column 4 (amount)'))
   })
 })
 
@@ -76,6 +80,49 @@ describe('a blank heading', () => {
     surface()
 
     expect(screen.getByTestId('heading-problems').textContent).toContain('Column 3')
+  })
+})
+
+describe('more than one blank column', () => {
+  it('reads as plural rather than "Column 3 and Column 5 has no heading"', () => {
+    const two = readHeadings([
+      ['Date', '  ', 'Amount', ' '],
+      ['2026-03-01', 'x', '1240.00', 'y'],
+    ])
+
+    if (!two.ok) throw new Error('fixture is unreadable')
+    expect(two.problems).toEqual([{ reason: 'blank-heading', positions: [2, 4] }])
+
+    render(<ColumnPairing kind="deposit" headings={two.headings} problems={two.problems} />)
+
+    const notice = screen.getByTestId('heading-problems').textContent ?? ''
+
+    expect(notice).toContain('Column 2 and Column 4 have no heading')
+    expect(notice).not.toContain('has no heading')
+  })
+
+  it('lists three or more with commas and a final "and"', () => {
+    const three = readHeadings([
+      ['Date', '  ', 'Amount', ' ', '   '],
+      ['2026-03-01', 'a', '1240.00', 'b', 'c'],
+    ])
+
+    if (!three.ok) throw new Error('fixture is unreadable')
+    expect(three.problems).toEqual([{ reason: 'blank-heading', positions: [2, 4, 5] }])
+
+    render(<ColumnPairing kind="deposit" headings={three.headings} problems={three.problems} />)
+
+    // "Column 2 and Column 4 and Column 5" is what a bare join gives, and it is
+    // not a sentence anyone reads. CodeRabbit asked for this shape by name.
+    expect(screen.getByTestId('heading-problems').textContent).toContain(
+      'Column 2, Column 4 and Column 5 have no heading',
+    )
+  })
+
+  it('still reads as singular for one', () => {
+    surface()
+
+    expect(screen.getByTestId('heading-problems').textContent).toContain('Column 3 has no heading')
   })
 })
 

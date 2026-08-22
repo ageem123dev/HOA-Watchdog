@@ -14,19 +14,24 @@
  * refused while the page still looks right.
  */
 
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DOCUMENT_KINDS } from '@/core/extraction/record'
 import { TABULAR_CONTENT_TYPES } from '@/core/extraction/rectangle'
 
-vi.mock('./actions', () => ({
-  readSample: vi.fn(async () => ({ status: 'idle' as const })),
-}))
+// Typed to the action's real signature so the recorded call can be read back as
+// a `FormData` without a cast at the assertion.
+const readSample = vi.fn<(previous: unknown, formData: FormData) => Promise<{ status: 'idle' }>>(
+  async () => ({ status: 'idle' }),
+)
+
+vi.mock('./actions', () => ({ readSample: (p: unknown, f: FormData) => readSample(p, f) }))
 
 const { MappingWizard } = await import('./mapping-wizard')
 
 afterEach(cleanup)
+beforeEach(() => vi.clearAllMocks())
 
 describe('the fields the action reads', () => {
   it('gives every control an accessible name', () => {
@@ -74,6 +79,17 @@ describe('the fields the action reads', () => {
     expect(control.value).toBe('')
   })
 
+  it('offers the file extensions too, not media types alone', () => {
+    render(<MappingWizard />)
+
+    const accept = document.querySelector('input[name="sample"]')?.getAttribute('accept') ?? ''
+
+    // A picker matches `accept` against both, inconsistently: Windows commonly
+    // reports a .csv as application/vnd.ms-excel. On media types alone a
+    // treasurer can find their own export greyed out. Raised by CodeRabbit.
+    for (const extension of ['.csv', '.xls', '.xlsx']) expect(accept).toContain(extension)
+  })
+
   it('accepts the formats the reader can actually read, and says so', () => {
     render(<MappingWizard />)
 
@@ -83,6 +99,47 @@ describe('the fields the action reads', () => {
     // picker offers. Non-empty asserted first.
     expect(TABULAR_CONTENT_TYPES.length).toBeGreaterThan(0)
     for (const type of TABULAR_CONTENT_TYPES) expect(accept).toContain(type)
+  })
+})
+
+describe('the form reaches the action', () => {
+  it('submits the declared kind and the chosen file to readSample', async () => {
+    /**
+     * The control *names* are asserted above; this asserts the wiring. Story 5.2
+     * shipped an action requiring a field the form never sent, with every gate
+     * green — names alone would not have caught it if the form were never
+     * submitted at all. Raised by CodeRabbit.
+     */
+    const { container } = render(<MappingWizard />)
+
+    const kind = container.querySelector('select[name="documentKind"]') as HTMLSelectElement
+    fireEvent.change(kind, { target: { value: 'deposit' } })
+
+    // Contents are irrelevant here — the action is mocked, and what is under
+    // test is what the form hands it.
+    const file = new File(['Date,Amount'], 'sample.csv', { type: 'text/csv' })
+    const input = container.querySelector('input[name="sample"]') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [file] })
+    fireEvent.change(input)
+
+    await act(async () => {
+      fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    })
+
+    await waitFor(() => expect(readSample).toHaveBeenCalled())
+
+    const sent = readSample.mock.calls[0]?.[1] as FormData
+
+    // The value the treasurer chose, arriving under the key the action reads.
+    expect(sent.get('documentKind')).toBe('deposit')
+
+    // The file *field* is carried, under the name the action reads. Its
+    // contents are not asserted: jsdom builds `FormData` from the real `files`
+    // property, which cannot be populated without a `DataTransfer` it does not
+    // implement — so a test claiming the bytes arrived would be claiming
+    // something this environment cannot show. `actions.test.ts` owns that half,
+    // by handing the action a `FormData` directly.
+    expect(sent.has('sample')).toBe(true)
   })
 })
 

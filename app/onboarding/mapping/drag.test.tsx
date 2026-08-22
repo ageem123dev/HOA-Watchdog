@@ -259,8 +259,17 @@ describe('a second sample', () => {
   })
 
   it('bounds the new mapping by the new file, not the old one', () => {
-    // The old file had five columns and the new one has two. A draft carried
-    // over would still accept position 5, which is not a column any more.
+    /**
+     * **Asserted by trying it, not by counting buttons.** This first checked
+     * which column buttons rendered — and those come from the `headings` prop,
+     * not from `draft.columns`, so a stale bound would have passed it while the
+     * comment claimed otherwise. Raised by CodeRabbit, and it is the same
+     * vacuity this story keeps finding: the assertion reached for the nearest
+     * observable thing rather than the property.
+     *
+     * The property is that position 5 is no longer a column, so a drop carrying
+     * it must be refused.
+     */
     const { rerender } = render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
 
     const other = readHeadings([
@@ -269,11 +278,24 @@ describe('a second sample', () => {
     ])
 
     if (!other.ok) throw new Error('fixture is unreadable')
+    expect(other.headings).toHaveLength(2)
 
     rerender(<ColumnPairing kind="deposit" headings={other.headings} />)
 
-    expect(screen.queryByRole('button', { name: /^Column 5/ })).toBeNull()
-    expect(screen.getByRole('button', { name: /^Column 2/ })).toBeTruthy()
+    const stale = transfer()
+    stale.setData(DRAG_FORMAT, '5')
+    fireEvent.drop(field('Amount'), { dataTransfer: stale })
+
+    expect(field('Amount').textContent).toContain('no column yet')
+    expect(screen.getByRole('alert')).toBeTruthy()
+
+    // The inverse in the same block, or the refusal above would pass against a
+    // surface that refuses everything.
+    const valid = transfer()
+    valid.setData(DRAG_FORMAT, '2')
+    fireEvent.drop(field('Amount'), { dataTransfer: valid })
+
+    expect(field('Amount').textContent).toContain('Column 2')
   })
 
   it('starts a new mapping when the kind changes', () => {
