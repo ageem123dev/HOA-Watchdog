@@ -54,11 +54,25 @@ const QUOTES = '\\x27\\x22\\x60'
  * Matches `from '…'`, `import '…'`, `import('…')` and `require('…')`, in single
  * quotes, double quotes or backticks.
  *
- * Global, so it carries `lastIndex` between uses — only ever spread or iterated
- * through `matchAll`, never `.test()`ed in a loop.
+ * **Escaped characters are consumed as a unit** — `(?:\\.|[^…\\])+` rather than
+ * a bare negated class. Without that, `import "it's module"` stops the capture
+ * at the apostrophe and yields `it`, and a truncated specifier is a specifier
+ * the `endsWith` comparison in `sole-data-path.test.ts` no longer recognises.
+ * That direction fails **open**, which is the one that matters for a guard.
+ * Raised by `ocr`.
+ *
+ * **Not exported.** It is global, so it carries `lastIndex` between uses, and a
+ * caller reaching for `.test()` in a loop would get alternating answers. Only
+ * `specifiersIn` touches it, and only through `matchAll`.
  */
-export const MODULE_SPECIFIER = new RegExp(
-  '\\b(?:from|import|require)\\s*\\(?\\s*[' + QUOTES + ']([^' + QUOTES + ']+)[' + QUOTES + ']',
+const MODULE_SPECIFIER = new RegExp(
+  // Group 1 is the opening quote; group 2 is the specifier; `\1` closes it.
+  // **The backreference is what makes the quotes independent of each other.** A
+  // single class of all three treats `"it's-module"` as ending at the
+  // apostrophe, because the class does not know which quote opened the string.
+  '\\b(?:from|import|require)\\s*\\(?\\s*([' +
+    QUOTES +
+    '])((?:\\\\.|(?!\\1)[^\\\\\\n])+)\\1',
   'g',
 )
 
@@ -73,7 +87,8 @@ export const MODULE_SPECIFIER = new RegExp(
 export function specifiersIn(source: string): readonly string[] {
   const { commentsBlanked } = neutralise(source)
 
+  // Group **2** — group 1 is the opening quote the backreference closes on.
   return [...commentsBlanked.matchAll(MODULE_SPECIFIER)]
-    .map(([, specifier]) => specifier)
+    .map((match) => match[2])
     .filter((specifier): specifier is string => specifier !== undefined)
 }

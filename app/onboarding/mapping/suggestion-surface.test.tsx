@@ -98,6 +98,40 @@ describe('the guess arrives already made', () => {
     expect(nameOf(/^Amount — required — no column yet — no suggestion/)).toBeTruthy()
   })
 
+  it('shows both answers at once when it matched some and not others', () => {
+    /**
+     * The mixed case, and the one closest to a real export. All-matched and
+     * none-matched are each covered above, but neither shows the two states
+     * side by side — which is what a treasurer actually sees, and the only
+     * arrangement where confusing one for the other is possible. Raised by `ocr`.
+     */
+    const partly = headingsOf('Txn Date', 'Mystery', 'Whatsit')
+
+    render(<ColumnPairing kind="deposit" headings={partly} suggester={deterministicSuggester} />)
+
+    expect(nameOf(/^Date — required — reads Column 1 .*— suggested/)).toBeTruthy()
+    expect(nameOf(/^Description — required — no column yet — no suggestion/)).toBeTruthy()
+    expect(nameOf(/^Amount — required — no column yet — no suggestion/)).toBeTruthy()
+    expect(screen.getByTestId('suggestion-summary').textContent).toContain('1')
+  })
+
+  it('suggests an optional column, and says nothing about the ones it did not', () => {
+    // `reference` is optional on a deposit. An unmatched optional field is not
+    // news, so it says "no column yet" and nothing more — the "no suggestion"
+    // wording is reserved for required fields, where the absence matters.
+    const withReference = headingsOf('Txn Date', 'Descr', 'Amt', 'Check No')
+
+    render(
+      <ColumnPairing kind="deposit" headings={withReference} suggester={deterministicSuggester} />,
+    )
+
+    expect(nameOf(/^Reference — optional — reads Column 4 .*— suggested/)).toBeTruthy()
+
+    // `unit` is optional on a deposit and nothing here names it.
+    const unit = screen.queryByRole('button', { name: /^Unit — optional/ })
+    if (unit !== null) expect(unit.textContent).not.toContain('no suggestion')
+  })
+
   it('leaves the mapping unfinished when it could suggest nothing', () => {
     render(<ColumnPairing kind="deposit" headings={OPAQUE} suggester={deterministicSuggester} />)
 
@@ -123,6 +157,10 @@ describe('the treasurer overrides it', () => {
 
     expect(nameOf(/^Date — required — reads Column 3/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Date — .* — suggested/ })).toBeNull()
+    // The unpair that made room actually took effect. Without this the test
+    // passes even if `unassign` silently did nothing and column 3 was free for
+    // some other reason. Raised by `ocr`.
+    expect(nameOf(/^Amount — required — no column yet/)).toBeTruthy()
   })
 
   it('stops calling a pairing suggested once it has been cleared', () => {
@@ -176,6 +214,30 @@ describe('a second sample', () => {
     const summary = screen.getByTestId('suggestion-summary').textContent ?? ''
     expect(summary).toContain('3')
     expect(summary).not.toContain('4')
+  })
+
+  it('re-runs when the suggester itself changes', () => {
+    /**
+     * Story 5.6b is the change that makes this reachable — turning a model on or
+     * off leaves `kind` and `headings` untouched. Without it, suggestions from a
+     * suggester that is no longer in use sit on screen as though it produced
+     * them. Raised by `ocr`.
+     */
+    const { rerender } = render(<ColumnPairing kind="deposit" headings={RECOGNISABLE} />)
+
+    expect(screen.queryByRole('button', { name: /— suggested/ })).toBeNull()
+
+    rerender(
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+    )
+
+    expect(nameOf(/^Date — required — reads Column 1 .*— suggested/)).toBeTruthy()
+
+    // And back the other way: withdrawing the suggester clears what it filled in.
+    rerender(<ColumnPairing kind="deposit" headings={RECOGNISABLE} />)
+
+    expect(screen.queryByRole('button', { name: /— suggested/ })).toBeNull()
+    expect(nameOf(/^Date — required — no column yet/)).toBeTruthy()
   })
 
   it('re-runs it for a different kind too', () => {

@@ -212,9 +212,15 @@ describe('the mapping is the treasurer’s (AC8)', () => {
 
     const suggested = draftFromSuggestion(DEPOSIT, 'deposit', suggestColumns(DEPOSIT, 'deposit'))
 
-    // Every one of these overrides a suggestion — the pre-fill put each target
-    // on a different column, so nothing here is a no-op.
-    expect(positionOf(suggested.draft, 'date')).not.toBe(4)
+    // Every one of these overrides a suggestion — asserted for all four, not
+    // just the first. The comment claimed "nothing here is a no-op" while only
+    // `date` was checked, which is a claim resting on the reader's goodwill.
+    // Raised by `ocr`.
+    for (const [target, position] of byHand) {
+      expect(positionOf(suggested.draft, target), `${target} was not a real override`).not.toBe(
+        position,
+      )
+    }
 
     const override = (start: DraftMapping): DraftMapping => {
       // Clear first: the suggestion holds all four columns, and story 5.4

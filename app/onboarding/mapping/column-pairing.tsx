@@ -152,8 +152,24 @@ export function ColumnPairing({
   // valid character in a template literal. Found by Argus.
   const sample = JSON.stringify([kind, headings.map((h) => [h.position, h.text])])
   const [renderedSample, setRenderedSample] = useState(sample)
+  /**
+   * The suggester is part of what the draft was built from, so a change to it
+   * has to reset the draft too.
+   *
+   * Tracked by reference rather than folded into `sample`, because a function
+   * has no useful string form — `JSON.stringify` renders every suggester as
+   * `null`, which would make every one of them look identical.
+   *
+   * Today `mapping-wizard.tsx` passes a stable constant, so this never fires.
+   * It is here because story 5.6b is exactly the change that makes the suggester
+   * dynamic — turning a model on or off — and at that point stale suggestions
+   * would sit on screen under a suggester that never produced them. Raised by
+   * `ocr`.
+   */
+  const [renderedSuggester, setRenderedSuggester] = useState(suggester)
 
-  if (renderedSample !== sample) {
+  if (renderedSample !== sample || renderedSuggester !== suggester) {
+    setRenderedSuggester(suggester)
     // **Re-suggested, not merely emptied.** Story 5.6: a pre-fill that only ran
     // in the initialiser would leave the second sample blank with nothing to
     // explain it — correct on the path anyone demonstrates, missing on the one

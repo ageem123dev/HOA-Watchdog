@@ -158,6 +158,10 @@ describe('a suggestion the draft would accept', () => {
 
     expect(positionFor(suggestions, 'date')).toBe(1)
     expect(suggestions.filter((s) => s.position === 2)).toEqual([])
+    // And column 3 is still reached. Without this the test passes for a
+    // suggester that stopped reading after the first heading, which is not the
+    // behaviour it is named for. Raised by `ocr`.
+    expect(positionFor(suggestions, 'amount')).toBe(3)
   })
 
   it('takes the first heading in file order when several match', () => {

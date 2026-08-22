@@ -121,6 +121,20 @@ describe('the scanner read over itself', () => {
     expect(specifiersIn(source)).toEqual(['./declared-members'])
   })
 
+  it.each([
+    ['an apostrophe inside a double-quoted specifier', 'import { x } from "it\'s-module"', "it's-module"],
+    ['an escaped quote inside the specifier', "import { x } from 'it\\'s-module'", "it\\'s-module"],
+  ])('captures the whole specifier despite %s', (_label, source, expected) => {
+    /**
+     * **The direction that matters.** A bare negated class stops the capture at
+     * the inner quote and yields `it` — and a *truncated* specifier is one the
+     * `endsWith` comparison in `sole-data-path.test.ts` no longer recognises.
+     * Over-reporting makes a guard go red; under-reporting lets a violation
+     * through. Raised by `ocr`.
+     */
+    expect(specifiersIn(source)).toEqual([expected])
+  })
+
   it('over-reports after a quote-bearing regex literal, which is the known limitation', () => {
     /**
      * **A stated limitation, not a passing grade.** `neutralise` has no concept
@@ -138,6 +152,13 @@ describe('the scanner read over itself', () => {
      * Fixing it means resolving the regex-versus-division ambiguity inside
      * `neutralise`, which has its own callers and its own tests. Recorded in the
      * story's Completion Notes.
+     *
+     * **What is asserted is the direction, not the wrong answer.** The first
+     * version pinned the exact buggy output, which would go red the day someone
+     * fixed `neutralise` — a test that breaks on a fix teaches people to revert
+     * fixes. Raised by `ocr`. So this asserts the invariant that must hold
+     * either way: the real import is always found. Whether the commented-out one
+     * is *also* reported is the part allowed to change.
      */
     const source = [
       "const QUOTE = /['\"]/g",
@@ -145,9 +166,12 @@ describe('the scanner read over itself', () => {
       "import { x } from './near'",
     ].join('\n')
 
-    // The `@/adapters/db` below lives only in a comment. Its presence here is
-    // the bug; the test exists so the day `neutralise` learns about regex
-    // literals, this goes red and says so.
-    expect(specifiersIn(source)).toEqual(['@/adapters/db', './near'])
+    const found = specifiersIn(source)
+
+    // Never under-reports: the real import survives whatever the comment does.
+    expect(found).toContain('./near')
+    // And today it over-reports, which is the safe direction — documented here
+    // rather than asserted, so a fix is an improvement and not a failure.
+    expect(found.length).toBeGreaterThanOrEqual(1)
   })
 })

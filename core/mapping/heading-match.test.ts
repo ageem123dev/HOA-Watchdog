@@ -188,10 +188,32 @@ describe('the alias table itself', () => {
     // target wins would depend on line order. Read the source rather than the
     // object, because the object cannot show the collision.
     const source = HEADING_ALIAS_SOURCE
-    const keys = [...source.matchAll(/^\s{2}([a-z0-9]+):/gm)].map((match) => match[1])
+    // `\s+`, not `\s{2}`: pinning the exact indentation makes this silently
+    // match nothing the day Prettier reformats the literal. The non-empty
+    // assertion below would catch that loudly rather than silently — but a check
+    // that depends on indentation is a check about whitespace, not about keys.
+    // Raised by `ocr`.
+    const keys = [...source.matchAll(/^\s+([a-z0-9]+):/gm)].map((match) => match[1])
 
     expect(keys.length).toBeGreaterThan(0)
     expect(keys.length).toBe(new Set(keys).size)
+  })
+
+  it('gives no two published targets the same match key', () => {
+    /**
+     * The cross-check `CANONICAL` depends on and cannot make for itself. It is
+     * a `Map` keyed by `matchKey(target)`, so two distinct targets folding to
+     * one key would leave the later silently overwriting the earlier — and
+     * `targetForHeading` would then answer with a target the treasurer never
+     * named. No pair does today; `unit` and `unit_reference` would.
+     *
+     * Raised by `ocr`, and it is the same shape Argus raised against the
+     * earlier `Set`-plus-cast version.
+     */
+    const keys = ALL_TARGETS.map(matchKey)
+
+    expect(keys.length).toBeGreaterThan(0)
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
 
