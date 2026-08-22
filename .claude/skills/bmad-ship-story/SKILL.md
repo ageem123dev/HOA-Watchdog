@@ -203,7 +203,7 @@ upstream mid-round.
 defects** were live — with the same background file and flags, and scored against a ground-truth list
 written *before* either run.
 
-| | `qwen/qwen3.7-plus` | `deepseek/deepseek-v4-pro-0813` |
+| | `qwen/qwen3.7-plus` *(kept)* | `deepseek/deepseek-v4-pro-0813` *(reverted)* |
 | --- | --- | --- |
 | **of the 8 known defects** | **2** | **0** |
 | comments raised | 40 (2 high, 7 medium, 31 low) | 2 (both low) |
@@ -211,9 +211,12 @@ written *before* either run.
 | coverage | `partial`, 14/15 | `complete`, 15/15 |
 | elapsed / tokens | 4m55s / 2.24M | 9m21s / 0.82M |
 
-**The switch to deepseek did not do what it was for.** It found fewer real defects than the model it
-replaced, on the same code, with better coverage and twice the wall-clock. It is cheaper and far
-quieter, but quiet is only worth having if the signal survives, and it did not.
+**The switch to deepseek did not do what it was for, and it was reverted on 2026-08-22.** It found
+fewer real defects than the model it replaced, on the same code, with twice the wall-clock — and it
+**cost more money**, despite using a third of the tokens, because per-token pricing runs the other
+way. (An earlier version of this note called it "cheaper" on the token count alone. Tokens are not
+cost, and Matt corrected it.) It is far quieter, but quiet is only worth having if the signal
+survives, and it did not.
 
 Both of qwen's `high` ratings were inflated, and one of its comments was simply wrong
 (`afterEach(cleanup)` is *not* redundant here — this project does not set `globals: true`). Across
@@ -357,7 +360,7 @@ If the user wants to keep building without merging, branch off the previous *sto
 | `{project}` | `ageem123/hoa-treasurer-assistant` |
 | `{project_encoded}` | `ageem123%2Fhoa-treasurer-assistant` |
 | `{glab_path}` | `/c/Users/magee/AppData/Local/Programs/glab` |
-| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`deepseek/deepseek-v4-pro-0813`** (switched 2026-08-22 from `qwen/qwen3.7-plus`, which was not an improvement on Argus); config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `reasoning.enabled: false` and nothing else** — the Qwen-only `enable_thinking` was dropped with the model. Keep reasoning off until someone measures it on: Qwen's thinking mode rejected `tool_choice` and *silently dropped files while exiting 0*, and step 6 exists because of it. **Run it at `--concurrency 4`, not the default 8.** Measured 2026-08-22: at the default, deepseek timed out on 3 of 16 files in the `context` phase, retried none, and exited 0 — `terminal_state` `partial`, `coverage.failed` holding 3, and `summary.files_reviewed` still claiming 16. At `--concurrency 4` the same scope came back 15/15 `complete`. **A partial is not model-specific**: qwen also went `partial` (14/15) at concurrency 4, so this is `ocr`/OpenRouter flakiness under load and step 6's manifest check is the only thing that catches it. `--timeout` is in minutes, default 10 |
+| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`qwen/qwen3.7-plus`**. Briefly switched to `deepseek/deepseek-v4-pro-0813` on 2026-08-22 and **reverted the same day**: measured head-to-head it found 0 of 8 known defects against qwen's 2, took twice the wall-clock, and cost more money despite a third of the tokens; config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `enable_thinking: false` *and* `reasoning.enabled: false`, and both are load-bearing.** Qwen's thinking mode rejects `tool_choice` and *silently drops files while exiting 0* — step 6 exists because of it. `enable_thinking` is Qwen/DashScope-only, so it comes off if the model ever changes again and `reasoning.enabled` does not. **Run it at `--concurrency 4`, not the default 8.** Measured 2026-08-22: at the default, deepseek timed out on 3 of 16 files in the `context` phase, retried none, and exited 0 — `terminal_state` `partial`, `coverage.failed` holding 3, and `summary.files_reviewed` still claiming 16. At `--concurrency 4` the same scope came back 15/15 `complete`. **A partial is not model-specific**: qwen also went `partial` (14/15) at concurrency 4, so this is `ocr`/OpenRouter flakiness under load and step 6's manifest check is the only thing that catches it. `--timeout` is in minutes, default 10 |
 | `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part). CLI **0.7.3** at `~/.local/bin/coderabbit`; in this version `--dir` filters which changes are reviewed rather than setting the working directory, so `cd` first |
 | `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
 | `{auto_pause}` | 25 |
