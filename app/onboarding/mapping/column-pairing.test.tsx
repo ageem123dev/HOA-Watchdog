@@ -79,6 +79,35 @@ describe('the fixture is the file it claims to be', () => {
   })
 })
 
+describe('the preview is reachable from the pairing surface (story 5.5)', () => {
+  const ROWS: readonly (readonly string[])[] = [
+    ['Date', 'Amount', '  ', 'amount', 'Unit'],
+    ['2026-03-01', '1240.00', 'Willow Creek Landscaping', '99.00', '12B'],
+  ]
+
+  it('shows nothing to preview until a sample is given', () => {
+    render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
+
+    expect(screen.queryByRole('heading', { name: /what this would produce/i })).toBeNull()
+  })
+
+  it('renders the preview once rows are given, and follows the pairings', () => {
+    // The story 5.2 lesson: a preview nothing renders is a preview that ships
+    // broken with every gate green.
+    render(<ColumnPairing kind="deposit" headings={HEADINGS} rows={ROWS} totalDataRows={143} />)
+
+    expect(screen.getByRole('heading', { name: /what this would produce/i })).toBeTruthy()
+
+    pair(1, 'Date')
+    pair(3, 'Description')
+    pair(2, 'Amount')
+
+    // Complete now, so it previews — with the counts UX-DR24 requires.
+    expect(document.body.textContent ?? '').toContain('1 of 143 rows')
+    expect(document.body.textContent ?? '').toContain('Willow Creek Landscaping')
+  })
+})
+
 describe('every control is one the keyboard can reach', () => {
   it('renders no clickable element that is not a button', () => {
     const { container } = render(<ColumnPairing kind="deposit" headings={HEADINGS} />)

@@ -79,6 +79,13 @@ describe('reading a sample', () => {
         { position: 3, text: 'Unit', normalised: 'unit' },
       ],
       problems: [],
+      // Story 5.5: the rows travel with the headings so the preview need not
+      // ask for the file again.
+      rows: [
+        ['Date', 'Amount', 'Unit'],
+        ['2026-03-01', '1240.00', '12B'],
+      ],
+      totalDataRows: 1,
     })
   })
 

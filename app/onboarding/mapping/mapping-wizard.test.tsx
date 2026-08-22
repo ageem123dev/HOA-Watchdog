@@ -161,6 +161,13 @@ describe('what the treasurer is told', () => {
             { position: 2, text: 'Amount', normalised: 'amount' },
           ],
           problems: [],
+          // Story 5.5 widened `SampleState`; a sample that has been read now
+          // carries its rows and the file's row count.
+          rows: [
+            ['Date', 'Amount'],
+            ['2026-03-01', '1240.00'],
+          ],
+          totalDataRows: 1,
         }}
       />,
     )
@@ -169,6 +176,50 @@ describe('what the treasurer is told', () => {
     // rendering it is the shape that shipped broken in 5.2.
     expect(screen.getByRole('button', { name: /^Column 1/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Amount — required/ })).toBeTruthy()
+  })
+
+  it('hands the sample rows to the pairing surface, so the preview can render', () => {
+    // Story 5.2's lesson again: the props exist and nothing passes them is
+    // exactly the shape that ships broken with every gate green.
+    render(
+      <MappingWizard
+        initialState={{
+          status: 'read',
+          kind: 'deposit',
+          headings: [
+            { position: 1, text: 'Date', normalised: 'date' },
+            { position: 2, text: 'Who', normalised: 'who' },
+            { position: 3, text: 'How much', normalised: 'how much' },
+          ],
+          problems: [],
+          rows: [
+            ['Date', 'Who', 'How much'],
+            ['2026-03-01', 'Willow Creek Landscaping', '1240.00'],
+          ],
+          totalDataRows: 143,
+        }}
+      />,
+    )
+
+    // The heading alone proves `rows` was passed - the preview does not render
+    // without it. The count needs a finished mapping, so pair one here: that is
+    // what proves `totalDataRows` travelled too.
+    expect(screen.getByRole('heading', { name: /what this would produce/i })).toBeTruthy()
+
+    const pair = (position: number, label: string) => {
+      // `\\b`, not `\b`: inside a template literal a bare `\b` is a backspace
+      // character, and the regex then matches nothing while compiling fine.
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(`^Column ${position}\\b`) }))
+      fireEvent.click(
+        screen.getByRole('button', { name: new RegExp(`^${label} — (required|optional)`) }),
+      )
+    }
+
+    pair(1, 'Date')
+    pair(2, 'Description')
+    pair(3, 'Amount')
+
+    expect(document.body.textContent ?? '').toContain('1 of 143 rows')
   })
 
   it('renders no pairing surface before a sample has been read', () => {

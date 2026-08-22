@@ -1,5 +1,5 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: 387f9e7
 merge_request:
 ---
@@ -99,7 +99,7 @@ implementation detail, and AC2 exists to pin it.
       clean sample produces **or** the refusal and every offending row — never both, because
       `readRows` never returns both. Plus the counts. Takes no store. (AC1, AC3, AC4, AC5, AC8)
 - [x] **Task 4 — Refuse to preview an incomplete mapping.** Via `completeness`. (AC6)
-- [ ] **Task 5 — The screen.** Rows and what they become, refusals in place, the counts and the
+- [x] **Task 5 — The screen.** Rows and what they become, refusals in place, the counts and the
       bound. (AC3, AC4, AC5, AC7)
 
 ## Dev Notes
@@ -251,6 +251,25 @@ out; the risk is recomputing them here from the wrong thing.
 | 3f | The kind read from somewhere other than the draft, so a roll is previewed as a deposit and its roll rows vanish | GUARD - a roll draft asserted to produce roll rows |
 | 3g | A store, repository or `ingest` reached from here | GUARD - structural: the module's imports are read |
 
+#### Task 5 - the screen
+
+**If it ran correctly, how would I know?** A treasurer looking at it can answer three questions:
+what would my rows become, how many rows was that judged on, and would the file import at all.
+
+**How am I going to test it?** jsdom render tests over `previewMapping`'s three branches, driven
+through the real pairing controls so the preview is exercised the way it is reached. The counts are
+asserted as *text*, because a count that exists in state and not on screen satisfies nothing.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 5a | The counts missing, or only one of the pair shown - "20 rows read" with no "of 143" is a claim about the file dressed as a claim about the sample. **This is the UX-DR24 breach** | GUARD - both numbers asserted in the rendered text |
+| 5b | A refusal rendered in the same neutral voice as a success, so "would be refused" reads as a status line rather than a stop | GUARD - `role="alert"` and refusal wording asserted |
+| 5c | Records rendered from stale state beside a refusal, re-creating the "17 imported, 3 refused" screen the type was shaped to prevent | GUARD - a refusing sample asserted to render no record values |
+| 5d | The bound unmentioned, so a treasurer believes the whole file was checked | GUARD - the read count is on screen, and is less than the total |
+| 5e | Offending rows listed without their numbers, leaving nothing to act on | GUARD - row numbers asserted |
+| 5f | The preview not re-rendering when a pairing changes, so it describes a mapping that no longer exists | GUARD - pair, assert, re-pair, assert it moved |
+| 5g | A tick or a count instead of the parsed values, which cannot answer "is my date column the right date column" | GUARD - the parsed field values asserted on screen |
+
 ### Completion Notes List
 
 #### Task 1 - applying a mapping
@@ -333,6 +352,39 @@ incomplete guard dropped (3).
 The cross-check is `duplicate-unit`: a refusal reason only `readRows`' own rules produce, so a
 preview that quietly grew a second parser could not invent it.
 
+#### Task 5 - the screen, and the wiring that makes it reachable
+
+**The counts are a sentence, not a badge.** "Read the first 1 of 143 rows. All 1 would import." A
+success claim without the denominator is a claim about twenty rows wearing the clothes of a claim
+about the file, which is the reassurance UX-DR24 forbids. Dropping the sentence turns 4 red; making
+`total` equal `read` turns 5.
+
+**A refusal is rendered in its own voice** - `role="alert"`, the word *refused*, every offending row
+numbered, and **no parsed values beside it**. Removing the alert role turns 2 red; dropping the row
+numbers turns 1.
+
+**Eight mutations, eight caught**, including the two that matter most for wiring: `ColumnPairing`
+not passing the rows through (8 red) and the wizard not passing `totalDataRows` (1 red). Those are
+story 5.2's lesson - a prop that exists and nothing passes is how a feature ships broken with every
+gate green - and they were real: `SampleState`, `readSample` and `MappingWizard` all had to be
+widened before the preview could render outside a test.
+
+#### The backspace defect, again, and it is in an open action item
+
+Writing the wire-up test through a shell heredoc turned `\b` into ``, which Python read as a
+**backspace byte**, and four of them landed inside a regex in `column-pairing.test.tsx`. It compiled
+and matched nothing. Then the *fix* reintroduced it one level out: a bare `` inside a JS template
+literal is also a backspace at runtime, so `new RegExp(\`^Column ${position}\`)` matched no
+button while looking perfectly correct.
+
+This is verbatim the epic-4 action item - *"a word-boundary escape written through a shell heredoc
+became a literal backspace byte inside a regex, which then compiled fine and matched nothing"* - and
+`docs/no-control-characters.test.ts` still scans markdown only, so nothing caught either instance.
+Found both times by reading the failure rather than by a guard.
+
+A scan of every `.ts`/`.tsx` file this branch touches now shows one hit, and it is the explanatory
+comment written about the defect.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -343,11 +395,21 @@ preview that quietly grew a second parser could not invent it.
 - `core/extraction/sample-headings.test.ts` - 3 cases for the bounded rows
 - `core/mapping/preview.ts` *(new)* - `previewMapping` and the three-branch `Preview`
 - `core/mapping/preview.test.ts` *(new)* - 14 cases, including the `duplicate-unit` cross-check
+- `app/onboarding/mapping/mapping-preview.tsx` *(new)* - the preview panel
+- `app/onboarding/mapping/mapping-preview.test.tsx` *(new)* - 10 cases
+- `app/onboarding/mapping/sample-state.ts` - carries `rows` and `totalDataRows`
+- `app/onboarding/mapping/actions.ts` - passes them out of the read
+- `app/onboarding/mapping/actions.test.ts` - the widened shape asserted
+- `app/onboarding/mapping/column-pairing.tsx` - renders the preview when rows are present
+- `app/onboarding/mapping/column-pairing.test.tsx` - 2 cases for the wiring
+- `app/onboarding/mapping/mapping-wizard.tsx` - passes the rows through
+- `app/onboarding/mapping/mapping-wizard.test.tsx` - 1 case for the wiring
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Task 5: the preview on screen, with the counts UX-DR24 requires, wired through state, action and wizard |
 | 2026-08-22 | Tasks 3 and 4: the preview composes the importer and returns records or a refusal, never both; an incomplete draft previews nothing |
 | 2026-08-22 | Task 2: a bounded slice of rows carried from the sample read, with an unclamped file total |
 | 2026-08-22 | Task 1: a mapping applied to a rectangle, mapped columns only, cross-checked through `readRows` |

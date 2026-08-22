@@ -101,7 +101,13 @@ export function MappingWizard({ initialState = EMPTY_SAMPLE_STATE }: MappingWiza
       )}
 
       {state.status === 'read' && (
-        <ColumnPairing kind={state.kind} headings={state.headings} problems={state.problems} />
+        <ColumnPairing
+          kind={state.kind}
+          headings={state.headings}
+          problems={state.problems}
+          rows={state.rows}
+          totalDataRows={state.totalDataRows}
+        />
       )}
     </>
   )

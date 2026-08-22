@@ -87,6 +87,8 @@ export async function readSample(
     kind: declaredKind,
     headings: result.headings,
     problems: result.problems,
+    rows: result.rows,
+    totalDataRows: result.totalDataRows,
   }
 }
 
