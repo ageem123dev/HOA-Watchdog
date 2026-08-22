@@ -138,7 +138,15 @@ upstream mid-round.
    Accept only when **all** hold: `.argus/ocr.json` is non-empty and parses; `manifest.terminal_state`
    is `complete`; `coverage.failed` and `.waived` are empty; `coverage.completed` covers
    `coverage.selected`; and `selected` covers every diff path `--exclude` did not remove.
-   `summary.files_reviewed` is **not** evidence — it has reported 59 against 17.
+   `summary.files_reviewed` is **not** evidence — it has reported 59 against 17, and on the DeepSeek
+   switch it reported 16 against 13 completed.
+
+   **`partial` is the state to expect, not a freak.** The first story-scale run on
+   `deepseek-v4-pro` came back `terminal_state: partial` with 3 of 16 files timed out in the
+   `context` phase, **no retries attempted**, and exit 0. Note also that the failure count lives in
+   `retry_report.failed_requests`, *not* `manifest.failed_requests` — reading the latter gives
+   `None` on a run that failed three requests. On a `partial`, re-run the failed paths before
+   treating the review as done, or say in the story that those files went unreviewed.
 7. **Verify each finding against the real file, fix test-first, run the gate, commit.** Then
    `argus_review` on that commit. **Do not run a second `ocr` round** — it re-reads the whole branch
    to re-examine a handful of lines.
@@ -339,7 +347,7 @@ If the user wants to keep building without merging, branch off the previous *sto
 | `{project}` | `ageem123/hoa-treasurer-assistant` |
 | `{project_encoded}` | `ageem123%2Fhoa-treasurer-assistant` |
 | `{glab_path}` | `/c/Users/magee/AppData/Local/Programs/glab` |
-| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`deepseek/deepseek-v4-pro-0813`** (switched 2026-08-22 from `qwen/qwen3.7-plus`, which was not an improvement on Argus); config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `reasoning.enabled: false` and nothing else** — the Qwen-only `enable_thinking` was dropped with the model. Keep reasoning off until someone measures it on: Qwen's thinking mode rejected `tool_choice` and *silently dropped files while exiting 0*, and step 6 exists because of it |
+| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`deepseek/deepseek-v4-pro-0813`** (switched 2026-08-22 from `qwen/qwen3.7-plus`, which was not an improvement on Argus); config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `reasoning.enabled: false` and nothing else** — the Qwen-only `enable_thinking` was dropped with the model. Keep reasoning off until someone measures it on: Qwen's thinking mode rejected `tool_choice` and *silently dropped files while exiting 0*, and step 6 exists because of it. **Measured on the switch, 2026-08-22: DeepSeek is ~3.6x slower than Qwen on the same 15-file scope (7m38s against 2m07s) and at the default `--concurrency 8` it timed out on 3 of 16 files, retried none of them, and exited 0** — `terminal_state` was `partial`, `coverage.failed` had 3 entries, and `summary.files_reviewed` still said 16. Step 6's manifest check is what catches this; `--concurrency` and `--timeout` (minutes, default 10) are the knobs, untested so far |
 | `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part). CLI **0.7.3** at `~/.local/bin/coderabbit`; in this version `--dir` filters which changes are reviewed rather than setting the working directory, so `cd` first |
 | `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
 | `{auto_pause}` | 25 |
