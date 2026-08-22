@@ -140,6 +140,10 @@ development_status:
 
 action_items:
   - epic: 5
+    action: "Harden scripts/ocr-to-argus.mjs to enforce the manifest acceptance checks, not just retry_report.failed_requests > 0. Today a report that is terminal_state partial for any other reason - waived items, completed short of selected, a non-complete terminal state - passes the adapter untouched and gets ingested, teaching Argus from a review that never read the code. The ship-story skill now states plainly that the checklist is a mandatory MANUAL gate, which is honest but weaker than making it unrepresentable. scripts/verify-extraction.test.ts is the precedent for testing a script here. Raised by CodeRabbit on MR !81 and deliberately not fixed there, because it is code plus tests on a docs-only branch"
+    owner: "Dev"
+    status: open
+  - epic: 5
     action: "A CSV is parsed with no cell-count cap while a workbook has one. adapters/extraction/workbook-sheetjs.ts stops at MAX_WORKBOOK_CELLS = 500,000; parseCsv has no equivalent, so a 25 MB file of commas becomes a rectangle of millions of empty cells in memory. MAX_DOCUMENT_BYTES bounds the bytes, not the cells. Pre-existing and reachable through ingest since epic 1 - story 5.4 only added a second entry point to it (readSampleHeadings), which is why it was not fixed there: capping one caller and not the other is worse than capping neither. Fix in toRectangle, where both callers meet. Raised by ocr on story 5.4"
     owner: "Dev"
     status: open
