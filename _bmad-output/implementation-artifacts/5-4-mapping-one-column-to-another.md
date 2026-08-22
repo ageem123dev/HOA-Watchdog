@@ -581,6 +581,63 @@ both were run rather than argued. AC2's is the interesting one: pairing by *fold
 instead of position is what a careless implementation would actually do, and it turns the two
 duplicate-column tests red.
 
+#### The local CodeRabbit round - six findings, six confirmed
+
+`review_completed`, 17 of 17 diff files reviewed, coverage reconciled. Every one was real, and none
+had been found by either of the two reviewers that ran before it.
+
+**1 (critical) - the mapping outlived the file it was built against.** `useState`'s initialiser runs
+once, and the wizard leaves its form on screen after a read - so a treasurer who reads a second
+sample kept the first sample's draft. Pairings pointing at positions that now mean *different
+columns*, bounded by the old file's column count, and the mapping still looked finished. Fixed with
+a render-phase reset keyed on the kind and the headings; both halves of that key are mutation-proven
+(dropping either turns 1 red).
+
+**2 (major) - the `session.user === null` branch of the page guard had no test.** Deleting it left
+every test green.
+
+**3 (major) - a vacuous assertion, and an instructive one.**
+`within(field('Reference')).queryByText(/required/)` looks *inside* the element, and the label is the
+button's own text content - so it returned `null` whether or not `required` was there. It now reads
+the button's text directly, and labelling every field "required" turns it red.
+
+**4 (major) - the junk-payload test never reached the code it named.** It set `text/plain`, which the
+handler does not read, so `getData` returned `''` and the case exercised `position < 1` while its
+comment claimed to be testing `NaN`. The `Number.isInteger` guard had **no test at all**. Now set
+under the exported `DRAG_FORMAT`. Writing the out-of-range case revealed the layering was different
+from what I assumed - an integer past the last column is a real request `assign` refuses, so the
+surface shows a refusal rather than ignoring it, and the test says that instead.
+
+**5 (major) - the forbidden-import scan matched single-line imports only.** A multiline import - the
+shape a formatter produces the moment that file gains one more name - was invisible to the guard, and
+so were re-exports and dynamic `import()`. Widened, and a multiline `document-repository-postgres`
+import now turns it red.
+
+**6 (minor) - a refusal asserted without its reason.** *dropping any one required target makes
+readRows refuse* checked only `ok === false`; a refusal for an unrelated reason would have satisfied
+it. It now asserts the dropped header is the one named.
+
+**Worth noting against `ocr`.** Its one `critical` claimed the whole drag suite was vacuous because
+the payload format did not match - wrong, and refuted by mutation. CodeRabbit found the *real* version
+of that concern: one specific test whose payload genuinely did not reach the format the component
+reads. Same neighbourhood, and only one of them was true.
+
+#### The defect the fix round introduced, and what caught it
+
+**A source file committed as binary, with every gate green.** The reset signature was first written
+with `U+0000`/`U+0001`/`U+0002` separators, through a shell heredoc that turned the escapes into the
+**bytes themselves**. Git reclassified `column-pairing.tsx` as binary (`numstat` reported `-  -`),
+ESLint could not read it - and all 134 tests passed, because a NUL is a perfectly valid character in
+a template literal.
+
+Nothing in the suite could have failed. `docs/no-control-characters.test.ts` scans markdown only,
+which is an open action item from story 4.6 recording this exact defect in a `.ts` file; this is its
+second appearance in TypeScript and the action item now says so. **Argus found it on the fix diff** -
+the third moment of the review gate, reviewing a diff that existed only because of the second.
+
+Replaced with `JSON.stringify`, which is unambiguous whatever a heading contains and, the point here,
+printable.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
@@ -604,6 +661,7 @@ duplicate-column tests red.
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Local CodeRabbit round: six findings, six confirmed, including a draft that outlived its sample; the fix round then wrote control bytes into a source file and Argus caught it |
 | 2026-08-21 | Task 6: duplicates and blanks reported where the mapping is built, and the page that reaches the action |
 | 2026-08-21 | Task 5: dragging as an accelerator; Argus found the drop target was `disabled`, so the drag path was dead in every real browser |
 | 2026-08-21 | Task 4: the pairing surface, native buttons as the mechanism, announced and stated in text |

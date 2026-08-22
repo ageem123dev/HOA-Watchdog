@@ -16,7 +16,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { readHeadings } from '@/core/extraction/headings'
-import { ColumnPairing } from './column-pairing'
+import { ColumnPairing, DRAG_FORMAT } from './column-pairing'
 
 const SAMPLE: readonly (readonly string[])[] = [
   ['Date', 'Amount', '  ', 'amount', 'Unit'],
@@ -184,13 +184,35 @@ describe('a drop carrying nothing usable', () => {
     const before = surfaceText()
 
     const dataTransfer = transfer()
-    dataTransfer.setData('text/plain', 'not-a-position')
+    // **Under the format the component actually reads.** This said `text/plain`,
+    // which the handler never looks at — so `getData` returned `''`, `Number('')`
+    // is `0`, and the case exercised the `position < 1` branch while its comment
+    // claimed to be testing `NaN`. The `Number.isInteger` guard had no test at
+    // all. Raised by CodeRabbit.
+    dataTransfer.setData(DRAG_FORMAT, 'not-a-position')
     fireEvent.drop(field('Amount'), { dataTransfer })
 
-    // `Number('not-a-position')` is `NaN`, and an unguarded handler pairs the
-    // field to it — the field then reads "column NaN" and the mapping is broken
-    // in a way nothing refuses.
+    // `Number('not-a-position')` is `NaN`. Unguarded, the field would pair to it
+    // and read "column NaN" — a mapping broken in a way nothing refuses.
     expect(surfaceText()).toEqual(before)
+  })
+
+  it('refuses a position the file has not got, rather than ignoring it', () => {
+    /**
+     * The layering, asserted. The drop handler's own guard is only for a payload
+     * that is not a position at all; an integer past the last column is a real
+     * request that `assign` refuses, so the surface says so rather than silently
+     * doing nothing. Written the other way round first, and the failure is what
+     * showed the two cases are not the same case.
+     */
+    render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
+
+    const dataTransfer = transfer()
+    dataTransfer.setData(DRAG_FORMAT, String(HEADINGS.length + 1))
+    fireEvent.drop(field('Amount'), { dataTransfer })
+
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(field('Amount').textContent).toContain('no column yet')
   })
 
   it('changes nothing when the drop carries an empty payload', () => {
@@ -200,5 +222,68 @@ describe('a drop carrying nothing usable', () => {
     fireEvent.drop(field('Amount'), { dataTransfer: transfer() })
 
     expect(surfaceText()).toEqual(before)
+  })
+})
+
+describe('a second sample', () => {
+  /**
+   * **The mapping must not survive the file it was built against.**
+   *
+   * `MappingWizard` leaves the form on screen after a read, so a treasurer can
+   * submit a different sample — a different kind, a different number of columns.
+   * `useState`'s initialiser runs once, so the same `ColumnPairing` instance
+   * would keep the old draft: pairings pointing at positions that now mean
+   * different columns, and a `columns` bound belonging to the previous file.
+   *
+   * Silent, and wrong in the worst direction — the mapping looks finished.
+   * Raised by CodeRabbit.
+   */
+  it('starts a new mapping when the sample changes', () => {
+    const { rerender } = render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
+
+    fireEvent.click(column(2))
+    fireEvent.click(field('Amount'))
+    expect(field('Amount').textContent).toContain('Column 2')
+
+    const other = readHeadings([
+      ['When', 'Total'],
+      ['2026-04-01', '10.00'],
+    ])
+
+    if (!other.ok) throw new Error('fixture is unreadable')
+
+    rerender(<ColumnPairing kind="deposit" headings={other.headings} />)
+
+    expect(field('Amount').textContent).toContain('no column yet')
+    expect(screen.queryByRole('button', { name: /^Unpair / })).toBeNull()
+  })
+
+  it('bounds the new mapping by the new file, not the old one', () => {
+    // The old file had five columns and the new one has two. A draft carried
+    // over would still accept position 5, which is not a column any more.
+    const { rerender } = render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
+
+    const other = readHeadings([
+      ['When', 'Total'],
+      ['2026-04-01', '10.00'],
+    ])
+
+    if (!other.ok) throw new Error('fixture is unreadable')
+
+    rerender(<ColumnPairing kind="deposit" headings={other.headings} />)
+
+    expect(screen.queryByRole('button', { name: /^Column 5/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Column 2/ })).toBeTruthy()
+  })
+
+  it('starts a new mapping when the kind changes', () => {
+    const { rerender } = render(<ColumnPairing kind="deposit" headings={HEADINGS} />)
+
+    fireEvent.click(column(2))
+    fireEvent.click(field('Amount'))
+
+    rerender(<ColumnPairing kind="assessment_roll" headings={HEADINGS} />)
+
+    expect(field('Amount').textContent).toContain('no column yet')
   })
 })

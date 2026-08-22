@@ -58,7 +58,7 @@ const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
  * A custom type rather than `text/plain`, so a stray drop of selected text from
  * anywhere else on the page carries nothing this reads.
  */
-const DRAG_FORMAT = 'application/x-column-position'
+export const DRAG_FORMAT = 'application/x-column-position'
 
 /** A column with no heading is identified by the only thing it has. */
 export const columnLabel = (heading: Heading): string =>
@@ -71,6 +71,39 @@ export function ColumnPairing({ kind, headings, problems = [] }: ColumnPairingPr
   const [selected, setSelected] = useState<number | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [refusal, setRefusal] = useState<string | null>(null)
+
+  /**
+   * **A mapping must not outlive the file it was built against.**
+   *
+   * The wizard leaves its form on screen after a read, so a treasurer can submit
+   * a second sample — a different kind, a different set of columns. `useState`'s
+   * initialiser runs once, so without this the old draft survives: pairings
+   * pointing at positions that now mean different columns, and a bound belonging
+   * to the previous file. Silent, and wrong in the worst direction, because the
+   * mapping still looks finished.
+   *
+   * Reset during render rather than in an effect — React's documented way to
+   * adjust state when props change, and it avoids rendering one frame of the
+   * stale mapping. Kept here rather than as a `key` in the caller so the
+   * component is correct however it is mounted. Raised by CodeRabbit.
+   */
+  // `JSON.stringify` rather than a delimiter of our own: it is unambiguous
+  // whatever a heading contains, and - the reason it is worth a comment - it
+  // is printable. The first version separated the parts with U+0000/U+0001/
+  // U+0002, written through a shell heredoc that turned the escapes into the
+  // bytes themselves. Git then classed this file as binary and ESLint could
+  // not read it, while every test stayed green, because a NUL is a perfectly
+  // valid character in a template literal. Found by Argus.
+  const sample = JSON.stringify([kind, headings.map((h) => [h.position, h.text])])
+  const [renderedSample, setRenderedSample] = useState(sample)
+
+  if (renderedSample !== sample) {
+    setRenderedSample(sample)
+    setDraft(emptyDraft(kind, headings.length))
+    setSelected(null)
+    setRefusal(null)
+    setAnnouncement('')
+  }
 
   const { required, optional } = targetsForKind(kind)
   const { missing } = completeness(draft)

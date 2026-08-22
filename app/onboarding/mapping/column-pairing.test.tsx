@@ -22,7 +22,7 @@
  * `<div>`s is the reassuring-and-empty shape this project keeps finding.
  */
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { readHeadings } from '@/core/extraction/headings'
@@ -268,7 +268,11 @@ describe('what is still needed', () => {
       expect(field(label).textContent).toContain('required')
     }
 
-    expect(within(field('Reference')).queryByText(/required/)).toBeNull()
+    // The button's own text, not a descendant. `within(...).queryByText` looks
+    // *inside* the element, and this label is the button's own text content — so
+    // the assertion returned null whether or not `required` was there. Vacuous
+    // in the direction that matters, and caught by CodeRabbit.
     expect(field('Reference').textContent).toContain('optional')
+    expect(field('Reference').textContent).not.toContain('required')
   })
 })

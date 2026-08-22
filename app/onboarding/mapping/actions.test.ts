@@ -274,9 +274,17 @@ describe('the four refusals stay four', () => {
 describe('nothing is stored', () => {
   it('imports no repository, no store and no ingestion', async () => {
     const source = readFileSync(fileURLToPath(new URL('./actions.ts', import.meta.url)), 'utf8')
-    const imported = [...source.matchAll(/^import[^\n]*?from\s+'([^']+)'/gm)].map(
-      (match) => match[1] ?? '',
-    )
+    // Every shape a module specifier can arrive in, not just the single-line
+    // `import ... from '...'` this originally matched. A multiline import - the
+    // shape a formatter produces the moment this file gains one more name - was
+    // invisible to it, and so was a re-export or a dynamic `import()`. A guard
+    // that misses the syntax someone actually writes is not a guard.
+    // Raised by CodeRabbit.
+    const imported = [
+      ...source.matchAll(/(?:^|\n)\s*(?:import|export)\b[\s\S]*?from\s*['"]([^'"]+)['"]/g),
+      ...source.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
+      ...source.matchAll(/(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g),
+    ].map((match) => match[1] ?? '')
 
     // Non-empty first: a filter over nothing reports success, which is how
     // story 5.3's `TABULAR_CONTENT_TYPES` round-trip passed against an empty

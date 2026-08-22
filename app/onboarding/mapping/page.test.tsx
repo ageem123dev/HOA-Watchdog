@@ -46,6 +46,15 @@ describe('the mapping step is not public', () => {
     await expect((await page())()).rejects.toThrow(`NEXT_REDIRECT:${SIGN_IN_ROUTE}`)
   })
 
+  it('sends a session whose user is explicitly null to sign in', async () => {
+    // The guard reads `session?.user === undefined || session.user === null`,
+    // and nothing covered the second half — deleting it left every test green.
+    // A session callback that supplies `null` is exactly what it is there for.
+    auth.mockResolvedValue({ user: null })
+
+    await expect((await page())()).rejects.toThrow(`NEXT_REDIRECT:${SIGN_IN_ROUTE}`)
+  })
+
   it('renders the step for a signed-in treasurer', async () => {
     // The inverse, so the redirects above are not passing against a page that
     // redirects everyone.

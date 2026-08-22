@@ -65,7 +65,15 @@ describe('the targets a kind actually has', () => {
         for (const dropped of required) {
           const withoutIt = required.filter((target) => target !== dropped)
 
-          expect(readRows(fileFrom(withoutIt), kind).ok).toBe(false)
+          const refused = readRows(fileFrom(withoutIt), kind)
+
+          expect(refused.ok).toBe(false)
+          // *Which* header, not merely that it refused: a `readRows` that turned
+          // the file away for some unrelated reason would satisfy `ok === false`
+          // and tell us nothing about the target list. Raised by CodeRabbit.
+          expect(
+            refused.ok ? [] : refused.problems.flatMap((p) => ('expected' in p ? p.expected : [])),
+          ).toContain(dropped)
         }
       },
     )
