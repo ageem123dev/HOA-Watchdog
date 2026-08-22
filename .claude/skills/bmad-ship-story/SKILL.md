@@ -145,11 +145,30 @@ upstream mid-round.
    `deepseek-v4-pro` came back `terminal_state: partial` with 3 of 16 files timed out in the
    `context` phase, **no retries attempted**, and exit 0. Note also that the failure count lives in
    `retry_report.failed_requests`, *not* `manifest.failed_requests` — reading the latter gives
-   `None` on a run that failed three requests. On a `partial`, re-run the failed paths before
-   treating the review as done, or say in the story that those files went unreviewed.
+   `None` on a run that failed three requests.
+
+   **What to do with a `partial`, precisely, because three places used to disagree.**
+   `scripts/ocr-to-argus.mjs` refuses any report with `failed_requests > 0`, so a partial cannot be
+   ingested at all — and there is no way to merge two reports into one, because the adapter takes a
+   single file. So:
+
+   1. **Re-run the same scope**, at `--concurrency 4` if it was not already. A partial run is a run
+      that did not finish, and finishing it is not "a second round" — see item 7, which forbids
+      something else entirely.
+   2. If it comes back `complete`, use that report and discard the partial.
+   3. If it is still `partial`, **do not pass it to `ocr-to-argus`**. Say in the story's Review
+      Findings which paths went unreviewed, by name, and carry on. A named gap is a fact the next
+      person can act on; a silently-ingested partial teaches Argus from a review that never read the
+      code. Raised by CodeRabbit on MR !81.
 7. **Verify each finding against the real file, fix test-first, run the gate, commit.** Then
-   `argus_review` on that commit. **Do not run a second `ocr` round** — it re-reads the whole branch
-   to re-examine a handful of lines.
+   `argus_review` on that commit — **on the commit itself, not merely on its diff**, because
+   `argus_ingest` joins `ocr`'s findings to an Argus run by commit SHA and Argus records a run
+   against whatever HEAD was at the time. On story 5.5 both runs landed on the commit *before* the
+   one `ocr` read, so the review could not be scored at all.
+
+   **Do not run a second `ocr` round after fixing** — it re-reads the whole branch to re-examine a
+   handful of lines. This forbids re-reviewing *fixed code*; it does not forbid retrying a run that
+   failed, which is item 6's business.
 
 #### The CodeRabbit CLI — once, last, on the cleaned code
 
