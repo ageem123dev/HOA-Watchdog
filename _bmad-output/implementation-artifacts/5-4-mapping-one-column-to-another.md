@@ -90,7 +90,7 @@ and the one that disagrees silently will be the keyboard one, because nobody dem
 - [x] **Task 2 — A draft mapping, keyed by position.** Assign, unassign, and a report of what is
       still missing. One source per target; a source claimed twice refused with both named. Takes no
       store. (AC2, AC3, AC4, AC9)
-- [ ] **Task 3 — The sample-reading surface story 5.3 deferred.** The server action that calls
+- [x] **Task 3 — The sample-reading surface story 5.3 deferred.** The server action that calls
       `readSampleHeadings`, and the step that reaches it. 5.3 held this back deliberately so the
       action would land with the screen that calls it — see Dev Notes.
 - [ ] **Task 4 — Pairing by keyboard, as the mechanism.** A selectable pairing surface: choose a
@@ -277,6 +277,32 @@ is why every operation here returns a new draft instead of `void`.
 | 2k | Optional targets counted as missing, so a mapping can never be completed | GUARD - only required targets are reported |
 | 2l | A draft assembled by hand carrying an out-of-range position and reported complete | OUT-OF-SCOPE - unconstructable through this module's API, which is where 2c guards. Nothing else constructs a draft; if anything ever does, `completeness` is where the check belongs |
 
+#### Task 3 - `readSample`: the surface story 5.3 deferred
+
+**A distinction to hold on to.** Story 5.3 established that *a sample has no document kind* - the
+mapping is what the kind is for, and `readSampleHeadings` takes none. This step does ask for one, and
+it is not the same question. The treasurer is declaring **which import they are setting up**, because
+Task 1 cannot offer targets without knowing it. The file still declares nothing; the wizard does.
+
+**If it ran correctly, how would I know?** The action returns the headings and problems
+`readSampleHeadings` produced, under the kind the form declared, and nothing is written anywhere.
+
+**How am I going to test it?** `auth` and the workbook adapter are mocked at the module boundary, as
+`app/quarantine/actions.test.ts` does. The "nothing is stored" half is structural rather than
+behavioural - a behavioural test cannot prove the *absence* of a write it never triggered, so the
+test reads the module's imports, in the shape `test_no_data_credentials.py` uses for AD-3 and story
+5.3 used for the shared folding.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | No session check, so the action is a public CSV parser - it is reachable without the page ever rendering, which is the argument `app/quarantine/actions.test.ts` already makes | GUARD - refused, and the refusal asserted before any read |
+| 3b | No file chosen, or an empty file input, reaching the reader as `undefined` | GUARD - named refusal |
+| 3c | `documentKind` absent or not a kind, so the mapping step renders with no targets or `targetsForKind` throws inside a render | GUARD - refused at the boundary, exactly as the upload action does |
+| 3d | The four refusal reasons collapsed into one message, so an empty file is reported as a format we cannot read - which invites re-exporting a file that exported perfectly well. Story 5.3 kept them apart for precisely this | GUARD - four distinct messages, one test each |
+| 3e | Bytes read before the declared size is checked, holding the submission in memory to decide it is too large to hold in memory | GUARD - size checked first, like `uploadDocuments` |
+| 3f | The workbook decoder not passed, so every spreadsheet returns `no-reader` while CSVs work - a wizard that reads half the formats the importer accepts | GUARD - a workbook sample, decoder asserted reached |
+| 3g | The sample ingested or stored, putting a file nobody meant to keep into the permanent record and the register a board reads | GUARD - structural: the module imports no repository, no store and not `ingest` |
+
 ### Completion Notes List
 
 #### Task 1 - the targets a kind actually has
@@ -344,6 +370,35 @@ derived from it, plus a `the fixture is the file it claims to be` block assertin
 the blank are actually there. Three fixture mutations now caught: a sixth column added, the collision
 removed, and the blank column given a name.
 
+#### Task 3 - the surface story 5.3 deferred
+
+**The kind is asked for, and it is not the question 5.3 refused.** A sample still declares nothing -
+`readSampleHeadings` takes no kind and still does not. The form asks which *import* is being set up,
+because `targetsForKind` cannot offer a target list without knowing, and that answer is the
+treasurer's rather than the file's. Carried forward beside the headings in `SampleState`.
+
+**The four refusals stay four.** Story 5.3 kept `empty-file` apart from `unreadable-file` because
+*"your file is empty"* and *"your file could not be read"* send a treasurer to different places, and
+the second actively invites re-exporting a file that exported perfectly well. Collapsing them into
+one sentence at the last step would have thrown that away, and the mutation that does so turns four
+tests red.
+
+**Nothing is stored, and it is checked structurally.** No behavioural test can prove the absence of a
+write it never triggered, so one test reads the module's own import list and refuses any repository,
+store or `ingest`. Non-empty asserted first - a filter over nothing reports success, which is how
+5.3's `TABULAR_CONTENT_TYPES` round-trip passed against an empty list.
+
+**Seven production mutations, seven caught**: the session guard dropped (2 red), the kind guard
+dropped (2), the empty-file-input guard dropped (1), the size boundary moved from `>` to `>=` (1),
+the size check removed (1), the four refusals collapsed (4), and the workbook decoder not passed (1).
+
+**A test that failed for the wrong reason, caught by looking.** The at-the-limit boundary case built
+a 25 MiB file with `padEnd`, which puts the filler *after* the final newline and makes a ragged row -
+so the file was refused as unreadable and the test failed while the guard it was aimed at was
+correct. Padded inside the last cell instead, with `expect(atLimit.size).toBe(MAX_DOCUMENT_BYTES)`
+now asserting the fixture is the size it claims. Three fixture mutations caught, including making
+that file one byte short.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
@@ -351,11 +406,15 @@ removed, and the blank column given a name.
 - `core/mapping/draft.ts` *(new)* - the draft mapping: `assign`, `unassign`, `completeness`
 - `core/mapping/draft.test.ts` *(new)* - 32 cases, including a cross-check that a complete mapping
   lays out a header row `readRows` accepts
+- `app/onboarding/mapping/actions.ts` *(new)* - `readSample`, the `'use server'` boundary
+- `app/onboarding/mapping/actions.test.ts` *(new)* - 16 cases, one of them structural
+- `app/onboarding/mapping/sample-state.ts` *(new)* - the state the step holds between submissions
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 3: the sample-reading server action, guarded and storing nothing |
 | 2026-08-21 | Task 2: a draft mapping keyed by position; the fixture pass found the collision fixture was prose, not data |
 | 2026-08-21 | Task 1: the targets a kind has, derived from the importer and cross-checked against `readRows` |
 | 2026-08-21 | Created from epic 5's story spine, with the position-not-text keying and the keyboard-as-mechanism shape recorded before implementation |
