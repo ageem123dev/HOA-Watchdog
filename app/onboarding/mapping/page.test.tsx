@@ -9,7 +9,9 @@
  * must not render because a matcher pattern was edited carelessly.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 
 const auth = vi.fn()
 
@@ -25,17 +27,23 @@ vi.mock('./mapping-wizard', () => ({ MappingWizard: () => <div data-testid="wiza
 
 const page = async () => (await import('./page')).default
 
+beforeEach(() => vi.clearAllMocks())
+afterEach(() => vi.resetModules())
+
 describe('the mapping step is not public', () => {
   it('sends a signed-out visitor to sign in', async () => {
     auth.mockResolvedValue(null)
 
-    await expect((await page())()).rejects.toThrow(/NEXT_REDIRECT/)
+    // The route, not merely *a* redirect: a page sending a signed-out visitor
+    // somewhere else entirely would satisfy a looser assertion. This is the
+    // shape `app/quarantine/page.test.tsx` uses.
+    await expect((await page())()).rejects.toThrow(`NEXT_REDIRECT:${SIGN_IN_ROUTE}`)
   })
 
   it('sends a session with no user to sign in', async () => {
     auth.mockResolvedValue({})
 
-    await expect((await page())()).rejects.toThrow(/NEXT_REDIRECT/)
+    await expect((await page())()).rejects.toThrow(`NEXT_REDIRECT:${SIGN_IN_ROUTE}`)
   })
 
   it('renders the step for a signed-in treasurer', async () => {

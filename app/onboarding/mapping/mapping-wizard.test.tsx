@@ -29,6 +29,16 @@ const { MappingWizard } = await import('./mapping-wizard')
 afterEach(cleanup)
 
 describe('the fields the action reads', () => {
+  it('gives every control an accessible name', () => {
+    render(<MappingWizard />)
+
+    // The `name` assertions below are about the wire; this is about whether a
+    // screen-reader user can tell what either control is for. A control with a
+    // correct `name` and no label submits fine and is unusable.
+    expect(screen.getByLabelText(/which import/i)).toBeTruthy()
+    expect(screen.getByLabelText(/sample export/i)).toBeTruthy()
+  })
+
   it('submits a control named documentKind', () => {
     render(<MappingWizard />)
 
