@@ -1,5 +1,6 @@
 import { normaliseUnitNumber } from '../unit/normalised-number'
 import { parseCsv } from './csv'
+import { normaliseHeading } from './headings'
 import {
   KINDS_WITH_UNIT_REFERENCE,
   isDocumentKind,
@@ -99,7 +100,8 @@ export type TableResult =
     }
   | { readonly ok: false; readonly problems: readonly TableProblem[] }
 
-const normalise = (header: string): string => header.trim().toLowerCase()
+// One folding, shared with `readHeadings` — see `normaliseHeading`.
+const normalise = normaliseHeading
 
 export function readTable(text: string, documentKind: DocumentKind): TableResult {
   const parsed = parseCsv(text)

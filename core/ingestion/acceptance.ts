@@ -115,8 +115,16 @@ export type Assessment =
   | { readonly outcome: 'accepted'; readonly contentType: string }
   | { readonly outcome: 'rejected'; readonly reason: RejectionReason }
 
-/** Browsers send `text/csv; charset=utf-8` and vary the case. Both are the same type. */
-function normalizeContentType(declared: string): string {
+/**
+ * Browsers send `text/csv; charset=utf-8` and vary the case. Both are the same
+ * type.
+ *
+ * Exported since story 5.3: `readSampleHeadings` receives a content type
+ * straight from a form, where `ingest` only ever sees one this function has
+ * already canonicalised. Left unshared, every CSV a browser labels with a
+ * charset would be reported as a format we cannot read.
+ */
+export function normalizeContentType(declared: string): string {
   // `split` always yields at least one element, but `noUncheckedIndexedAccess`
   // does not know that, and the default keeps the empty-string case explicit.
   const [base = ''] = declared.split(';')
