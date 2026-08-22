@@ -6,6 +6,7 @@ import type { DocumentKind } from '@/core/extraction/record'
 import type { Heading, HeadingProblem } from '@/core/extraction/headings'
 import { assign, completeness, emptyDraft, unassign, type DraftMapping } from '@/core/mapping/draft'
 import { targetsForKind, type TargetField } from '@/core/mapping/targets'
+import { TARGET_LABELS } from './target-labels'
 import { MappingPreview } from './mapping-preview'
 
 /**
@@ -47,17 +48,6 @@ export interface ColumnPairingProps {
   readonly rows?: readonly (readonly string[])[]
   /** Data rows the file holds, for the count UX-DR24 requires. */
   readonly totalDataRows?: number
-}
-
-/** What a treasurer calls each of the importer's columns. */
-const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
-  date: 'Date',
-  description: 'Description',
-  amount: 'Amount',
-  reference: 'Reference',
-  unit: 'Unit',
-  cycle: 'Billing cycle',
-  year: 'Year',
 }
 
 /**

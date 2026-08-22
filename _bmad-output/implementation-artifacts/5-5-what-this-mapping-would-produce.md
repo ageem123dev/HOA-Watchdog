@@ -436,6 +436,46 @@ The consequence was real the first time even though the reasoning was not, which
 would have added an optional chain that can never be exercised; reading the first as stated would
 have aimed the fix at the wrong half of the code.
 
+#### The `ocr` round - 20 comments, 8 confirmed
+
+`terminal_state: complete`, **17 of 17 files**, 0 failed, 0 waived, at `--concurrency 4`. That flag
+is this session's measurement rather than the skill's default: at the default 8 the same tool dropped
+3 of 16 files with no retries and exit 0.
+
+**The one that mattered: `TARGET_LABELS` existed twice**, identically, in `column-pairing.tsx` and
+`mapping-preview.tsx`. Identical is not the risk - the day one changes is, and the symptom would be a
+treasurer told to map "Billing cycle" on one panel and shown "Cycle" on the other, with nothing
+saying they are the same column. That is the defect shape story 5.3 found in a duplicated
+`trim().toLowerCase()`, and the one this story's own AC1 pattern exists to prevent.
+
+Extracted to `target-labels.ts`, and the guard is **observed rather than structural**: both panels
+render together and every required target must show the *same string* on its button and in the
+preview's missing-list. A grep for a shared import would pass against two copies that agree today;
+this fails the moment they disagree about a word, which a one-word drift proved (1 red).
+
+**A test that would have gone quiet.** *does not reassure without them* was written as
+`expect(claimsSuccess && hasCount).toBe(claimsSuccess)`, which holds trivially whenever
+`claimsSuccess` is false - so changing the success wording would have stopped it asserting anything
+rather than turning it red. The claim is a precondition now, and changing the wording turns it red.
+
+**Assertions scoped to the panel that owns them.** `document.body.textContent` matched counts
+anywhere on the page; they now read the preview `region` by its accessible name and assert the
+literal sentence `2 of 143 rows` rather than two numbers in order.
+
+Also added: the whole slice sequence asserted rather than its two ends, and a case for a header row
+that exists but is empty.
+
+**Refuted, with reasons:** `rowsOf` does *not* generate invalid dates (`(i % 9) + 1` is always 1-9);
+the problem-list keys cannot collide (the fallback is the array index); the `Map` cannot receive
+duplicate targets (`assign` refuses them); and one `medium` argued itself round to *"this test is
+correct... all tests appear to be logically sound"* before finishing.
+
+**The ingest could not be joined, and that is recorded rather than glossed.** `argus_ingest` scores
+`ocr` against an Argus run on the *same commit*, and Argus records a run against HEAD at the time it
+ran. Both runs on this code landed on `e27727b`, before the roll fix; `ocr` reviewed `4e6a966`, after
+it. No run exists on that exact tree, so the review was skipped rather than mis-scored. Worth
+carrying forward: **run `argus_review` on the commit `ocr` will review, not merely on its diff.**
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -447,7 +487,8 @@ have aimed the fix at the wrong half of the code.
 - `core/mapping/preview.ts` *(new)* - `previewMapping` and the three-branch `Preview`
 - `core/mapping/preview.test.ts` *(new)* - 14 cases, including the `duplicate-unit` cross-check
 - `app/onboarding/mapping/mapping-preview.tsx` *(new)* - the preview panel
-- `app/onboarding/mapping/mapping-preview.test.tsx` *(new)* - 10 cases
+- `app/onboarding/mapping/mapping-preview.test.tsx` *(new)* - 12 cases
+- `app/onboarding/mapping/target-labels.ts` *(new)* - the one copy of the field labels
 - `app/onboarding/mapping/sample-state.ts` - carries `rows` and `totalDataRows`
 - `app/onboarding/mapping/actions.ts` - passes them out of the read
 - `app/onboarding/mapping/actions.test.ts` - the widened shape asserted
@@ -460,6 +501,7 @@ have aimed the fix at the wrong half of the code.
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | `ocr` round: 20 comments, 8 confirmed - the field labels existed twice, and a test that would have gone quiet |
 | 2026-08-22 | Branch Argus round: a roll preview was missing the two columns that make it a roll; a follow-up `critical` refuted |
 | 2026-08-22 | Task 5: the preview on screen, with the counts UX-DR24 requires, wired through state, action and wizard |
 | 2026-08-22 | Tasks 3 and 4: the preview composes the importer and returns records or a refusal, never both; an incomplete draft previews nothing |

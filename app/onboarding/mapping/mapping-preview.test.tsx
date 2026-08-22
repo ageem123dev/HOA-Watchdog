@@ -56,6 +56,15 @@ const ONE_BAD: readonly (readonly string[])[] = [
 
 const text = () => document.body.textContent ?? ''
 
+/**
+ * The preview panel's own text.
+ *
+ * `document.body` is the whole page, so a count that happened to appear
+ * elsewhere would satisfy an assertion about the preview. Raised by `ocr`.
+ */
+const panel = () =>
+  screen.getByRole('region', { name: /what this would produce/i }).textContent ?? ''
+
 describe('a mapping the importer would accept', () => {
   it('shows what each row becomes, value by value', () => {
     render(<MappingPreview draft={COMPLETE()} rows={CLEAN} totalDataRows={2} />)
@@ -121,19 +130,23 @@ describe('the counts UX-DR24 requires', () => {
 
     // Both numbers. "2 rows read" alone is a claim about the sample dressed as
     // a claim about the file.
-    expect(text()).toContain('2')
-    expect(text()).toMatch(/143/)
-    expect(text()).toMatch(/\b2\b[\s\S]*\b143\b/)
+    // The literal sentence, inside the panel that owns it - not two numbers
+    // that happen to appear in that order somewhere on the page.
+    expect(panel()).toContain('2 of 143 rows')
   })
 
   it('does not reassure without them', () => {
     render(<MappingPreview draft={COMPLETE()} rows={CLEAN} totalDataRows={143} />)
 
     const body = text()
-    const claimsSuccess = /would import|will import|looks right/i.test(body)
 
-    // If it makes a claim at all, the counts must be beside it.
-    expect(claimsSuccess && /143/.test(body)).toBe(claimsSuccess)
+    // **Asserted, not assumed.** This was written as
+    // `expect(claimsSuccess && hasCount).toBe(claimsSuccess)`, which holds
+    // trivially whenever `claimsSuccess` is false - so the day the success
+    // wording changed the test would have gone quiet instead of red. Raised by
+    // `ocr`. The claim is a precondition of the test now, not a branch in it.
+    expect(body).toMatch(/would import/i)
+    expect(body).toContain('143')
   })
 
   it('reports the counts on a refusal too', () => {
@@ -141,7 +154,7 @@ describe('the counts UX-DR24 requires', () => {
 
     // Taken from the records, this would read 0 and tell the treasurer nothing
     // was read when two rows were read and found wanting.
-    expect(text()).toMatch(/\b2\b[\s\S]*\b143\b/)
+    expect(panel()).toContain('2 of 143 rows')
   })
 })
 

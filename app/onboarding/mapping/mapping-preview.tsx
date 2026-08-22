@@ -4,6 +4,7 @@ import type { DraftMapping } from '@/core/mapping/draft'
 import { previewMapping } from '@/core/mapping/preview'
 import { mappedTargets } from '@/core/mapping/apply'
 import type { TargetField } from '@/core/mapping/targets'
+import { TARGET_LABELS } from './target-labels'
 
 /**
  * What this mapping would produce — the last cheap moment before anything writes.
@@ -22,17 +23,6 @@ import type { TargetField } from '@/core/mapping/targets'
  * "mostly fine" to render. The refused branch says the file would be refused,
  * names every offending row, and shows no parsed values beside them.
  */
-
-/** What a treasurer calls each of the importer's columns — the labels 5.4 uses. */
-const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
-  date: 'Date',
-  description: 'Description',
-  amount: 'Amount',
-  reference: 'Reference',
-  unit: 'Unit',
-  cycle: 'Billing cycle',
-  year: 'Year',
-}
 
 /** `ExtractionRecord`'s field for each target — the vocabulary differs on purpose. */
 const RECORD_FIELD: Readonly<

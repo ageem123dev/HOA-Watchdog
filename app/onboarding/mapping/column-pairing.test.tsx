@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { readHeadings } from '@/core/extraction/headings'
 import { targetsForKind } from '@/core/mapping/targets'
+import { TARGET_LABELS } from './target-labels'
 import { ColumnPairing } from './column-pairing'
 
 /**
@@ -105,6 +106,38 @@ describe('the preview is reachable from the pairing surface (story 5.5)', () => 
     // Complete now, so it previews — with the counts UX-DR24 requires.
     expect(document.body.textContent ?? '').toContain('1 of 143 rows')
     expect(document.body.textContent ?? '').toContain('Willow Creek Landscaping')
+  })
+})
+
+describe('the two panels name a field the same way', () => {
+  it('uses one set of labels across the pairing surface and the preview', () => {
+    /**
+     * Observed, not asserted structurally. Both panels rendered together, and
+     * for every target the *same* string has to appear on the field button and
+     * in the preview's list of what is still missing. Two copies that agree
+     * today would pass a grep for a shared import and still drift tomorrow;
+     * this fails the moment they disagree about a word.
+     *
+     * Raised by `ocr`: the labels were two identical literals.
+     */
+    const ROWS: readonly (readonly string[])[] = [
+      ['Date', 'Amount', '  ', 'amount', 'Unit'],
+      ['2026-03-01', '1240.00', 'Willow Creek Landscaping', '99.00', '12B'],
+    ]
+
+    render(<ColumnPairing kind="deposit" headings={HEADINGS} rows={ROWS} totalDataRows={1} />)
+
+    const { required } = targetsForKind('deposit')
+    const missingLine = screen.getByText(/Nothing yet/i).textContent ?? ''
+
+    expect(required.length).toBeGreaterThan(0)
+    for (const target of required) {
+      const label = TARGET_LABELS[target]
+      // On the button the pairing surface renders...
+      expect(screen.getByRole('button', { name: new RegExp(`^${label} — required`) })).toBeTruthy()
+      // ...and in the sentence the preview renders.
+      expect(missingLine).toContain(label)
+    }
   })
 })
 

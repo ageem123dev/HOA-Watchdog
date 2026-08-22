@@ -69,8 +69,12 @@ describe('a file larger than the limit', () => {
   it('takes the first rows, in order', () => {
     const { rows } = boundedSample(sampleOf(OVER))
 
-    expect(rows[1]?.[0]).toBe('row-1')
-    expect(rows[PREVIEW_ROW_LIMIT]?.[0]).toBe(`row-${PREVIEW_ROW_LIMIT}`)
+    // The whole sequence, not just its ends: a slice that kept the first and
+    // last while dropping or reordering the middle would satisfy those two.
+    // Raised by `ocr`.
+    expect(rows.slice(1).map((row) => row[0])).toEqual(
+      Array.from({ length: PREVIEW_ROW_LIMIT }, (_, i) => `row-${i + 1}`),
+    )
     // And not the tail: a slice from the end would start at row-8 here.
     expect(rows.flat()).not.toContain(`row-${OVER}`)
   })
@@ -97,6 +101,15 @@ describe('files with nothing to slice', () => {
     const { rows, totalDataRows } = boundedSample([HEADER])
 
     expect(rows).toEqual([HEADER])
+    expect(totalDataRows).toBe(0)
+  })
+
+  it('keeps an empty header row rather than inventing one', () => {
+    // `[[]]` is a rectangle with a header of no columns. The implementation
+    // reaches `header ?? []` here, and nothing exercised it. Raised by `ocr`.
+    const { rows, totalDataRows } = boundedSample([[]])
+
+    expect(rows).toEqual([[]])
     expect(totalDataRows).toBe(0)
   })
 
