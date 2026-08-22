@@ -91,7 +91,7 @@ implementation detail, and AC2 exists to pin it.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Apply a mapping to a rectangle.** Pure: rows plus a `DraftMapping` in, a rectangle
+- [x] **Task 1 — Apply a mapping to a rectangle.** Pure: rows plus a `DraftMapping` in, a rectangle
       headed with target names out, mapped columns only, in target order. (AC1, AC2)
 - [ ] **Task 2 — Carry a bounded slice of rows from the sample read.** The bound is a named constant,
       and the total row count travels with it so AC5 can be honest. (AC7)
@@ -181,14 +181,70 @@ preview that could import would route around it.
 
 ### Test Design
 
+#### Task 1 - `applyMapping`: a rectangle headed with target names
+
+**If it ran correctly, how would I know?** The returned rectangle, handed to `readRows` for the
+draft's kind, parses into the records the sample's values imply. That is the cross-check and it is
+the assertion that matters — a rectangle that merely *looks* right is what an off-by-one produces.
+
+**How am I going to test it?** Pure function, rows in and rows out; no seam needed. The care goes
+into the **fixture**: every column carries a value that identifies which column it came from, so a
+shift of one is visible in the assertion rather than hidden behind plausible-looking data.
+
+**Could this happen elsewhere?** The 1-based/0-based seam is the same one story 5.3 guarded when it
+made `Heading.position` 1-based "because it is the number a treasurer counts to". Every consumer of
+that number is a place to get it wrong once.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | Columns renamed *in place* with unmapped ones left alone, so an unmapped column headed `amount` collides with the mapped `amount` and `readRows` refuses the whole file with `duplicate-headers` - over a column the treasurer deliberately did not map | GUARD - build from mapped columns only; fixture carries exactly that collision |
+| 1b | The 1-based position used as a 0-based index, so every column is read one to the left. **Silent**: the values are still plausible, and a date column reads as a reference | GUARD - each fixture cell names its own column, so a shift changes the assertion |
+| 1c | A data row shorter than the header row - ragged CSV, trailing empties dropped by the exporter - yielding `undefined`, which stringifies into the cell as `"undefined"` and reaches the validator as a non-empty value | GUARD - absent cells become `''`, which `readRows` already treats as absent |
+| 1d | The header row treated as data, or dropped twice so the first real row is lost | GUARD - row counts asserted, and the first data row's values asserted by name |
+| 1e | A pairing whose position exceeds the actual rectangle width (the draft was built against a wider sample than the rows given) | GUARD - empty cell rather than a crash or `undefined` |
+| 1f | An empty rectangle, or one with a header and no data rows | GUARD - a header-only rectangle out, not a crash |
+| 1g | Output column order taken from pairing insertion order, so the preview's columns rearrange as the treasurer re-pairs, and the tests are order-dependent | GUARD - deterministic `targetsForKind` order, asserted against a draft built in a different order |
+
 ### Completion Notes List
+
+#### Task 1 - applying a mapping
+
+**Mapped columns only, in `targetsForKind` order.** Renaming in place would have let the fixture's
+unmapped column headed `amount` collide with the mapped one and `readRows` would refuse the whole
+file - the defect the story predicted, now covered by a fixture that carries exactly that collision.
+Order comes from the importer rather than the pairings so the preview does not rearrange itself each
+time a treasurer re-pairs.
+
+**`?? ''`, never `undefined`.** A ragged row - trailing empties dropped by an exporter - would put
+`undefined` in a cell, which stringifies to `"undefined"`: a non-empty value that parses as a
+perfectly good vendor name. The same guard covers a draft built against a wider sample than the rows
+it is applied to.
+
+**Four production mutations, four caught**: the 1-based position used as a 0-based index (7 red), an
+absent cell left `undefined` (2), order taken from the pairings (7), and the header row treated as
+data (9).
+
+**The fixture pass found a real gap, and it is the one this project keeps finding.** Making the
+fixture rows anonymous (`'x'` in every column) turned 2 red - so the column-naming is load-bearing.
+But **pairing the draft in target order left all 15 green**: the ordering test computes its
+expectation from `targetsForKind` and compares, so with an in-order fixture a pairings-order
+implementation gives the same answer and the test proves nothing. The fixture *was* out of order,
+deliberately, and nothing asserted it - so tidying it would have silently disarmed the test, exactly
+as story 5.4's collision fixture rotted into a comment. Now asserted, and re-running that mutation
+turns it red.
+
+
 
 ### Review Findings
 
 ### File List
 
+- `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
+- `core/mapping/apply.test.ts` *(new)* - 16 cases, including the `readRows` cross-check
+
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Task 1: a mapping applied to a rectangle, mapped columns only, cross-checked through `readRows` |
 | 2026-08-22 | Created from epic 5's spine, with the rows-are-gone decision and the rename-collision trap recorded before implementation |
