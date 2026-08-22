@@ -402,6 +402,28 @@ parser, and these guards catch **architectural drift, not a determined evader**:
 can equally edit the test. Recorded in the module's own doc comment so the next reader sees the
 limit rather than inferring a guarantee.
 
+#### Round outcome
+
+All four confirmed findings fixed in `7a9d081`; CodeRabbit replied to each thread confirming the fix,
+and those three are resolved.
+
+The Major one is **agreed out of scope, not overruled**: *"acknowledged. The finding remains valid,
+but a parser-backed scanner is outside this merge request's stated scope... I will keep this thread
+open for the human scope decision."* It offered to open a follow-up issue; that is the author's call
+and was not accepted on their behalf. The thread stays open on MR !83.
+
+**Action item, not this story's work** - a second one against `module-specifiers.ts`, alongside the
+`neutralise` regex-literal note above. `specifiersIn` returns specifiers **raw**, so
+`import '@/adapters/db'` is never matched by a consumer, and a conditional dynamic import
+`import(cond ? 'a' : 'b')` is not seen at all. Both fail **open**. Both predate this branch in all
+four copies of the scanner; this story consolidated them and fixed a third that also failed open (a
+quote class truncating `import "it's-module"` to `it`). Closing them means tokenising TypeScript.
+
+**A note for whoever picks that up:** these guards catch architectural *drift*. Treating them as a
+security boundary against a determined evader requires the scope decision above to be taken first -
+anyone deliberately encoding a specifier to slip past an architecture test can equally delete the
+test.
+
 ### AC audit
 
 Each criterion, the test that fails if the behaviour is removed, and the evidence that it does. **A
