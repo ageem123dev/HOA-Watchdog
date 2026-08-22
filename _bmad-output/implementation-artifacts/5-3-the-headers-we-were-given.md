@@ -263,6 +263,35 @@ Recorded rather than resolved, because the alternative was a third copy of a fiv
 that is the defect this round was about. The latent trap is real though: an import of `extraction`
 added to `acceptance.ts` would close the loop.
 
+#### MR !78, CodeRabbit round 1 - the sharing guard did not guard sharing
+
+One finding, minor, and correct. The structural check added earlier in this story asserted that
+`tabular.ts` *mentions* `normaliseHeading` and holds no bare `trim().toLowerCase()`. **Both pass if
+`tabular` imports the shared folding and then binds `normalise` to something else** - `h =>
+h.toLowerCase()` satisfies them and silently drops the trim. `tsconfig` sets no `noUnusedLocals`,
+so nothing else would notice the import had become decorative.
+
+That is the third guard in this story written to prevent vacuity that was itself weak, after the
+empty-list loop and the `Function.length` assertion. The pattern is worth naming: **a check written
+in a hurry to prove a property tends to assert the nearest observable thing rather than the
+property.**
+
+Fixed with **parity observed rather than inspected**: a heading in a form `normaliseHeading` folds
+to `amount` is a heading `readRows` accepts *as* the amount column. Two implementations that
+disagree cannot both pass, whatever the source says. The inverse is asserted too (`amt` is not
+found), so the block is not passing because `readRows` accepts everything.
+
+The structural check is **kept alongside**, narrowed to the binding, because the two catch different
+things - and the mutations show it:
+
+| Mutation | Caught by |
+| --- | --- |
+| imports the shared folding, then binds another | parity, 3 red |
+| keeps an identical copy of its own | structural, 1 red |
+
+Neither alone is sufficient: parity cannot see a copy that agrees on the forms it names, and
+structure cannot see behaviour.
+
 ### File List
 
 - `core/extraction/headings.ts` *(new)* - `readHeadings`, the reporting reader
@@ -282,6 +311,7 @@ added to `acceptance.ts` would close the loop.
 | --- | --- |
 | 2026-08-21 | Task 4: a sample is read without being stored; the bytes-to-rows dispatch is shared with ingest rather than copied |
 | 2026-08-21 | Local CodeRabbit round: three findings, three confirmed - a duplicated folding, an uncanonicalised content type, and a vacuous arity assertion |
+| 2026-08-22 | MR !78 round 1: the sharing guard passed against a decorative import; replaced with observed parity plus a narrowed structural check |
 | 2026-08-21 | Status done, written in this commit rather than after the merge |
 | 2026-08-21 | Tasks 1-3: readHeadings reports duplicates and blanks by position, all at once, and distinguishes the empty cases |
 | 2026-08-21 | Created from epic 5's story spine, with the sample-is-not-a-document decision flagged for Task 4 |

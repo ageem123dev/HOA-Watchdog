@@ -24,6 +24,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { normaliseHeading, readHeadings } from './headings'
+import { readRows } from './tabular'
 
 const headingsOf = (rows: readonly (readonly string[])[]) => {
   const result = readHeadings(rows)
@@ -49,17 +50,68 @@ describe('the folding this shares with the importer', () => {
   })
 
   /**
-   * **The behavioural test above cannot see sharing.** It asserts that this
-   * folding is correct; a `tabular.ts` that quietly kept its own identical copy
-   * would pass it and drift the moment either changed. So this reads the source,
-   * in the shape `test_no_data_credentials.py` uses for AD-3: the property is
-   * structural, so the check is too.
+   * **Parity, observed rather than inspected.**
+   *
+   * The first version of this read `tabular.ts` and asserted it mentioned
+   * `normaliseHeading` and contained no bare `trim().toLowerCase()`. CodeRabbit
+   * pointed out that both checks pass if `tabular` imports the shared folding
+   * and then binds `normalise` to something else — `h => h.toLowerCase()`
+   * satisfies them and drops the trim. `tsconfig` sets no `noUnusedLocals`, so
+   * nothing else would notice the import was decorative.
+   *
+   * So this asserts the *effect* instead: a heading written in a form
+   * `normaliseHeading` folds to `amount` is a heading `readRows` accepts as the
+   * `amount` column. Two implementations that disagree cannot both pass, whatever
+   * the source says.
    */
-  it('is the folding tabular uses, not merely one that matches it', () => {
+  it.each([
+    ['padding', '  amount  '],
+    ['case', 'AMOUNT'],
+    ['both', ' Amount '],
+  ])('folds %s in the importer exactly as it folds here', (_label, written) => {
+    expect(normaliseHeading(written)).toBe('amount')
+
+    const result = readRows(
+      [
+        ['date', 'description', written],
+        ['2026-01-01', 'A Counterparty', '10.00'],
+      ],
+      'statement',
+    )
+
+    expect(result.ok, `the importer did not read ${JSON.stringify(written)} as amount`).toBe(true)
+  })
+
+  /**
+   * The other direction, so the block above is not passing because `readRows`
+   * accepts everything: a heading the folding does *not* turn into `amount` is
+   * a column the importer does not find.
+   */
+  it('does not read a heading the folding leaves different as that column', () => {
+    expect(normaliseHeading('amt')).not.toBe('amount')
+
+    const result = readRows(
+      [
+        ['date', 'description', 'amt'],
+        ['2026-01-01', 'A Counterparty', '10.00'],
+      ],
+      'statement',
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.problems[0]?.reason).toBe('missing-headers')
+  })
+
+  /**
+   * And the cheap structural check kept alongside, because the parity cases
+   * above can only cover the forms they name: a second definition in `tabular`
+   * that happens to agree on those three would still be a copy waiting to drift.
+   */
+  it('holds no folding of its own in the importer', () => {
     const source = readFileSync(join(import.meta.dirname, 'tabular.ts'), 'utf8')
 
-    expect(source).toContain('normaliseHeading')
-    // No second definition. A bare `trim().toLowerCase()` in there is a copy.
+    expect(source).toMatch(/^const normalise = normaliseHeading$/m)
     expect(source).not.toMatch(/trim\(\)\.toLowerCase\(\)/)
   })
 })
