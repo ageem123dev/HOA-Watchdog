@@ -1,7 +1,7 @@
 ---
 Status: review
 baseline_commit: 658fb22
-merge_request:
+merge_request: 80
 ---
 
 # Story 5.4: Mapping one column to another
@@ -637,6 +637,25 @@ the third moment of the review gate, reviewing a diff that existed only because 
 
 Replaced with `JSON.stringify`, which is unambiguous whatever a heading contains and, the point here,
 printable.
+
+#### The integration pass (step 6)
+
+Scope `658fb22..HEAD`, **excluding `_bmad-output/**`** — the story document is this review's spec,
+and reviewing it as a diff reviews the prose against itself.
+
+Engine: **argus (MCP)**, one call. `audit_chain_ok: true`, context 17/17 files, selectivity 1,
+reflection converged, confidence 1. **No findings.**
+
+This is the pass that per-task reviews structurally cannot be — an interaction between Task 2's draft
+and Task 4's surface is invisible to either alone. It is also not a re-read of what the earlier
+reviews saw: the branch moved after 4b's Argus run, so this was the first look at the CodeRabbit
+round's fixes *in the context of the whole story*, which is where a fix that breaks a sibling fix
+becomes visible.
+
+The Claude subagent layers were not run: the engine is `argus`, which satisfies the gate on its own
+under `_bmad/custom/review-gate.md`. The acceptance dimension is covered by the AC audit above, with
+a proven mutation per criterion, which is stronger evidence than a reading of the diff against the
+prose.
 
 ### File List
 
