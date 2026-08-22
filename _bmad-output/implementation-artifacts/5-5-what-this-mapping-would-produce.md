@@ -302,6 +302,28 @@ turns it red.
 
 ### Review Findings
 
+#### The AC audit (step 4c)
+
+Every criterion, the test that covers it, and the mutation that turns that test red. No criterion is
+listed on a name alone - a vacuous test satisfies "I named one" while staying green when the
+behaviour is deleted, which is the defect this project keeps finding.
+
+| AC | Test | Mutation that turns it red |
+| --- | --- | --- |
+| 1 - parses through the importer | `preview.test.ts` > *surfaces `duplicate-unit`, a refusal only readRows produces*; *reads a roll as a roll* | the kind hard-coded rather than read from the draft - 2 red |
+| 2 - mapped columns only, in target order | `apply.test.ts` > *is not refused for a duplicate heading the treasurer never mapped*; *orders columns by the importer* | order taken from the pairings - 7 red; the 1-based position used as 0-based - 7 red |
+| 3 - each row shows what it becomes | `mapping-preview.test.tsx` > *shows what each row becomes, value by value*; *shows the roll-only columns* | **the parsed values blanked, leaving headers and counts - 4 red** |
+| 4 - a refusal is a refusal | `mapping-preview.test.tsx` > *says the file would be refused*, *names the offending row by number*, *shows no parsed values beside the refusal* | the alert role removed - 2 red; row numbers dropped - 1 red; only the first problem reported - 1 red |
+| 5 - counts, never bare reassurance | `mapping-preview.test.tsx` > *says how many rows were read and how many the file holds*; `sample-rows.test.ts` > *reports the file total, unclamped* | the counts sentence dropped - 4 red; `total` clamped to `read` - 5 red |
+| 6 - incomplete previews nothing | `preview.test.ts` > *previews nothing and names every required target still missing*; *agrees with `completeness`* | the incomplete guard dropped - 3 red; the missing list blanked on screen - 1 red |
+| 7 - bounded, and the bound on screen | `sample-rows.test.ts` > *reads exactly the limit in data rows*; `mapping-preview.test.tsx` > the "first N of M" sentence | the bound applied to the rectangle - 6 red; the wizard not passing `totalDataRows` - 1 red |
+| 8 - nothing stored, nothing imported | `preview.test.ts` > *imports no repository, no store and no ingestion* | **a `document-repository-postgres` import added to `preview.ts` - 1 red** |
+
+AC3 and AC8 had no directly-proven mutation when the audit began and were run rather than argued;
+both are marked in bold above. The rest cite rounds already recorded in the completion notes.
+
+
+
 #### Task 2 - the bounded slice, and two counts that must be able to differ
 
 **`totalDataRows` is deliberately not `Math.min`.** Clamped by the same expression as the slice it
