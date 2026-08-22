@@ -93,7 +93,7 @@ and the one that disagrees silently will be the keyboard one, because nobody dem
 - [x] **Task 3 — The sample-reading surface story 5.3 deferred.** The server action that calls
       `readSampleHeadings`, and the step that reaches it. 5.3 held this back deliberately so the
       action would land with the screen that calls it — see Dev Notes.
-- [ ] **Task 4 — Pairing by keyboard, as the mechanism.** A selectable pairing surface: choose a
+- [x] **Task 4 — Pairing by keyboard, as the mechanism.** A selectable pairing surface: choose a
       column, choose a target, pair; and the inverse. Live region, visible focus, text state. (AC5,
       AC7)
 - [ ] **Task 5 — Dragging, over the same operation.** A pointer accelerator that calls the same
@@ -303,6 +303,36 @@ test reads the module's imports, in the shape `test_no_data_credentials.py` uses
 | 3f | The workbook decoder not passed, so every spreadsheet returns `no-reader` while CSVs work - a wizard that reads half the formats the importer accepts | GUARD - a workbook sample, decoder asserted reached |
 | 3g | The sample ingested or stored, putting a file nobody meant to keep into the permanent record and the register a board reads | GUARD - structural: the module imports no repository, no store and not `ingest` |
 
+#### Task 4 - the pairing surface, keyboard as the mechanism
+
+**The shape, decided before the interaction.** A selectable list pairing, exactly as epics.md
+prescribes: choose a column, then choose the target it feeds. Every control that changes the mapping
+is a native `<button>`, so the *platform* operates it by keyboard and there is no second
+implementation to keep in step. Task 5's drag calls the same `pair` function these buttons call.
+
+**What "asserted by keyboard" honestly means here, because it is easy to fake.** On a native button
+a keyboard activation *is* a click event - the browser synthesises it, and jsdom does not. So driving
+`fireEvent.keyDown` would prove nothing unless the component grew its own `onKeyDown`, which is the
+second implementation AC6 exists to forbid. The evidence is therefore two things together, and
+neither alone: **(1)** every mapping control is a real `<button>` in the tab order - a `<div>` with
+an `onClick` fails, and that is the actual defect this guards - and **(2)** the whole mapping can be
+built and taken apart through exactly those controls. Written down rather than glossed, because a
+test named "works by keyboard" that fires clicks at divs is precisely the reassuring-and-empty shape
+this story keeps finding.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4a | A control is a `<div>` or `<span>` with an `onClick`, so a mouse works and the keyboard does not reach it at all | GUARD - every mapping control asserted to be a `<button>`; the test enumerates them rather than naming one |
+| 4b | A control is in the DOM but out of the tab order (`tabindex="-1"`), which looks identical on screen | GUARD - asserted absent |
+| 4c | Pairing succeeds but nothing is announced, so a screen-reader user has no idea whether the key press did anything | GUARD - a polite live region naming both sides, asserted after a pairing |
+| 4d | Unpairing is announced with the same words as pairing, or not at all | GUARD - distinct text, asserted |
+| 4e | Paired state carried by colour or position alone, so it is invisible to a screen reader and to anyone who cannot distinguish the tint | GUARD - the pairing is in the text of the row |
+| 4f | What remains is shown as a count, or only the first missing target, repeating the defect `completeness` was built to avoid | GUARD - every missing required target named on screen |
+| 4g | A refusal from `assign` swallowed, so pressing a claimed column does nothing and says nothing | GUARD - the refusal is rendered, naming the target that already holds the column |
+| 4h | The selection left dangling after a pairing, so the next Enter pairs a column the treasurer thought they had finished with | GUARD - selection cleared, asserted by pairing twice in a row |
+| 4i | The component keeps its own copy of the pairing rules rather than calling `assign`, so the screen and the domain drift | GUARD - the refusal cases only `assign` produces are asserted through the surface |
+| 4j | Targets rendered from a list written in the component rather than from `targetsForKind`, so an invoice offers `unit` | GUARD - asserted per kind against `targetsForKind` |
+
 ### Completion Notes List
 
 #### Task 1 - the targets a kind actually has
@@ -399,6 +429,36 @@ correct. Padded inside the last cell instead, with `expect(atLimit.size).toBe(MA
 now asserting the fixture is the size it claims. Three fixture mutations caught, including making
 that file one byte short.
 
+#### Task 4 - the pairing surface
+
+**Choose a column, then choose the field it feeds.** Every control that changes the mapping is a
+native `<button>`, so the platform operates it by keyboard and there is no `onKeyDown` of our own to
+drift out of step with the pointer path Task 5 adds.
+
+**The keyboard claim is stated honestly rather than performed.** On a native button a keyboard
+activation *is* a click event - the browser synthesises it and jsdom does not - so firing `keyDown`
+would prove nothing unless the component grew its own handler, which is the second implementation
+AC6 forbids. The evidence is two things together: every mapping control is a real `<button>` in the
+tab order, and the whole mapping can be built and taken apart through exactly those controls. The
+first is the one that matters, because `<div onClick>` is the actual defect and it looks identical
+on screen.
+
+**Nothing here decides what a valid pairing is.** `assign`, `unassign` and `completeness` do; this
+renders their answers. The refusal for a column another field holds names that field, because "that
+is not allowed" leaves a treasurer with nothing to act on.
+
+**Nine production mutations, nine caught**: an unpair control turned into a `<div onClick>` (2 red),
+the field buttons taken out of the tab order (1), the selection not cleared after a pairing (1), the
+refusal swallowed (1), nothing announced (1), unpairing announced in the same words as pairing (1),
+the field list written in the component instead of read from `targetsForKind` (1), what remains shown
+as a count (1), and the paired column dropped from the row text (3).
+
+**Fixture mutations: two caught, one benign and now pinned anyway.** Giving the blank column a
+heading and removing the collision each turn the *fixture is the file it claims to be* block red.
+Adding a sixth column did not, because nothing here is derived from the count - unlike Task 2, where
+every boundary case was. Pinned with a length assertion regardless, since that is exactly the
+reasoning that let Task 2's fixture rot unnoticed.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
@@ -409,11 +469,14 @@ that file one byte short.
 - `app/onboarding/mapping/actions.ts` *(new)* - `readSample`, the `'use server'` boundary
 - `app/onboarding/mapping/actions.test.ts` *(new)* - 16 cases, one of them structural
 - `app/onboarding/mapping/sample-state.ts` *(new)* - the state the step holds between submissions
+- `app/onboarding/mapping/column-pairing.tsx` *(new)* - the pairing surface
+- `app/onboarding/mapping/column-pairing.test.tsx` *(new)* - 16 cases
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 4: the pairing surface, native buttons as the mechanism, announced and stated in text |
 | 2026-08-21 | Task 3: the sample-reading server action, guarded and storing nothing |
 | 2026-08-21 | Task 2: a draft mapping keyed by position; the fixture pass found the collision fixture was prose, not data |
 | 2026-08-21 | Task 1: the targets a kind has, derived from the importer and cross-checked against `readRows` |
