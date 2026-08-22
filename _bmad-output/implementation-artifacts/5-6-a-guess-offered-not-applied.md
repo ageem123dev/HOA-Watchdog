@@ -1,7 +1,7 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: f78759e
-merge_request:
+merge_request: 83
 ---
 
 # Story 5.6: A guess, offered not applied
