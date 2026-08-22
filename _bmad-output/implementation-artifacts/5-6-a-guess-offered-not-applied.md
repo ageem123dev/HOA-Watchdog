@@ -290,6 +290,44 @@ never asked.
 
 ### Review Findings
 
+#### Local round, before the merge request
+
+Three reviewers, cheapest first, each once. They did not overlap, which is the argument for running
+all three.
+
+| Reviewer | Found |
+| --- | --- |
+| **Argus** (per commit, free) | The prototype-chain defect in the alias lookup - a column headed `constructor` returning the `Object` function where the signature promises `TargetField | null`. Also the unsound cast in the canonical lookup, now a `Map`. Clean on tasks 2, 3 and 4. |
+| **`ocr`** (once, whole branch) | 23 comments; **12 confirmed, 3 refuted**, the rest declined as style. The high one was real: the shared import scanner used one character class for all three quote styles, so `import "it's-module"` captured `it` - and a truncated specifier fails **open** against `sole-data-path`'s `endsWith`. Also a latent reset bug that story 5.6b would have made reachable, and a test of mine that would have gone red the day someone fixed `neutralise`. |
+| **CodeRabbit CLI** (once, last) | The five document kinds written out by hand in **three** places, one of them a file whose own comment warns about that exact defect shape. Two Argus rounds and an `ocr` round had read it without raising it. |
+
+`ocr` manifest verified rather than assumed: `terminal_state` `complete`, 14 selected / 14 completed,
+zero failed, zero waived, and the selection reconciled against `git diff --name-only`. CodeRabbit
+accepted only on `status: "review_completed"` with all 16 diff paths in `reviewedFiles`.
+
+#### Integration pass (`bmad-code-review`, full mode)
+
+Review engine: **argus (MCP)**. Scope `f78759e..HEAD`, excluding `_bmad-output/**` - the story
+document is the spec, and reviewing it as a diff reviews the prose against itself. One call over the
+whole 14-file, 2223-line diff.
+
+> Argus: clean - complexity `moderate` - confidence `1` - context 16/16 files - 1 agy call,
+> 160,184 tokens. `audit_chain_ok` true, `reflection_converged` true.
+
+Target verified before reading the judgement: the verdict names `suggest.ts`, `heading-match.ts`,
+`prefill.ts`, `column-pairing.tsx` and `module-specifiers.ts`, all genuinely in the diff.
+
+**No findings from the engine.** One gap found by looking for what per-task reviews structurally
+cannot see - an interaction between tasks:
+
+- **Story 5.3's duplicate-heading report had never been exercised alongside a suggestion.** A file
+  with two `Amount` columns is *told* to "map whichever you mean" while the guess has already picked
+  one. That is coherent only if the screen says both things at once; if it said only the first, the
+  treasurer would go looking for a decision already made for them. Two tests added: the suggestion
+  takes the first duplicate and 5.3's report survives beside it, and the treasurer can still take the
+  other one. Both pass, and "first in file order" is separately mutation-proven in `suggest.test.ts`.
+
+
 ### Completion Notes List
 
 #### Task 1 - matching a heading the way a person would

@@ -139,6 +139,60 @@ describe('the guess arrives already made', () => {
   })
 })
 
+describe('a suggestion alongside story 5.3’s heading problems', () => {
+  /**
+   * **The interaction no per-task test could see.** Story 5.3 reports duplicate
+   * headings rather than refusing the file; story 5.6 suggests a column for each
+   * target. Put together, a file with two `Amount` columns gets *told* to "map
+   * whichever you mean" while one of them has already been picked for it.
+   *
+   * That is coherent only if the screen says both things at once — the problem
+   * and which column the guess took. If it said only the first, the treasurer
+   * would go looking for a decision already made on their behalf.
+   */
+  const DUPLICATED = headingsOf('Txn Date', 'Descr', 'Amount', 'Amount')
+  const problems = [
+    { reason: 'duplicate-heading' as const, heading: 'amount', positions: [3, 4] },
+  ]
+
+  it('suggests the first of the duplicates and still reports the problem', () => {
+    render(
+      <ColumnPairing
+        kind="deposit"
+        headings={DUPLICATED}
+        problems={problems}
+        suggester={deterministicSuggester}
+      />,
+    )
+
+    // First in file order, matching what `suggestColumns` guarantees.
+    expect(nameOf(/^Amount — required — reads Column 3 .*— suggested/)).toBeTruthy()
+    // And 5.3's report is still on screen rather than suppressed by the guess.
+    expect(screen.getByTestId('heading-problems').textContent).toContain('Column 3')
+    expect(screen.getByTestId('heading-problems').textContent).toContain('Column 4')
+  })
+
+  it('lets the treasurer take the other duplicate instead', () => {
+    render(
+      <ColumnPairing
+        kind="deposit"
+        headings={DUPLICATED}
+        problems={problems}
+        suggester={deterministicSuggester}
+      />,
+    )
+
+    // The whole point of reporting the problem: the treasurer resolves it, and
+    // the guess must not stand in the way of the resolution.
+    fireEvent.click(nameOf(/^Unpair Amount/))
+    fireEvent.click(nameOf(/^Column 4/))
+    fireEvent.click(nameOf(/^Amount — required/))
+
+    expect(nameOf(/^Amount — required — reads Column 4/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Amount — .* — suggested/ })).toBeNull()
+  })
+})
+
 describe('the treasurer overrides it', () => {
   it('stops calling a pairing suggested once it has been changed', () => {
     /**
