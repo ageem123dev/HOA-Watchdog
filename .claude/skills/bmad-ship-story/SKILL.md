@@ -77,7 +77,7 @@ CodeRabbit CLI found, and Argus has separately caught defects neither raised. A 
 from each, and the merge request is a fourth look at the fixes.
 
 **The order is the point.** Argus is free, so it goes first and as often as there are commits. `ocr`
-is cheap but slow and heavy — 754k tokens for nine files — so it runs **once**, on the branch as a
+is slow and heavy — 2.24M tokens and ~5 minutes for fifteen files, measured 2026-08-22 — so it runs **once**, on the branch as a
 whole. The CodeRabbit CLI is the scarcest thing in this pipeline (4–5 reviews per hour, *per account
 across every repository*, and **a rate-limited request still spends an attempt**), so it goes last,
 **once**, looking at code the other two have already cleaned. Spending it on defects `ocr` or Argus
