@@ -198,22 +198,32 @@ upstream mid-round.
 
 **The CLI ignores `.coderabbit.yaml` `path_filters`**, so it reviews more than the merge request will.
 
-**What `ocr` is, measured rather than assumed — and every figure below is `qwen/qwen3.7-plus`.**
-The model changed to `deepseek/deepseek-v4-pro-0813` on 2026-08-22 precisely because these numbers
-were not good enough, so **treat them as the case against the old model, not as a description of the
-current one.** Nothing here has been re-measured yet.
+**What `ocr` is, measured head-to-head on 2026-08-22.** Both models were run over story 5.4's
+`658fb22..709d439` — the exact range CodeRabbit's MR round 1 reviewed, where **8 confirmed real
+defects** were live — with the same background file and flags, and scored against a ground-truth list
+written *before* either run.
 
-On story 5.3, against the exact pre-fix commit the CLI reviewed, Qwen found **none of the two
-findings it could have seen** — including a content type left uncanonicalised, which would have made
-every browser-labelled CSV report as a format the wizard cannot read. It found two others: one fair
-point about a short-circuit assertion, and one runtime type-check suggestion on a boundary TypeScript
-already guarantees. On story 5.4 it raised 35 comments of which **5 were confirmed**, and its one
-`critical` was refuted by mutation; the CodeRabbit CLI then found six real defects on the same code,
-including one Qwen had not.
+| | `qwen/qwen3.7-plus` | `deepseek/deepseek-v4-pro-0813` |
+| --- | --- | --- |
+| **of the 8 known defects** | **2** | **0** |
+| comments raised | 40 (2 high, 7 medium, 31 low) | 2 (both low) |
+| of which real defects | 2 | 0 |
+| coverage | `partial`, 14/15 | `complete`, 15/15 |
+| elapsed / tokens | 4m55s / 2.24M | 9m21s / 0.82M |
 
-**So `ocr` stays an *addition* here and not a replacement, until someone re-measures it.** The
-cheapest honest measurement is the one already set up: run it over a story whose findings are known
-from the other two reviewers and count confirmations against them.
+**The switch to deepseek did not do what it was for.** It found fewer real defects than the model it
+replaced, on the same code, with better coverage and twice the wall-clock. It is cheaper and far
+quieter, but quiet is only worth having if the signal survives, and it did not.
+
+Both of qwen's `high` ratings were inflated, and one of its comments was simply wrong
+(`afterEach(cleanup)` is *not* redundant here — this project does not set `globals: true`). Across
+the whole story `ocr` contributed **one** observation no other reviewer made: that `'cycle' as
+TargetField` is an unnecessary cast. Argus separately caught two defects neither model found on any
+run, and the CodeRabbit CLI found all eight.
+
+**So `ocr` remains an addition and not a replacement — and whether it is worth its slot at all is now
+an open question for Matt**, on either model. It is a 5–9 minute step whose every finding still needs
+verification. Do not quietly drop it; raise it.
 
 ### 4c — The AC audit, before the MR
 
@@ -347,7 +357,7 @@ If the user wants to keep building without merging, branch off the previous *sto
 | `{project}` | `ageem123/hoa-treasurer-assistant` |
 | `{project_encoded}` | `ageem123%2Fhoa-treasurer-assistant` |
 | `{glab_path}` | `/c/Users/magee/AppData/Local/Programs/glab` |
-| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`deepseek/deepseek-v4-pro-0813`** (switched 2026-08-22 from `qwen/qwen3.7-plus`, which was not an improvement on Argus); config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `reasoning.enabled: false` and nothing else** — the Qwen-only `enable_thinking` was dropped with the model. Keep reasoning off until someone measures it on: Qwen's thinking mode rejected `tool_choice` and *silently dropped files while exiting 0*, and step 6 exists because of it. **Measured on the switch, 2026-08-22: DeepSeek is ~3.6x slower than Qwen on the same 15-file scope (7m38s against 2m07s) and at the default `--concurrency 8` it timed out on 3 of 16 files, retried none of them, and exited 0** — `terminal_state` was `partial`, `coverage.failed` had 3 entries, and `summary.files_reviewed` still said 16. Step 6's manifest check is what catches this; `--concurrency` and `--timeout` (minutes, default 10) are the knobs, untested so far |
+| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`deepseek/deepseek-v4-pro-0813`** (switched 2026-08-22 from `qwen/qwen3.7-plus`, which was not an improvement on Argus); config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `reasoning.enabled: false` and nothing else** — the Qwen-only `enable_thinking` was dropped with the model. Keep reasoning off until someone measures it on: Qwen's thinking mode rejected `tool_choice` and *silently dropped files while exiting 0*, and step 6 exists because of it. **Run it at `--concurrency 4`, not the default 8.** Measured 2026-08-22: at the default, deepseek timed out on 3 of 16 files in the `context` phase, retried none, and exited 0 — `terminal_state` `partial`, `coverage.failed` holding 3, and `summary.files_reviewed` still claiming 16. At `--concurrency 4` the same scope came back 15/15 `complete`. **A partial is not model-specific**: qwen also went `partial` (14/15) at concurrency 4, so this is `ocr`/OpenRouter flakiness under load and step 6's manifest check is the only thing that catches it. `--timeout` is in minutes, default 10 |
 | `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part). CLI **0.7.3** at `~/.local/bin/coderabbit`; in this version `--dir` filters which changes are reviewed rather than setting the working directory, so `cd` first |
 | `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
 | `{auto_pause}` | 25 |
@@ -378,7 +388,7 @@ These hold in any repository and travel with the skill unchanged.
 
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.
 - **Two looks per story, by different reviewers.** 4b sees the story whole before anyone else has; Section 8 sees the fixes. Neither is the whole review — on story 5.1b the MR round raised ten findings against code Argus had already passed twice, including a scoping guard satisfiable by SQL inside a comment.
-- **The reviewers are not interchangeable, and the order is about cost.** Argus is free and has caught the expensive defects, so it runs per commit. `ocr` is cheap but heavy, so it runs once. The CodeRabbit CLI is the most rationed and the most productive, so it runs last on code the other two have cleaned — spending it on what they already found wastes it. Measured on stories 5.3 and 5.4, `ocr` found neither of the findings the CLI found on the same commit and confirmed 5 of 35: read 4b's closing note before treating its silence as a clean bill — **and note those figures are the old `qwen` model, not the `deepseek` one now configured.**
+- **The reviewers are not interchangeable, and the order is about cost.** Argus is free and has caught the expensive defects, so it runs per commit. `ocr` is cheap but heavy, so it runs once. The CodeRabbit CLI is the most rationed and the most productive, so it runs last on code the other two have cleaned — spending it on what they already found wastes it. Measured head-to-head on story 5.4's `658fb22..709d439`, against 8 known-real defects: **qwen found 2, deepseek 0**, and the CodeRabbit CLI found all eight. Read 4b's closing note before treating `ocr`'s silence as a clean bill — on this evidence its silence means very little either way.
 - **A reviewer's output is a second opinion to verify, never ground truth.** CodeRabbit's was once ingested unverified. In one round it correctly caught that `requestTimeout` does not bound socket idleness and wrongly asserted the repo runs markdownlint; in another it named the wrong migration. Confirm each finding against the real file before acting on it or feeding it to `argus_ingest`, which turns a false positive into a lesson.
 - **Any scripted edit is read back afterwards.** Not "be careful with heredocs" — that rule existed and was broken anyway. An anchored replacement whose assertion fails is a change that did not happen: one was reported as fixed on a review thread and the reviewer's next round caught it. Verify the **replacement**, not just the presence of new text: a grep for the new string passes when that string already existed elsewhere, or when the old text is still sitting at the target. Check the old text is gone and the match count is what you expected.
 - **Shell gotchas:** backticks inside double-quoted bash strings are command-substituted (write bodies to files); `glab api --field "body=$(cat f)"` **fails if the body starts with `@`** — glab reads a leading `@` as a filename and errors with "The filename, directory name, or volume label syntax is incorrect", or silently posts nothing; use `glab mr note create` for any body that could start with one; PowerShell here-strings don't work in the Bash tool; `git show origin/branch:path` is mangled by Windows path conversion (use `git cat-file -p <blob>`); run one test file with `npm test -- <substring>`, never `npx vitest run` (fails here, and `npx` fetches unpinned packages); never `npx prettier` — no config, and its defaults fight the house style.
