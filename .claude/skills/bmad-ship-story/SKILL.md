@@ -77,7 +77,7 @@ CodeRabbit CLI found, and Argus has separately caught defects neither raised. A 
 from each, and the merge request is a fourth look at the fixes.
 
 **The order is the point.** Argus is free, so it goes first and as often as there are commits. `ocr`
-is cheap but slow and heavy — 754k tokens for nine files — so it runs **once**, on the branch as a
+is slow and heavy — 2.24M tokens and ~5 minutes for fifteen files, measured 2026-08-22 — so it runs **once**, on the branch as a
 whole. The CodeRabbit CLI is the scarcest thing in this pipeline (4–5 reviews per hour, *per account
 across every repository*, and **a rate-limited request still spends an attempt**), so it goes last,
 **once**, looking at code the other two have already cleaned. Spending it on defects `ocr` or Argus
@@ -125,8 +125,14 @@ upstream mid-round.
    ocr review --from main --to HEAD \
      --exclude '_bmad-output/**' \
      --background-file .argus/ocr-background.md \
+     --concurrency 4 \
      --format json --audience agent > .argus/ocr.json 2> .argus/ocr.err
    ```
+
+   **`--concurrency 4` is not optional either**, and it belongs in the command rather than only in
+   the binding because the command is what gets run. At the default 8, a story-scale run dropped 3 of
+   16 files with no retries and exit 0. Raised by CodeRabbit, which noticed the prose demanded a flag
+   the copy-paste command did not carry.
 
    `--exclude '_bmad-output/**'` is not optional: `rule.json`'s `include` re-enables markdown, so
    without it the story document is reviewed *as a diff* — the prose against itself. It selected 11
@@ -138,10 +144,42 @@ upstream mid-round.
    Accept only when **all** hold: `.argus/ocr.json` is non-empty and parses; `manifest.terminal_state`
    is `complete`; `coverage.failed` and `.waived` are empty; `coverage.completed` covers
    `coverage.selected`; and `selected` covers every diff path `--exclude` did not remove.
-   `summary.files_reviewed` is **not** evidence — it has reported 59 against 17.
+   `summary.files_reviewed` is **not** evidence — it has reported 59 against 17, and on the DeepSeek
+   switch it reported 16 against 13 completed.
+
+   **`partial` is the state to expect, not a freak.** The first story-scale run on
+   `deepseek-v4-pro` came back `terminal_state: partial` with 3 of 16 files timed out in the
+   `context` phase, **no retries attempted**, and exit 0. Note also that the failure count lives in
+   `retry_report.failed_requests`, *not* `manifest.failed_requests` — reading the latter gives
+   `None` on a run that failed three requests.
+
+   **What to do with a `partial`, precisely, because three places used to disagree.**
+   `scripts/ocr-to-argus.mjs` refuses any report with `retry_report.failed_requests > 0` — but that
+   is the **only** check it makes, so the checklist above is a **mandatory manual gate**, not a
+   formality the adapter will catch for you. A run that is `partial` for any other reason — waived
+   items, `completed` short of `selected`, a terminal state that is not `complete` — passes the
+   adapter untouched. An earlier version of this paragraph claimed a partial "cannot be ingested at
+   all", which was simply wrong. Raised by CodeRabbit on MR !81.
+
+   There is also no way to merge two reports into one, because the adapter takes a single file. So:
+
+   1. **Re-run the same scope**, at `--concurrency 4` if it was not already. A partial run is a run
+      that did not finish, and finishing it is not "a second round" — see item 7, which forbids
+      something else entirely.
+   2. If it comes back `complete`, use that report and discard the partial.
+   3. If it is still `partial`, **do not pass it to `ocr-to-argus`**. Say in the story's Review
+      Findings which paths went unreviewed, by name, and carry on. A named gap is a fact the next
+      person can act on; a silently-ingested partial teaches Argus from a review that never read the
+      code. Raised by CodeRabbit on MR !81.
 7. **Verify each finding against the real file, fix test-first, run the gate, commit.** Then
-   `argus_review` on that commit. **Do not run a second `ocr` round** — it re-reads the whole branch
-   to re-examine a handful of lines.
+   `argus_review` on that commit — **on the commit itself, not merely on its diff**, because
+   `argus_ingest` joins `ocr`'s findings to an Argus run by commit SHA and Argus records a run
+   against whatever HEAD was at the time. On story 5.5 both runs landed on the commit *before* the
+   one `ocr` read, so the review could not be scored at all.
+
+   **Do not run a second `ocr` round after fixing** — it re-reads the whole branch to re-examine a
+   handful of lines. This forbids re-reviewing *fixed code*; it does not forbid retrying a run that
+   failed, which is item 6's business.
 
 #### The CodeRabbit CLI — once, last, on the cleaned code
 
@@ -190,12 +228,46 @@ upstream mid-round.
 
 **The CLI ignores `.coderabbit.yaml` `path_filters`**, so it reviews more than the merge request will.
 
-**What `ocr` is, measured rather than assumed.** On story 5.3, against the exact pre-fix commit the
-CLI reviewed, it found **none of the two findings it could have seen** — including a content type
-left uncanonicalised, which would have made every browser-labelled CSV report as a format the wizard
-cannot read. It found two others: one fair point about a short-circuit assertion, and one runtime
-type-check suggestion on a boundary TypeScript already guarantees. One story is a small sample, not a
-verdict — but it is why `ocr` is an *addition* here and not a replacement for anything.
+**What `ocr` is, measured head-to-head on 2026-08-22.** Both models were run over story 5.4's
+`658fb22..709d439` — the exact range CodeRabbit's MR round 1 reviewed, where **8 confirmed real
+defects** were live — with the same background file and flags, and scored against a ground-truth list
+written *before* either run.
+
+| | `qwen/qwen3.7-plus` *(kept)* | `deepseek/deepseek-v4-pro-0813` *(reverted)* |
+| --- | --- | --- |
+| **of the 8 known defects** | **2** | **0** |
+| comments raised | 40 (2 high, 7 medium, 31 low) | 2 (both low) |
+| of which real defects | 2 | 0 |
+| coverage | `partial`, 14/15 | `complete`, 15/15 |
+| elapsed / tokens | 4m55s / 2.24M | 9m21s / 0.82M |
+
+**The two runs did not have equal coverage, and that has to be said before the numbers are used.**
+Qwen completed 14 of 15 selected paths; deepseek completed 15 of 15. So the **elapsed times and token
+costs are not comparable at all** — qwen's 4m55s and 2.24M bought one file less work — and the defect
+counts are a floor rather than a measurement.
+
+Which way that cuts is worth stating plainly, because it is not symmetric: **qwen found more with
+less coverage.** The file it dropped was `draft.test.ts`, where two of the eight known defects live,
+and it still found one of them. Its 2 is therefore a lower bound and deepseek's 0 is not. Re-running
+qwen to completion would tighten the figure; it would not change the direction, which is why the
+revert did not wait for it. Raised by CodeRabbit on MR !81.
+
+**With that said: the switch to deepseek did not do what it was for, and it was reverted on
+2026-08-22.** It found fewer real defects than the model it replaced, on the same code, with twice
+the wall-clock — and it **cost more money**, despite using a third of the tokens, because per-token
+pricing runs the other way. (An earlier version of this note called it "cheaper" on the token count
+alone. Tokens are not cost, and Matt corrected it.) It is far quieter, but quiet is only worth having
+if the signal survives, and it did not.
+
+Both of qwen's `high` ratings were inflated, and one of its comments was simply wrong
+(`afterEach(cleanup)` is *not* redundant here — this project does not set `globals: true`). Across
+the whole story `ocr` contributed **one** observation no other reviewer made: that `'cycle' as
+TargetField` is an unnecessary cast. Argus separately caught two defects neither model found on any
+run, and the CodeRabbit CLI found all eight.
+
+**So `ocr` remains an addition and not a replacement — and whether it is worth its slot at all is now
+an open question for Matt**, on either model. It is a 5–9 minute step whose every finding still needs
+verification. Do not quietly drop it; raise it.
 
 ### 4c — The AC audit, before the MR
 
@@ -329,7 +401,7 @@ If the user wants to keep building without merging, branch off the previous *sto
 | `{project}` | `ageem123/hoa-treasurer-assistant` |
 | `{project_encoded}` | `ageem123%2Fhoa-treasurer-assistant` |
 | `{glab_path}` | `/c/Users/magee/AppData/Local/Programs/glab` |
-| `{ocr}` | `ocr` **v1.9.8** on PATH, configured for OpenRouter with `qwen/qwen3.7-plus`; config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff |
+| `{ocr}` | `ocr` **v1.9.9** on PATH, configured for OpenRouter with **`qwen/qwen3.7-plus`**. Briefly switched to `deepseek/deepseek-v4-pro-0813` on 2026-08-22 and **reverted the same day**: measured head-to-head it found 0 of 8 known defects against qwen's 2, took twice the wall-clock, and cost more money despite a third of the tokens; config and `rule.json` in `~/.opencodereview/`. Runs natively on Windows — no WSL. `--background-file` **aborts above 8000 characters** and warns above 2000. `rule.json`'s `include` re-enables markdown, so `--exclude '_bmad-output/**'` is required or the story document is reviewed as a diff. **`extra_body` carries `enable_thinking: false` *and* `reasoning.enabled: false`, and both are load-bearing.** Qwen's thinking mode rejects `tool_choice` and *silently drops files while exiting 0* — step 6 exists because of it. `enable_thinking` is Qwen/DashScope-only, so it comes off if the model ever changes again and `reasoning.enabled` does not. **Run it at `--concurrency 4`, not the default 8.** Measured 2026-08-22: at the default, deepseek timed out on 3 of 16 files in the `context` phase, retried none, and exited 0 — `terminal_state` `partial`, `coverage.failed` holding 3, and `summary.files_reviewed` still claiming 16. At `--concurrency 4` the same scope came back 15/15 `complete`. **A partial is not model-specific**: qwen also went `partial` (14/15) at concurrency 4, so this is `ocr`/OpenRouter flakiness under load and step 6's manifest check is the only thing that catches it. `--timeout` is in minutes, default 10 |
 | `{repo_path_wsl}` | `/mnt/c/Users/magee/repos/HOA-Treasurer-Assistant` (the CodeRabbit CLI is Linux/macOS only, so it runs in WSL against the Windows checkout; `/mnt/c` is the slow part). CLI **0.7.3** at `~/.local/bin/coderabbit`; in this version `--dir` filters which changes are reviewed rather than setting the working directory, so `cd` first |
 | `{reviewer_account}` | `service_account_group_138854092_3007818568fc4619843ba9be06214ec5` — **complete, never abbreviated**: it is matched against the note author, so a truncated value matches nothing, a real review reads as "no review", and 8c waits forever. It was an illustration in prose before it was a binding. |
 | `{auto_pause}` | 25 |
@@ -360,7 +432,7 @@ These hold in any repository and travel with the skill unchanged.
 
 - **Status flow:** `backlog → ready-for-dev → in-progress → review → done`. `baseline_commit` defines the review diff range.
 - **Two looks per story, by different reviewers.** 4b sees the story whole before anyone else has; Section 8 sees the fixes. Neither is the whole review — on story 5.1b the MR round raised ten findings against code Argus had already passed twice, including a scoping guard satisfiable by SQL inside a comment.
-- **The reviewers are not interchangeable, and the order is about cost.** Argus is free and has caught the expensive defects, so it runs per commit. `ocr` is cheap but heavy, so it runs once. The CodeRabbit CLI is the most rationed and the most productive, so it runs last on code the other two have cleaned — spending it on what they already found wastes it. Measured on story 5.3, `ocr` found neither of the findings the CLI found on the same commit: read 4b's closing note before treating its silence as a clean bill.
+- **The reviewers are not interchangeable, and the order is about cost.** Argus is free and has caught the expensive defects, so it runs per commit. `ocr` is cheap but heavy, so it runs once. The CodeRabbit CLI is the most rationed and the most productive, so it runs last on code the other two have cleaned — spending it on what they already found wastes it. Measured head-to-head on story 5.4's `658fb22..709d439`, against 8 known-real defects: **qwen found 2, deepseek 0**, and the CodeRabbit CLI found all eight. **Unequal coverage — qwen 14/15 paths, deepseek 15/15 — so those are floors, not measurements, and the timings are not comparable at all;** qwen found more while reading less. Read 4b's closing note before treating `ocr`'s silence as a clean bill — on this evidence its silence means very little either way.
 - **A reviewer's output is a second opinion to verify, never ground truth.** CodeRabbit's was once ingested unverified. In one round it correctly caught that `requestTimeout` does not bound socket idleness and wrongly asserted the repo runs markdownlint; in another it named the wrong migration. Confirm each finding against the real file before acting on it or feeding it to `argus_ingest`, which turns a false positive into a lesson.
 - **Any scripted edit is read back afterwards.** Not "be careful with heredocs" — that rule existed and was broken anyway. An anchored replacement whose assertion fails is a change that did not happen: one was reported as fixed on a review thread and the reviewer's next round caught it. Verify the **replacement**, not just the presence of new text: a grep for the new string passes when that string already existed elsewhere, or when the old text is still sitting at the target. Check the old text is gone and the match count is what you expected.
 - **Shell gotchas:** backticks inside double-quoted bash strings are command-substituted (write bodies to files); `glab api --field "body=$(cat f)"` **fails if the body starts with `@`** — glab reads a leading `@` as a filename and errors with "The filename, directory name, or volume label syntax is incorrect", or silently posts nothing; use `glab mr note create` for any body that could start with one; PowerShell here-strings don't work in the Bash tool; `git show origin/branch:path` is mangled by Windows path conversion (use `git cat-file -p <blob>`); run one test file with `npm test -- <substring>`, never `npx vitest run` (fails here, and `npx` fetches unpinned packages); never `npx prettier` — no config, and its defaults fight the house style.
