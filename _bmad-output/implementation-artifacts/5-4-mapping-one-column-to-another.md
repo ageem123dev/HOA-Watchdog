@@ -87,7 +87,7 @@ and the one that disagrees silently will be the keyboard one, because nobody dem
 
 - [x] **Task 1 — The targets a kind actually has.** Derived from the importer's own constants, per
       document kind, with required and optional distinguished. (AC1)
-- [ ] **Task 2 — A draft mapping, keyed by position.** Assign, unassign, and a report of what is
+- [x] **Task 2 — A draft mapping, keyed by position.** Assign, unassign, and a report of what is
       still missing. One source per target; a source claimed twice refused with both named. Takes no
       store. (AC2, AC3, AC4, AC9)
 - [ ] **Task 3 — The sample-reading surface story 5.3 deferred.** The server action that calls
@@ -247,6 +247,36 @@ value the validator then rejects."* That is this failure mode exactly, one seam 
 | 1f | An unrecognised kind answered with a default list rather than refused, so a typo produces a plausible-looking wizard | PROPAGATE — throws a named error; the surface never constructs one, so this is a contract for callers rather than a screen state |
 | 1g | A target appearing in both lists, shown twice on screen and counted twice in "what remains" | GUARD — the two lists are asserted disjoint for every kind |
 
+#### Task 2 - the draft mapping: `assign`, `unassign`, `completeness`
+
+**If it ran correctly, how would I know?** Each returns a new draft, or a named refusal. The
+observable signals are the pairing list and what `completeness` says remains - and the cross-check
+is that a *complete* draft's targets, laid out as a header row, is one `readRows` accepts.
+
+**How am I going to test it?** Pure functions over a value; the seam is that there is none. That is
+AC9's assertion too: the module is called with a kind and a column count and nothing else, and if it
+ever needs a repository the test that calls it with nothing goes red - which is what will make
+story 5.7's addition visible in a diff rather than absorbed into it.
+
+**Could this happen elsewhere?** The in-place-mutation mode (2e) is the one with siblings: any React
+state built from this must be replaced rather than edited, or the screen renders the old value. That
+is why every operation here returns a new draft instead of `void`.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | Keyed by heading text, so two `amount` columns are one target and a blank heading is unmappable - which throws away the whole of story 5.3 | GUARD - the source side is a position and there is no text parameter; two identically-named columns are paired to different targets and stay distinct |
+| 2b | A column already paired to another target silently moved, changing a pairing at the top of the list while the treasurer works at the bottom | GUARD - refused, naming the target that already holds it |
+| 2c | A position the file does not have accepted - `0`, negative, past the last column, or fractional - producing a mapping that reads a column that is not there | GUARD - refused; boundaries `0, 1, columns, columns+1` and a non-integer |
+| 2d | A target this kind does not have accepted, so an invoice can be mapped to `unit` and the retired `type` is reachable after Task 1 refused to offer it | GUARD - refused, checked against `targetsForKind` rather than a second list |
+| 2e | The draft mutated in place, so React renders the old value and nothing can be undone | GUARD - a new draft returned and the original asserted unchanged |
+| 2f | Re-pairing a target appends rather than replaces, so one target holds two columns | GUARD - one pairing per target, asserted after a re-pair |
+| 2g | Unassigning a target that holds nothing throws, so a double key-press breaks the screen | GUARD - a no-op returning an equal draft |
+| 2h | Unassign takes a position rather than a target and removes the wrong pairing | GUARD - it takes a target, and a fixture with two pairings proves which one went |
+| 2i | Unassign frees the target but leaves the column considered claimed, so it can never be paired again | GUARD - reverse-it: assign, unassign, assign the same column elsewhere |
+| 2j | Only the first unfilled required target reported, so a treasurer fixes one and is shown the next - the exact inversion story 5.3 made against `readRows` | GUARD - all at once |
+| 2k | Optional targets counted as missing, so a mapping can never be completed | GUARD - only required targets are reported |
+| 2l | A draft assembled by hand carrying an out-of-range position and reported complete | OUT-OF-SCOPE - unconstructable through this module's API, which is where 2c guards. Nothing else constructs a draft; if anything ever does, `completeness` is where the check belongs |
+
 ### Completion Notes List
 
 #### Task 1 - the targets a kind actually has
@@ -280,14 +310,52 @@ test 1f demanded it, not the other way about.
 
 ### Review Findings
 
+#### Task 2 - the draft mapping
+
+**Refused and reported are different things, and the split is deliberate.** An incomplete draft is a
+valid draft - `completeness` answers what remains, all of it at once, and refuses nothing. What *is*
+refused is a pairing that cannot exist: a column the file does not have, a target this kind does not
+have, or a column another target already holds. Those are not states a mapping passes through on the
+way to being finished.
+
+**A claimed column is refused, never moved.** Silently re-pointing it would change a pairing the
+treasurer made earlier, at the top of a list they are no longer looking at, with nothing to say it
+happened. Re-pairing a *target* does replace, and frees whatever it held - otherwise that column is
+claimed by nobody and pairable by nobody.
+
+**Seven production mutations, seven caught**: re-pairing appends instead of replacing (2 red), a
+claimed column silently moved (1), position 0 accepted (1), only the first missing target reported
+(2), optional targets counted as missing (8), the not-a-target check dropped (3), and `unassign`
+doing nothing (3).
+
+**The fixture pass found a real defect, and it is the one this story predicted.** The first version
+declared `const COLLIDING_COLUMNS = 5` and described the layout in a comment - *two `amount` columns,
+one blank*. Changing that 5 to 10 left **all 29 tests green**. Every boundary case was derived from
+the constant (`COLLIDING_COLUMNS + 1`), so it moved with it, and no test in the file had ever seen a
+heading: the tests named for duplicate and blank columns were pairing bare positions, and the
+collision existed only in prose.
+
+That is exactly the shape the story flagged before implementation - *a check written in a hurry
+asserts the nearest observable thing rather than the property* - and no production mutation could
+have surfaced it, because the production code was right.
+
+Fixed by making the fixture a real rectangle read through `readHeadings`, with the column count
+derived from it, plus a `the fixture is the file it claims to be` block asserting the collision and
+the blank are actually there. Three fixture mutations now caught: a sixth column added, the collision
+removed, and the blank column given a name.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
 - `core/mapping/targets.test.ts` *(new)* - 38 cases, four of them cross-checks against `readRows`
+- `core/mapping/draft.ts` *(new)* - the draft mapping: `assign`, `unassign`, `completeness`
+- `core/mapping/draft.test.ts` *(new)* - 32 cases, including a cross-check that a complete mapping
+  lays out a header row `readRows` accepts
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 2: a draft mapping keyed by position; the fixture pass found the collision fixture was prose, not data |
 | 2026-08-21 | Task 1: the targets a kind has, derived from the importer and cross-checked against `readRows` |
 | 2026-08-21 | Created from epic 5's story spine, with the position-not-text keying and the keyboard-as-mechanism shape recorded before implementation |
