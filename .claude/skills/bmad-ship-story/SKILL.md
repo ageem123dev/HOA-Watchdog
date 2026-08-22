@@ -71,8 +71,12 @@ Then commit (trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthro
 
 ### 4b — The local review, before the MR exists
 
-**Two reviewers here, and CodeRabbit is not one of them.** Argus first, then `ocr`. CodeRabbit's
-allowance is the scarce thing in this pipeline — measured at 4–5 reviews per hour, *per account,
+**Exactly one `ocr` round per story, and CodeRabbit is not part of this step at all.** Argus runs as
+often as there are commits to review — it is free. `ocr` runs **once**, on the branch as a whole,
+after Argus has had its passes: 754k tokens a run is not something to spend per commit, and the
+second look at the fixes is CodeRabbit on the merge request.
+
+Why CodeRabbit is absent here: its allowance is the scarce thing in this pipeline — measured at 4–5 reviews per hour, *per account,
 across every repository*, and **a rate-limited request still spends an attempt**, so asking twice
 lowers the ceiling you are waiting on. Spending it here leaves none for the merge request, where it
 has found something real on every story it has reviewed. So it reviews the MR (Section 8) and
@@ -167,7 +171,8 @@ upstream mid-round.
    severities (critical + major) most `ocr` findings are filtered out and nothing is learned. Widen
    `severities` when a confirmed `medium` is worth teaching.
 9. Fix test-first, run the same gate, commit. Then `argus_review` on that fix commit, so the MR
-   round has a SHA to join on.
+   round has a SHA to join on. **Do not run a second `ocr` round** — it would re-read the whole
+   branch to re-examine a handful of lines, and Section 8 is the look at the fixes.
 10. **Push before Section 5** (*Merge request to main*). `glab mr create` builds the MR from the
    *remote* branch, so fix commits left unpushed are silently absent from it.
 
