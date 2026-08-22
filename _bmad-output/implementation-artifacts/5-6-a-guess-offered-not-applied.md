@@ -194,7 +194,38 @@ fork it.
 **Cross-check:** for every `TargetField`, matching its own canonical name returns that target. A
 table that drifted from the importer's vocabulary fails it without anyone maintaining a second list.
 
-### Completion Notes List
+#### Task 2 - `suggestColumns`: an answer for every required target
+
+**If it ran correctly, how would I know?** Given a sample's headings and a kind, every required
+target comes back either naming a column or explicitly saying it has none - and every pairing it
+names is one `assign` would accept.
+
+**How am I going to test it?** Pure over headings and a kind, so no seam is needed for the
+deterministic half. AC4 and AC6 are the ones that cannot be behavioural: **no behavioural test can
+prove the absence of a credential the code never reaches for.** Those are structural, reading the
+module's own imports - the shape story 5.3 used for the shared folding and 5.5 used for "nothing is
+stored".
+
+**Could this happen elsewhere?** The bound is the same class as story 5.5's `PREVIEW_MAX_BYTES`,
+which was got wrong twice: the row bound did not bound the payload, then the byte bound counted
+UTF-16 code units. Caps here are counted in the unit they claim, and asserted at and past the edge.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | A required target with **no** match omitted from the result rather than present saying "none" - indistinguishable from a target nobody asked about, and AC2 exists for exactly that distinction | GUARD - every required target present, asserted per kind |
+| 2b | Two columns matching one target (`Amt` and `Amount` in one file) - two pairings, and `assign` refuses the second silently from the treasurer's side | GUARD - at most one column per target, first in file order |
+| 2c | One column claimed by two targets, same shape, same silent refusal | GUARD - a column is claimed once |
+| 2d | A suggestion for a target the kind does not publish - `cycle` on a deposit - which `assign` refuses and the treasurer sees as nothing happening | GUARD - filtered through `targetsForKind`, asserted on a deposit |
+| 2e | Unbounded input crossing the boundary: ten thousand headings, or one heading a megabyte long. The cap must exist **now**, while nothing crosses it, or 5.6b has to add one to a live path | GUARD - `MAX_SUGGESTIBLE_HEADINGS` and `MAX_HEADING_LENGTH`, both named, both asserted at and past the edge |
+| 2f | A heading logged or retained - they are the association's own column names out of its own file | GUARD - structural: nothing in the module writes anywhere |
+| 2g | A store, repository, client or credential reachable from this module. **This is the AD-8 control**: what the runtime is *able* to do, not what it is asked to do | GUARD - structural import scan |
+| 2h | A position that is not 1-based, or one the file does not have, so `assign` refuses it | GUARD - positions taken from `Heading.position`, asserted against the fixture |
+| 2i | Duplicate positions in the input (`readHeadings` reports duplicates rather than refusing them), producing two suggestions on one column | GUARD - claimed-set is keyed by position |
+
+**Cross-check:** every suggestion the suggester produces is fed to `assign` and must be accepted. A
+suggester that could name a pairing the draft refuses would be a second set of rules - and that is
+the defect this project has already found twice (`targetsForKind` versus a hand-written list, and
+`TARGET_LABELS` defined twice).
 
 ### Review Findings
 

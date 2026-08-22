@@ -24,7 +24,7 @@ import { readdir } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { neutralise } from '../ports/declared-members'
+import { specifiersIn } from '../ports/module-specifiers'
 
 const REPO_ROOT = process.cwd()
 
@@ -96,8 +96,13 @@ const IS_TEST = /\.test\.(?:[cm]?[jt]sx?)$/
  * one, plus backticks. A template literal is idiomatic at exactly one call site,
  * `import(...)`, and a quote-only class let it through. Raised by Argus on the
  * integration pass.
+ *
+ * **That widening is why the scanner is now shared.** It was made here and never
+ * reached the two copies in `core/ports/`, which kept matching quotes only — so
+ * for a while the repo's other structural guards were blind to exactly the form
+ * Argus had just found. `module-specifiers.ts` is the one copy now, with the
+ * comment blanking that belongs beside it.
  */
-const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"`]([^'"`]+)['"`]/g
 
 /**
  * Comments are removed first, and string *contents* are kept.
@@ -131,13 +136,9 @@ export function reachesTheExecutor(source: string): readonly string[] {
 }
 
 function specifiersReaching(source: string, modules: readonly string[]): readonly string[] {
-  const { commentsBlanked } = neutralise(source)
   const found: string[] = []
 
-  for (const match of commentsBlanked.matchAll(MODULE_SPECIFIER)) {
-    const specifier = match[1]
-    if (specifier === undefined) continue
-
+  for (const specifier of specifiersIn(source)) {
     // An interpolated specifier is **indeterminate, and indeterminate is
     // reported**. `import(`@/catalog/${entry}`)` captures the literal `${entry}`,
     // so a tail comparison silently answers "not the catalog" for something that
