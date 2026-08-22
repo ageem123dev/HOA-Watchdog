@@ -95,10 +95,10 @@ implementation detail, and AC2 exists to pin it.
       headed with target names out, mapped columns only, in target order. (AC1, AC2)
 - [x] **Task 2 — Carry a bounded slice of rows from the sample read.** The bound is a named constant,
       and the total row count travels with it so AC5 can be honest. (AC7)
-- [ ] **Task 3 — The preview result.** Compose apply + `readRows` into **either** the records a
+- [x] **Task 3 — The preview result.** Compose apply + `readRows` into **either** the records a
       clean sample produces **or** the refusal and every offending row — never both, because
       `readRows` never returns both. Plus the counts. Takes no store. (AC1, AC3, AC4, AC5, AC8)
-- [ ] **Task 4 — Refuse to preview an incomplete mapping.** Via `completeness`. (AC6)
+- [x] **Task 4 — Refuse to preview an incomplete mapping.** Via `completeness`. (AC6)
 - [ ] **Task 5 — The screen.** Rows and what they become, refusals in place, the counts and the
       bound. (AC3, AC4, AC5, AC7)
 
@@ -228,6 +228,29 @@ count that is clamped and the count that is not must not be computed by the same
 | 2e | A header-only file, or an empty one: no data rows to slice | GUARD - header preserved, total `0`, no crash |
 | 2f | The slice taken from the end, or the rows re-ordered, so "the first 20 rows" is not what the treasurer sees | GUARD - first and last slice rows asserted by their own values |
 
+#### Task 3 - `previewMapping`: records or refusal, never both
+
+**If it ran correctly, how would I know?** For a sample the importer would accept, the records it
+would produce. For one it would refuse, the refusal and every offending row. **Never both** - that is
+the story's central correction, and the shape of the return type is what enforces it.
+
+**How am I going to test it?** Pure composition over `applyMapping` and `readRows`; no seam. The
+cross-check is a case only `readRows`' own rules produce - `duplicate-unit` on a roll naming the same
+unit and year twice - because a hand-rolled second parser would never invent that reason.
+
+**Could this happen elsewhere?** The counts are the same "read N of M" pair Task 2 built, one layer
+out; the risk is recomputing them here from the wrong thing.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | Records and problems returned together, so the screen shows "17 imported, 3 refused" for a file the importer would refuse **entirely** - the treasurer concludes the bulk of the data is fine and proceeds | GUARD - the return type makes it unrepresentable, and a test asserts a refused sample carries no records |
+| 3b | `read` taken from the records length, so a refusal reports "0 of 143 rows read" when 20 were read and found wanting | GUARD - asserted on a refusing sample |
+| 3c | `total` taken from the slice rather than the file, undoing Task 2's whole point one layer up | GUARD - over-limit fixture, `total` asserted greater than `read` |
+| 3d | Only the first problem reported, so a treasurer fixes one row and is shown the next - the inversion story 5.3 made against `readRows` | GUARD - a fixture with two bad rows, both asserted |
+| 3e | A second parser written here rather than delegating, which would drift from the importer and make this screen lie | GUARD - cross-check on `duplicate-unit`, a reason only `readRows` produces |
+| 3f | The kind read from somewhere other than the draft, so a roll is previewed as a deposit and its roll rows vanish | GUARD - a roll draft asserted to produce roll rows |
+| 3g | A store, repository or `ingest` reached from here | GUARD - structural: the module's imports are read |
+
 ### Completion Notes List
 
 #### Task 1 - applying a mapping
@@ -285,6 +308,31 @@ raised, nothing changed, and `grep -c` returned 0 for both new symbols. Re-appli
 aware anchors and verified by reading back that the old `return` line is gone. That is the fourth
 instance this session and the third from CRLF.
 
+#### Tasks 3 and 4 - records or refusal, and the incomplete guard
+
+**The union is the guard.** `Preview` has three branches and no branch carries both records and
+problems, so the shape a screen could misread does not exist. That is the story's central correction
+made structural rather than remembered: `readRows` refuses the whole document if any row is bad, so
+"17 imported, 3 refused" was never a possible outcome to render.
+
+**`read` is the rows parsed, not the records produced.** Taken from the records it reads `0` on a
+refusal, and the treasurer is told nothing was read when twenty rows were read and found wanting.
+That mutation turns **10** red.
+
+**`completeness` is asked, not re-decided.** An incomplete draft previewed anyway hands back
+`missing-headers` from the parser instead of "you still need to map Amount" - and a second opinion on
+completeness here would be the two-lists defect one layer out.
+
+**Five production mutations, five caught**: `read` from the records (10 red), `total` from the slice
+(2), only the first problem (1), the kind hard-coded rather than read from the draft (2), and the
+incomplete guard dropped (3).
+
+**Three fixture mutations, three caught**: the bad amount made valid (2 red), `total` set equal to
+`read` (1 - the "of 143" distinction), and the duplicate-unit fixture given two different units (1).
+
+The cross-check is `duplicate-unit`: a refusal reason only `readRows`' own rules produce, so a
+preview that quietly grew a second parser could not invent it.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -293,11 +341,14 @@ instance this session and the third from CRLF.
 - `core/extraction/sample-rows.test.ts` *(new)* - 11 cases
 - `core/extraction/sample-headings.ts` - the ok result now carries `rows` and `totalDataRows`
 - `core/extraction/sample-headings.test.ts` - 3 cases for the bounded rows
+- `core/mapping/preview.ts` *(new)* - `previewMapping` and the three-branch `Preview`
+- `core/mapping/preview.test.ts` *(new)* - 14 cases, including the `duplicate-unit` cross-check
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Tasks 3 and 4: the preview composes the importer and returns records or a refusal, never both; an incomplete draft previews nothing |
 | 2026-08-22 | Task 2: a bounded slice of rows carried from the sample read, with an unclamped file total |
 | 2026-08-22 | Task 1: a mapping applied to a rectangle, mapped columns only, cross-checked through `readRows` |
 | 2026-08-22 | Created from epic 5's spine, with the rows-are-gone decision and the rename-collision trap recorded before implementation |
