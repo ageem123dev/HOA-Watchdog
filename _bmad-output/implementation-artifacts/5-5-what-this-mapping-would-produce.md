@@ -371,11 +371,16 @@ widened before the preview could render outside a test.
 
 #### The backspace defect, again, and it is in an open action item
 
-Writing the wire-up test through a shell heredoc turned `\b` into ``, which Python read as a
-**backspace byte**, and four of them landed inside a regex in `column-pairing.test.tsx`. It compiled
-and matched nothing. Then the *fix* reintroduced it one level out: a bare `` inside a JS template
-literal is also a backspace at runtime, so `new RegExp(\`^Column ${position}\`)` matched no
-button while looking perfectly correct.
+Writing the wire-up test through a shell heredoc collapsed a doubled word-boundary escape down to a
+single one, which Python then read as a **backspace byte** — four of them landed inside a regex in
+`column-pairing.test.tsx`. It compiled and matched nothing. Then the *fix* reintroduced the same
+character one level out: a single word-boundary escape inside a **JS template literal** is a
+backspace at runtime too, so the `RegExp` built from it matched no button while looking perfectly
+correct on screen.
+
+**Three levels of escaping, and each one eats a backslash**: the heredoc, then Python's string
+literal, then the template literal. Writing the character class into a template needs the escape
+doubled *in the file*, and getting it there through a heredoc needs it doubled again.
 
 This is verbatim the epic-4 action item - *"a word-boundary escape written through a shell heredoc
 became a literal backspace byte inside a regex, which then compiled fine and matched nothing"* - and
