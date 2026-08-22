@@ -98,7 +98,7 @@ and the one that disagrees silently will be the keyboard one, because nobody dem
       AC7)
 - [x] **Task 5 — Dragging, over the same operation.** A pointer accelerator that calls the same
       pairing function and nothing else. (AC6)
-- [ ] **Task 6 — Duplicates and blanks, on the screen where they matter.** (AC8)
+- [x] **Task 6 — Duplicates and blanks, on the screen where they matter.** (AC8)
 
 ## Dev Notes
 
@@ -352,6 +352,21 @@ sharing check passed against an import the module never used.
 | 5d | A drop carrying nothing, or a value that is not a position, assigns `NaN` | GUARD - refused, and the draft unchanged |
 | 5e | Dragging becomes the only way in, because the columns stop being buttons once they are draggable | GUARD - Task 4's whole suite still passes, and it is asserted here that removing the drag handlers leaves the surface operable |
 
+#### Task 6 - duplicates and blanks, on the screen where they matter
+
+**Both forms are used, and that is the point.** `HeadingProblem` carries the *normalised* heading
+(`amount`) because that is what collides; the *written* forms (`Amount` at 2, `amount` at 4) are in
+the headings. A report naming only the normalised form sends a treasurer looking for a column their
+spreadsheet does not contain, which is the distinction story 5.3 built and this is where it is spent.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 6a | The problems dropped, so a treasurer sees two identical rows and is never told which is which | GUARD - rendered, both positions named |
+| 6b | The report names only the normalised heading, sending them to look for `amount` when their file says `Amount` | GUARD - the written form of each position asserted present |
+| 6c | The blank column reported without its position, which is the only thing identifying it | GUARD - `Column 3` asserted |
+| 6d | Problems rendered as a refusal that blocks the mapping, inverting story 5.3's report-rather-than-refuse | GUARD - the surface stays fully operable with problems present, asserted by building a mapping through them |
+| 6e | The page never renders the surface, leaving an action nobody calls - the exact shape that shipped broken in story 5.2 | GUARD - the wizard's form is asserted to submit the fields the action reads |
+
 ### Completion Notes List
 
 #### Task 1 - the targets a kind actually has
@@ -520,6 +535,29 @@ tests, and reverting either turns 2 red.
 over: jsdom cannot reproduce the event suppression, so a test that dragged and asserted success would
 pass either way. The assertion is structural on purpose.
 
+#### Task 6 - duplicates and blanks, and the step that reaches the action
+
+**Both of story 5.3's forms are spent here.** The duplicate notice names *Column 2 (Amount)* and
+*Column 4 (amount)* - the written forms, from the headings - while the problem itself is keyed on the
+folded `amount`, which is what actually collides. A notice naming only the folded form sends a
+treasurer looking for a column their spreadsheet has not got, and that is the distinction 5.3 built.
+
+**Reported, never a refusal**, and asserted as such: a mapping is built *through* the duplicated and
+blank columns while the notice is on screen. The inverse is asserted too - a clean file renders no
+panel at all - so those tests are not passing against something permanently visible.
+
+**The page and the form are Task 3's other half, and they landed here.** Task 3 built the action and
+its state; the checkbox went on before the step that calls it existed, which is the wrong order and
+worth recording rather than tidying away. `mapping-wizard.test.tsx` is the test story 5.2 needed and
+did not have: it asserts the control *names*, because a name is what reaches `formData.get(...)`, and
+`/onboarding/mapping` now appears in `next build`'s route list.
+
+**Nine production mutations, nine caught**: the problems panel dropped (3 red), the duplicate
+reported with the folded heading (1), the blank reported without its position (1), the sample control
+renamed (2), a kind pre-selected (1), the pairing surface never rendered (1), and the page's session
+guard dropped (2). Two fixture mutations caught: the collision removed, and the two written forms
+made identical - the second is the one that would have made *"as written"* prove nothing.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
@@ -533,11 +571,17 @@ pass either way. The assertion is structural on purpose.
 - `app/onboarding/mapping/column-pairing.tsx` *(new)* - the pairing surface
 - `app/onboarding/mapping/column-pairing.test.tsx` *(new)* - 17 cases
 - `app/onboarding/mapping/drag.test.tsx` *(new)* - 9 cases, including the two paths compared
+- `app/onboarding/mapping/mapping-wizard.tsx` *(new)* - the step: declare the kind, read a sample
+- `app/onboarding/mapping/mapping-wizard.test.tsx` *(new)* - 8 cases, about the wire
+- `app/onboarding/mapping/heading-problems.test.tsx` *(new)* - 6 cases
+- `app/onboarding/mapping/page.tsx` *(new)* - the protected route
+- `app/onboarding/mapping/page.test.tsx` *(new)* - 3 cases, the second lock
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 6: duplicates and blanks reported where the mapping is built, and the page that reaches the action |
 | 2026-08-21 | Task 5: dragging as an accelerator; Argus found the drop target was `disabled`, so the drag path was dead in every real browser |
 | 2026-08-21 | Task 4: the pairing surface, native buttons as the mechanism, announced and stated in text |
 | 2026-08-21 | Task 3: the sample-reading server action, guarded and storing nothing |

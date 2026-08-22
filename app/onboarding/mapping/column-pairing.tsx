@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react'
 
 import type { DocumentKind } from '@/core/extraction/record'
-import type { Heading } from '@/core/extraction/headings'
+import type { Heading, HeadingProblem } from '@/core/extraction/headings'
 import { assign, completeness, emptyDraft, unassign, type DraftMapping } from '@/core/mapping/draft'
 import { targetsForKind, type TargetField } from '@/core/mapping/targets'
 
@@ -34,6 +34,11 @@ import { targetsForKind, type TargetField } from '@/core/mapping/targets'
 export interface ColumnPairingProps {
   readonly kind: DocumentKind
   readonly headings: readonly Heading[]
+  /**
+   * What story 5.3 found wrong with the header row — reported here, never a
+   * refusal. A file with two `amount` columns is still a file worth mapping.
+   */
+  readonly problems?: readonly HeadingProblem[]
 }
 
 /** What a treasurer calls each of the importer's columns. */
@@ -61,7 +66,7 @@ export const columnLabel = (heading: Heading): string =>
     ? `Column ${heading.position} — no heading`
     : `Column ${heading.position} — ${heading.text}`
 
-export function ColumnPairing({ kind, headings }: ColumnPairingProps) {
+export function ColumnPairing({ kind, headings, problems = [] }: ColumnPairingProps) {
   const [draft, setDraft] = useState<DraftMapping>(() => emptyDraft(kind, headings.length))
   const [selected, setSelected] = useState<number | null>(null)
   const [announcement, setAnnouncement] = useState('')
@@ -167,6 +172,39 @@ export function ColumnPairing({ kind, headings }: ColumnPairingProps) {
         <p role="alert" style={styles.refusal}>
           {refusal}
         </p>
+      )}
+
+      {problems.length > 0 && (
+        <section data-testid="heading-problems" aria-labelledby="heading-problems-title">
+          <h2 id="heading-problems-title" style={styles.paneHeading}>
+            Worth knowing about your headings
+          </h2>
+          <ul style={styles.list}>
+            {problems.map((problem) => (
+              <li key={`${problem.reason}-${problem.positions.join('-')}`} style={styles.item}>
+                {problem.reason === 'duplicate-heading'
+                  ? /*
+                      **Named as the treasurer wrote them, not as the importer
+                      folds them.** The problem carries the normalised heading
+                      because that is what collides; the written forms are in the
+                      headings. Reporting only `amount` sends someone looking for
+                      a column their spreadsheet has not got.
+                    */
+                    `${problem.positions
+                      .map((position) => {
+                        const heading = headingAt(position)
+                        return heading === undefined
+                          ? `Column ${position}`
+                          : `Column ${position} (${heading.text.trim()})`
+                      })
+                      .join(' and ')} are the same column name to the importer. Map whichever you mean.`
+                  : `${problem.positions
+                      .map((position) => `Column ${position}`)
+                      .join(' and ')} has no heading. You can still map it by its position.`}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <div style={styles.columns}>
