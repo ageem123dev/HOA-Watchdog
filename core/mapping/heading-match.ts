@@ -1,4 +1,5 @@
 import { normaliseHeading } from '../extraction/headings'
+import { DOCUMENT_KINDS } from '../extraction/record'
 import { targetsForKind, type TargetField } from './targets'
 
 /**
@@ -122,11 +123,16 @@ export function targetForHeading(heading: string): TargetField | null {
  * defect `record.ts` names one seam over.
  */
 const CANONICAL: ReadonlyMap<string, TargetField> = new Map(
-  (['deposit', 'assessment_roll', 'invoice', 'statement', 'other'] as const)
-    .flatMap((kind) => {
-      const { required, optional } = targetsForKind(kind)
-      return [...required, ...optional]
-    })
+  // **`DOCUMENT_KINDS`, not the five kinds written out again.** A literal list
+  // here is the same defect one seam over from the one this file's own comment
+  // warns about: add a sixth kind and its targets are silently not canonical, so
+  // `targetForHeading` answers `null` for a column that kind genuinely
+  // publishes. Raised by CodeRabbit — and by nothing before it, across two Argus
+  // rounds and an `ocr` round over this file.
+  DOCUMENT_KINDS.flatMap((kind) => {
+    const { required, optional } = targetsForKind(kind)
+    return [...required, ...optional]
+  })
     // A `Map` rather than a `Set` of folded keys, so the *target* comes back
     // rather than the folded string. With a `Set` this needed `key as
     // TargetField`, which silently becomes a lie the day a target is added

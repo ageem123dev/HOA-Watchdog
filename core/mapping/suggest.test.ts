@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import type { DocumentKind } from '../extraction/record'
+import { DOCUMENT_KINDS, type DocumentKind } from '../extraction/record'
 import type { Heading } from '../extraction/headings'
 import { neutralise } from '../ports/declared-members'
 import { specifiersIn } from '../ports/module-specifiers'
@@ -53,7 +53,10 @@ const positionFor = (suggestions: readonly Suggestion[], target: TargetField): n
   return found?.position ?? null
 }
 
-const KINDS = ['deposit', 'assessment_roll', 'invoice', 'statement', 'other'] as const
+// Derived, never listed again: a literal here would keep every 'for each kind'
+// assertion below silently blind to a kind added to the domain. Raised by
+// CodeRabbit, which found the same literal in three places.
+const KINDS = DOCUMENT_KINDS
 
 describe('a suggestion for each column the importer needs', () => {
   it('matches the headings a real export uses', () => {

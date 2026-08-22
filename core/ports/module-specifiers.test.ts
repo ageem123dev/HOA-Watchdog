@@ -169,9 +169,11 @@ describe('the scanner read over itself', () => {
     const found = specifiersIn(source)
 
     // Never under-reports: the real import survives whatever the comment does.
-    expect(found).toContain('./near')
     // And today it over-reports, which is the safe direction — documented here
     // rather than asserted, so a fix is an improvement and not a failure.
-    expect(found.length).toBeGreaterThanOrEqual(1)
+    //
+    // A `found.length >= 1` line stood here too, which `toContain` already
+    // implies. Raised by CodeRabbit.
+    expect(found).toContain('./near')
   })
 })

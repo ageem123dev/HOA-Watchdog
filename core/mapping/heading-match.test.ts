@@ -18,13 +18,17 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { normaliseHeading } from '../extraction/headings'
+import { DOCUMENT_KINDS } from '../extraction/record'
 import { HEADING_ALIASES, matchKey, targetForHeading } from './heading-match'
 import { targetsForKind, type TargetField } from './targets'
 
 /** Every target the importer publishes, across all kinds. */
 const ALL_TARGETS: readonly TargetField[] = [
   ...new Set(
-    (['deposit', 'assessment_roll', 'invoice', 'statement', 'other'] as const).flatMap((kind) => {
+    // `DOCUMENT_KINDS`, not the five kinds written out again. A literal here is
+    // a test that keeps passing while the code it checks stops covering a new
+    // kind — the cross-check below would never look at it. Raised by CodeRabbit.
+    DOCUMENT_KINDS.flatMap((kind) => {
       const { required, optional } = targetsForKind(kind)
       return [...required, ...optional]
     }),
