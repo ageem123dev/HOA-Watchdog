@@ -128,7 +128,7 @@ development_status:
   5-1d-the-sweep-parses-sql: done  # split from 5.1c: the scoping guard reads SQL rather than resembling it
   5-2-a-document-declares-its-kind: done  # kind moves from the row to the upload; contract change
   5-3-the-headers-we-were-given: done  # duplicates and blanks reported, not guessed
-  5-4-mapping-one-column-to-another: ready-for-dev  # drag AND keyboard, neither the poor relation
+  5-4-mapping-one-column-to-another: in-progress  # drag AND keyboard, neither the poor relation
   5-5-what-this-mapping-would-produce: backlog  # the preview, before anything is stored
   5-6-a-guess-offered-not-applied: backlog  # FR-10; deterministic first, model on the residue
   5-7-the-mapping-is-remembered: backlog  # and a mapping change is a deliberate act

@@ -85,7 +85,7 @@ and the one that disagrees silently will be the keyboard one, because nobody dem
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — The targets a kind actually has.** Derived from the importer's own constants, per
+- [x] **Task 1 — The targets a kind actually has.** Derived from the importer's own constants, per
       document kind, with required and optional distinguished. (AC1)
 - [ ] **Task 2 — A draft mapping, keyed by position.** Assign, unassign, and a report of what is
       still missing. One source per target; a source claimed twice refused with both named. Takes no
@@ -219,14 +219,75 @@ appears to prove and does not. Observe the resulting state instead.
 
 ### Test Design
 
+#### Task 1 — `targetsForKind`: the targets a kind actually has
+
+**If it ran correctly, how would I know?** For a given kind it returns two lists, and those lists are
+exactly the columns `readRows` would demand and accept for that kind. The observable signal is not
+the lists themselves — it is that a file built from the required list is one `readRows` accepts, and
+a file missing any one of them is one it refuses.
+
+**How am I going to test it?** A pure function over two frozen constant lists; no seam needed. The
+interesting test is the **cross-check**, not the example: build a header row from the returned
+required list, hand it to `readRows` for that kind, assert it parses; drop one target, assert it
+refuses. Two implementations that disagree cannot both pass, whatever either source file says. This
+is the shape story 5.3 arrived at for the shared folding after a structural check turned out to be
+satisfiable by a decorative import.
+
+**Could this happen elsewhere?** `record.ts` already names this defect shape in its own header:
+*"One statement, two readers... Splitting that into two lists is how the parser comes to produce a
+value the validator then rejects."* That is this failure mode exactly, one seam over.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | `unit` offered for every kind, so a treasurer maps a column on an invoice and `readRows` silently ignores it — a pairing that reads as done and does nothing | GUARD — offered only for the kinds in `KINDS_WITH_UNIT_REFERENCE`, asserted per kind |
+| 1b | A roll's `unit`/`cycle`/`year` offered as *optional*, so the mapping reports complete and `readRows` then refuses the file for missing headers | GUARD — required for `assessment_roll`, and the cross-check proves the refusal |
+| 1c | `cycle`/`year` offered for kinds that never read them, so a treasurer maps two columns to nothing | GUARD — absent from both lists for every other kind |
+| 1d | The lists hand-written here, correct today and drifting the day a column is added to `tabular.ts` | GUARD — derived from the exported constants, and the cross-check fails if they diverge |
+| 1e | The retired `type` column offered as a target, which `readRows` refuses outright with `kind-is-not-a-column` — the mapping would break the whole upload | GUARD — asserted absent for every kind |
+| 1f | An unrecognised kind answered with a default list rather than refused, so a typo produces a plausible-looking wizard | PROPAGATE — throws a named error; the surface never constructs one, so this is a contract for callers rather than a screen state |
+| 1g | A target appearing in both lists, shown twice on screen and counted twice in "what remains" | GUARD — the two lists are asserted disjoint for every kind |
+
 ### Completion Notes List
+
+#### Task 1 - the targets a kind actually has
+
+**Derived from the importer's constants, and the tests do not read the source to prove it.** They
+build a header row out of what `targetsForKind` returns, hand it to `readRows`, and assert the
+answer - for every kind, three ways: the required list alone parses, dropping any one member is
+refused, and required plus optional still parses. Two implementations that disagree cannot both
+pass. Story 5.3 arrived at that shape the expensive way, after a structural check written to prove
+two modules shared a folding turned out to be satisfied by an import the module never used.
+
+**17 of the 38 passed against the empty stub**, and every one of them was a negative - *never offers
+`type`*, *offers `unit` exactly when the importer reads one* for the kinds that read none, *lists no
+target twice*. An empty list satisfies all of those. Worth recording rather than counting as
+coverage: the tests that carry this task are the four `readRows` cross-checks, and they were red.
+
+**Sensitivity - four production mutations, four caught:** roll headers dropped from `required` (2
+red), `unit` offered for every kind (3 red), the roll-only columns offered for every kind (4 red),
+and an unknown kind answered instead of thrown (1 red).
+
+**Fixture mutations - the class a code mutation cannot reach.** The refusal test asserts that
+dropping a required column makes `readRows` refuse, which would pass just as well against a fixture
+so malformed that *everything* is refused. Making `date` invalid turns **10** red, and an invalid
+`cycle` turns 2 red, so the fixture is doing no work the code should be doing. Both restored and
+re-run before moving on.
+
+**`isDocumentKind` is checked against a parameter TypeScript already types as `DocumentKind`.** That
+is deliberate, not belt-and-braces: the kind crosses a form submission before it reaches here, which
+is the same argument `readRows` makes for its own `unknown-kind` refusal. The guard exists because
+test 1f demanded it, not the other way about.
 
 ### Review Findings
 
 ### File List
 
+- `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
+- `core/mapping/targets.test.ts` *(new)* - 38 cases, four of them cross-checks against `readRows`
+
 ## Change Log
 
 | Date | Change |
 | --- | --- |
+| 2026-08-21 | Task 1: the targets a kind has, derived from the importer and cross-checked against `readRows` |
 | 2026-08-21 | Created from epic 5's story spine, with the position-not-text keying and the keyboard-as-mechanism shape recorded before implementation |
