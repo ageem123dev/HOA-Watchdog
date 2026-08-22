@@ -398,8 +398,6 @@ is deliberate, not belt-and-braces: the kind crosses a form submission before it
 is the same argument `readRows` makes for its own `unknown-kind` refusal. The guard exists because
 test 1f demanded it, not the other way about.
 
-### Review Findings
-
 #### Task 2 - the draft mapping
 
 **Refused and reported are different things, and the split is deliberate.** An incomplete draft is a
@@ -557,6 +555,31 @@ reported with the folded heading (1), the blank reported without its position (1
 renamed (2), a kind pre-selected (1), the pairing surface never rendered (1), and the page's session
 guard dropped (2). Two fixture mutations caught: the collision removed, and the two written forms
 made identical - the second is the one that would have made *"as written"* prove nothing.
+
+### Review Findings
+
+#### The AC audit (step 4c)
+
+Every criterion, the test that covers it, and the mutation that turns that test red. No criterion is
+listed on the strength of a name alone — a vacuous test satisfies *"I named one"* while staying green
+when the behaviour is deleted, which is the defect this project keeps finding.
+
+| AC | Test | Mutation that turns it red |
+| --- | --- | --- |
+| 1 — targets from the importer | `targets.test.ts` › *agrees with the importer* (3 cross-checks × 5 kinds) and *offers `unit` exactly when the importer reads one* | roll headers dropped from `required` — 2 red; `unit` offered for every kind — 3 red; roll-only columns offered to every kind — 4 red |
+| 2 — a pairing names a position, not a heading | `draft.test.ts` › *keeps two identically-named columns apart*, *maps a column whose heading is blank*; `column-pairing.test.tsx` › the same two through the surface | the surface pairing by folded heading text instead of position — **2 red**; the drag payload carrying heading text — 3 red |
+| 3 — one target per column, refused with both named | `draft.test.ts` › *refuses a column another target already holds, and names that target*; `column-pairing.test.tsx` › *shows the refusal `assign` gives…* | a claimed column silently moved — 1 red; the refusal swallowed at the surface — 1 red |
+| 4 — incomplete is a state, not an error | `draft.test.ts` › *reports every unfilled required target at once*; `column-pairing.test.tsx` › *names every missing required field* | only the first missing target reported — 2 red; optional targets counted as missing — 8 red; what remains shown as a count — 1 red |
+| 5 — built and taken apart by keyboard alone | `column-pairing.test.tsx` › *renders no clickable element that is not a button*, *takes no control out of the tab order*, *takes the whole mapping apart again* | an unpair control turned into a `<div onClick>` — 2 red; the field buttons given `tabIndex={-1}` — 1 red; `disabled` restored on the field buttons — 2 red |
+| 6 — drag is an accelerator over the same operation | `drag.test.tsx` › *builds the same mapping either way*, *refuses a claimed column the same way either way* | the drop handler setting state instead of calling `pair` — 2 red. **And the converse**: deleting the entire drag layer leaves all 16 keyboard tests passing |
+| 7 — announced, and never colour alone | `column-pairing.test.tsx` › *announces the pairing in a live region*, *announces an unpairing differently*, *pairs a column to a field and says so in the row* | nothing announced — 1 red; unpairing announced in the same words — 1 red; the paired column dropped from the row text — 3 red |
+| 8 — duplicates and blanks where the mapping is built | `heading-problems.test.tsx` › *names both positions*, *names each column as the treasurer wrote it*, *is named by its position* | the problems panel dropped — 3 red; the duplicate reported with the folded heading — 1 red; the blank reported without its position — 1 red |
+| 9 — nothing stored, nothing guessed | `actions.test.ts` › *imports no repository, no store and no ingestion*; `draft.test.ts` › *builds a whole mapping given a kind and a column count and nothing else* | a `document-repository-postgres` import added to the action — **1 red** |
+
+Two of these had no directly-proven mutation when the audit began — AC2 at the surface and AC9 — and
+both were run rather than argued. AC2's is the interesting one: pairing by *folded heading text*
+instead of position is what a careless implementation would actually do, and it turns the two
+duplicate-column tests red.
 
 ### File List
 
