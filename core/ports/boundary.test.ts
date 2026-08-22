@@ -25,6 +25,8 @@ import { dirname, join, relative, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { specifiersIn } from './module-specifiers'
+
 const REPO_ROOT = process.cwd()
 const CORE = join(REPO_ROOT, 'core')
 
@@ -44,15 +46,18 @@ const FORBIDDEN_DIRECTORIES = [
 ] as const
 
 /**
- * Every module specifier, in every form that loads a module:
+ * Every module specifier, in every form that loads a module — `from '…'`
+ * (including a list a formatter wrapped across lines), a side-effect `import '…'`
+ * with no `from` at all, a dynamic `import('…')`, and `require('…')`.
  *
- * - `from '…'`      — static import or re-export, **including one wrapped across
- *                     lines by a formatter**, since this matches only the tail
- * - `import '…'`    — side-effect import, which has no `from` at all
- * - `import('…')`   — dynamic import
- * - `require('…')`  — CommonJS
+ * **Now `specifiersIn`, shared.** The pattern this file arrived at was copied
+ * into three other guards and the copies drifted: this one and `finding.test.ts`
+ * matched only `'` and `"` while `sole-data-path.test.ts` had been widened to
+ * backticks after Argus found an `import(`…`)` slipping past. One scanner, so a
+ * hardening reaches every guard that depends on it. This one also gains comment
+ * blanking, which it never had — it would have read a commented-out import as a
+ * violation.
  */
-const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
 
 export interface BoundaryViolation {
   readonly specifier: string
@@ -67,7 +72,7 @@ export interface BoundaryViolation {
 export function forbiddenImportsIn(source: string, filePath: string): BoundaryViolation[] {
   const violations: BoundaryViolation[] = []
 
-  for (const [, specifier] of source.matchAll(MODULE_SPECIFIER)) {
+  for (const specifier of specifiersIn(source)) {
     const packageMatch = FORBIDDEN_PACKAGES.find(
       (entry) => specifier === entry.specifier || specifier.startsWith(`${entry.specifier}/`),
     )

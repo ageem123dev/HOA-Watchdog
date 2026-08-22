@@ -24,7 +24,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { AlreadyReviewedError, FindingNotFoundError } from './finding'
-import { declaredMembers, neutralise } from './declared-members'
+import { declaredMembers } from './declared-members'
+import { specifiersIn as sharedSpecifiersIn } from './module-specifiers'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(HERE, 'finding.ts'), 'utf8')
@@ -144,8 +145,6 @@ describe('epic 4 does not depend on epic 3', () => {
    * Every form that loads a module, not just `from '…'` — the six shapes
    * `boundary.test.ts` found escaping its first version.
    */
-  const MODULE_SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
-
   const REPO_ROOT = join(HERE, '..', '..')
 
   const PORT = join(REPO_ROOT, 'core', 'ports', 'finding.ts')
@@ -178,15 +177,13 @@ describe('epic 4 does not depend on epic 3', () => {
    * satisfied by that sentence: the guard written to stop a vacuous pass was
    * itself passing on a comment. Raised by CodeRabbit.
    *
-   * `neutralise` is `declared-members.ts`'s, which keeps string literals while
-   * blanking comments and has its own tests for the way a naive `//` strip eats
-   * the closing quote of `'https://example.com'`.
+   * **Now `module-specifiers.ts`'s**, shared with the three other structural
+   * guards rather than copied into each. The copies had already drifted — this
+   * one matched only `'` and `"` while `sole-data-path.test.ts` had been widened
+   * to backticks — and a guard one revision behind reports clean on exactly the
+   * import the widening was for.
    */
-  function specifiersIn(text: string): string[] {
-    const { commentsBlanked } = neutralise(text)
-
-    return [...commentsBlanked.matchAll(MODULE_SPECIFIER)].map(([, specifier]) => specifier ?? '')
-  }
+  const specifiersIn = sharedSpecifiersIn
 
   /**
    * The specifiers in `text` that reach the model path, resolved from `from`.
