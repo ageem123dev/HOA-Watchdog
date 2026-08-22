@@ -79,7 +79,12 @@ export function MappingPreview({ draft, rows, totalDataRows }: MappingPreviewPro
     )
   }
 
-  const { read, total } = preview.counts
+  const { read } = preview.counts
+  // **The file cannot hold fewer rows than were read from it.** `totalDataRows`
+  // arrives as an independent number, and a caller that passed rows without it
+  // produced "Read all 2 of 0 rows." Clamping here keeps the two counts from
+  // contradicting each other whatever the caller does. Raised by CodeRabbit.
+  const total = Math.max(preview.counts.total, read)
   /**
    * The sentence UX-DR24 exists for.
    *

@@ -12,6 +12,9 @@
  * wrong index produces.
  */
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import { readRows } from '../extraction/tabular'
@@ -218,7 +221,20 @@ describe('a roll, which has more required columns', () => {
 })
 
 describe('nothing is stored', () => {
-  it('applies a mapping given rows and a draft and nothing else', () => {
-    expect(applyMapping(SAMPLE, depositDraft())).toHaveLength(3)
+  it('imports no repository, no store and no ingestion', () => {
+    // This block asserted a row count, which the cases above already cover -
+    // so it passed whether or not `applyMapping` wrote anything, under a name
+    // saying it did not. Raised by CodeRabbit. Replaced with the import scan
+    // `preview.test.ts` uses, which can actually fail.
+    const source = readFileSync(fileURLToPath(new URL('./apply.ts', import.meta.url)), 'utf8')
+    const imported = [
+      ...source.matchAll(/(?:^|\n)\s*(?:import|export)\b[\s\S]*?from\s*['"]([^'"]+)['"]/g),
+      ...source.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map((match) => match[1] ?? '')
+
+    expect(imported.length).toBeGreaterThan(0)
+    expect(
+      imported.filter((s) => /repository|-postgres|document-store|storage\/|\/ingest$/.test(s)),
+    ).toEqual([])
   })
 })

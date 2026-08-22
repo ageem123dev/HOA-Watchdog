@@ -85,7 +85,7 @@ export function ColumnPairing({
   headings,
   problems = [],
   rows,
-  totalDataRows = 0,
+  totalDataRows,
 }: ColumnPairingProps) {
   const [draft, setDraft] = useState<DraftMapping>(() => emptyDraft(kind, headings.length))
   const [selected, setSelected] = useState<number | null>(null)
@@ -361,7 +361,13 @@ export function ColumnPairing({
       </div>
 
       {rows !== undefined && (
-        <MappingPreview draft={draft} rows={rows} totalDataRows={totalDataRows} />
+        <MappingPreview
+          draft={draft}
+          rows={rows}
+          // Defaulting to 0 let the preview say it had read more rows than the
+          // file holds. Absent, the rows in hand are the best count there is.
+          totalDataRows={totalDataRows ?? Math.max(rows.length - 1, 0)}
+        />
       )}
 
       {/*

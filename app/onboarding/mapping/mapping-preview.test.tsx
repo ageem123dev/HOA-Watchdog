@@ -100,7 +100,11 @@ describe('previewing an assessment roll', () => {
 
   const ROLL_ROWS: readonly (readonly string[])[] = [
     ['Unit', 'Owner', 'From', 'Annual', 'Cadence', 'Yr'],
-    ['12B', 'A Holder', '2026-01-01', '1200.00', 'monthly', '2026'],
+    // The tenure starts in 2025 and the assessment is for 2026, deliberately.
+    // With both at 2026, `toContain('2026')` passed even with the year column
+    // dropped entirely, because the date cell already carried it. Raised by
+    // CodeRabbit; `readRows` validates the date and the year independently.
+    ['12B', 'A Holder', '2025-01-01', '1200.00', 'monthly', '2026'],
   ]
 
   it('shows the roll-only columns, which are the ones a roll is about', () => {
@@ -155,6 +159,20 @@ describe('the counts UX-DR24 requires', () => {
     // Taken from the records, this would read 0 and tell the treasurer nothing
     // was read when two rows were read and found wanting.
     expect(panel()).toContain('2 of 143 rows')
+  })
+})
+
+describe('the counts cannot contradict each other', () => {
+  it('never claims to have read more rows than the file holds', () => {
+    // `totalDataRows` travelled as an independent number with a `0` default, so
+    // a caller that passed rows and forgot the count rendered "Read all 2 of 0
+    // rows." Raised by CodeRabbit.
+    render(<MappingPreview draft={COMPLETE()} rows={CLEAN} totalDataRows={0} />)
+
+    const said = panel()
+
+    expect(said).not.toMatch(/of 0 rows/)
+    expect(said).toContain('2 of 2 rows')
   })
 })
 

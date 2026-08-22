@@ -65,12 +65,23 @@ export function boundedSample(
   // still tell the truth: "0 of 143".
   const head = header ?? []
   const carried: (readonly string[])[] = []
-  let budget = PREVIEW_MAX_BYTES - JSON.stringify(head).length
+
+  // **The whole candidate payload, in UTF-8 bytes.** Summing rows with
+  // `JSON.stringify(row).length` was wrong twice over: `.length` counts UTF-16
+  // code units, so a cell of non-ASCII text is up to three bytes each and a
+  // 256 KB budget carried 688 KB; and summing rows individually omits the
+  // array brackets and the commas between them. Measuring the rectangle it
+  // would actually serialise is both exact and obviously so. Raised by the
+  // CodeRabbit CLI.
+  //
+  // At most `PREVIEW_ROW_LIMIT` iterations, so re-measuring each time costs
+  // nothing worth optimising away.
+  const encoder = new TextEncoder()
+  const bytesOf = (rectangle: readonly (readonly string[])[]): number =>
+    encoder.encode(JSON.stringify(rectangle)).length
 
   for (const row of dataRows.slice(0, limit)) {
-    const size = JSON.stringify(row).length
-    if (size > budget) break
-    budget -= size
+    if (bytesOf([head, ...carried, row]) > PREVIEW_MAX_BYTES) break
     carried.push(row)
   }
 

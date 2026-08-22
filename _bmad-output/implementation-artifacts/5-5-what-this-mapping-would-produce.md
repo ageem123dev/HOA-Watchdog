@@ -529,6 +529,49 @@ because a reviewer's precision is a fact about the reviewer.
 This is the pass per-task rounds structurally cannot be - and on this story it is the one that caught
 the roll preview missing `cycle` and `year`, which no single task's diff could show.
 
+#### MR !82, CodeRabbit round 1 - seven findings, seven confirmed
+
+Reviewed `387f9e7..b782dd6`, 18 files. All seven verified against the real code; all seven real. Two
+were user-facing, two were vacuous assertions of mine, one was a bound that did not bound.
+
+**The screen told the treasurer something that had stopped being true.** Both the oversized-file
+refusal and the form note still said *only the headings are read* - written when that was exactly
+what happened. Story 5.5 made the rows travel to the browser, and neither sentence was revisited. On
+a product whose whole argument is that a treasurer can trust what it tells them, that is the kind of
+untruth that matters most: small, invisible, and about their own data.
+
+**"Read all 2 of 0 rows."** `totalDataRows` travelled as an independent number with a `0` default, so
+a caller passing rows and forgetting the count rendered a sentence that contradicts itself. The
+default is gone, the caller derives a real fallback, and `MappingPreview` clamps `total` to at least
+`read` so the two cannot disagree whatever a caller does.
+
+**The byte budget was not measuring bytes.** `JSON.stringify(x).length` counts **UTF-16 code units**,
+and summing rows individually omits the array brackets and separators. A payload of non-ASCII text
+measured 256 KB and weighed **688,245 bytes** - the test says so. Now measured with `TextEncoder`
+over the complete candidate rectangle, which is both exact and obviously so. This is the *second*
+round on the same constant: the CLI found that the row bound did not bound the payload, and the MR
+round found that the byte bound did not measure bytes.
+
+**Two of my own tests proved nothing.**
+
+- `apply.test.ts` had a block named *nothing is stored* whose only assertion was a row count already
+  covered three cases earlier. It passed whether or not `applyMapping` wrote anything, under a name
+  saying it did not. Replaced with the import scan `preview.test.ts` uses - adding a repository
+  import now turns it red.
+- The roll fixture used `2026-01-01` as the tenure start **and** `2026` as the assessment year, so
+  `toContain('2026')` passed with the year column removed entirely. The date is `2025-01-01` now.
+  `readRows` validates the two independently, which is what makes the fixture separable at all.
+
+**Also:** `REFUSAL_TEXT` was `Record<string, string>`, so a new refusal reason would have fallen
+through to the raw enum on screen; typed to `TableProblem['reason']`, a new reason is a type error.
+And a `position === undefined` branch in `applyMapping` that no test could reach - a guard nobody
+asked for, which this project's own directive forbids - is gone, with target and position resolved
+into one pair rather than two lookups that could disagree.
+
+**Three mutations on the round's fixes, three caught**: back to UTF-16 units (1 red), rows summed
+individually (3 red), the count clamp removed (1 red). Plus the replaced import scan, proven by
+adding a repository import.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -554,6 +597,7 @@ the roll preview missing `cycle` and `year`, which no single task's diff could s
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | MR !82 round 1: seven findings, seven confirmed - two screens telling a treasurer something no longer true, and a byte budget not measuring bytes |
 | 2026-08-22 | Integration pass: three lows, all three refuted against the types |
 | 2026-08-22 | MR !82 opened; status done, written in this commit rather than after the merge |
 | 2026-08-22 | Local CodeRabbit round: the row bound did not bound the payload, which was this story's own stated rationale |

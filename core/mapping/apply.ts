@@ -40,27 +40,33 @@ export function applyMapping(
   // sample never had.
   if (rows.length === 0) return []
 
-  const targets = mappedTargets(draft)
+  // Target and position resolved together, once, so the pair is a single fact
+  // rather than two lookups that could disagree.
   const positionOf = new Map(draft.pairings.map((pairing) => [pairing.target, pairing.position]))
+  const pairs = mappedTargets(draft).map(
+    (target) => [target, positionOf.get(target) as number] as const,
+  )
+  const targets = pairs.map(([target]) => target)
 
   const [, ...dataRows] = rows
 
   return [
     [...targets],
     ...dataRows.map((row) =>
-      targets.map((target) => {
-        const position = positionOf.get(target)
-
+      // `positionOf` is built from the same pairings `mappedTargets` filtered
+      // on, so every target here has one. An `undefined` branch was written
+      // anyway and no test could reach it — a guard nobody asked for, which is
+      // the thing this project's own directive forbids. Raised by CodeRabbit.
+      pairs.map(([, position]) =>
         // **`?? ''`, never `undefined`.** A ragged row — exporters drop trailing
         // empties — would otherwise put `undefined` in the cell, which
         // stringifies to `"undefined"`: a non-empty value that parses as a
-        // perfectly good vendor name. The same guard covers a draft built
-        // against a wider sample than the rows it is applied to.
+        // perfectly good vendor name. The same covers a draft built against a
+        // wider sample than the rows it is applied to.
         //
-        // `position` is 1-based, because that is the number story 5.3 reports
-        // and the number a treasurer counts to.
-        return position === undefined ? '' : (row[position - 1] ?? '')
-      }),
+        // `position` is 1-based, the number story 5.3 reports.
+        row[position - 1] ?? '',
+      ),
     ),
   ]
 }

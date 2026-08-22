@@ -150,6 +150,36 @@ describe('the size bound, not just the row bound', () => {
     expect(JSON.stringify(carried).length).toBeLessThanOrEqual(PREVIEW_MAX_BYTES)
   })
 
+  it('measures UTF-8 bytes, not UTF-16 code units', () => {
+    /**
+     * `JSON.stringify(x).length` counts code units. A cell of non-ASCII text is
+     * up to three bytes per unit, so a payload measured that way can be three
+     * times the cap it claims to enforce - and the cap exists precisely to keep
+     * this off the wire. Raised by the CodeRabbit CLI.
+     */
+    const multibyte = (units: number): readonly string[] => ['日'.repeat(units), 'b', 'c']
+    const rows = [HEADER, ...Array.from({ length: 8 }, () => multibyte(PREVIEW_MAX_BYTES / 8))]
+
+    const { rows: carried } = boundedSample(rows)
+
+    expect(new TextEncoder().encode(JSON.stringify(carried)).length).toBeLessThanOrEqual(
+      PREVIEW_MAX_BYTES,
+    )
+  })
+
+  it('counts the separators and brackets the payload actually carries', () => {
+    // Summing each row on its own omits the array wrapper and the commas
+    // between rows. Small per row, and it is the difference between "at the
+    // cap" and "over it" on a full payload.
+    const rows = [HEADER, ...Array.from({ length: 40 }, () => ['x'.repeat(6000), 'b', 'c'])]
+
+    const { rows: carried } = boundedSample(rows)
+
+    expect(new TextEncoder().encode(JSON.stringify(carried)).length).toBeLessThanOrEqual(
+      PREVIEW_MAX_BYTES,
+    )
+  })
+
   it('leaves ordinary samples untouched by the size bound', () => {
     // The inverse, so the assertions above are not passing against a bound that
     // rejects everything.
