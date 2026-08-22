@@ -1,6 +1,6 @@
 ---
 Status: ready-for-dev
-baseline_commit:
+baseline_commit: aac3f5d
 merge_request:
 ---
 
@@ -244,6 +244,35 @@ and keeps AC2 cheap: falling back is returning the value it already has.
 ## Dev Agent Record
 
 ### Test Design
+
+#### Task 1 - `residueOf`: what deterministic matching could not answer
+
+**If it ran correctly, how would I know?** Given headings and a kind, it returns exactly the headings
+no target claimed and exactly the targets no heading filled. A fully-matched file yields an empty
+residue on both sides, which is the signal AC1 turns into "do not call the model at all".
+
+**How am I going to test it?** Pure, over the same fixtures story 5.6 used, and **derived from
+`suggestColumns` rather than recomputed**. That is the whole design risk: a second implementation of
+"what matched" would agree on the day it was written and drift the day the alias table changes, and
+the symptom is a model asked about a column already paired - which is a pairing `assign` then refuses
+and the treasurer sees as nothing happening.
+
+**Could this happen elsewhere?** This project has found that shape four times: `targetsForKind`
+versus a hand list, `TARGET_LABELS` twice, the import scanner in four copies, and the five document
+kinds written out three times in story 5.6. It is the defect this codebase is most prone to.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | The residue recomputed by re-running the matcher rather than read off `suggestColumns`'s answer, so the two can disagree | GUARD - derived from the suggestion list, asserted by a test that changes the alias table's effect and sees both move together |
+| 1b | A heading counted as unmatched when it *was* matched, so the model is asked about a column already paired | GUARD - a matched heading never appears in the residue, asserted per kind |
+| 1c | An **optional** target reported as unfilled, so the model is pushed to guess columns nobody needs and the residue never empties | GUARD - only required targets count as unfilled; asserted on a deposit whose optional `unit` is absent |
+| 1d | A heading that is blank, over-length, or past the count cap appearing in the residue - the caps are at the port, and a residue that ignored them would hand 5.6b exactly what 5.6 bounded | GUARD - the same caps apply, imported not restated |
+| 1e | The residue non-empty when everything required is filled, so a fully-matched file still costs a model call | GUARD - AC1's condition is "no unfilled required target", asserted with a fake that fails if called |
+| 1f | An unknown kind swallowed into an empty residue rather than throwing, mirroring the bug `targetsForKind` refuses to have | PROPAGATE - `UnknownDocumentKindError`, asserted by type |
+
+**Cross-check:** for every kind, `residueOf` plus the suggestions it came from account for every
+required target exactly once - either filled or in the residue, never both, never neither.
+
 
 ### Review Findings
 
