@@ -390,6 +390,30 @@ Found both times by reading the failure rather than by a guard.
 A scan of every `.ts`/`.tsx` file this branch touches now shows one hit, and it is the explanatory
 comment written about the defect.
 
+#### The branch-level Argus round - one confirmed, one refuted, and both mechanisms wrong
+
+**Confirmed: a roll preview showed everything except the two columns that make it a roll.** `cycle`
+and `year` live on the roll row rather than the extraction record, and the table read only records -
+so a treasurer previewing an assessment roll could check the unit, the holder, the date and the
+amount, and *not* the cadence they bill on or the year it is for. Those two are what the document is
+about. Fixed by reading `records` and `rollRows` side by side; both halves are mutation-proven
+(dropping the fields turns 1 red, blanking the values turns 1).
+
+**Argus's stated mechanism was wrong**, twice in a row on the same file, and worth recording:
+
+- it said `records` is *empty* for a roll and the table therefore renders no rows. `readRows`
+  populates **both** for a roll, one of each per data row. The `still shows the shared columns` test
+  passes, which is the evidence, and it is now pinned in `preview.test.ts` rather than re-derived.
+- on the fix diff it raised a `critical`: `preview.rollRows` is `undefined` for a deposit, so the
+  component crashes on render. It is not. `rollRows` is initialised as an array in `readRows` and
+  returned unconditionally, the `Preview` type declares it non-optional, and the deposit tests render
+  that very table and pass - a crash would have failed them. **Refuted.**
+
+The consequence was real the first time even though the reasoning was not, which is why
+`argus-review-routing.md` §5 requires verifying against the file before acting. Acting on the second
+would have added an optional chain that can never be exercised; reading the first as stated would
+have aimed the fix at the wrong half of the code.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -414,6 +438,7 @@ comment written about the defect.
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Branch Argus round: a roll preview was missing the two columns that make it a roll; a follow-up `critical` refuted |
 | 2026-08-22 | Task 5: the preview on screen, with the counts UX-DR24 requires, wired through state, action and wizard |
 | 2026-08-22 | Tasks 3 and 4: the preview composes the importer and returns records or a refusal, never both; an incomplete draft previews nothing |
 | 2026-08-22 | Task 2: a bounded slice of rows carried from the sample read, with an unclamped file total |
