@@ -657,6 +657,38 @@ under `_bmad/custom/review-gate.md`. The acceptance dimension is covered by the 
 a proven mutation per criterion, which is stronger evidence than a reading of the diff against the
 prose.
 
+#### The gate on the head the MR points at (step 7)
+
+Run on `709d439` itself, not inherited from an earlier run. **There is no CI here, so this run is the
+whole of the evidence.**
+
+- `npm run lint` — 0 errors (1 pre-existing warning in `tsconfig-coverage.test.ts`)
+- `npm run build` — compiled; `/onboarding/mapping` appears in the route list
+- `npx tsc --noEmit` — 8 errors, exactly the recorded baseline
+- `npm test` — **3493 passing, 713 skipped**
+
+**One failure on the first run, and it is reported rather than re-run past.**
+`app/findings/register/export-control.test.tsx › does not revoke the file before the browser has
+taken it` failed with *"expected revokeObjectURL to not be called at all, but actually been called 1
+times"* — verbatim the flake already recorded as an open epic-4 action item. Evidence that it is not
+this story's: the file was last touched by story 4.7 (`069e56e`, an ancestor of this branch), this
+branch changes **nothing** under `app/findings`, the file passed **5 runs out of 5** in isolation, and
+the second full suite run on the same commit was clean. It asserts an absence within a real-time
+window, which is the action item's point.
+
+#### The merge-request review did not arrive
+
+CodeRabbit picked the MR up automatically at 04:11 UTC and its summary comment still reads
+*"processing new changes"* an hour and a half later — no walkthrough, and none of the four shapes a
+review announces itself in. A manual `@coderabbitai review` was answered with *"this command is
+applicable only when automatic reviews are paused"*, which is the binding's documented behaviour and
+confirms the automatic run owns this head.
+
+**So 8c's precondition is not met and this story is deliberately NOT marked `done`.** "Zero
+unresolved threads" and "no review yet" are both true before any review has run, and a story left
+reading `done` on an unreviewed head is exactly the false-clean the convergence rule exists to
+refuse. No push was made to force a review: a push spends nothing and resets nothing.
+
 ### File List
 
 - `core/mapping/targets.ts` *(new)* - `targetsForKind`, derived from the importer's own constants
