@@ -227,6 +227,35 @@ suggester that could name a pairing the draft refuses would be a second set of r
 the defect this project has already found twice (`targetsForKind` versus a hand-written list, and
 `TARGET_LABELS` defined twice).
 
+#### Task 3 - `draftFromSuggestion`: pre-filled, not decided
+
+**If it ran correctly, how would I know?** A draft comes back with the suggested pairings already
+made, and every one of them can be changed by the means story 5.4 built - `assign` to move it,
+`unassign` to clear it. The suggestion has no privileged status afterwards, and nothing is stored.
+
+**How am I going to test it?** Pure. `emptyDraft` in, a draft out. AC8 is the interesting one and it
+is behavioural: take a pre-filled draft, override every pairing, and assert the result is exactly the
+draft the treasurer would have built by hand. Any bookkeeping that made a suggested pairing *special*
+would show up as a difference.
+
+**Could this happen elsewhere?** Yes, and it is the whole reason this goes through `assign`. Story
+5.4's rules - refuse a column already paired, replace rather than duplicate on re-pairing, reject a
+target the kind does not publish - exist once. A pre-fill that wrote `pairings` directly would be a
+second way to build a draft, and the two would agree until the day 5.4's rules changed.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | Pairings written straight into `DraftMapping` rather than through `assign`, so 5.4's rules apply to hand-made pairings and not to suggested ones | GUARD - built by folding `assign`, asserted structurally *and* by a rule 5.4 owns |
+| 3b | A suggestion `assign` refuses aborting the whole pre-fill, so one odd column costs the treasurer every other suggestion | GUARD - a refused pairing is skipped, the rest are kept |
+| 3c | A refusal swallowed so quietly that a suggester which proposes nothing usable looks identical to one that was never asked | GUARD - the count of applied pairings is observable |
+| 3d | `position: null` - "no suggestion" - passed to `assign` as a column number, which is `no-such-column` at best and column 0 at worst | GUARD - nulls filtered, asserted |
+| 3e | The draft's `columns` taken from the suggestion rather than from the sample, so a file whose columns nobody recognised gets a zero-column draft nothing can be paired into | GUARD - `columns` comes from the headings |
+| 3f | A suggested pairing that cannot be overridden, or that reappears after being cleared - the difference between pre-filling and deciding | GUARD - AC8: override every pairing, compare against the hand-built draft |
+| 3g | Anything written anywhere. **5.7 is where a mapping is remembered**, and a pre-fill that persisted would make 5.7's idempotency question moot by answering it wrongly first | GUARD - structural, and the function has no seam to write through |
+
+**Cross-check:** a draft pre-filled from a suggestion, then fully overridden, must equal the draft
+built by hand from the same choices. That is AC8 stated as an equality rather than as a feeling.
+
 ### Review Findings
 
 ### Completion Notes List
