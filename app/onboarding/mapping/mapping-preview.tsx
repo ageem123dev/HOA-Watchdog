@@ -35,17 +35,34 @@ const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
 }
 
 /** `ExtractionRecord`'s field for each target — the vocabulary differs on purpose. */
-const FIELD_OF: Readonly<Record<TargetField, 'issuedOn' | 'vendorName' | 'totalAmount' | 'documentNumber' | 'unitReference' | null>> =
-  {
-    date: 'issuedOn',
-    description: 'vendorName',
-    amount: 'totalAmount',
-    reference: 'documentNumber',
-    unit: 'unitReference',
-    // Roll-only, and carried on the roll row rather than the extraction record.
-    cycle: null,
-    year: null,
-  }
+const RECORD_FIELD: Readonly<
+  Partial<
+    Record<
+      TargetField,
+      'issuedOn' | 'vendorName' | 'totalAmount' | 'documentNumber' | 'unitReference'
+    >
+  >
+> = {
+  date: 'issuedOn',
+  description: 'vendorName',
+  amount: 'totalAmount',
+  reference: 'documentNumber',
+  unit: 'unitReference',
+}
+
+/**
+ * `cycle` and `year` live on the **roll row**, not the extraction record.
+ *
+ * They were left out of the table at first, and Argus caught it on the branch
+ * review: they are precisely the two columns that make a roll a roll, so a
+ * treasurer previewing one could see everything except the cadence they bill on
+ * and the year it is for. `readRows` populates `records` *and* `rollRows` for a
+ * roll — one of each per data row, in step — so the two are read side by side.
+ */
+const ROLL_FIELD: Readonly<Partial<Record<TargetField, 'billingCycle' | 'assessmentYear'>>> = {
+  cycle: 'billingCycle',
+  year: 'assessmentYear',
+}
 
 export interface MappingPreviewProps {
   readonly draft: DraftMapping
@@ -108,7 +125,9 @@ export function MappingPreview({ draft, rows, totalDataRows }: MappingPreviewPro
     )
   }
 
-  const targets = mappedTargets(draft).filter((target) => FIELD_OF[target] !== null)
+  const targets = mappedTargets(draft).filter(
+    (target) => RECORD_FIELD[target] !== undefined || ROLL_FIELD[target] !== undefined,
+  )
 
   return (
     <section aria-labelledby="preview-title" style={styles.panel}>
@@ -130,18 +149,30 @@ export function MappingPreview({ draft, rows, totalDataRows }: MappingPreviewPro
           </tr>
         </thead>
         <tbody>
-          {preview.records.map((record, index) => (
-            <tr key={index}>
-              {targets.map((target) => {
-                const field = FIELD_OF[target]
-                return (
-                  <td key={target} style={styles.cell}>
-                    {field === null ? '' : (record[field] ?? '')}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
+          {preview.records.map((record, index) => {
+            // Same index, because `readRows` pushes one of each per data row and
+            // returns `ok: false` the moment a row is defective.
+            const rollRow = preview.rollRows[index]
+
+            return (
+              <tr key={index}>
+                {targets.map((target) => {
+                  const recordField = RECORD_FIELD[target]
+                  const rollField = ROLL_FIELD[target]
+
+                  return (
+                    <td key={target} style={styles.cell}>
+                      {recordField !== undefined
+                        ? (record[recordField] ?? '')
+                        : rollField === undefined || rollRow === undefined
+                          ? ''
+                          : String(rollRow[rollField])}
+                    </td>
+                  )
+                })}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </section>

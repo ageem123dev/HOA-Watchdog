@@ -160,6 +160,10 @@ describe('the cross-check: it is the importer doing the parsing', () => {
     // The kind comes from the draft. Previewed as a deposit, the roll rows
     // vanish and the treasurer is shown an import that creates no units.
     expect(preview.status === 'would-import' && preview.rollRows).toHaveLength(1)
+    // And the records too: `readRows` populates BOTH for a roll. Argus read
+    // this the other way round when it flagged the preview table, so it is
+    // pinned here rather than left to be re-derived.
+    expect(preview.status === 'would-import' && preview.records).toHaveLength(1)
   })
 
   it('ignores the unmapped columns rather than colliding with them', () => {

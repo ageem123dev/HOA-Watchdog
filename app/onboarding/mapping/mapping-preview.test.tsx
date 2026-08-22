@@ -78,6 +78,43 @@ describe('a mapping the importer would accept', () => {
   })
 })
 
+describe('previewing an assessment roll', () => {
+  const ROLL = () =>
+    draftOf('assessment_roll', 6, [
+      ['unit', 1],
+      ['description', 2],
+      ['date', 3],
+      ['amount', 4],
+      ['cycle', 5],
+      ['year', 6],
+    ])
+
+  const ROLL_ROWS: readonly (readonly string[])[] = [
+    ['Unit', 'Owner', 'From', 'Annual', 'Cadence', 'Yr'],
+    ['12B', 'A Holder', '2026-01-01', '1200.00', 'monthly', '2026'],
+  ]
+
+  it('shows the roll-only columns, which are the ones a roll is about', () => {
+    render(<MappingPreview draft={ROLL()} rows={ROLL_ROWS} totalDataRows={1} />)
+
+    // Without these a treasurer previewing a roll cannot check the two columns
+    // that make it a roll — the cadence they bill on and the year it is for.
+    // Raised by Argus on the branch review.
+    expect(text()).toContain('Billing cycle')
+    expect(text()).toContain('Year')
+    expect(text()).toContain('monthly')
+    expect(text()).toContain('2026')
+  })
+
+  it('still shows the shared columns', () => {
+    render(<MappingPreview draft={ROLL()} rows={ROLL_ROWS} totalDataRows={1} />)
+
+    expect(text()).toContain('12B')
+    expect(text()).toContain('A Holder')
+    expect(text()).toContain('1200.00')
+  })
+})
+
 describe('the counts UX-DR24 requires', () => {
   it('says how many rows were read and how many the file holds', () => {
     render(<MappingPreview draft={COMPLETE()} rows={CLEAN} totalDataRows={143} />)
