@@ -6,6 +6,8 @@ import type { DocumentKind } from '@/core/extraction/record'
 import type { Heading, HeadingProblem } from '@/core/extraction/headings'
 import { assign, completeness, emptyDraft, unassign, type DraftMapping } from '@/core/mapping/draft'
 import { targetsForKind, type TargetField } from '@/core/mapping/targets'
+import { TARGET_LABELS } from './target-labels'
+import { MappingPreview } from './mapping-preview'
 
 /**
  * Pairing a file's columns with the importer's.
@@ -39,17 +41,13 @@ export interface ColumnPairingProps {
    * refusal. A file with two `amount` columns is still a file worth mapping.
    */
   readonly problems?: readonly HeadingProblem[]
-}
-
-/** What a treasurer calls each of the importer's columns. */
-const TARGET_LABELS: Readonly<Record<TargetField, string>> = {
-  date: 'Date',
-  description: 'Description',
-  amount: 'Amount',
-  reference: 'Reference',
-  unit: 'Unit',
-  cycle: 'Billing cycle',
-  year: 'Year',
+  /**
+   * The sample's rows, bounded - story 5.5. Absent until a sample has been
+   * read, and the preview simply does not render without them.
+   */
+  readonly rows?: readonly (readonly string[])[]
+  /** Data rows the file holds, for the count UX-DR24 requires. */
+  readonly totalDataRows?: number
 }
 
 /**
@@ -82,7 +80,13 @@ export const columnLabel = (heading: Heading): string =>
     ? `Column ${heading.position} — no heading`
     : `Column ${heading.position} — ${heading.text}`
 
-export function ColumnPairing({ kind, headings, problems = [] }: ColumnPairingProps) {
+export function ColumnPairing({
+  kind,
+  headings,
+  problems = [],
+  rows,
+  totalDataRows,
+}: ColumnPairingProps) {
   const [draft, setDraft] = useState<DraftMapping>(() => emptyDraft(kind, headings.length))
   const [selected, setSelected] = useState<number | null>(null)
   const [announcement, setAnnouncement] = useState('')
@@ -355,6 +359,16 @@ export function ColumnPairing({ kind, headings, problems = [] }: ColumnPairingPr
           </ul>
         </section>
       </div>
+
+      {rows !== undefined && (
+        <MappingPreview
+          draft={draft}
+          rows={rows}
+          // Defaulting to 0 let the preview say it had read more rows than the
+          // file holds. Absent, the rows in hand are the best count there is.
+          totalDataRows={totalDataRows ?? Math.max(rows.length - 1, 0)}
+        />
+      )}
 
       {/*
         Every one of them, named. A count would repeat the defect `completeness`

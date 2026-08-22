@@ -21,6 +21,14 @@ export type SampleState =
       readonly kind: DocumentKind
       readonly headings: readonly Heading[]
       readonly problems: readonly HeadingProblem[]
+      /**
+       * The header row plus a bounded slice of data rows - story 5.5, so the
+       * preview can parse the treasurer's own rows without asking for the file
+       * again. Bounded because this is serialised to the client.
+       */
+      readonly rows: readonly (readonly string[])[]
+      /** Data rows the file holds - UX-DR24's "of 143". */
+      readonly totalDataRows: number
     }
   | { readonly status: 'error'; readonly error: string }
 

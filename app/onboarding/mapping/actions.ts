@@ -67,7 +67,7 @@ export async function readSample(
   if (chosen.size > MAX_SAMPLE_BYTES) {
     return {
       status: 'error',
-      error: `Samples are up to ${MAX_SAMPLE_BYTES / (1024 * 1024)} MB. A few rows is plenty — the headings are all this reads.`,
+      error: `Samples are up to ${MAX_SAMPLE_BYTES / (1024 * 1024)} MB. A few rows is plenty — only the headings and the first few rows are read.`,
     }
   }
 
@@ -87,6 +87,8 @@ export async function readSample(
     kind: declaredKind,
     headings: result.headings,
     problems: result.problems,
+    rows: result.rows,
+    totalDataRows: result.totalDataRows,
   }
 }
 

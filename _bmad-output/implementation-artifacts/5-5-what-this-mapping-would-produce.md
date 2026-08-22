@@ -1,0 +1,610 @@
+---
+Status: done
+baseline_commit: 387f9e7
+merge_request: 82
+---
+
+# Story 5.5: What this mapping would produce
+
+## Story
+
+As **a treasurer setting up an import**,
+I want **to see my own rows parsed through the mapping I just built, and what each one would become**,
+so that **I find out my date column is the posting date rather than the transaction date now, and not after a hundred payments have been written against the wrong month**.
+
+## What this story is
+
+5.3 answered *what columns does this file have*. 5.4 answered *which of ours does each correspond to*. This answers **"and what would that actually do?"** — before anything is stored.
+
+It is the last cheap moment. Everything after this point writes.
+
+## The decision to record before building
+
+**The rows are gone.** `readSampleHeadings` decodes the file, reads the header row, and returns
+headings and problems — the rectangle itself is discarded when the function returns. A preview needs
+the *data* rows, and there are three ways to get them back:
+
+1. **re-upload the file** — a treasurer who has already handed us the sample being asked for it again;
+2. **carry the bytes** in wizard state and decode a second time — the whole file across a form
+   boundary, for a screen that shows a handful of rows;
+3. **carry a bounded slice of rows** from the read that already happened.
+
+**Take (3), and record why the bound is not a detail.** `SampleState` crosses a server-action
+boundary and is serialised to the client. A 25 MB sample is 25 MB of state — and the screen is going
+to show perhaps twenty rows. The bound is what makes the approach viable *and* it is the thing
+UX-DR24 then forces you to be honest about: having previewed 20 rows of 143, the screen may not say
+"looks good".
+
+**Whatever is chosen, nothing is persisted.** 5.7 is where a mapping is remembered; a preview that
+wrote anything would be the seam crossed early, exactly as 5.4 said of its own draft.
+
+## The trap in applying a mapping
+
+`readRows` matches columns by **heading name**, folded. So "apply the mapping" means producing a
+rectangle whose header row carries the *target* names.
+
+If the mapped columns are renamed **in place** and the unmapped ones left alone, an unmapped column
+whose heading happens to be `amount` now collides with the `amount` you mapped — and `readRows`
+refuses the whole file with `duplicate-headers`. The treasurer sees their mapping rejected because of
+a column they deliberately did not map.
+
+**So the previewed rectangle is built from the mapped columns only**, in target order. An unmapped
+column cannot collide with anything because it is not there. This is a decision, not an
+implementation detail, and AC2 exists to pin it.
+
+## Acceptance Criteria
+
+1. **The preview parses through the importer, not beside it.** The same `readRows` the real import
+   uses, on the declared kind. A second parser written for the preview would eventually disagree with
+   the first, and the disagreement would surface as a treasurer being shown one thing and getting
+   another — which is precisely the failure this screen exists to prevent.
+
+2. **Only mapped columns reach the parse, in target order.** An unmapped column cannot collide with a
+   target name and cannot refuse the file. Asserted with a fixture carrying an unmapped column named
+   the same as a mapped target.
+
+3. **When the importer would accept the file, each previewed row shows what it becomes** — field by
+   field: the date, the description, the amount, and the unit where the kind carries one. Not a tick.
+   A row reported as "fine" without showing its values proves nothing to someone checking whether
+   their date column is the *right* date column, which is the entire purpose of this screen.
+
+4. **When the importer would refuse the file, the preview says the file would be refused** — and
+   names **every** offending row with its number and reason, not the first. It does **not** show
+   parsed rows alongside them. One bad row fails the whole document (see Dev Notes), so a screen
+   showing 17 successes and 3 problems would misstate the outcome in the direction that costs most:
+   the treasurer concludes the bulk of their data is fine and proceeds.
+
+5. **Counts, always, and never bare reassurance.** How many rows were previewed, out of how many the
+   sample holds, and — on a refusal — how many rows are implicated. **UX-DR24 forbids reassurance
+   without a count of what was checked**, and "your mapping looks right" over an unstated sample is
+   exactly that. "Read 20 of 143 rows; all 20 would import" is a claim a treasurer can weigh.
+
+6. **An incomplete mapping previews nothing, and says what is missing.** It reuses `completeness`
+   rather than deciding again — 5.4 already owns which required targets remain, and a second opinion
+   here is the two-lists defect one layer out.
+
+7. **The preview is bounded, and the bound is on screen.** The treasurer is told they are seeing the
+   first N rows; a bound nobody is told about is indistinguishable from a file that ended early.
+
+8. **Nothing is stored and nothing is imported.** No repository, no `ingest`, no document row. The
+   preview modules take no store, and a test asserts it by calling them with nothing.
+
+## Tasks / Subtasks
+
+- [x] **Task 1 — Apply a mapping to a rectangle.** Pure: rows plus a `DraftMapping` in, a rectangle
+      headed with target names out, mapped columns only, in target order. (AC1, AC2)
+- [x] **Task 2 — Carry a bounded slice of rows from the sample read.** The bound is a named constant,
+      and the total row count travels with it so AC5 can be honest. (AC7)
+- [x] **Task 3 — The preview result.** Compose apply + `readRows` into **either** the records a
+      clean sample produces **or** the refusal and every offending row — never both, because
+      `readRows` never returns both. Plus the counts. Takes no store. (AC1, AC3, AC4, AC5, AC8)
+- [x] **Task 4 — Refuse to preview an incomplete mapping.** Via `completeness`. (AC6)
+- [x] **Task 5 — The screen.** Rows and what they become, refusals in place, the counts and the
+      bound. (AC3, AC4, AC5, AC7)
+
+## Dev Notes
+
+### What exists, and what it returns
+
+- `core/mapping/draft.ts` — `DraftMapping { kind, columns, pairings: [{ target, position }] }`,
+  positions **1-based**, plus `completeness(draft) -> { complete, missing }`.
+- `core/mapping/targets.ts` — `targetsForKind(kind) -> { required, optional }`, derived from the
+  importer's own constants.
+- `core/extraction/tabular.ts` — `readRows(rows, kind)` returns
+  `{ ok: true, records, rollRows }` or `{ ok: false, problems }`. Problem reasons include
+  `invalid-row` (**carrying `row`, 1-based over data rows**), `duplicate-unit`, `missing-headers`,
+  `duplicate-headers`, `no-rows`.
+- `core/extraction/record.ts` — `ExtractionRecord` is `documentKind`, `vendorName`,
+  `documentNumber`, `issuedOn`, `totalAmount`, `unitReference`, `currency`. **That is the vocabulary
+  AC3 renders**; note `vendorName` holds the *description* column and `documentNumber` the
+  *reference*, which is worth a label a treasurer recognises rather than the field name.
+- `core/extraction/sample-headings.ts` — `readSampleHeadings(file, deps)`, and the place Task 2
+  touches.
+- `app/onboarding/mapping/` — `actions.ts` (`readSample`), `sample-state.ts`, `mapping-wizard.tsx`,
+  `column-pairing.tsx`.
+
+### One bad row fails the whole document, and the preview must say so
+
+**This is the single most important thing to know before writing Task 3**, and it is easy to get
+backwards. `readRows` accumulates row problems and then:
+
+```ts
+// One bad row fails the document. Storing the other 199 is precisely how "no
+// partial or best-effort record is stored" gets violated in practice, and a
+// ledger missing one line without saying so is worse than one that was
+// refused outright.
+if (problems.length > 0) return { ok: false, problems }
+
+return { ok: true, records, rollRows }
+```
+
+So it returns records **or** problems, never both. There is no "17 good rows and 3 bad ones" result
+to render, because that is not what the importer would do — it would refuse the file.
+
+**A preview that showed 17 parsed rows and flagged 3 would therefore be lying**, and lying in the
+direction that matters: the treasurer would believe most of their data is fine and press on. The
+preview reports the importer's actual verdict — *this file would be refused, and here is every row
+that is why* — or, for a file it would accept, what those rows become.
+
+Row numbers in `invalid-row` and `duplicate-unit` are **1-based over data rows**, not over the file,
+so a heading row does not shift them. Confirm against the code; this paragraph was wrong in the first
+draft of this story and the correction is the reason these ACs read as they do.
+
+### What this story does not do
+
+No persistence (5.7), no suggestion (5.6), no ordering rule (5.8), and **no import**. The preview
+must not become a "and now import it" button — 5.8 decides what order imports are allowed in, and a
+preview that could import would route around it.
+
+### The traps this project keeps setting
+
+- **A test that names a behaviour and proves nothing.** Story 5.4 shipped three of these and a
+  reviewer found all three: an assertion inside `within()` that queried descendants of a button whose
+  text was its own; a drag test whose payload never reached the format the component read; and a
+  bounds test that asserted which buttons rendered rather than the bound it claimed to check. For
+  every assertion here, ask what would have to break for it to go red.
+- **Fixture-vacuity.** Break the *input*, not just the code. 5.4's collision fixture was a comment
+  and a count, and changing the count from 5 to 10 left all 29 tests green.
+- **Scripted edits that do not apply.** This file's own repository has three instances in one
+  session, two from CRLF line endings defeating a `\n` anchor. Read back every scripted edit: old
+  text gone, new text present, match count as expected.
+
+### References
+
+- `_bmad-output/planning-artifacts/epics.md` — epic 5's spine; UX-DR24 at line 137
+- `_bmad-output/implementation-artifacts/5-4-mapping-one-column-to-another.md` — the draft mapping,
+  and its list of what it deferred to here
+- `_bmad-output/implementation-artifacts/5-3-the-headers-we-were-given.md` — why a sample is not a
+  document, which still holds
+
+## Dev Agent Record
+
+### Test Design
+
+#### Task 1 - `applyMapping`: a rectangle headed with target names
+
+**If it ran correctly, how would I know?** The returned rectangle, handed to `readRows` for the
+draft's kind, parses into the records the sample's values imply. That is the cross-check and it is
+the assertion that matters — a rectangle that merely *looks* right is what an off-by-one produces.
+
+**How am I going to test it?** Pure function, rows in and rows out; no seam needed. The care goes
+into the **fixture**: every column carries a value that identifies which column it came from, so a
+shift of one is visible in the assertion rather than hidden behind plausible-looking data.
+
+**Could this happen elsewhere?** The 1-based/0-based seam is the same one story 5.3 guarded when it
+made `Heading.position` 1-based "because it is the number a treasurer counts to". Every consumer of
+that number is a place to get it wrong once.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | Columns renamed *in place* with unmapped ones left alone, so an unmapped column headed `amount` collides with the mapped `amount` and `readRows` refuses the whole file with `duplicate-headers` - over a column the treasurer deliberately did not map | GUARD - build from mapped columns only; fixture carries exactly that collision |
+| 1b | The 1-based position used as a 0-based index, so every column is read one to the left. **Silent**: the values are still plausible, and a date column reads as a reference | GUARD - each fixture cell names its own column, so a shift changes the assertion |
+| 1c | A data row shorter than the header row - ragged CSV, trailing empties dropped by the exporter - yielding `undefined`, which stringifies into the cell as `"undefined"` and reaches the validator as a non-empty value | GUARD - absent cells become `''`, which `readRows` already treats as absent |
+| 1d | The header row treated as data, or dropped twice so the first real row is lost | GUARD - row counts asserted, and the first data row's values asserted by name |
+| 1e | A pairing whose position exceeds the actual rectangle width (the draft was built against a wider sample than the rows given) | GUARD - empty cell rather than a crash or `undefined` |
+| 1f | An empty rectangle, or one with a header and no data rows | GUARD - a header-only rectangle out, not a crash |
+| 1g | Output column order taken from pairing insertion order, so the preview's columns rearrange as the treasurer re-pairs, and the tests are order-dependent | GUARD - deterministic `targetsForKind` order, asserted against a draft built in a different order |
+
+#### Task 2 - a bounded slice of rows, and an honest total
+
+**If it ran correctly, how would I know?** The read returns a rectangle of at most
+`PREVIEW_ROW_LIMIT` data rows **with its header row**, plus the number of data rows the file actually
+has. Those two numbers are what AC5's "20 of 143" is made of, and they must be able to differ.
+
+**How am I going to test it?** Pure, over a rectangle; the bound is a named constant so a fixture can
+be built at `LIMIT`, `LIMIT + 1` and either side. The header row travels with the slice because
+`applyMapping` expects a rectangle and drops row 0 — carrying bare data rows would mean prepending a
+dummy header at the call site, which is a seam nobody would remember.
+
+**Could this happen elsewhere?** Every "first N of M" in a UI is the same pair of off-by-ones. The
+count that is clamped and the count that is not must not be computed by the same expression.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | The bound applied to the rectangle *including* the header, so `LIMIT - 1` data rows are previewed while the screen says `LIMIT` | GUARD - fixture at exactly `LIMIT + 1` data rows, data-row count asserted |
+| 2b | `totalDataRows` counts the header row, so a one-row file reports two and every count on the screen is one too many | GUARD - asserted against a known small fixture |
+| 2c | The bound not applied at all, so the whole rectangle crosses the server-action boundary - the 25 MB state this design exists to avoid | GUARD - a fixture well over the limit, length asserted |
+| 2d | `totalDataRows` clamped by the same expression as the slice, so it can never exceed the limit and the screen can only ever say "20 of 20" | GUARD - asserted greater than the slice on an over-limit fixture |
+| 2e | A header-only file, or an empty one: no data rows to slice | GUARD - header preserved, total `0`, no crash |
+| 2f | The slice taken from the end, or the rows re-ordered, so "the first 20 rows" is not what the treasurer sees | GUARD - first and last slice rows asserted by their own values |
+
+#### Task 3 - `previewMapping`: records or refusal, never both
+
+**If it ran correctly, how would I know?** For a sample the importer would accept, the records it
+would produce. For one it would refuse, the refusal and every offending row. **Never both** - that is
+the story's central correction, and the shape of the return type is what enforces it.
+
+**How am I going to test it?** Pure composition over `applyMapping` and `readRows`; no seam. The
+cross-check is a case only `readRows`' own rules produce - `duplicate-unit` on a roll naming the same
+unit and year twice - because a hand-rolled second parser would never invent that reason.
+
+**Could this happen elsewhere?** The counts are the same "read N of M" pair Task 2 built, one layer
+out; the risk is recomputing them here from the wrong thing.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | Records and problems returned together, so the screen shows "17 imported, 3 refused" for a file the importer would refuse **entirely** - the treasurer concludes the bulk of the data is fine and proceeds | GUARD - the return type makes it unrepresentable, and a test asserts a refused sample carries no records |
+| 3b | `read` taken from the records length, so a refusal reports "0 of 143 rows read" when 20 were read and found wanting | GUARD - asserted on a refusing sample |
+| 3c | `total` taken from the slice rather than the file, undoing Task 2's whole point one layer up | GUARD - over-limit fixture, `total` asserted greater than `read` |
+| 3d | Only the first problem reported, so a treasurer fixes one row and is shown the next - the inversion story 5.3 made against `readRows` | GUARD - a fixture with two bad rows, both asserted |
+| 3e | A second parser written here rather than delegating, which would drift from the importer and make this screen lie | GUARD - cross-check on `duplicate-unit`, a reason only `readRows` produces |
+| 3f | The kind read from somewhere other than the draft, so a roll is previewed as a deposit and its roll rows vanish | GUARD - a roll draft asserted to produce roll rows |
+| 3g | A store, repository or `ingest` reached from here | GUARD - structural: the module's imports are read |
+
+#### Task 5 - the screen
+
+**If it ran correctly, how would I know?** A treasurer looking at it can answer three questions:
+what would my rows become, how many rows was that judged on, and would the file import at all.
+
+**How am I going to test it?** jsdom render tests over `previewMapping`'s three branches, driven
+through the real pairing controls so the preview is exercised the way it is reached. The counts are
+asserted as *text*, because a count that exists in state and not on screen satisfies nothing.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 5a | The counts missing, or only one of the pair shown - "20 rows read" with no "of 143" is a claim about the file dressed as a claim about the sample. **This is the UX-DR24 breach** | GUARD - both numbers asserted in the rendered text |
+| 5b | A refusal rendered in the same neutral voice as a success, so "would be refused" reads as a status line rather than a stop | GUARD - `role="alert"` and refusal wording asserted |
+| 5c | Records rendered from stale state beside a refusal, re-creating the "17 imported, 3 refused" screen the type was shaped to prevent | GUARD - a refusing sample asserted to render no record values |
+| 5d | The bound unmentioned, so a treasurer believes the whole file was checked | GUARD - the read count is on screen, and is less than the total |
+| 5e | Offending rows listed without their numbers, leaving nothing to act on | GUARD - row numbers asserted |
+| 5f | The preview not re-rendering when a pairing changes, so it describes a mapping that no longer exists | GUARD - pair, assert, re-pair, assert it moved |
+| 5g | A tick or a count instead of the parsed values, which cannot answer "is my date column the right date column" | GUARD - the parsed field values asserted on screen |
+
+### Completion Notes List
+
+#### Task 1 - applying a mapping
+
+**Mapped columns only, in `targetsForKind` order.** Renaming in place would have let the fixture's
+unmapped column headed `amount` collide with the mapped one and `readRows` would refuse the whole
+file - the defect the story predicted, now covered by a fixture that carries exactly that collision.
+Order comes from the importer rather than the pairings so the preview does not rearrange itself each
+time a treasurer re-pairs.
+
+**`?? ''`, never `undefined`.** A ragged row - trailing empties dropped by an exporter - would put
+`undefined` in a cell, which stringifies to `"undefined"`: a non-empty value that parses as a
+perfectly good vendor name. The same guard covers a draft built against a wider sample than the rows
+it is applied to.
+
+**Four production mutations, four caught**: the 1-based position used as a 0-based index (7 red), an
+absent cell left `undefined` (2), order taken from the pairings (7), and the header row treated as
+data (9).
+
+**The fixture pass found a real gap, and it is the one this project keeps finding.** Making the
+fixture rows anonymous (`'x'` in every column) turned 2 red - so the column-naming is load-bearing.
+But **pairing the draft in target order left all 15 green**: the ordering test computes its
+expectation from `targetsForKind` and compares, so with an in-order fixture a pairings-order
+implementation gives the same answer and the test proves nothing. The fixture *was* out of order,
+deliberately, and nothing asserted it - so tidying it would have silently disarmed the test, exactly
+as story 5.4's collision fixture rotted into a comment. Now asserted, and re-running that mutation
+turns it red.
+
+
+
+### Review Findings
+
+#### The AC audit (step 4c)
+
+Every criterion, the test that covers it, and the mutation that turns that test red. No criterion is
+listed on a name alone - a vacuous test satisfies "I named one" while staying green when the
+behaviour is deleted, which is the defect this project keeps finding.
+
+| AC | Test | Mutation that turns it red |
+| --- | --- | --- |
+| 1 - parses through the importer | `preview.test.ts` > *surfaces `duplicate-unit`, a refusal only readRows produces*; *reads a roll as a roll* | the kind hard-coded rather than read from the draft - 2 red |
+| 2 - mapped columns only, in target order | `apply.test.ts` > *is not refused for a duplicate heading the treasurer never mapped*; *orders columns by the importer* | order taken from the pairings - 7 red; the 1-based position used as 0-based - 7 red |
+| 3 - each row shows what it becomes | `mapping-preview.test.tsx` > *shows what each row becomes, value by value*; *shows the roll-only columns* | **the parsed values blanked, leaving headers and counts - 4 red** |
+| 4 - a refusal is a refusal | `mapping-preview.test.tsx` > *says the file would be refused*, *names the offending row by number*, *shows no parsed values beside the refusal* | the alert role removed - 2 red; row numbers dropped - 1 red; only the first problem reported - 1 red |
+| 5 - counts, never bare reassurance | `mapping-preview.test.tsx` > *says how many rows were read and how many the file holds*; `sample-rows.test.ts` > *reports the file total, unclamped* | the counts sentence dropped - 4 red; `total` clamped to `read` - 5 red |
+| 6 - incomplete previews nothing | `preview.test.ts` > *previews nothing and names every required target still missing*; *agrees with `completeness`* | the incomplete guard dropped - 3 red; the missing list blanked on screen - 1 red |
+| 7 - bounded, and the bound on screen | `sample-rows.test.ts` > *reads exactly the limit in data rows*; `mapping-preview.test.tsx` > the "first N of M" sentence | the bound applied to the rectangle - 6 red; the wizard not passing `totalDataRows` - 1 red |
+| 8 - nothing stored, nothing imported | `preview.test.ts` > *imports no repository, no store and no ingestion* | **a `document-repository-postgres` import added to `preview.ts` - 1 red** |
+
+AC3 and AC8 had no directly-proven mutation when the audit began and were run rather than argued;
+both are marked in bold above. The rest cite rounds already recorded in the completion notes.
+
+
+
+#### Task 2 - the bounded slice, and two counts that must be able to differ
+
+**`totalDataRows` is deliberately not `Math.min`.** Clamped by the same expression as the slice it
+can only ever equal the slice, and the screen can only say "20 of 20" - which is UX-DR24's forbidden
+reassurance wearing a number. Mutating it to `Math.min` turns 4 red.
+
+**The bound is on the data rows, not the rectangle.** `rows.slice(0, limit)` yields `limit - 1` data
+rows while the screen says `limit`; that mutation turns 6 red. The header travels with the slice
+because `applyMapping` takes a rectangle and drops row 0 - carrying bare data rows would mean
+prepending a dummy header at every call site.
+
+**Four production mutations, four caught**: the bound on the rectangle (6 red), the total clamped
+(4), the slice taken from the end (2), and the header dropped (11).
+
+**Two fixture mutations, two caught**: making the rows indistinguishable (2 red - so the per-row
+`row-N` values are load-bearing for the ordering assertions) and reducing the over-limit fixture to
+exactly the limit (2 red - the unclamped-total test needs a file that genuinely exceeds it).
+
+**A scripted edit did not apply, and the read-back caught it.** The first attempt at wiring
+`boundedSample` into `sample-headings.ts` used `
+` anchors against a CRLF file: the assertion
+raised, nothing changed, and `grep -c` returned 0 for both new symbols. Re-applied with line-ending
+aware anchors and verified by reading back that the old `return` line is gone. That is the fourth
+instance this session and the third from CRLF.
+
+#### Tasks 3 and 4 - records or refusal, and the incomplete guard
+
+**The union is the guard.** `Preview` has three branches and no branch carries both records and
+problems, so the shape a screen could misread does not exist. That is the story's central correction
+made structural rather than remembered: `readRows` refuses the whole document if any row is bad, so
+"17 imported, 3 refused" was never a possible outcome to render.
+
+**`read` is the rows parsed, not the records produced.** Taken from the records it reads `0` on a
+refusal, and the treasurer is told nothing was read when twenty rows were read and found wanting.
+That mutation turns **10** red.
+
+**`completeness` is asked, not re-decided.** An incomplete draft previewed anyway hands back
+`missing-headers` from the parser instead of "you still need to map Amount" - and a second opinion on
+completeness here would be the two-lists defect one layer out.
+
+**Five production mutations, five caught**: `read` from the records (10 red), `total` from the slice
+(2), only the first problem (1), the kind hard-coded rather than read from the draft (2), and the
+incomplete guard dropped (3).
+
+**Three fixture mutations, three caught**: the bad amount made valid (2 red), `total` set equal to
+`read` (1 - the "of 143" distinction), and the duplicate-unit fixture given two different units (1).
+
+The cross-check is `duplicate-unit`: a refusal reason only `readRows`' own rules produce, so a
+preview that quietly grew a second parser could not invent it.
+
+#### Task 5 - the screen, and the wiring that makes it reachable
+
+**The counts are a sentence, not a badge.** "Read the first 1 of 143 rows. All 1 would import." A
+success claim without the denominator is a claim about twenty rows wearing the clothes of a claim
+about the file, which is the reassurance UX-DR24 forbids. Dropping the sentence turns 4 red; making
+`total` equal `read` turns 5.
+
+**A refusal is rendered in its own voice** - `role="alert"`, the word *refused*, every offending row
+numbered, and **no parsed values beside it**. Removing the alert role turns 2 red; dropping the row
+numbers turns 1.
+
+**Eight mutations, eight caught**, including the two that matter most for wiring: `ColumnPairing`
+not passing the rows through (8 red) and the wizard not passing `totalDataRows` (1 red). Those are
+story 5.2's lesson - a prop that exists and nothing passes is how a feature ships broken with every
+gate green - and they were real: `SampleState`, `readSample` and `MappingWizard` all had to be
+widened before the preview could render outside a test.
+
+#### The backspace defect, again, and it is in an open action item
+
+Writing the wire-up test through a shell heredoc collapsed a doubled word-boundary escape down to a
+single one, which Python then read as a **backspace byte** — four of them landed inside a regex in
+`column-pairing.test.tsx`. It compiled and matched nothing. Then the *fix* reintroduced the same
+character one level out: a single word-boundary escape inside a **JS template literal** is a
+backspace at runtime too, so the `RegExp` built from it matched no button while looking perfectly
+correct on screen.
+
+**Three levels of escaping, and each one eats a backslash**: the heredoc, then Python's string
+literal, then the template literal. Writing the character class into a template needs the escape
+doubled *in the file*, and getting it there through a heredoc needs it doubled again.
+
+This is verbatim the epic-4 action item - *"a word-boundary escape written through a shell heredoc
+became a literal backspace byte inside a regex, which then compiled fine and matched nothing"* - and
+`docs/no-control-characters.test.ts` still scans markdown only, so nothing caught either instance.
+Found both times by reading the failure rather than by a guard.
+
+A scan of every `.ts`/`.tsx` file this branch touches now shows one hit, and it is the explanatory
+comment written about the defect.
+
+#### The branch-level Argus round - one confirmed, one refuted, and both mechanisms wrong
+
+**Confirmed: a roll preview showed everything except the two columns that make it a roll.** `cycle`
+and `year` live on the roll row rather than the extraction record, and the table read only records -
+so a treasurer previewing an assessment roll could check the unit, the holder, the date and the
+amount, and *not* the cadence they bill on or the year it is for. Those two are what the document is
+about. Fixed by reading `records` and `rollRows` side by side; both halves are mutation-proven
+(dropping the fields turns 1 red, blanking the values turns 1).
+
+**Argus's stated mechanism was wrong**, twice in a row on the same file, and worth recording:
+
+- it said `records` is *empty* for a roll and the table therefore renders no rows. `readRows`
+  populates **both** for a roll, one of each per data row. The `still shows the shared columns` test
+  passes, which is the evidence, and it is now pinned in `preview.test.ts` rather than re-derived.
+- on the fix diff it raised a `critical`: `preview.rollRows` is `undefined` for a deposit, so the
+  component crashes on render. It is not. `rollRows` is initialised as an array in `readRows` and
+  returned unconditionally, the `Preview` type declares it non-optional, and the deposit tests render
+  that very table and pass - a crash would have failed them. **Refuted.**
+
+The consequence was real the first time even though the reasoning was not, which is why
+`argus-review-routing.md` §5 requires verifying against the file before acting. Acting on the second
+would have added an optional chain that can never be exercised; reading the first as stated would
+have aimed the fix at the wrong half of the code.
+
+#### The `ocr` round - 20 comments, 8 confirmed
+
+`terminal_state: complete`, **17 of 17 files**, 0 failed, 0 waived, at `--concurrency 4`. That flag
+is this session's measurement rather than the skill's default: at the default 8 the same tool dropped
+3 of 16 files with no retries and exit 0.
+
+**The one that mattered: `TARGET_LABELS` existed twice**, identically, in `column-pairing.tsx` and
+`mapping-preview.tsx`. Identical is not the risk - the day one changes is, and the symptom would be a
+treasurer told to map "Billing cycle" on one panel and shown "Cycle" on the other, with nothing
+saying they are the same column. That is the defect shape story 5.3 found in a duplicated
+`trim().toLowerCase()`, and the one this story's own AC1 pattern exists to prevent.
+
+Extracted to `target-labels.ts`, and the guard is **observed rather than structural**: both panels
+render together and every required target must show the *same string* on its button and in the
+preview's missing-list. A grep for a shared import would pass against two copies that agree today;
+this fails the moment they disagree about a word, which a one-word drift proved (1 red).
+
+**A test that would have gone quiet.** *does not reassure without them* was written as
+`expect(claimsSuccess && hasCount).toBe(claimsSuccess)`, which holds trivially whenever
+`claimsSuccess` is false - so changing the success wording would have stopped it asserting anything
+rather than turning it red. The claim is a precondition now, and changing the wording turns it red.
+
+**Assertions scoped to the panel that owns them.** `document.body.textContent` matched counts
+anywhere on the page; they now read the preview `region` by its accessible name and assert the
+literal sentence `2 of 143 rows` rather than two numbers in order.
+
+Also added: the whole slice sequence asserted rather than its two ends, and a case for a header row
+that exists but is empty.
+
+**Refuted, with reasons:** `rowsOf` does *not* generate invalid dates (`(i % 9) + 1` is always 1-9);
+the problem-list keys cannot collide (the fallback is the array index); the `Map` cannot receive
+duplicate targets (`assign` refuses them); and one `medium` argued itself round to *"this test is
+correct... all tests appear to be logically sound"* before finishing.
+
+**The ingest could not be joined, and that is recorded rather than glossed.** `argus_ingest` scores
+`ocr` against an Argus run on the *same commit*, and Argus records a run against HEAD at the time it
+ran. Both runs on this code landed on `e27727b`, before the roll fix; `ocr` reviewed `4e6a966`, after
+it. No run exists on that exact tree, so the review was skipped rather than mis-scored. Worth
+carrying forward: **run `argus_review` on the commit `ocr` will review, not merely on its diff.**
+
+#### The local CodeRabbit round - one finding, confirmed, and it was in my own rationale
+
+`review_completed`, **20 of 20** diff files, coverage reconciled. One finding, `major`, and it was
+right about something the other two reviewers had read past.
+
+**The bound did not bound what I said it bounded.** `PREVIEW_ROW_LIMIT` caps how many rows travel; it
+says nothing about how *big* they are. A 25 MB file of twenty wide rows is still 25 MB crossing the
+server-action boundary into React state - which is the exact thing this design was introduced to
+prevent, written down in this story's own "The decision to record before building". The reasoning was
+sound and the implementation only delivered half of it.
+
+`PREVIEW_MAX_BYTES` (256 KB) now bounds the serialised payload as well, header included, carrying
+whole rows only. If not even the first row fits, none are carried and the counts still tell the
+truth - "0 of 143" is honest, if unhelpful, and a partial row would read as a defect in the
+treasurer's file rather than a limit of the preview.
+
+**Three mutations, three caught** - but only after a fixture was fixed. Removing the size check turns
+2 red and clamping `totalDataRows` by it turns 5. **Excluding the header from the budget turned
+nothing red**, because every fixture had a three-column header: the mistake was invisible at that
+size. A 1000-column header fixture now catches it. That is the fixture-vacuity discipline finding its
+own gap, again.
+
+**On the ingest.** This one joined - `missed: 1`, one lesson written
+(*"Look harder in TypeScript under core/extraction/** for input validation"*). The difference from
+the `ocr` round was running `argus_review` **while HEAD was the reviewed commit**, so a run existed
+to score against. That is now the rule rather than a happy accident.
+
+#### The integration pass (step 6)
+
+Scope `387f9e7..HEAD`, **excluding `_bmad-output/**`** - the story document is this review's spec, and
+reviewing it as a diff reviews the prose against itself. Engine: **argus (MCP)**, one call.
+`audit_chain_ok: true`, context 20/20 files, selectivity 1, reflection converged.
+
+**Three `low` findings, all three refuted**, each against the real file:
+
+1. *`String(rollRow[rollField])` turns `undefined` into the string `"undefined"`.* `RollRow` declares
+   `billingCycle: BillingCycle` and `assessmentYear: number`, both non-optional, and `readRollRow`
+   returns `ok` only with them set. The state does not exist.
+2. *The refusal list's React key collides when two problems share a row.* It cannot: `readRows`
+   pushes `invalid-row` for a row **guarded by `if (validation.ok)`** and then returns, so a row
+   yields at most one, and problems without a row use the array index. Two rows with the same reason
+   differ in `row`.
+3. *`JSON.stringify(row).length` throws if a row is `undefined`.* `dataRows` comes from `toRectangle`,
+   which returns either `parseCsv`'s rows or the workbook decoder's - both dense - and the type is
+   `readonly (readonly string[])[]`.
+
+All three are defences against states the types forbid, and none was added: the Prime Directive is
+that a guard with no test behind it is a guard nobody asked for. Recorded rather than dropped,
+because a reviewer's precision is a fact about the reviewer.
+
+This is the pass per-task rounds structurally cannot be - and on this story it is the one that caught
+the roll preview missing `cycle` and `year`, which no single task's diff could show.
+
+#### MR !82, CodeRabbit round 1 - seven findings, seven confirmed
+
+Reviewed `387f9e7..b782dd6`, 18 files. All seven verified against the real code; all seven real. Two
+were user-facing, two were vacuous assertions of mine, one was a bound that did not bound.
+
+**The screen told the treasurer something that had stopped being true.** Both the oversized-file
+refusal and the form note still said *only the headings are read* - written when that was exactly
+what happened. Story 5.5 made the rows travel to the browser, and neither sentence was revisited. On
+a product whose whole argument is that a treasurer can trust what it tells them, that is the kind of
+untruth that matters most: small, invisible, and about their own data.
+
+**"Read all 2 of 0 rows."** `totalDataRows` travelled as an independent number with a `0` default, so
+a caller passing rows and forgetting the count rendered a sentence that contradicts itself. The
+default is gone, the caller derives a real fallback, and `MappingPreview` clamps `total` to at least
+`read` so the two cannot disagree whatever a caller does.
+
+**The byte budget was not measuring bytes.** `JSON.stringify(x).length` counts **UTF-16 code units**,
+and summing rows individually omits the array brackets and separators. A payload of non-ASCII text
+measured 256 KB and weighed **688,245 bytes** - the test says so. Now measured with `TextEncoder`
+over the complete candidate rectangle, which is both exact and obviously so. This is the *second*
+round on the same constant: the CLI found that the row bound did not bound the payload, and the MR
+round found that the byte bound did not measure bytes.
+
+**Two of my own tests proved nothing.**
+
+- `apply.test.ts` had a block named *nothing is stored* whose only assertion was a row count already
+  covered three cases earlier. It passed whether or not `applyMapping` wrote anything, under a name
+  saying it did not. Replaced with the import scan `preview.test.ts` uses - adding a repository
+  import now turns it red.
+- The roll fixture used `2026-01-01` as the tenure start **and** `2026` as the assessment year, so
+  `toContain('2026')` passed with the year column removed entirely. The date is `2025-01-01` now.
+  `readRows` validates the two independently, which is what makes the fixture separable at all.
+
+**Also:** `REFUSAL_TEXT` was `Record<string, string>`, so a new refusal reason would have fallen
+through to the raw enum on screen; typed to `TableProblem['reason']`, a new reason is a type error.
+And a `position === undefined` branch in `applyMapping` that no test could reach - a guard nobody
+asked for, which this project's own directive forbids - is gone, with target and position resolved
+into one pair rather than two lookups that could disagree.
+
+**Three mutations on the round's fixes, three caught**: back to UTF-16 units (1 red), rows summed
+individually (3 red), the count clamp removed (1 red). Plus the replaced import scan, proven by
+adding a repository import.
+
+### File List
+
+- `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
+- `core/mapping/apply.test.ts` *(new)* - 16 cases, including the `readRows` cross-check
+- `core/extraction/sample-rows.ts` *(new)* - `PREVIEW_ROW_LIMIT` and `boundedSample`
+- `core/extraction/sample-rows.test.ts` *(new)* - 11 cases
+- `core/extraction/sample-headings.ts` - the ok result now carries `rows` and `totalDataRows`
+- `core/extraction/sample-headings.test.ts` - 3 cases for the bounded rows
+- `core/mapping/preview.ts` *(new)* - `previewMapping` and the three-branch `Preview`
+- `core/mapping/preview.test.ts` *(new)* - 14 cases, including the `duplicate-unit` cross-check
+- `app/onboarding/mapping/mapping-preview.tsx` *(new)* - the preview panel
+- `app/onboarding/mapping/mapping-preview.test.tsx` *(new)* - 12 cases
+- `app/onboarding/mapping/target-labels.ts` *(new)* - the one copy of the field labels
+- `app/onboarding/mapping/sample-state.ts` - carries `rows` and `totalDataRows`
+- `app/onboarding/mapping/actions.ts` - passes them out of the read
+- `app/onboarding/mapping/actions.test.ts` - the widened shape asserted
+- `app/onboarding/mapping/column-pairing.tsx` - renders the preview when rows are present
+- `app/onboarding/mapping/column-pairing.test.tsx` - 2 cases for the wiring
+- `app/onboarding/mapping/mapping-wizard.tsx` - passes the rows through
+- `app/onboarding/mapping/mapping-wizard.test.tsx` - 1 case for the wiring
+
+## Change Log
+
+| Date | Change |
+| --- | --- |
+| 2026-08-22 | MR !82 round 1: seven findings, seven confirmed - two screens telling a treasurer something no longer true, and a byte budget not measuring bytes |
+| 2026-08-22 | Integration pass: three lows, all three refuted against the types |
+| 2026-08-22 | MR !82 opened; status done, written in this commit rather than after the merge |
+| 2026-08-22 | Local CodeRabbit round: the row bound did not bound the payload, which was this story's own stated rationale |
+| 2026-08-22 | `ocr` round: 20 comments, 8 confirmed - the field labels existed twice, and a test that would have gone quiet |
+| 2026-08-22 | Branch Argus round: a roll preview was missing the two columns that make it a roll; a follow-up `critical` refuted |
+| 2026-08-22 | Task 5: the preview on screen, with the counts UX-DR24 requires, wired through state, action and wizard |
+| 2026-08-22 | Tasks 3 and 4: the preview composes the importer and returns records or a refusal, never both; an incomplete draft previews nothing |
+| 2026-08-22 | Task 2: a bounded slice of rows carried from the sample read, with an unclamped file total |
+| 2026-08-22 | Task 1: a mapping applied to a rectangle, mapped columns only, cross-checked through `readRows` |
+| 2026-08-22 | Created from epic 5's spine, with the rows-are-gone decision and the rename-collision trap recorded before implementation |

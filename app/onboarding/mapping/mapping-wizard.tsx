@@ -85,8 +85,8 @@ export function MappingWizard({ initialState = EMPTY_SAMPLE_STATE }: MappingWiza
         </label>
 
         <p style={styles.note}>
-          Only the headings are read. Nothing is stored, and this file is not added to your
-          documents.
+          The headings and the first few rows are read, so we can show you what this mapping would
+          produce. Nothing is stored, and this file is not added to your documents.
         </p>
 
         <button type="submit" disabled={pending}>
@@ -101,7 +101,13 @@ export function MappingWizard({ initialState = EMPTY_SAMPLE_STATE }: MappingWiza
       )}
 
       {state.status === 'read' && (
-        <ColumnPairing kind={state.kind} headings={state.headings} problems={state.problems} />
+        <ColumnPairing
+          kind={state.kind}
+          headings={state.headings}
+          problems={state.problems}
+          rows={state.rows}
+          totalDataRows={state.totalDataRows}
+        />
       )}
     </>
   )
