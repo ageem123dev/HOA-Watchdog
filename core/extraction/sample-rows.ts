@@ -22,6 +22,20 @@
 /** How many data rows a preview reads. Twenty is a screenful, not a limit anyone tuned. */
 export const PREVIEW_ROW_LIMIT = 20
 
+/**
+ * And how large those rows may be, serialised.
+ *
+ * **The row count alone does not bound the payload**, which is what this whole
+ * design exists to keep small: twenty rows of a 25 MB file can still be 25 MB
+ * if the cells are wide, and the state crosses a server-action boundary either
+ * way. Raised by the CodeRabbit CLI, against a rationale that had claimed the
+ * row bound was enough.
+ *
+ * 256 KB is comfortably more than a screenful of ordinary rows and far less
+ * than anything that would trouble a page.
+ */
+export const PREVIEW_MAX_BYTES = 256 * 1024
+
 export interface BoundedSample {
   /**
    * The header row followed by at most `PREVIEW_ROW_LIMIT` data rows.
@@ -45,10 +59,25 @@ export function boundedSample(
 
   const [header, ...dataRows] = rows
 
+  // Whole rows only. A partial row would render as a row with missing cells,
+  // which reads as a defect in the treasurer's file rather than a limit of the
+  // preview. If even the first will not fit, none are carried and the counts
+  // still tell the truth: "0 of 143".
+  const head = header ?? []
+  const carried: (readonly string[])[] = []
+  let budget = PREVIEW_MAX_BYTES - JSON.stringify(head).length
+
+  for (const row of dataRows.slice(0, limit)) {
+    const size = JSON.stringify(row).length
+    if (size > budget) break
+    budget -= size
+    carried.push(row)
+  }
+
   return {
     // Bounded on the *data* rows, not the rectangle: slicing `rows` to `limit`
     // yields `limit - 1` data rows while the screen says `limit`.
-    rows: [header ?? [], ...dataRows.slice(0, limit)],
+    rows: [head, ...carried],
     // Deliberately not `Math.min(...)`. The whole point of carrying this is
     // that it can exceed what was read; clamped by the same expression as the
     // slice, the screen can only ever say "20 of 20".

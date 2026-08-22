@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { boundedSample, PREVIEW_ROW_LIMIT } from './sample-rows'
+import { boundedSample, PREVIEW_MAX_BYTES, PREVIEW_ROW_LIMIT } from './sample-rows'
 
 const HEADER = ['Date', 'Amount', 'Unit']
 
@@ -93,6 +93,69 @@ describe('the boundary itself', () => {
 
     expect(rows.slice(1)).toHaveLength(PREVIEW_ROW_LIMIT)
     expect(totalDataRows).toBe(PREVIEW_ROW_LIMIT + 1)
+  })
+})
+
+describe('the size bound, not just the row bound', () => {
+  /**
+   * `PREVIEW_ROW_LIMIT` bounds how many rows travel; it does not bound how big
+   * they are. A 25 MB file of twenty very wide rows is still 25 MB of React
+   * state — which is the exact thing the bound was introduced to prevent, so
+   * bounding only the count left the stated reason unmet. Raised by the
+   * CodeRabbit CLI.
+   */
+  const wideRow = (bytes: number): readonly string[] => ['x'.repeat(bytes), 'b', 'c']
+
+  it('stops before the payload gets large, even well under the row limit', () => {
+    const rows = [HEADER, ...Array.from({ length: 5 }, () => wideRow(PREVIEW_MAX_BYTES / 3))]
+
+    const { rows: carried, totalDataRows } = boundedSample(rows)
+
+    // Fewer than the row limit, because the bytes ran out first.
+    expect(carried.slice(1).length).toBeLessThan(5)
+    expect(JSON.stringify(carried).length).toBeLessThanOrEqual(PREVIEW_MAX_BYTES)
+    // And the file's own count is still the truth, unclamped.
+    expect(totalDataRows).toBe(5)
+  })
+
+  it('carries whole rows only, never a partial one', () => {
+    const rows = [HEADER, ...Array.from({ length: 5 }, () => wideRow(PREVIEW_MAX_BYTES / 3))]
+
+    for (const row of boundedSample(rows).rows.slice(1)) {
+      expect(row).toHaveLength(HEADER.length)
+    }
+  })
+
+  it('carries no data rows at all when the first will not fit', () => {
+    const rows = [HEADER, wideRow(PREVIEW_MAX_BYTES * 2)]
+
+    const { rows: carried, totalDataRows } = boundedSample(rows)
+
+    // Honest rather than helpful: the counts still say 0 of 1, which is true.
+    expect(carried).toEqual([HEADER])
+    expect(totalDataRows).toBe(1)
+  })
+
+  it('counts the header against the budget too', () => {
+    // A file with hundreds of columns has a large header row, and it crosses
+    // the boundary like everything else. Excluding it lets the payload exceed
+    // the cap by however big it is - and with a small header fixture, that
+    // mistake is invisible.
+    const bigHeader = Array.from({ length: 1000 }, (_, i) => 'column-'.repeat(20) + i)
+    const rows = [bigHeader, ...Array.from({ length: 5 }, () => wideRow(PREVIEW_MAX_BYTES / 3))]
+
+    const { rows: carried } = boundedSample(rows)
+
+    expect(JSON.stringify(bigHeader).length).toBeGreaterThan(PREVIEW_MAX_BYTES / 4)
+    expect(JSON.stringify(carried).length).toBeLessThanOrEqual(PREVIEW_MAX_BYTES)
+  })
+
+  it('leaves ordinary samples untouched by the size bound', () => {
+    // The inverse, so the assertions above are not passing against a bound that
+    // rejects everything.
+    const { rows } = boundedSample(sampleOf(3))
+
+    expect(rows.slice(1)).toHaveLength(3)
   })
 })
 

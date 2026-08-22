@@ -476,6 +476,33 @@ ran. Both runs on this code landed on `e27727b`, before the roll fix; `ocr` revi
 it. No run exists on that exact tree, so the review was skipped rather than mis-scored. Worth
 carrying forward: **run `argus_review` on the commit `ocr` will review, not merely on its diff.**
 
+#### The local CodeRabbit round - one finding, confirmed, and it was in my own rationale
+
+`review_completed`, **20 of 20** diff files, coverage reconciled. One finding, `major`, and it was
+right about something the other two reviewers had read past.
+
+**The bound did not bound what I said it bounded.** `PREVIEW_ROW_LIMIT` caps how many rows travel; it
+says nothing about how *big* they are. A 25 MB file of twenty wide rows is still 25 MB crossing the
+server-action boundary into React state - which is the exact thing this design was introduced to
+prevent, written down in this story's own "The decision to record before building". The reasoning was
+sound and the implementation only delivered half of it.
+
+`PREVIEW_MAX_BYTES` (256 KB) now bounds the serialised payload as well, header included, carrying
+whole rows only. If not even the first row fits, none are carried and the counts still tell the
+truth - "0 of 143" is honest, if unhelpful, and a partial row would read as a defect in the
+treasurer's file rather than a limit of the preview.
+
+**Three mutations, three caught** - but only after a fixture was fixed. Removing the size check turns
+2 red and clamping `totalDataRows` by it turns 5. **Excluding the header from the budget turned
+nothing red**, because every fixture had a three-column header: the mistake was invisible at that
+size. A 1000-column header fixture now catches it. That is the fixture-vacuity discipline finding its
+own gap, again.
+
+**On the ingest.** This one joined - `missed: 1`, one lesson written
+(*"Look harder in TypeScript under core/extraction/** for input validation"*). The difference from
+the `ocr` round was running `argus_review` **while HEAD was the reviewed commit**, so a run existed
+to score against. That is now the rule rather than a happy accident.
+
 ### File List
 
 - `core/mapping/apply.ts` *(new)* - `applyMapping` and `mappedTargets`
@@ -501,6 +528,7 @@ carrying forward: **run `argus_review` on the commit `ocr` will review, not mere
 
 | Date | Change |
 | --- | --- |
+| 2026-08-22 | Local CodeRabbit round: the row bound did not bound the payload, which was this story's own stated rationale |
 | 2026-08-22 | `ocr` round: 20 comments, 8 confirmed - the field labels existed twice, and a test that would have gone quiet |
 | 2026-08-22 | Branch Argus round: a roll preview was missing the two columns that make it a roll; a follow-up `critical` refuted |
 | 2026-08-22 | Task 5: the preview on screen, with the counts UX-DR24 requires, wired through state, action and wizard |
