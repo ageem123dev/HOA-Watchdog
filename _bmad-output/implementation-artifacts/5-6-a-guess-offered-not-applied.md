@@ -102,11 +102,11 @@ deterministic; a setup-time suggestion a human approves is a different thing.
 
 - [x] **Task 1 — Normalise a heading the way a person would.** Case, space, punctuation, and the
       alias table. Pure, and the alias table is data. (AC1)
-- [ ] **Task 2 — Suggest a column for every required target, or say none.** The port and its
+- [x] **Task 2 — Suggest a column for every required target, or say none.** The port and its
       deterministic implementation, bounded and credential-free. (AC1, AC2, AC4, AC5, AC6)
-- [ ] **Task 3 — Pre-fill the draft from a suggestion.** Through `assign`, so a suggested pairing is
+- [x] **Task 3 — Pre-fill the draft from a suggestion.** Through `assign`, so a suggested pairing is
       the same kind of thing as a hand-made one and every 5.4 rule still applies. (AC3, AC8)
-- [ ] **Task 4 — Say what was suggested and what was not.** On the pairing surface, including the
+- [x] **Task 4 — Say what was suggested and what was not.** On the pairing surface, including the
       no-suggester case. (AC2, AC7)
 
 ## Dev Notes
@@ -332,11 +332,56 @@ no cast to be wrong.
 **Scope held:** no prompt, no key, no network. The only match for "prompt" in the diff is the doc
 comment quoting the epic.
 
+### AC audit
+
+Each criterion, the test that fails if the behaviour is removed, and the evidence that it does. **A
+name alone is not evidence** - a vacuous test satisfies "I named one" while staying green when the
+behaviour is deleted, which is the defect this project keeps finding.
+
+| AC | Test | Sensitivity shown by |
+| --- | --- | --- |
+| 1 Deterministic matching, real-shaped headings | `heading-match.test.ts::the abbreviations real exports use`, `::case, space and punctuation do not defeat a match` | Task 1 round: `Unit #` moved to the never-matches list, `Balance` to the always-amount list, `Amt` given `date` - **3 reds**. Plus the forked-folding mutation, caught only after the parity test was rewritten |
+| 2 Every required target answered, "none" included | `suggest.test.ts::names every required target of a %s, matched or not`; at the surface, `suggestion-surface.test.tsx::says plainly when a required field got no suggestion` | Dropping unmatched targets from the result - **12 red**. Removing the "no suggestion" marker - **1 red** |
+| 3 Pre-fills, does not decide; nothing stored | `prefill.test.ts::the mapping is the treasurer's (AC8)` (all three), `::nothing is stored, and nothing can be`; `suggestion-surface.test.tsx::lets a suggested column be unpaired by the means story 5.4 built` | Writing `pairings` directly instead of folding `assign` - **4 red**. Import scan is structural and asserted non-empty first |
+| 4 No tool access, no data credential | `suggest.test.ts::imports nothing but the domain vocabulary it matches against`, `::reaches no store, client, credential or network` | Allow-list, not deny-list, over `specifiersIn`. Guarded against vacuity by `::reads its imports at all` and by asserting the comment-stripper did not eat the code |
+| 5 Bounded, caps named | `suggest.test.ts::caps how many headings it will consider`, `::considers the last heading within the cap`, `::ignores a heading longer than the cap`, `::considers a heading exactly at the cap` | Removing either cap - **1 red each**. Off-by-one on either - **1 red each**. Both sides of both edges are asserted, so a cap of zero cannot pass |
+| 6 Headers not logged or retained | `suggest.test.ts::does not log or retain the headings it is given`, `::keeps nothing between calls` | Structural plus behavioural. The behavioural half would fail on module-level state |
+| 7 No suggester: usable, and says so | `suggestion-surface.test.tsx::with no suggester at all (AC7)` (five cases) | Ignoring the prop and always suggesting - **17 red**. Collapsing "never asked" into "found nothing" - **2 red** |
+| 8 The confirmed mapping is the treasurer's | `prefill.test.ts::ends identical to the draft built by hand from the same choices`; `suggestion-surface.test.tsx::stops calling a pairing suggested once it has been changed` | The fixture is asserted to be a real override before comparing; shortening it to a no-op - **1 red**. Deriving the marker from history rather than the current pairing - **1 red** |
+
+**The audit found nothing this time**, which is worth recording because it has found something on
+nine consecutive stories. The likeliest reason is that the mutation rounds ran per task rather than
+at the end, so the vacuous fixtures (three-column samples where two different counts coincide, a
+distinctness assertion over inputs that cannot collide) were caught before this point rather than by it.
+
 ### File List
 
 - `core/mapping/heading-match.ts` *(new)* - `matchKey`, `HEADING_ALIASES`, `targetForHeading`
 - `core/mapping/heading-match.test.ts` *(new)* - 49 cases, including the cross-check that every
   published target names itself
+- `core/mapping/suggest.ts` *(new)* - `ColumnSuggester` (the port 5.6b implements), `suggestColumns`,
+  `deterministicSuggester`, `MAX_SUGGESTIBLE_HEADINGS`, `MAX_HEADING_LENGTH`
+- `core/mapping/suggest.test.ts` *(new)* - 32 cases, including the structural AD-8 import scan and
+  the cross-check that every suggestion is one `assign` accepts
+- `core/mapping/prefill.ts` *(new)* - `draftFromSuggestion`, folding `assign`
+- `core/mapping/prefill.test.ts` *(new)* - 15 cases, including AC8 stated as an equality
+- `core/ports/module-specifiers.ts` *(new)* - `MODULE_SPECIFIER`, `specifiersIn`; the one import
+  scanner, extracted from three drifted copies
+- `core/ports/module-specifiers.test.ts` *(new)* - 19 cases, including the self-scan regression
+- `core/ports/boundary.test.ts` *(updated)* - migrated onto the shared scanner; gains comment blanking
+- `core/ports/finding.test.ts` *(updated)* - migrated onto the shared scanner
+- `core/tools/sole-data-path.test.ts` *(updated)* - migrated onto the shared scanner
+- `app/onboarding/mapping/column-pairing.tsx` *(updated)* - optional `suggester`, the pre-fill on both
+  the initialiser and the reset, the marker, and the summary line
+- `app/onboarding/mapping/mapping-wizard.tsx` *(updated)* - names `deterministicSuggester`
+- `app/onboarding/mapping/suggestion-surface.test.tsx` *(new)* - 17 render cases
+
+**Action item, not this story's work.** `neutralise` has no concept of a regex literal, so a quote
+inside one desynchronises its string tracking and the comments after it stop being blanked. Any
+production file containing a regex like `/['"]/` is read that way. It **fails closed** - prose is
+reported as an import, so the guards go red rather than letting a violation through - which is why it
+is recorded rather than fixed here. `module-specifiers.ts` sidesteps it by building its pattern from
+escapes, and `module-specifiers.test.ts` asserts the limitation so the day it is fixed, it says so.
 
 ## Change Log
 
