@@ -37,14 +37,14 @@ Then sign in and go to **Upload**. Start with `samples/assessment-roll.csv`; see
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env.local`. It names **twenty-one** variables in ten groups:
+Copy [`.env.example`](.env.example) to `.env.local`. It names **twenty-two** variables in ten groups:
 
 | Group | Variables | Why |
 | --- | --- | --- |
 | Database | `WATCHDOG_WRITER_DATABASE_URL`, `WATCHDOG_READER_DATABASE_URL` | Two roles, not one. The reader is `SELECT`-only, and AD-4's separation is real only where a connection string makes it real |
 | Sessions | `AUTH_SECRET` | Signs the session cookie |
 | Object storage | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, and optionally `R2_OUT_OF_SCOPE_BUCKET` | Document bytes live here; the database holds identity only (AD-16) |
-| Extraction | `GEMINI_API_KEY`, `GEMINI_OCR_MODEL` | Reading scans and photographs |
+| Extraction | `GEMINI_API_KEY`, `GEMINI_OCR_MODEL`, `GEMINI_SUGGEST_MODEL` | Reading scans and photographs, and guessing which spreadsheet column is which |
 | Agent service | `AGENT_SERVICE_TOKEN` | The bearer token `/tools/v1/*` accepts (AD-15). Unset means the endpoint refuses everyone — and until the private network exists, this token is the only thing in front of it |
 | Chat turn | `GATEWAY_SERVICE_TOKEN`, `AGENT_BASE_URL`, `GATEWAY_BASE_URL` | How the gateway reaches the agent service (AD-17). A **different** token from `AGENT_SERVICE_TOKEN`, which is the agent's identity in the other direction — one token used both ways means either runtime's compromise grants the other's identity. Two URLs for the same reason the tokens are two: `AGENT_BASE_URL` is how the gateway reaches the agent, `GATEWAY_BASE_URL` is how the agent reaches the gateway's tool endpoints for the rows an answer is built from |
 | Actor assertion | `ACTOR_ASSERTION_KEY` | The key the gateway signs a per-turn actor assertion with (AD-18). A **third** credential, and unlike the two above it carries a *subject* rather than authenticating a runtime — which is what lets the tool endpoints know which board member a turn is for. **Only the gateway holds it**: Node mints on the way out and verifies on the way back in, and the agent service relays what it cannot mint or read. The agent having this key would undo the property AD-18 exists for |

@@ -25,7 +25,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { Heading } from '@/core/extraction/headings'
-import { deterministicSuggester, type ColumnSuggester } from '@/core/mapping/suggest'
+import { suggestColumns } from '@/core/mapping/suggest'
 import { ColumnPairing } from './column-pairing'
 
 afterEach(cleanup)
@@ -45,15 +45,18 @@ const OPAQUE = headingsOf('Col1', 'Col2', 'Col3')
 
 const nameOf = (pattern: RegExp) => screen.getByRole('button', { name: pattern })
 
-/** A suggester that answers, but never with a column. */
-const SAYS_NOTHING: ColumnSuggester = {
-  suggest: (_headings, kind) => deterministicSuggester.suggest(headingsOf('x'), kind),
-}
+/**
+ * Asked, and found nothing: every required target present, every position null.
+ *
+ * Distinct from `undefined`, which means nobody was asked. AC7 turns on the
+ * difference and the surface says which.
+ */
+const SAYS_NOTHING = suggestColumns(headingsOf('x'), 'deposit')
 
 describe('the guess arrives already made', () => {
   it('pairs the columns it recognised', () => {
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     expect(nameOf(/^Date — required — reads Column 1/)).toBeTruthy()
@@ -63,7 +66,7 @@ describe('the guess arrives already made', () => {
 
   it('says a pairing was suggested, in words', () => {
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     // AC3's "offered, not applied" at the surface. Without this the treasurer
@@ -79,7 +82,7 @@ describe('the guess arrives already made', () => {
     const withAnExtra = headingsOf('Txn Date', 'Descr', 'Amt', 'Balance')
 
     render(
-      <ColumnPairing kind="deposit" headings={withAnExtra} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={withAnExtra} suggestions={suggestColumns(withAnExtra, 'deposit')} />,
     )
 
     const summary = screen.getByTestId('suggestion-summary').textContent ?? ''
@@ -92,7 +95,7 @@ describe('the guess arrives already made', () => {
   it('says plainly when a required field got no suggestion', () => {
     // AC2 at the surface: a required field nobody could match must not show the
     // same blank as one that was never considered.
-    render(<ColumnPairing kind="deposit" headings={OPAQUE} suggester={deterministicSuggester} />)
+    render(<ColumnPairing kind="deposit" headings={OPAQUE} suggestions={suggestColumns(OPAQUE, 'deposit')} />)
 
     expect(nameOf(/^Date — required — no column yet — no suggestion/)).toBeTruthy()
     expect(nameOf(/^Amount — required — no column yet — no suggestion/)).toBeTruthy()
@@ -107,7 +110,7 @@ describe('the guess arrives already made', () => {
      */
     const partly = headingsOf('Txn Date', 'Mystery', 'Whatsit')
 
-    render(<ColumnPairing kind="deposit" headings={partly} suggester={deterministicSuggester} />)
+    render(<ColumnPairing kind="deposit" headings={partly} suggestions={suggestColumns(partly, 'deposit')} />)
 
     expect(nameOf(/^Date — required — reads Column 1 .*— suggested/)).toBeTruthy()
     expect(nameOf(/^Description — required — no column yet — no suggestion/)).toBeTruthy()
@@ -122,7 +125,7 @@ describe('the guess arrives already made', () => {
     const withReference = headingsOf('Txn Date', 'Descr', 'Amt', 'Check No')
 
     render(
-      <ColumnPairing kind="deposit" headings={withReference} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={withReference} suggestions={suggestColumns(withReference, 'deposit')} />,
     )
 
     expect(nameOf(/^Reference — optional — reads Column 4 .*— suggested/)).toBeTruthy()
@@ -142,7 +145,7 @@ describe('the guess arrives already made', () => {
   })
 
   it('leaves the mapping unfinished when it could suggest nothing', () => {
-    render(<ColumnPairing kind="deposit" headings={OPAQUE} suggester={deterministicSuggester} />)
+    render(<ColumnPairing kind="deposit" headings={OPAQUE} suggestions={suggestColumns(OPAQUE, 'deposit')} />)
 
     expect(document.body.textContent ?? '').toContain('Still needed')
   })
@@ -170,7 +173,7 @@ describe('a suggestion alongside story 5.3’s heading problems', () => {
         kind="deposit"
         headings={DUPLICATED}
         problems={problems}
-        suggester={deterministicSuggester}
+        suggestions={suggestColumns(DUPLICATED, 'deposit')}
       />,
     )
 
@@ -187,7 +190,7 @@ describe('a suggestion alongside story 5.3’s heading problems', () => {
         kind="deposit"
         headings={DUPLICATED}
         problems={problems}
-        suggester={deterministicSuggester}
+        suggestions={suggestColumns(DUPLICATED, 'deposit')}
       />,
     )
 
@@ -210,7 +213,7 @@ describe('the treasurer overrides it', () => {
      * moved the column would be saying the machine chose what the human chose.
      */
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     // Free column 3, then give Date column 3 instead of the suggested column 1.
@@ -228,7 +231,7 @@ describe('the treasurer overrides it', () => {
 
   it('stops calling a pairing suggested once it has been cleared', () => {
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     fireEvent.click(nameOf(/^Unpair Date/))
@@ -239,7 +242,7 @@ describe('the treasurer overrides it', () => {
 
   it('lets a suggested column be unpaired by the means story 5.4 built', () => {
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     // The unpair control exists for a suggested pairing exactly as it does for a
@@ -256,7 +259,7 @@ describe('a second sample', () => {
      * initialiser is silently absent from here on.
      */
     const { rerender } = render(
-      <ColumnPairing kind="deposit" headings={OPAQUE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={OPAQUE} suggestions={suggestColumns(OPAQUE, 'deposit')} />,
     )
 
     expect(nameOf(/^Date — required — no column yet/)).toBeTruthy()
@@ -269,7 +272,7 @@ describe('a second sample', () => {
     const withAnExtra = headingsOf('Txn Date', 'Descr', 'Amt', 'Balance')
 
     rerender(
-      <ColumnPairing kind="deposit" headings={withAnExtra} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={withAnExtra} suggestions={suggestColumns(withAnExtra, 'deposit')} />,
     )
 
     expect(nameOf(/^Date — required — reads Column 1 .*— suggested/)).toBeTruthy()
@@ -291,7 +294,7 @@ describe('a second sample', () => {
     expect(screen.queryByRole('button', { name: /— suggested/ })).toBeNull()
 
     rerender(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     expect(nameOf(/^Date — required — reads Column 1 .*— suggested/)).toBeTruthy()
@@ -317,12 +320,12 @@ describe('a second sample', () => {
      * requirement. Raised by CodeRabbit.
      */
     const { rerender } = render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     for (let pass = 0; pass < 3; pass += 1) {
       rerender(
-        <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+        <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
       )
     }
 
@@ -333,12 +336,12 @@ describe('a second sample', () => {
     // The reason the reset is conditional at all: a render that changes nothing
     // must not throw away what the treasurer did.
     const { rerender } = render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     fireEvent.click(nameOf(/^Unpair Date/))
     rerender(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     expect(nameOf(/^Date — required — no column yet/)).toBeTruthy()
@@ -346,12 +349,12 @@ describe('a second sample', () => {
 
   it('re-runs it for a different kind too', () => {
     const { rerender } = render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     const roll = headingsOf('Unit #', 'Amt', 'Billing Cycle', 'Assessment Year')
     rerender(
-      <ColumnPairing kind="assessment_roll" headings={roll} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="assessment_roll" headings={roll} suggestions={suggestColumns(roll, 'assessment_roll')} />,
     )
 
     // `cycle` exists only on a roll — proof the new kind drove the suggestion.
@@ -399,7 +402,7 @@ describe('with no suggester at all (AC7)', () => {
     const neverAsked = screen.getByTestId('suggestion-summary').textContent
     unmount()
 
-    render(<ColumnPairing kind="deposit" headings={OPAQUE} suggester={SAYS_NOTHING} />)
+    render(<ColumnPairing kind="deposit" headings={OPAQUE} suggestions={SAYS_NOTHING} />)
     const foundNothing = screen.getByTestId('suggestion-summary').textContent
 
     expect(neverAsked).toBeTruthy()
@@ -414,7 +417,7 @@ describe('the announcement region', () => {
     // another is how an announcement gets read twice or not at all." The
     // suggestion summary is static text for that reason.
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     expect(document.querySelectorAll('[aria-live]')).toHaveLength(1)
@@ -424,7 +427,7 @@ describe('the announcement region', () => {
     // The suggestion is pre-filled, not announced: a live region firing on
     // mount is read over whatever the user was doing.
     render(
-      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggester={deterministicSuggester} />,
+      <ColumnPairing kind="deposit" headings={RECOGNISABLE} suggestions={suggestColumns(RECOGNISABLE, 'deposit')} />,
     )
 
     expect(screen.getByRole('status').textContent).toBe('')

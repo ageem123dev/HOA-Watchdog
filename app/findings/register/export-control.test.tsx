@@ -337,7 +337,17 @@ describe('a failed export says so, rather than looking like a finished one', () 
       await act(async () => {})
 
       expect(created).toHaveBeenCalled()
-      expect(revoked).not.toHaveBeenCalled()
+      // **This blob, not any blob.** `not.toHaveBeenCalled()` stood here and was
+      // over-broad: it also fails when an *unrelated* object URL is revoked, and
+      // an earlier test in this file can leave a pending revocation that lands
+      // inside this one once the machine is loaded enough to reorder them. Seen
+      // failing with `blob:nodedata:…` — a URL this test never created, since
+      // `createObjectURL` is mocked to return `blob:register`.
+      //
+      // The property the docblock above describes is unchanged and is what is
+      // asserted now: the file *this* control created has not been revoked at
+      // the moment the click returns.
+      expect(revoked).not.toHaveBeenCalledWith('blob:register')
 
       await act(async () => {
         vi.runAllTimers()

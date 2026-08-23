@@ -1,5 +1,6 @@
 import type { DocumentKind } from '@/core/extraction/record'
 import type { Heading, HeadingProblem } from '@/core/extraction/headings'
+import type { Suggestion } from '@/core/mapping/suggest'
 
 /**
  * What the mapping step holds between submissions.
@@ -29,6 +30,19 @@ export type SampleState =
       readonly rows: readonly (readonly string[])[]
       /** Data rows the file holds - UX-DR24's "of 143". */
       readonly totalDataRows: number
+      /**
+       * What to pre-fill the mapping with - story 5.6b.
+       *
+       * **Computed here rather than on the client**, because the model-backed
+       * half needs a credential that exists only on the server. Story 5.6
+       * passed a `ColumnSuggester` to `ColumnPairing` and let it call one during
+       * render; that port is synchronous and this is not, so the seam moved.
+       *
+       * `undefined` means **nobody was asked**; an array whose positions are all
+       * `null` means asked and nothing found. Story 5.6's AC7 rests on the
+       * difference and the surface still says which.
+       */
+      readonly suggestions?: readonly Suggestion[]
     }
   | { readonly status: 'error'; readonly error: string }
 

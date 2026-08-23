@@ -130,13 +130,13 @@ development_status:
   5-3-the-headers-we-were-given: done  # duplicates and blanks reported, not guessed
   5-4-mapping-one-column-to-another: done  # drag AND keyboard, neither the poor relation
   5-5-what-this-mapping-would-produce: done  # the preview, before anything is stored
-  5-6-a-guess-offered-not-applied: in-progress  # FR-10 deterministic half + the structural boundary
+  5-6-a-guess-offered-not-applied: done  # FR-10 deterministic half + the structural boundary
   # Split 2026-08-22, per the epic own guidance to try the boring version first and
   # the epic-5 action item. 5.6 is the deterministic matcher plus the whole
   # no-credential, bounded, nothing-retained boundary; 5.6b adds the model adapter
   # behind that port. FR-10 explicitly allows the model to be switched off entirely,
   # so 5.6 alone is a state the FR describes rather than a half-built one.
-  5-6b-the-model-earns-the-residue: backlog  # FR-10, AD-8; the adapter behind the 5.6 port
+  5-6b-the-model-earns-the-residue: in-progress  # FR-10, AD-8; the adapter behind the 5.6 port
   5-7-the-mapping-is-remembered: backlog  # and a mapping change is a deliberate act
   5-8-the-order-that-works: backlog  # no deposits before a roll
   5-9-the-first-directors: backlog  # retires or constrains scripts/add-board-member.mjs
