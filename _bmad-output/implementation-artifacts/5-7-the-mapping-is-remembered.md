@@ -112,7 +112,7 @@ already owns them, stop.** That is the violation, not a shortcut.
       kind, with 5.1's tenancy. (AC1, AC3)
 - [x] **Task 3 — A matching upload skips the wizard.** Look up by shape at upload time; fall through
       to the wizard when nothing matches, visibly. (AC2)
-- [ ] **Task 4 — Re-import what a change affects.** Through `ingest`'s existing read-and-replace,
+- [x] **Task 4 — Re-import what a change affects.** Through `ingest`'s existing read-and-replace,
       with bytes from object storage. Per-document outcomes, no partial documents. (AC4, AC7)
 - [ ] **Task 5 — Raise no alert twice.** Prove the suppression over a re-import, not only over a
       re-upload. (AC5)
@@ -336,6 +336,83 @@ adapter reads as "nothing was replaced". That is a second model's reading of the
 different family, and it moves the odds. It is not a run. The label stays *unverified* until this
 file's database half executes, because "two of us read it the same way" is how a shared wrong
 assumption survives.
+
+#### Task 4 - the re-import, which must not become a second writer
+
+**How the affected documents are identified.** Not by a recorded shape column. The bytes have to be
+fetched to re-import anyway, so computing each candidate's shape from those same bytes costs one
+extra parse and nothing else - and it covers documents imported *before* this story, which a column
+written at ingest time could not. A shape column would miss exactly the documents most likely to need
+re-importing, and would need a backfill that does this anyway.
+
+Candidates are `document` joined to `extraction` for the kind: `document_kind` lives on `extraction`
+(migration 006), not on `document`. One document has many extraction rows, so the join must not
+return it many times.
+
+**If it ran correctly, how would I know?** A document imported under the old mapping has different
+derived records afterwards, and a document of another shape - or another association - has the same
+ones it had before.
+
+**How am I going to test it?** By calling `ingest` for real with fakes beneath it, so the assertion
+that derived rows are replaced is made against the component that actually owns them. Asserting that
+`reimport` called some collaborator would prove only that I wired my own function to itself.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4a | A second write path for derived rows - the AD-13 violation the story names as the likeliest mistake | GUARD - `reimport` writes nothing; it calls `ingest`, and a structural test asserts it imports no repository that writes derived rows |
+| 4b | Re-importing another association's documents | GUARD - candidates derived from the member in SQL, as the mapping store is |
+| 4c | Re-importing documents of a *different shape* that merely share the kind | GUARD - shape recomputed per document from its own bytes and compared |
+| 4d | One document's failure aborting the rest, or worse, leaving the batch half-applied | GUARD - AC7; per-document outcome, each document's replace already atomic inside `ingest` |
+| 4e | Bytes missing from object storage (lifecycle rule, failed upload, wrong key) taking the whole re-import down | GUARD - reported for that document, the rest continue |
+| 4f | A document whose bytes no longer parse at all | GUARD - same treatment; it is not re-imported and says so |
+| 4g | The re-import silently reporting success for a document it skipped | GUARD - the outcome vocabulary distinguishes re-imported, unchanged, and failed; "skipped" is never "done" |
+| 4h | A duplicate row per document from the extraction join | GUARD - distinct; asserted on a document with two extraction rows |
+| 4i | Alerts re-sent for findings already raised | OUT-OF-SCOPE here, and Task 5's whole subject - AD-13 keys them, and Task 5 proves it over a re-import rather than only over a re-upload |
+
+**Cross-check:** the records after a re-import equal the records a fresh upload of the same bytes
+under the new mapping produces. The re-import agrees with the path it claims to be reusing.
+
+#### Task 4 - what the implementation cost, and the one thing I had backwards
+
+**The port moved.** `importedUnder` went on `DocumentRepository` first. `tsc` immediately named four
+places that would have had to grow a method none of them calls - `ingest.test.ts`, `reading.test.ts`,
+`extract-document.test.ts` and the Postgres adapter - because `ingest` has no business listing
+documents. Moved to its own narrow port, which is what this project already does elsewhere
+(`document-store.ts`, `mapping-store.ts`, `finding-alert.ts`). Nothing else broke after that.
+
+**`already-held` is the success case, and I had it backwards.** `reimport` first accepted only
+`read` as a successful re-ingest, so every successful re-import reported `unreadable`. `ingest` calls
+`extractions.replace` at ingest.ts:293 and returns `already-held` at ingest.ts:361 - the replace
+happens first. The word is addressed to somebody uploading a file they already uploaded; for a
+re-import, whose bytes are by definition already held, it means the rows *were* re-read and replaced.
+Six tests failed on it, which is the only reason I read those two line numbers instead of trusting
+the summary in the story's own Dev Notes.
+
+**Ten mutations, ten killed.** Seven against `reimport.ts` and its boundary, three against the
+candidate query.
+
+| Mutation | Result |
+| --- | --- |
+| a derived-row writer is imported | KILLED |
+| bytes re-uploaded through `store.put` | KILLED |
+| the shape comparison always matches | KILLED |
+| missing bytes treated as present | KILLED |
+| a failing document aborts the batch | KILLED |
+| `already-held` stops counting as a re-import | KILLED |
+| the `catch` removed | KILLED |
+| `distinct` dropped from the candidate query | KILLED |
+| the association becomes a bound parameter | KILLED |
+| the kind filter dropped | KILLED |
+
+**The boundary test exists because the behavioural one structurally cannot do this.**
+`reimport.test.ts` proves records reach `extractions.replace`; it cannot prove nothing *else* writes
+derived rows, because a `reimport` that called `ingest` and also inserted its own rows would pass
+every assertion in it. AD-13 is stated as a prohibition, so it needs a test shaped like one -
+`reimport-boundary.test.ts`, whose own last case asserts the file is non-empty, since every other
+assertion in it is an absence and would pass against nothing at all.
+
+**Still to prove under a database.** The candidate query has never executed, for the same reason the
+mapping store's has not. `distinct` and the join to `extraction` are asserted as text only.
 
 ### Review Findings
 
