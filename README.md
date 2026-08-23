@@ -174,7 +174,7 @@ core/         Pure domain logic — depends on nothing outward, performs no I/O
 adapters/     The outside world: auth, db, extraction, storage
 catalog/      The versioned query catalog — reviewed SQL and typed parameters, no I/O
 agent/        The Python reasoning service — holds the model key, never a data credential (AD-3)
-migrations/   25 SQL migrations, applied in order by `npm run migrate`
+migrations/   26 SQL migrations, applied in order by `npm run migrate`
 scripts/      Operational entry points (migrate, add-board-member, build-samples, smoke, verify-*)
 samples/      One example upload per accepted format
 docs/         The upload contract and the as-built system description

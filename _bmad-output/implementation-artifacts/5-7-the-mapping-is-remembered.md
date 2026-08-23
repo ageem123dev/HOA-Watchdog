@@ -224,8 +224,6 @@ the same rectangle, producing the same records - the round trip, not the fields.
 
 ### Review Findings
 
-### Review Findings
-
 ### Completion Notes List
 
 ### File List

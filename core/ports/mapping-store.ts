@@ -1,0 +1,52 @@
+/**
+ * Where a treasurer's column mapping is remembered (story 5.7).
+ *
+ * Migration 026 is the authority on the rules; this is the shape a caller
+ * reaches them through. Read that file's header before changing anything here —
+ * the two are one design, as `finding-alert.ts` says of its own pair.
+ *
+ * ## What identifies a mapping
+ *
+ * An association, a document kind, and the **shape** of the heading row it was
+ * built against — `shapeKey` in `core/mapping/saved.ts`. All three are identity,
+ * not filters: a mapping found across associations would import one board's file
+ * under another board's column meanings, and one found across kinds would read a
+ * deposit export as a roll.
+ *
+ * ## Saving replaces, and says what it replaced
+ *
+ * A treasurer who re-maps a shape they have already mapped is *changing* it, and
+ * story 5.7's whole second half turns on that being visible: the change is
+ * recorded, and it re-imports what it affects. So `save` returns what was there
+ * before rather than `void` — a caller that cannot see the previous mapping
+ * cannot tell a first save from a change, and would have to read-then-write to
+ * find out, which is the race this avoids.
+ *
+ * ## There is no `delete`
+ *
+ * Not because deletion is unthinkable, but because nothing in story 5.7 needs
+ * it and a method declared here would be one nobody has decided the meaning of.
+ * Deleting a mapping that documents were imported under raises the same question
+ * this story answered for changing one, and it deserves the same deliberate
+ * answer rather than an inherited default.
+ */
+
+import type { SavedMapping } from '../mapping/saved'
+
+export interface MappingStore {
+  /**
+   * The mapping for this association, kind and shape, or `null`.
+   *
+   * `null` is "nobody has mapped this shape", which is what sends an upload to
+   * the wizard. It is not an error and must not be reported as one.
+   */
+  find(associationId: string, kind: SavedMapping['kind'], shape: string): Promise<SavedMapping | null>
+
+  /**
+   * Remember `mapping`, replacing any mapping for the same identity.
+   *
+   * Returns the mapping that was replaced, or `null` if this is the first for
+   * that shape — see the note above on why this is not `void`.
+   */
+  save(mapping: SavedMapping): Promise<SavedMapping | null>
+}
