@@ -114,7 +114,7 @@ already owns them, stop.** That is the violation, not a shortcut.
       to the wizard when nothing matches, visibly. (AC2)
 - [x] **Task 4 — Re-import what a change affects.** Through `ingest`'s existing read-and-replace,
       with bytes from object storage. Per-document outcomes, no partial documents. (AC4, AC7)
-- [ ] **Task 5 — Raise no alert twice.** Prove the suppression over a re-import, not only over a
+- [x] **Task 5 — Raise no alert twice.** Prove the suppression over a re-import, not only over a
       re-upload. (AC5)
 - [ ] **Task 6 — The record, and the warning before it.** What will change, then what did. (AC6)
 
@@ -413,6 +413,36 @@ assertion in it is an absence and would pass against nothing at all.
 
 **Still to prove under a database.** The candidate query has never executed, for the same reason the
 mapping store's has not. `distinct` and the join to `extraction` are asserted as text only.
+
+#### Task 5 - the suppression holds, but not by the mechanism I claimed
+
+The tests drive the real chain: `reimport` to `ingest` to `notifyFindings`. Two fixture errors were
+caught by the **control test** rather than by reading - `recipients.active()` is the method, not
+`forFinding`, and `toAlertEmail` reads a finding's evidence to build the message, so a three-string
+stub produced no email and therefore no send. Without a control asserting the first alert *does* go,
+all four tests would have passed against an alerting path that never sent anything.
+
+**The interesting result.** The file's own header explained that suppression came from
+`awaitingAlert` excluding delivered findings, and asserted that "a fake reader that ignored the ledger
+would prove nothing at all". Mutating the fake reader to always offer the finding **passed all four
+tests** - because `claim` refuses a finding already delivered, so the send never happens. The prose
+named the wrong mechanism.
+
+Corrected, and turned into a property rather than a footnote: a fifth test now asserts suppression
+survives a *permissive reader*, which is defence in depth made explicit. Removing the `claim` check
+from `notify-findings.ts` kills a test, so that mechanism is now proven load-bearing. The harness
+mutation still survives - correctly, because one test now sets up exactly that scenario deliberately.
+
+| Mutation | Result |
+| --- | --- |
+| `ingest` stops passing the alert ledger | KILLED (all four) |
+| `reimport` stops calling `ingest` | KILLED |
+| the `claim` check removed from `notify-findings.ts` | KILLED |
+| the fake reader made permanently permissive | SURVIVED - now an asserted property |
+
+**What this does not prove.** `awaitingAlert`'s exclusion is SQL, and
+`finding-reader-postgres.test.ts` is what proves the SQL implements it. This file proves a re-import
+routes *through* the ledger rather than around it, which is the part that is new.
 
 ### Review Findings
 
