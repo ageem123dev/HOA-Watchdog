@@ -21,6 +21,10 @@ import { recordRoll } from './record-roll'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
+import { readHeadings } from '../extraction/headings'
+import { applyMapping } from '../mapping/apply'
+import { shapeKey } from '../mapping/saved'
+import type { MappingStore } from '../ports/mapping-store'
 
 /**
  * Ingestion: the only way ledger data enters this system (AD-1).
@@ -100,6 +104,14 @@ export type IngestOutcome =
   | { readonly filename: string; readonly outcome: 'figures-not-stored'; readonly documentId: string }
 
 export interface IngestDependencies {
+  /**
+   * Absent means no upload finds a saved mapping - exactly the behaviour of
+   * every release before story 5.7. Optional so an unconfigured deploy ingests
+   * rather than fails, and so the many callers that have no mapping to offer
+   * need not know this exists.
+   */
+  readonly mappings?: MappingStore
+
   readonly store: DocumentStore
   readonly repository: DocumentRepository
   readonly extractions: ExtractionRepository
@@ -206,7 +218,13 @@ async function ingestOne(
     // Everything above is durable now. Reading happens after, so a document
     // that cannot be read is still held and a corrected export needs no
     // re-upload — and a failed read cannot cost what was already stored.
-    const reading = read(assessment.contentType, bytes, documentKind, deps)
+    const reading = await read(
+      assessment.contentType,
+      bytes,
+      documentKind,
+      uploadedBy,
+      deps,
+    )
 
     if (reading === 'no-reader') {
       // Already-held wins here. The treasurer uploaded this file before, and
@@ -365,12 +383,26 @@ type Reading = ReturnType<typeof readRows> | 'no-reader'
  * `no-reader` stays distinct from `unreadable-file` here as it always has: a
  * type nothing reads yet is *held* for a human, which is the outcome above.
  */
-function read(
+/**
+ * Bytes to records, through the treasurer's saved column mapping if they have
+ * one (story 5.7, AC2).
+ *
+ * The mapping goes here and nowhere else. `toRectangle` has just produced rows
+ * whose first is the export's own heading row, and `applyMapping` turns exactly
+ * that into a rectangle headed by the *importer's* vocabulary - which is what
+ * `readRows` already expects. Everything downstream is unchanged and does not
+ * know a mapping was involved.
+ *
+ * Async because the lookup is. That cost is one `await` at the single call site,
+ * against putting the lookup where the shape is not yet known.
+ */
+async function read(
   contentType: string,
   bytes: Uint8Array,
   documentKind: DocumentKind,
+  uploadedBy: string,
   deps: IngestDependencies,
-): Reading {
+): Promise<Reading> {
   const rectangle = toRectangle(contentType, bytes, deps.workbooks)
 
   if (!rectangle.ok) {
@@ -383,7 +415,53 @@ function read(
       : { ok: false, problems: [{ reason: 'unreadable-file' }] }
   }
 
-  return readRows(rectangle.rows, documentKind)
+  return readRows(await mapped(rectangle.rows, documentKind, uploadedBy, deps), documentKind)
+}
+
+/**
+ * The saved mapping applied, or the rows exactly as they arrived.
+ *
+ * Three ways this declines to act, and each is a decision rather than an
+ * oversight:
+ *
+ * - **No store configured.** An unconfigured deploy must ingest exactly as it
+ *   did before this story, so an absent `mappings` is not an error.
+ * - **No mapping for this shape.** `null` means nobody has mapped this export,
+ *   which is what sends the treasurer to the wizard. Not an error either.
+ * - **The store failed.** Caught, because a mapping lookup must not be able to
+ *   fail an upload. The file then reads as it would with no mapping - which for
+ *   a non-standard heading row is a refusal the treasurer is shown, not a wrong
+ *   import they are not. Failing *open* here would mean a database blip silently
+ *   turning a mapped export into an unreadable one, which is the safe direction.
+ *
+ * The shape key is computed from the rectangle's own headings, so a mapping can
+ * only be found for the exact heading row - in the exact order - it was built
+ * against. That is the whole defence against the disaster case: a mapping is a
+ * list of *positions*, so one applied to a file whose columns moved reads every
+ * value into the wrong field, and every value is still plausible there.
+ */
+async function mapped(
+  rows: readonly (readonly string[])[],
+  documentKind: DocumentKind,
+  uploadedBy: string,
+  deps: IngestDependencies,
+): Promise<readonly (readonly string[])[]> {
+  if (!deps.mappings) return rows
+
+  const headings = readHeadings(rows)
+  if (!headings.ok) return rows
+
+  try {
+    const saved = await deps.mappings.find(
+      uploadedBy,
+      documentKind,
+      shapeKey(documentKind, headings.headings),
+    )
+
+    return saved ? applyMapping(rows, saved.mapping) : rows
+  } catch {
+    return rows
+  }
 }
 
 export async function ingest(

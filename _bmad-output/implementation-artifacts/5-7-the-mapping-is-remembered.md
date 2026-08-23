@@ -110,7 +110,7 @@ already owns them, stop.** That is the violation, not a shortcut.
       storage, no `ingest`. (AC8)
 - [ ] **Task 2 — Remember a mapping.** The port, the shape key, and the adapter. Per association and
       kind, with 5.1's tenancy. (AC1, AC3)
-- [ ] **Task 3 — A matching upload skips the wizard.** Look up by shape at upload time; fall through
+- [x] **Task 3 — A matching upload skips the wizard.** Look up by shape at upload time; fall through
       to the wizard when nothing matches, visibly. (AC2)
 - [ ] **Task 4 — Re-import what a change affects.** Through `ingest`'s existing read-and-replace,
       with bytes from object storage. Per-document outcomes, no partial documents. (AC4, AC7)
@@ -221,6 +221,71 @@ re-proved by story 5.6 Task 1 and again by 5.6b's residue.
 
 **Cross-check:** a mapping saved from a draft and read back must be accepted by `applyMapping` against
 the same rectangle, producing the same records - the round trip, not the fields.
+
+#### Task 3 - the saved mapping reaches the reading, or the file fails as it did
+
+**Where it goes.** `read()` in `ingest.ts` turns bytes into a rectangle and hands it to `readRows`. A
+saved mapping slots exactly between: `applyMapping` emits a rectangle carrying the importer's *own*
+header row, which is precisely what `readRows` expects. Nothing downstream changes.
+
+**If it ran correctly, how would I know?** A CSV headed `Txn Date,Descr,Amt` - which `readRows`
+refuses today - imports when a mapping for that shape is saved, and still refuses when one is not.
+
+**How am I going to test it?** Through `ingest` with a fake store, because the claim is about what the
+*ingestion path* does. A test that called `applyMapping` directly would prove the transform works and
+say nothing about whether anything calls it - the shape story 5.2 shipped, where an action required a
+field the form never sent and every gate stayed green.
+
+**Could this happen elsewhere?** `read` is on the hot path for every upload. The risk is not the happy
+case; it is what happens when the store is absent, slow, or wrong.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | A mapping applied to a file it was not made for - the disaster case, because a mapping is *positions* and every value would still be plausible in the wrong field | GUARD - exact shape match including order; asserted with a reordered file |
+| 3b | The store absent (an unconfigured deploy, or a caller that does not pass it) failing the upload instead of behaving as today | GUARD - optional dependency; a file whose headings are already the importer's still imports |
+| 3c | The store **throwing** and taking the upload down with it | GUARD - caught; the file then reads as it would with no mapping, which for a non-standard header is a refusal, not a wrong import |
+| 3d | The lookup anchored on something other than the uploader, so one board's mapping is applied to another board's file | GUARD - `find(uploadedBy, ...)`; the adapter derives the association in SQL |
+| 3e | A mapping applied to a document kind it was not made for | GUARD - kind is in the key |
+| 3f | The mapping applied but `already-held` short-circuiting first, so a re-upload silently keeps the old parse | NOTE - `alreadyHeld` only short-circuits under `no-reader`; the ordinary path re-reads and replaces, which is what Task 4 depends on |
+| 3g | A non-tabular document (a scanned PDF) paying for a lookup it can never use | GUARD - only the rectangle path looks anything up |
+
+**Cross-check:** the same bytes, the same kind and the same saved mapping produce the same records
+through `ingest` as `applyMapping` + `readRows` produce directly - the integration agreeing with the
+units it is built from.
+
+#### Task 3 - the sensitivity check, and the one mutation that lived
+
+Five decisions in `mapped()`, each mutated on its own, `mapping-wiring.test.ts` run against each,
+every mutation verified as applied by anchor count before the run (a `
+` pattern against a CRLF file
+silently no-ops, and a no-op mutation is indistinguishable from a caught one):
+
+| Mutation | Result |
+| --- | --- |
+| `catch` replaced by `finally`, so a store failure escapes | KILLED |
+| the mapping never applied (`saved ? rows : rows`) | KILLED |
+| the lookup keyed on another member instead of the uploader | KILLED |
+| the lookup keyed on a constant instead of the shape | KILLED |
+| the absent-store guard disabled (`if (false)`) | **SURVIVED** |
+
+**Why the last one lived, and why the guard stays anyway.** With `if (!deps.mappings) return rows`
+disabled, `deps.mappings.find` throws a `TypeError` - *inside the try* - and the catch returns the
+rows unchanged. The absent-store path and the store-outage path are the same path, so no test can
+separate them, and the guard is behaviourally redundant to the catch.
+
+I am recording that rather than deleting the guard or writing a test that only appears to demand it.
+Deleting it would make an unconfigured deploy depend on throwing and catching a `TypeError` per
+upload, and would leave the next person to narrow that catch - which is the correct thing to do to it
+one day - silently breaking the no-store path. The guard is defence in depth and says what the
+optional dependency means; what it is *not* is proven by a test, and claiming otherwise is the
+vacuous-guard defect this story has already tripped over once.
+
+**Where it tripped over it once.** The first draft of `mapping-wiring.test.ts` asserted
+`not.toBe('recorded')` for the three refusal cases. `recorded` is not one of `ingest`'s outcomes at
+all, so those assertions passed for every outcome including success - three guards proving nothing,
+in the file whose whole purpose is proving something. Caught by running them: one *other* assertion
+failed with `expected 'read' to be 'recorded'`, which named the vocabulary error. Now asserted as
+`toBe('unreadable')` and `toBe('read')`.
 
 ### Review Findings
 
