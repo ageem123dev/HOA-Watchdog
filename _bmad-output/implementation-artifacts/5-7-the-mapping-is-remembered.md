@@ -444,6 +444,53 @@ mutation still survives - correctly, because one test now sets up exactly that s
 `finding-reader-postgres.test.ts` is what proves the SQL implements it. This file proves a re-import
 routes *through* the ledger rather than around it, which is the part that is new.
 
+#### Task 6 - the warning, and the record
+
+**The warning shares its rule with the run rather than restating it.**
+`previewReimport` and `reimport` both go through one `classify`, extracted for
+the purpose. Two copies of "does this change affect this document" would drift
+into a preview promising a number the run did not honour - and the number is the
+thing the treasurer consented to, which makes this the worst possible place in
+the story for the duplicated-rule defect. A test asserts the promise and the run
+agree, and that the promise was not the trivial one (something affected,
+something not).
+
+The preview counts unreachable documents separately rather than passing over
+them. A treasurer told only "1 will be re-read" would never learn a second is
+unreachable, and this is the moment they are deciding, so it is the moment the
+fact is worth something.
+
+**The record is its own table, and un-editable, which the mapping is not.**
+Migration 027. A mapping row is replaced in place, so anything recorded *on* it
+about a change is destroyed by the next change - a history table is the only
+shape that answers "what did this look like in March", the question a board asks
+when a figure is disputed. 026 deliberately keeps UPDATE because replacing a
+mapping is the story's second half; 027 revokes it, because a record of what
+happened must not be rewritable. Two adjacent tables with opposite answers, and a
+migration written by copying the other would carry the wrong one silently - which
+is what that assertion exists to catch.
+
+**Eleven mutations, eleven killed** - four on the preview, four on the migration,
+three on the adapter. The adapter's three are worth naming because none of them
+is visible to the type checker:
+
+- the association becoming a bound parameter
+- `JSON.stringify(null)` producing the *string* `'null'` - a jsonb value meaning
+  "no mapping", where a SQL NULL means "nothing was replaced". 027 leaves the
+  column nullable for exactly that distinction, and stringifying unconditionally
+  erases it
+- the outcomes handed to `node-postgres` as a JavaScript array, which it maps to
+  a Postgres *array* against a `jsonb` column
+
+**The README guard caught the new migration** and was updated from 26 to 27. Left
+here as a note that it works: a migration added without it would have failed the
+suite rather than shipped quietly.
+
+**No database half for the change-log adapter**, deliberately. Every assertion
+worth making about it is the shape of one insert, and `migrations/mapping-change.test.ts`
+already carries the database half for this table. A second skipping block
+re-inserting the same row would be a file that never runs, proving nothing twice.
+
 ### Review Findings
 
 ### Completion Notes List

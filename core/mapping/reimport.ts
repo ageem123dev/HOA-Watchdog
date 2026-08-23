@@ -60,6 +60,16 @@ export type ReimportResult =
   | 'unreadable'
   | 'failed'
 
+/** What a change would do, before the treasurer agrees to it. */
+export interface ReimportPreview {
+  /** Documents of this kind the association holds - the pool, not the target. */
+  readonly considered: number
+  /** How many would actually be re-read. This is the number AC6 asks for. */
+  readonly affected: number
+  /** Held but unreachable or unparseable. Shown, because silence implies zero. */
+  readonly unreadable: number
+}
+
 export interface ReimportOutcome {
   readonly documentId: string
   readonly filename: string
@@ -102,6 +112,85 @@ export async function reimport(
   return outcomes
 }
 
+/**
+ * How many documents a change would re-read, without re-reading them (AC6).
+ *
+ * The treasurer is told this *before* they confirm, because a mapping edit
+ * rewrites financial history and "12 documents will be re-read" is the whole
+ * difference between a deliberate act and an accident.
+ *
+ * **It shares `classify` with the re-import rather than restating the rule.**
+ * Which documents a change affects is one question with one answer; asking it
+ * twice in two places is the duplicated-rule defect this project has found five
+ * times, and here the two copies would drift into a preview that promised a
+ * number the run did not honour - the worst possible place for it, since the
+ * number is what the treasurer consented to.
+ *
+ * It costs the same fetches the run costs, and that is not avoidable: the shape
+ * lives in the bytes. The alternative is a stored shape column, which
+ * `reimport-candidates.ts` explains is absent for exactly the documents that
+ * matter most.
+ */
+export async function previewReimport(
+  uploadedBy: string,
+  kind: DocumentKind,
+  shape: string,
+  deps: ReimportDependencies,
+): Promise<ReimportPreview> {
+  const held = await deps.candidates.importedUnder(uploadedBy, kind)
+  let affected = 0
+  let unreadable = 0
+
+  for (const document of held) {
+    const verdict = await classify(document, shape, kind, deps)
+
+    if (verdict.affected) affected += 1
+    // Counted and shown, not hidden. A document whose bytes are gone or will not
+    // parse is one this change cannot fix, and a treasurer told only "3 will be
+    // re-read" would not learn that a fourth is unreachable until never.
+    else if (verdict.result !== 'unaffected') unreadable += 1
+  }
+
+  return { considered: held.length, affected, unreadable }
+}
+
+type Verdict =
+  | { readonly affected: true; readonly bytes: Uint8Array }
+  | { readonly affected: false; readonly result: ReimportResult }
+
+/**
+ * Does this change affect this document, and if so, its bytes.
+ *
+ * The single owner of that question. It returns the bytes it already fetched so
+ * the re-import does not fetch them twice within one run.
+ */
+async function classify(
+  document: { readonly storageKey: string; readonly contentType: string },
+  shape: string,
+  kind: DocumentKind,
+  deps: ReimportDependencies,
+): Promise<Verdict> {
+  const bytes = await deps.store.get(document.storageKey)
+  // Not an exception. A key object storage does not have is a fact about this
+  // document, and the batch continues - reported so it can be chased, never
+  // folded into `unaffected`, which would say the mapping simply did not apply.
+  if (bytes === null) return { affected: false, result: 'bytes-missing' }
+
+  const rectangle = toRectangle(document.contentType, bytes, deps.workbooks)
+  if (!rectangle.ok) return { affected: false, result: 'unreadable' }
+
+  const headings = readHeadings(rectangle.rows)
+  if (!headings.ok) return { affected: false, result: 'unreadable' }
+
+  // The shape is re-derived from these bytes and compared to the shape whose
+  // mapping changed. This is the whole of 4c: a document sharing the association
+  // and the kind but not the heading row is not affected, and re-importing it
+  // would apply a mapping built for somebody else's columns.
+  if (shapeKey(kind, headings.headings) !== shape) return { affected: false, result: 'unaffected' }
+
+  return { affected: true, bytes }
+}
+
 async function one(
   document: { readonly storageKey: string; readonly filename: string; readonly contentType: string },
   uploadedBy: string,
@@ -110,23 +199,12 @@ async function one(
   deps: ReimportDependencies,
 ): Promise<ReimportResult> {
   try {
-    const bytes = await deps.store.get(document.storageKey)
+    const verdict = await classify(document, shape, kind, deps)
+    if (!verdict.affected) return verdict.result
+    const bytes = verdict.bytes
     // Not an exception. A key object storage does not have is a fact about this
     // document, and the batch continues — reported so it can be chased, never
     // folded into `unaffected`, which would say the mapping simply did not apply.
-    if (bytes === null) return 'bytes-missing'
-
-    const rectangle = toRectangle(document.contentType, bytes, deps.workbooks)
-    if (!rectangle.ok) return 'unreadable'
-
-    const headings = readHeadings(rectangle.rows)
-    if (!headings.ok) return 'unreadable'
-
-    // The shape is re-derived from these bytes and compared to the shape whose
-    // mapping changed. This is the whole of 4c: a document sharing the
-    // association and the kind but not the heading row is not affected, and
-    // re-importing it would apply a mapping built for somebody else's columns.
-    if (shapeKey(kind, headings.headings) !== shape) return 'unaffected'
 
     const [outcome] = await deps.ingest(
       [{ filename: document.filename, contentType: document.contentType, bytes, documentKind: kind }],

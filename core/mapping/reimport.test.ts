@@ -30,7 +30,7 @@ import type { Reimportable, ReimportCandidates } from '../ports/reimport-candida
 import type { SavedMapping } from './saved'
 import { shapeKey } from './saved'
 import { readHeadings } from '../extraction/headings'
-import { reimport } from './reimport'
+import { previewReimport, reimport } from './reimport'
 
 const TREASURER = 'director-1'
 
@@ -255,6 +255,71 @@ describe('one document going wrong does not take the others with it', () => {
     expect(new Set(outcomes.map((o) => o.outcome))).toEqual(
       new Set(['re-imported', 'unaffected', 'bytes-missing']),
     )
+  })
+})
+
+describe('the warning before the act (AC6)', () => {
+  const preview = (h: Harness) =>
+    previewReimport(TREASURER, 'deposit', MAPPING.shape, {
+      ...h.deps,
+      ingest,
+      candidates: h.candidates,
+    })
+
+  it('counts what would be re-read, separately from what is merely held', async () => {
+    const h = harness([doc('a', 'march.csv'), doc('b', 'other-bank.csv')], {
+      'key/a': MAPPED,
+      'key/b': OTHER,
+    })
+
+    expect(await preview(h)).toEqual({ considered: 2, affected: 1, unreadable: 0 })
+  })
+
+  it('counts a document it cannot reach rather than passing over it', async () => {
+    /**
+     * A treasurer told "1 will be re-read" and nothing else would never learn
+     * that a second document is unreachable - and this is the moment they are
+     * deciding, so it is the moment the fact is worth something. Silence here
+     * reads as zero.
+     */
+    const h = harness([doc('a', 'march.csv'), doc('gone', 'lost.csv')], { 'key/a': MAPPED })
+
+    expect(await preview(h)).toEqual({ considered: 2, affected: 1, unreadable: 1 })
+  })
+
+  it('promises exactly what the re-import then does', async () => {
+    /**
+     * The anti-drift assertion, and the reason `classify` is shared rather than
+     * copied. The preview is what the treasurer consents to; a run that
+     * re-imported a different number than the one they agreed to would be the
+     * worst place in this story for the duplicated-rule defect to land.
+     *
+     * Two harnesses, because the run mutates its own world - the same documents,
+     * the same bytes, the same mapping.
+     */
+    const documents = [doc('a', 'march.csv'), doc('b', 'other-bank.csv'), doc('gone', 'lost.csv')]
+    const bytes = { 'key/a': MAPPED, 'key/b': OTHER }
+
+    const promised = await preview(harness(documents, bytes))
+    const done = await run(harness(documents, bytes))
+
+    expect(done.filter((outcome) => outcome.outcome === 're-imported')).toHaveLength(
+      promised.affected,
+    )
+    expect(done).toHaveLength(promised.considered)
+    // And the promise was not the trivial one: something was, and something was not.
+    expect(promised.affected).toBeGreaterThan(0)
+    expect(promised.affected).toBeLessThan(promised.considered)
+  })
+
+  it('reads nothing back into the system', async () => {
+    // A preview that re-imported as a side effect would rewrite history the
+    // treasurer has not yet agreed to rewrite - the whole point of asking first.
+    const h = harness([doc('a', 'march.csv')], { 'key/a': MAPPED })
+
+    await preview(h)
+
+    expect(h.replaced).toEqual([])
   })
 })
 
