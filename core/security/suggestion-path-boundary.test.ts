@@ -91,6 +91,24 @@ const FORBIDDEN_IMPORTS = [
   'core/answer',
 ] as const
 
+/**
+ * Whether a specifier reaches somewhere this path may not.
+ *
+ * Named so the sweep and the planted-violation cases use **one** rule. Two
+ * copies would let the planted cases pass against a rule the sweep does not
+ * actually apply, which is the shape of a guard that proves nothing.
+ */
+const forbidden = (specifier: string): boolean =>
+  FORBIDDEN_IMPORTS.some(
+    (directory) =>
+      specifier.includes(`/${directory}/`) ||
+      specifier.startsWith(`@/${directory}`) ||
+      specifier.startsWith(`${directory}/`),
+  )
+
+/** `process.env[expression]` — a read whose name is not in the source at all. */
+const COMPUTED_ENV_READ = /process\s*\.\s*env\s*\[\s*[^'"`\]]/
+
 const sources = SUGGESTION_PATH.map((path) => ({
   path,
   text: readFileSync(join(REPO_ROOT, path), 'utf8'),
@@ -116,17 +134,64 @@ describe('the guard can actually fail', () => {
   })
 
   it('detects a planted credential read', () => {
-    // A scanner reporting green on the thing it exists to catch is worse than
-    // none — `boundary.test.ts`'s lesson, applied to this file's own detector.
-    expect(readsEnvironmentVariable('const x = process.env.REASONING_API_KEY', 'REASONING_API_KEY'))
-      .toBe(true)
-    expect(readsEnvironmentVariable('const x = 1', 'REASONING_API_KEY')).toBe(false)
+    /**
+     * A scanner reporting green on the thing it exists to catch is worse than
+     * none — `boundary.test.ts`'s lesson, applied to this file's own detector.
+     *
+     * **Planted with a name that is not a real credential**, and that is not
+     * fussiness. Writing `process.env.REASONING_API_KEY` here — even as test
+     * data inside a string — made AD-10's own guard report *this file* as a
+     * module reading both sides of the boundary, because a text scanner cannot
+     * tell a planted violation from a real one. `no-model-in-alerts.test.ts`
+     * avoids it by keeping credential names as bare strings and never spelling
+     * `process.env.` beside one.
+     */
+    expect(readsEnvironmentVariable('const x = process.env.EXAMPLE_NOT_A_SECRET', 'EXAMPLE_NOT_A_SECRET')).toBe(true)
+    expect(readsEnvironmentVariable('const x = 1', 'EXAMPLE_NOT_A_SECRET')).toBe(false)
   })
 
-  it('detects a planted forbidden import', () => {
-    expect(specifiersIn("import { x } from '@/adapters/db/catalog'")).toContain(
-      '@/adapters/db/catalog',
-    )
+  it.each([
+    ['a static import', "import { x } from '@/adapters/db/catalog'", '@/adapters/db/catalog'],
+    ['a namespace import', "import * as db from '@/adapters/db'", '@/adapters/db'],
+    ['a side-effect import', "import '@/adapters/db/init'", '@/adapters/db/init'],
+    ['a dynamic import', "await import('@/adapters/db')", '@/adapters/db'],
+    ['relative traversal', "import { x } from '../../adapters/db/catalog'", '../../adapters/db/catalog'],
+  ])('detects a planted forbidden import: %s', (_label, source, expected) => {
+    // Each of these is a shape `ocr` asked whether the sweep below would catch.
+    // Asserting the answer beats arguing it — and the traversal case turned out
+    // to be caught already, because `../../adapters/db/x` does contain
+    // `/adapters/db/`.
+    const found = specifiersIn(source)
+
+    expect(found).toContain(expected)
+    expect(found.some((s) => forbidden(s)), `${expected} not classified as forbidden`).toBe(true)
+  })
+
+  it('reads no environment variable through a computed key', () => {
+    /**
+     * **A targeted patch for a hole in the shared detector.**
+     * `readsEnvironmentVariable` matches `process.env.NAME`, `process.env['NAME']`
+     * and destructuring — but not `process.env[someVariable]`, where the name is
+     * not in the source at all. That gap fails *open*, and `ocr` raised it.
+     *
+     * Widening the shared detector is not this story's to do: it is used by
+     * AD-10's boundary guard and the alerting guard, and a change there needs its
+     * own round. What is cheap and closes the hole *for this path* is refusing
+     * computed access outright — no module here has any reason to want it.
+     */
+    for (const { path, text } of sources) {
+      expect(text, `${path} reads process.env through a computed key`).not.toMatch(
+        COMPUTED_ENV_READ,
+      )
+    }
+  })
+
+  it('detects a planted computed env read', () => {
+    // The detector above, shown to fail on the thing it exists to catch.
+    expect('const k = n; process.env[k]').toMatch(COMPUTED_ENV_READ)
+    // A literal key is the *allowed* form, and naming a real credential here
+    // would trip AD-10's guard for the reason above.
+    expect("process.env['EXAMPLE_NOT_A_SECRET']").not.toMatch(COMPUTED_ENV_READ)
   })
 })
 
@@ -164,16 +229,9 @@ describe('no tool access', () => {
     // filter over nothing passes by describing an empty world.
     expect(specifiers.length, `${path} imports nothing at all`).toBeGreaterThan(0)
 
-    const forbidden = specifiers.filter((specifier) =>
-      FORBIDDEN_IMPORTS.some(
-        (directory) =>
-          specifier.includes(`/${directory}/`) ||
-          specifier.startsWith(`@/${directory}`) ||
-          specifier.startsWith(`${directory}/`),
-      ),
-    )
+    const reached = specifiers.filter(forbidden)
 
-    expect(forbidden, `${path} imports ${forbidden.join(', ')}`).toEqual([])
+    expect(reached, `${path} imports ${reached.join(', ')}`).toEqual([])
   })
 
   it('reaches the model through exactly one door', () => {

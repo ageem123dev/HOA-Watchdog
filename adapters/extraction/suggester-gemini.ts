@@ -46,6 +46,7 @@ import type { DocumentKind } from '@/core/extraction/record'
 import type { Residue } from '@/core/mapping/residue'
 import type { Suggestion } from '@/core/mapping/suggest'
 import { targetsForKind, type TargetField } from '@/core/mapping/targets'
+import { raceAbort } from './extractor-gemini'
 
 const ORIGIN = 'https://generativelanguage.googleapis.com'
 
@@ -184,7 +185,7 @@ export async function askModelForColumns(
     // `redirect: 'manual'` surfaces 3xx as a response rather than following it.
     if (!response.ok || (response.status >= 300 && response.status < 400)) return []
 
-    const text = await readBounded(response)
+    const text = await readBounded(response, controller.signal)
     if (text === null) return []
 
     return validate(text, offered, wanted, published)
@@ -210,12 +211,61 @@ function payloadFor(residue: Residue): {
   }
 }
 
-/** Read at most `MAX_REPLY_BYTES`, refusing rather than truncating. */
-async function readBounded(response: Response): Promise<string | null> {
-  const body = await response.text()
+/**
+ * Read at most `MAX_REPLY_BYTES`, refusing rather than truncating.
+ *
+ * **Streamed, and stopped at the limit rather than after it.** The first version
+ * here did `await response.text()` and *then* measured — which allocates the
+ * entire body before deciding it was too big to allocate, so the constant
+ * bounded what was parsed and nothing at all about memory. `extractor-gemini.ts`
+ * had solved this already and this module claims to inherit its transport
+ * decisions; this one was simply not inherited. Raised by `ocr`.
+ *
+ * `raceAbort` is that module's, shared rather than copied: an injected `fetch`
+ * may hand back a stream not wired to the abort signal, so the deadline is
+ * observed here explicitly instead of assumed.
+ */
+async function readBounded(response: Response, signal: AbortSignal): Promise<string | null> {
+  const body = response.body
 
-  // Bytes, not characters: a reply of multi-byte text is larger than its length.
-  return new TextEncoder().encode(body).length > MAX_REPLY_BYTES ? null : body
+  if (body === null) return await raceAbort(response.text(), signal)
+
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+
+  try {
+    for (;;) {
+      const { done, value } = await raceAbort(reader.read(), signal)
+      if (done) break
+      if (value === undefined) continue
+
+      total += value.byteLength
+
+      // Refuse the moment the limit is passed, and cancel so the provider stops
+      // sending rather than filling a buffer nobody will read.
+      if (total > MAX_REPLY_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+
+      chunks.push(value)
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+
+  const joined = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    joined.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+
+  return new TextDecoder().decode(joined)
 }
 
 /**

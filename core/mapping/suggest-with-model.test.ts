@@ -123,23 +123,25 @@ describe('the deterministic answer wins', () => {
     expect(result.some((s) => s.target === 'cycle')).toBe(false)
   })
 
-  it('takes the first of two model pairings for one target', async () => {
+  it('discards the whole answer when one target is claimed twice', () => {
     /**
-     * Distinct from the position collision below, and it needs its own fixture:
-     * every other test here has the target rejected earlier — for being already
-     * matched, or never unfilled — so the "this target is spoken for" guard
-     * never fires and survives being deleted. Two answers for the *same*
-     * unfilled target is the only shape that reaches it.
+     * **All or nothing, as the adapter does it.** This used to keep the first
+     * and drop the second, and `ocr` was right that the inconsistency was real:
+     * the adapter discards a self-contradictory reply whole, on the grounds that
+     * keeping the plausible half is how a wrong pairing acquires the appearance
+     * of having been checked. A port answering twice for one target has
+     * contradicted itself in exactly that way.
+     *
+     * Discarding costs nothing here, which is why the stricter rule is the
+     * affordable one: the deterministic answer is already in hand.
      */
-    const result = await suggestWithModel(
+    return suggestWithModel(
       PARTLY,
       'deposit',
       answering({ target: 'amount', position: 2 }, { target: 'amount', position: 3 }),
-    )
-
-    expect(positionFor(result, 'amount')).toBe(2)
-    // And the second answer did not quietly claim column 3 for something else.
-    expect(result.filter((s) => s.position === 3)).toEqual([])
+    ).then((result) => {
+      expect(result).toEqual(suggestColumns(PARTLY, 'deposit'))
+    })
   })
 
   it('ignores an entry whose fields are the wrong type', async () => {
@@ -153,21 +155,20 @@ describe('the deterministic answer wins', () => {
     expect(result).toEqual(suggestColumns(PARTLY, 'deposit'))
   })
 
-  it('refuses two model pairings that claim one position', async () => {
+  it('discards the whole answer when two pairings claim one position', () => {
     /**
      * The merge guards independently of the adapter. `ResidueAsker` is a port —
      * story 5.6b's Gemini adapter refuses this before it ever gets here, but it
      * is not the only implementation the type admits, and a guard that relies on
      * a particular caller behaving is not a guard.
      */
-    const result = await suggestWithModel(
+    return suggestWithModel(
       PARTLY,
       'deposit',
       answering({ target: 'description', position: 2 }, { target: 'amount', position: 2 }),
-    )
-
-    expect(positionFor(result, 'description')).toBe(2)
-    expect(positionFor(result, 'amount')).toBeNull()
+    ).then((result) => {
+      expect(result).toEqual(suggestColumns(PARTLY, 'deposit'))
+    })
   })
 })
 
@@ -190,6 +191,21 @@ describe('every way the model can fail (AC2)', () => {
     const result = await suggestWithModel(PARTLY, 'deposit', asker as ResidueAsker | undefined)
 
     expect(result).toEqual(deterministic())
+  })
+
+  it('gives up on an asker that never settles', async () => {
+    /**
+     * **The one failure a `try/catch` cannot see.** A hanging promise never
+     * rejects, so nothing in the `try` fires — the asker simply holds
+     * `readSample` open, and with it the treasurer's upload. Story 5.6b's Gemini
+     * adapter bounds its own call, but `ResidueAsker` is a port and the guard
+     * cannot rest on one implementation behaving. Raised by `ocr`.
+     */
+    const forever: ResidueAsker = () => new Promise(() => {})
+
+    const result = await suggestWithModel(PARTLY, 'deposit', forever, 10)
+
+    expect(result).toEqual(suggestColumns(PARTLY, 'deposit'))
   })
 
   it('never rejects, whatever the asker does', async () => {

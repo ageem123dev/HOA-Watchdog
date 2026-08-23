@@ -50,10 +50,13 @@ export type ResidueAsker = (
  * Never rejects. The result is always at least as good as `suggestColumns` and
  * always the same shape as it.
  */
+export const DEFAULT_ASK_TIMEOUT_MS = 15_000
+
 export async function suggestWithModel(
   headings: readonly Heading[],
   kind: DocumentKind,
   ask?: ResidueAsker,
+  timeoutMs: number = DEFAULT_ASK_TIMEOUT_MS,
 ): Promise<readonly Suggestion[]> {
   const deterministic = suggestColumns(headings, kind)
 
@@ -71,7 +74,22 @@ export async function suggestWithModel(
     // `await` inside the `try`: a rejected promise and a synchronous throw are
     // the same failure to a caller, and only one of them is caught by a bare
     // call outside it.
-    answered = await ask(residue, kind)
+    // **A deadline of this function's own, not the adapter's.** Story 5.6b's
+    // Gemini adapter bounds its own call, but `ResidueAsker` is a port and a
+    // hanging promise is not a rejected one — nothing in a `try` catches it. An
+    // asker that never settles would hold `readSample` open, and with it the
+    // treasurer's upload. Longer than the adapter's own bound so that a normal
+    // slow answer is still the adapter's to refuse, not this one's. Raised by
+    // `ocr`.
+    answered = await Promise.race([
+      ask(residue, kind),
+      new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('ask timed out')), timeoutMs)
+        // `unref` where the runtime has it: a pending timer must not hold a
+        // process open after the answer already arrived.
+        ;(timer as unknown as { unref?: () => void }).unref?.()
+      }),
+    ])
   } catch {
     // Not inspected and not logged. The asker reaches a model over a network
     // holding a credential, and its errors are the ones most likely to carry
@@ -115,20 +133,27 @@ function merge(
   }
 
   for (const entry of answered) {
-    if (typeof entry !== 'object' || entry === null) continue
+    // **All or nothing, as the adapter does it.** This filtered before, and the
+    // inconsistency was real: the adapter discards a contradictory reply whole
+    // on the grounds that keeping the plausible half is how a wrong pairing
+    // acquires the appearance of having been checked. The same argument applies
+    // to a port that answers about a column it was never shown. Falling back
+    // costs nothing — the deterministic answer is already in hand. Raised by
+    // `ocr`.
+    if (typeof entry !== 'object' || entry === null) return deterministic
 
     const { target, position } = entry
 
-    if (typeof position !== 'number' || typeof target !== 'string') continue
+    if (typeof position !== 'number' || typeof target !== 'string') return deterministic
     // `wanted` alone: it is `residue.unfilled`, which is built from
     // `targetsForKind(kind).required`, so a target in it is published by
     // definition. A `published.has(target)` check stood beside this and survived
     // mutation — it could never fire, because nothing reaches it that `wanted`
     // has not already accepted.
-    if (!wanted.has(target)) continue
+    if (!wanted.has(target)) return deterministic
     // Only a column the asker was actually shown, and only one nobody holds.
-    if (!offered.has(position) || claimed.has(position)) continue
-    if (found.has(target)) continue
+    if (!offered.has(position) || claimed.has(position)) return deterministic
+    if (found.has(target)) return deterministic
 
     found.set(target, position)
     claimed.add(position)
