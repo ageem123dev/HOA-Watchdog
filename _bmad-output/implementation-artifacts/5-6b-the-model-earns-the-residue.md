@@ -1,7 +1,7 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: aac3f5d
-merge_request:
+merge_request: 84
 ---
 
 # Story 5.6b — the model earns the residue

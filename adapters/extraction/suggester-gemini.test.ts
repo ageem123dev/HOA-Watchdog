@@ -173,7 +173,10 @@ describe('AD-8: the headers are data, never instructions', () => {
 
     const body = declaration.slice(0, blankLine)
 
-    // No `${`, no `+`, no `.replace(`, no `concat` anywhere in the declaration.
+    // No interpolation and no `concat` in the declaration. Deliberately **not**
+    // `+`: the constant joins its own literals with it, so asserting on `+`
+    // would fail on the correct code. The comment used to list four checks
+    // where two exist — raised by CodeRabbit.
     expect(body).not.toContain('${')
     expect(body).not.toContain('concat')
     expect(code).toContain('export const SUGGESTION_INSTRUCTION')
@@ -418,6 +421,10 @@ describe('configuration, and what an error may say', () => {
     // Non-empty first, then the names — used by the story's own wiring task.
     expect(MODEL_VARS.length).toBeGreaterThan(0)
     expect(MODEL_VARS).toContain('GEMINI_API_KEY')
+    // Both, not just the first: dropping the model name from `MODEL_VARS`
+    // would leave this green while the wiring stopped reporting a variable
+    // the adapter requires. Raised by CodeRabbit.
+    expect(MODEL_VARS).toContain('GEMINI_SUGGEST_MODEL')
   })
 
   it('reaches no reasoning credential', () => {

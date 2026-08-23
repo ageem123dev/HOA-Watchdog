@@ -44,14 +44,15 @@ export type ResidueAsker = (
   kind: DocumentKind,
 ) => Promise<readonly Suggestion[]>
 
+/** How long the whole ask may take before the deterministic answer stands. */
+export const DEFAULT_ASK_TIMEOUT_MS = 15_000
+
 /**
  * Suggest columns for `headings`, asking `ask` about whatever is left over.
  *
  * Never rejects. The result is always at least as good as `suggestColumns` and
  * always the same shape as it.
  */
-export const DEFAULT_ASK_TIMEOUT_MS = 15_000
-
 export async function suggestWithModel(
   headings: readonly Heading[],
   kind: DocumentKind,

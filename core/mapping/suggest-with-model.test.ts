@@ -113,13 +113,24 @@ describe('the deterministic answer wins', () => {
     expect(positionFor(result, 'reference')).toBeNull()
   })
 
-  it('ignores a target the kind does not publish', async () => {
+  it('discards the whole answer for a target the kind does not publish', async () => {
+    /**
+     * The old assertion — that `cycle` is absent from the result — held even
+     * with the `wanted` check deleted, because `merge` builds its output from
+     * `targetsForKind().required` and `optional`, so `cycle` could never appear
+     * on a deposit however the loop behaved. A test that cannot fail for the
+     * reason it names. Raised by CodeRabbit.
+     *
+     * The documented behaviour is stronger and *is* falsifiable: the whole
+     * answer is discarded, so the good pairing beside it is lost too.
+     */
     const result = await suggestWithModel(
       PARTLY,
       'deposit',
-      answering({ target: 'cycle', position: 2 } as Suggestion),
+      answering({ target: 'amount', position: 2 }, { target: 'cycle', position: 3 } as Suggestion),
     )
 
+    expect(result).toEqual(suggestColumns(PARTLY, 'deposit'))
     expect(result.some((s) => s.target === 'cycle')).toBe(false)
   })
 

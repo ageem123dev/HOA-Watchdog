@@ -37,6 +37,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { neutralise } from '../ports/declared-members'
 import { specifiersIn } from '../ports/module-specifiers'
 import { readsEnvironmentVariable } from './dual-llm-boundary'
 
@@ -114,8 +115,44 @@ const forbidden = (specifier: string): boolean => {
   )
 }
 
-/** `process.env[expression]` — a read whose name is not in the source at all. */
-const COMPUTED_ENV_READ = /(?:process\s*\.\s*)?env\s*\[\s*[^'"`\]]/
+/**
+ * Bracket reads of `env` whose key is **not one complete literal**.
+ *
+ * The first version inspected only the *first character* inside the bracket and
+ * rejected anything that was not a quote — which let two forms straight through,
+ * both of which hide the name exactly as `env[name]` does:
+ *
+ * - a template key, `` env[`${name}`] ``
+ * - a concatenated key, `env['PREFIX_' + name]`
+ *
+ * Raised by CodeRabbit. Now the whole bracket is read and compared against one
+ * complete literal, so anything else — a variable, a template, a concatenation,
+ * a call — is reported.
+ */
+function computedEnvReads(text: string): string[] {
+  const found: string[] = []
+  const opener = /(?:process\s*\.\s*)?\benv\s*\[/g
+
+  for (const match of text.matchAll(opener)) {
+    const start = (match.index ?? 0) + match[0].length
+    const close = text.indexOf(']', start)
+    if (close === -1) continue
+
+    const key = text.slice(start, close).trim()
+
+    // One complete literal, and nothing beside it — **and a backtick key only
+    // counts if it interpolates nothing.** `` `${name}` `` is a complete literal
+    // by shape and hides the name entirely, which is the whole point of the
+    // check; the first attempt at this accepted it for exactly that reason.
+    const literal = /^(['"`])((?:(?!\1).)*)\1$/s.exec(key)
+
+    if (literal !== null && !(literal[1] === '`' && (literal[2] ?? '').includes('${'))) continue
+
+    found.push(`env[${key}]`)
+  }
+
+  return found
+}
 
 /**
  * The source of `path`, or a loud failure.
@@ -148,6 +185,50 @@ describe('the guard can actually fail', () => {
       'core/mapping/suggest-with-model.ts',
       'core/mapping/suggest.ts',
     ])
+  })
+
+  it('covers every credential and every forbidden directory', () => {
+    /**
+     * **The same lesson as the path list, applied to the other two.** Every
+     * check below is generated from these lists too, so dropping `R2_BUCKET` or
+     * `adapters/storage` removed cases rather than failing anything — the path
+     * list was protected and these were not. Raised by CodeRabbit.
+     */
+    expect([...FORBIDDEN_CREDENTIALS].sort()).toEqual([
+      'ACTOR_ASSERTION_KEY',
+      'AGENT_SERVICE_TOKEN',
+      'AUTH_SECRET',
+      'GATEWAY_SERVICE_TOKEN',
+      'R2_ACCESS_KEY_ID',
+      'R2_BUCKET',
+      'R2_SECRET_ACCESS_KEY',
+      'REASONING_API_KEY',
+      'REASONING_MODEL',
+      'WATCHDOG_READER_DATABASE_URL',
+      'WATCHDOG_WRITER_DATABASE_URL',
+    ])
+
+    expect([...FORBIDDEN_IMPORTS].sort()).toEqual([
+      'adapters/agent',
+      'adapters/auth',
+      'adapters/db',
+      'adapters/storage',
+      'catalog',
+      'core/answer',
+    ])
+  })
+
+  it.each(FORBIDDEN_IMPORTS)('classifies %s as forbidden, however it is written', (directory) => {
+    // The planted cases below exercise three of the six directories. This
+    // exercises all of them, in each spelling the classifier claims to handle.
+    for (const specifier of [
+      `@/${directory}/x`,
+      `../../${directory}/x`,
+      `../${directory}`,
+      directory,
+    ]) {
+      expect(forbidden(specifier), `${specifier} not classified as forbidden`).toBe(true)
+    }
   })
 
   it('read every one of them, non-empty', () => {
@@ -206,18 +287,27 @@ describe('the guard can actually fail', () => {
      * computed access outright — no module here has any reason to want it.
      */
     for (const { path, text } of sources) {
-      expect(text, `${path} reads process.env through a computed key`).not.toMatch(
-        COMPUTED_ENV_READ,
-      )
+      // Comments blanked, like `specifiersIn` does: prose mentioning `env[k]`
+      // is not a read. Raised by CodeRabbit alongside the forms below.
+      const reads = computedEnvReads(neutralise(text).commentsBlanked)
+
+      expect(reads, `${path} reads env through a computed key: ${reads.join(', ')}`).toEqual([])
     }
   })
 
   it('detects a planted computed env read', () => {
     // The detector above, shown to fail on the thing it exists to catch.
-    expect('const k = n; process.env[k]').toMatch(COMPUTED_ENV_READ)
-    // A literal key is the *allowed* form, and naming a real credential here
-    // would trip AD-10's guard for the reason above.
-    expect("process.env['EXAMPLE_NOT_A_SECRET']").not.toMatch(COMPUTED_ENV_READ)
+    // Every shape that hides the name, including the two the first version let
+    // straight through by inspecting only the opening character.
+    expect(computedEnvReads('const k = n; process.env[k]')).toHaveLength(1)
+    expect(computedEnvReads('process.env[`${name}`]')).toHaveLength(1)
+    expect(computedEnvReads("process.env['PREFIX_' + name]")).toHaveLength(1)
+    expect(computedEnvReads('const { env } = process; env[k]')).toHaveLength(1)
+
+    // A literal key is the *allowed* form. Naming a real credential here would
+    // trip AD-10's guard, for the reason given above.
+    expect(computedEnvReads("process.env['EXAMPLE_NOT_A_SECRET']")).toEqual([])
+    expect(computedEnvReads('process.env.EXAMPLE_NOT_A_SECRET')).toEqual([])
   })
 })
 
