@@ -104,7 +104,7 @@ already owns them, stop.** That is the violation, not a shortcut.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Move the "nothing is stored" claims rather than delete them.** The structural tests
+- [x] **Task 1 — Move the "nothing is stored" claims rather than delete them.** The structural tests
       from 5.3/5.4/5.6 say `actions.ts` reaches no repository. That stops being true here, and the
       tests must say what *is* true instead — a mapping store, and still no document store, no object
       storage, no `ingest`. (AC8)
@@ -490,6 +490,50 @@ suite rather than shipped quietly.
 worth making about it is the shape of one insert, and `migrations/mapping-change.test.ts`
 already carries the database half for this table. A second skipping block
 re-inserting the same row would be a file that never runs, proving nothing twice.
+
+#### Task 1 and AC3 - the claim narrowed, and the boundary decided a design question
+
+**The structural guard fired on its own, before I touched it.** Adding
+`createMappingStore` to `actions.ts` failed `imports no repository, no store and
+no ingestion` immediately, because the existing pattern matches `-postgres`. That
+is the guard working, and it is worth recording that it was not a nuisance: it is
+what forced the narrowing to be deliberate.
+
+**Narrowed by one exact specifier, not by loosening the pattern.** Widening the
+regex to let `mapping-store-postgres` through would have let *every* adapter
+through with it and the test would still have passed - the failure mode of every
+narrowing. So the allowance is a named constant, plus two things that make it
+falsifiable: an assertion that the mapping store really is imported (so the
+exception is describing this module rather than sitting unused), and a **positive
+control** feeding the rule five specifiers it must still refuse - including the
+re-import's own dependencies, which makes "the re-import lives elsewhere" a
+tested claim rather than an intention. Four mutations, four killed, including
+removing the mapping-store import so the exception goes stale.
+
+**The boundary settled a design question I was about to get wrong.** `saveMapping`
+was written to return the affected-document count with `replaced`, so the
+treasurer sees AC6's number. `tsc` refused: counting means reading every
+candidate's bytes from object storage, which this module may not reach. That
+prohibition is not an obstacle to route around - it is the reason the sample path
+cannot touch the permanent record. So `SaveState.replaced` carries no number, and
+the count is `previewReimport`, asked for by the module that owns the re-import.
+The story's Task 1 wording had said exactly this ("still no document store, no
+object storage, no `ingest`"); the type checker is what made me notice I was
+contradicting it.
+
+**Written out of order, and saying so.** `saveMapping` was implemented before its
+behavioural tests - the structural update came first because that is what broke.
+The tests exist now and seven mutations kill them (session check removed, an
+invalid pairing dropped rather than refusing, the shape taken from the form,
+`savedBy` made constant, `replaced` collapsed into `saved`, unparseable pairings
+becoming an empty mapping). But they were written after the code, so they were
+never observed failing against an absent implementation, which is weaker evidence
+than the rest of this story carries.
+
+**The one input that must not be assertable.** The stored shape decides which
+mapping a later upload matches, so the form's `headerRow` is re-read through
+`readHeadings` and `shapeKey` - the same two functions an upload goes through -
+and a `shape` field sent by the client is ignored. A test sends one to prove it.
 
 ### Review Findings
 

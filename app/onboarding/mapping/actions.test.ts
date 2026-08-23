@@ -40,6 +40,12 @@ vi.mock('@/adapters/extraction/workbook-sheetjs', () => ({
   readWorkbook: (bytes: Uint8Array) => decode(bytes),
 }))
 
+/** What `save` reports it replaced. `null` is a first mapping. */
+const save = vi.fn(async (_mapping: unknown) => null as unknown)
+vi.mock('@/adapters/db/mapping-store-postgres', () => ({
+  createMappingStore: () => ({ save: (mapping: unknown) => save(mapping), find: vi.fn() }),
+}))
+
 const SIGNED_IN = { user: { id: 'director-1', email: 'treasurer@example.com' } }
 
 const CSV = 'Date,Amount,Unit\r\n2026-03-01,1240.00,12B\r\n'
@@ -397,6 +403,146 @@ describe('the four refusals stay four', () => {
   })
 })
 
+describe('confirming a mapping (AC3)', () => {
+  const saveAction = async () => (await import('./actions')).saveMapping
+
+  const HEADER = JSON.stringify(['Date', 'Amount', 'Unit'])
+  const PAIRINGS = JSON.stringify([
+    { target: 'date', position: 1 },
+    { target: 'amount', position: 2 },
+  ])
+
+  const confirm = async (fields: Record<string, string>) =>
+    (await saveAction())({ status: 'idle' }, form(fields))
+
+  it('refuses without a session', async () => {
+    // A server action is its own entry point. Without this, anyone could write a
+    // mapping into a board's setup.
+    auth.mockResolvedValue(null)
+
+    const state = await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('refuses a kind the form did not declare', async () => {
+    auth.mockResolvedValue(SIGNED_IN)
+
+    const state = await confirm({ documentKind: '', headerRow: HEADER, pairings: PAIRINGS })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('stores the shape it derives, never one the form sends', async () => {
+    /**
+     * The input that must not be assertable. The stored shape decides which
+     * mapping a later upload matches, so a client-supplied one would let a form
+     * claim its mapping applies to a heading row it was never built for.
+     *
+     * The form here sends a `shape` field outright, and it is ignored.
+     */
+    auth.mockResolvedValue(SIGNED_IN)
+
+    await confirm({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: PAIRINGS,
+      shape: 'whatever-the-client-says',
+    })
+
+    const saved = save.mock.calls[0]?.[0] as { shape: string }
+
+    expect(saved.shape).not.toContain('whatever-the-client-says')
+    // Derived through the importer's own folding, so it is case- and
+    // space-insensitive exactly as an upload's is.
+    expect(saved.shape).toContain('date')
+  })
+
+  it('saves as the signed-in member, so the adapter can derive the association', async () => {
+    auth.mockResolvedValue(SIGNED_IN)
+
+    await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
+
+    const saved = save.mock.calls[0]?.[0] as { savedBy: string }
+
+    expect(saved.savedBy).toBe('director-1')
+  })
+
+  it('refuses the whole submission when one pairing is invalid', async () => {
+    /**
+     * All-or-nothing. A partially applied mapping is the failure that looks like
+     * success: the treasurer sees "saved" and one column they set is quietly
+     * absent, surfacing weeks later as a column of empty amounts.
+     *
+     * Column 9 does not exist in a three-column sample, and `assign` is what
+     * says so - this action does not re-decide it.
+     */
+    auth.mockResolvedValue(SIGNED_IN)
+
+    const state = await confirm({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: JSON.stringify([
+        { target: 'date', position: 1 },
+        { target: 'amount', position: 9 },
+      ]),
+    })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('refuses a target the kind does not offer', async () => {
+    auth.mockResolvedValue(SIGNED_IN)
+
+    const state = await confirm({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: JSON.stringify([{ target: 'not_a_field', position: 1 }]),
+    })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('refuses a mapping it cannot parse rather than storing an empty one', async () => {
+    // The dangerous version of this bug stores `pairings: []` and reports
+    // success, so every later upload of that shape imports nothing.
+    auth.mockResolvedValue(SIGNED_IN)
+
+    const state = await confirm({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: 'not json at all',
+    })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('reports a first mapping as saved', async () => {
+    auth.mockResolvedValue(SIGNED_IN)
+    save.mockResolvedValue(null)
+
+    const state = await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
+
+    expect(state).toEqual({ status: 'saved' })
+  })
+
+  it('reports a changed mapping as replaced, which is what triggers the warning', async () => {
+    // The distinction the story's second half turns on. Collapsing the two into
+    // one `saved` would make the warning impossible to render.
+    auth.mockResolvedValue(SIGNED_IN)
+    save.mockResolvedValue({ savedBy: 'director-1', kind: 'deposit', shape: 's', mapping: {} })
+
+    const state = await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
+
+    expect(state).toEqual({ status: 'replaced' })
+  })
+})
+
 describe('nothing is stored', () => {
   it('imports no repository, no store and no ingestion', async () => {
     const source = readFileSync(fileURLToPath(new URL('./actions.ts', import.meta.url)), 'utf8')
@@ -418,13 +564,47 @@ describe('nothing is stored', () => {
     // list.
     expect(imported.length).toBeGreaterThan(0)
 
-    // A sample is not a document the association is keeping. One reaching
-    // `document` would sit in the permanent record and count against the
-    // register a board reads.
-    const forbidden = imported.filter((specifier) =>
-      /repository|-postgres|document-store|storage\/|\/ingest$/.test(specifier),
-    )
+    /**
+     * **Narrowed by story 5.7, not relaxed.** This module now reaches the
+     * mapping store, because AC3 puts the treasurer's confirmation here. It
+     * still reaches nothing else, and the reason the rest of the list survives
+     * is unchanged: a sample is not a document the association is keeping, and
+     * one landing in `document` would sit in the permanent record and count
+     * against the register a board reads.
+     *
+     * The allowance is **one exact specifier**, not a loosened pattern. Widening
+     * the regex to let `mapping-store-postgres` through would have let every
+     * other adapter through with it, and the test would still have passed - the
+     * failure mode of every narrowing, which is why this one is a named
+     * exception the positive control below re-proves.
+     */
+    const ALLOWED = '@/adapters/db/mapping-store-postgres'
 
-    expect(forbidden).toEqual([])
+    const forbids = (specifier: string) =>
+      specifier !== ALLOWED &&
+      /repository|-postgres|document-store|storage\/|\/ingest$/.test(specifier)
+
+    expect(imported.filter(forbids)).toEqual([])
+
+    // The mapping store really is reached, so the exception above is describing
+    // this module rather than sitting unused and unfalsifiable.
+    expect(imported).toContain(ALLOWED)
+
+    /**
+     * The positive control, and the whole reason the narrowing is trustworthy.
+     * A rule that no longer refuses anything passes silently forever; this feeds
+     * it the specifiers it must still refuse - including the re-import's own
+     * dependencies, which is what makes "the re-import lives elsewhere" a tested
+     * claim rather than an intention.
+     */
+    expect(
+      [
+        '@/adapters/db/document-repository-postgres',
+        '@/adapters/db/reimport-candidates-postgres',
+        '@/adapters/storage/r2',
+        '@/core/ingestion/ingest',
+        '@/core/ports/document-store',
+      ].filter(forbids),
+    ).toHaveLength(5)
   })
 })
