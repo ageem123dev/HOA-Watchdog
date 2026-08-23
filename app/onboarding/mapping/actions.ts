@@ -5,6 +5,8 @@ import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
 import { MAX_DOCUMENT_BYTES } from '@/core/ingestion/acceptance'
 import { isDocumentKind } from '@/core/extraction/record'
 import { readSampleHeadings } from '@/core/extraction/sample-headings'
+import { suggestWithModel } from '@/core/mapping/suggest-with-model'
+import { askModelForColumns } from '@/adapters/extraction/suggester-gemini'
 import type { SampleState } from './sample-state'
 
 /**
@@ -89,6 +91,10 @@ export async function readSample(
     problems: result.problems,
     rows: result.rows,
     totalDataRows: result.totalDataRows,
+    // Deterministic first; the model only on what is left over, and only
+    // when it is configured. `suggestWithModel` never rejects, so this
+    // cannot turn a readable sample into a refusal.
+    suggestions: await suggestWithModel(result.headings, declaredKind, askModelForColumns),
   }
 }
 

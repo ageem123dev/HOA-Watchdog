@@ -176,7 +176,7 @@ referentially stable" contract both go away.
       whenever the model does not produce a valid one. (AC1, AC2, AC8)
 - [x] **Task 4 — The structural boundary, asserted.** The import allow-list, the no-reasoning-
       credential check, the no-interpolation check, and AD-10's boundary guard still clean. (AC5)
-- [ ] **Task 5 — Move the seam, then wire it.** `readSample` computes the suggestions and
+- [x] **Task 5 — Move the seam, then wire it.** `readSample` computes the suggestions and
       `SampleState` carries them; `ColumnPairing` takes `suggestions` instead of `suggester`, and
       story 5.6's surface tests move with it. With the model unconfigured the wizard behaves exactly
       as it does today. (AC2)

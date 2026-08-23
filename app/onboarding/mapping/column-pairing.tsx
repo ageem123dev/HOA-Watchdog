@@ -6,7 +6,7 @@ import type { DocumentKind } from '@/core/extraction/record'
 import type { Heading, HeadingProblem } from '@/core/extraction/headings'
 import { assign, completeness, unassign, type DraftMapping } from '@/core/mapping/draft'
 import { draftFromSuggestion } from '@/core/mapping/prefill'
-import type { ColumnSuggester, Suggestion } from '@/core/mapping/suggest'
+import type { Suggestion } from '@/core/mapping/suggest'
 import { targetsForKind, type TargetField } from '@/core/mapping/targets'
 import { TARGET_LABELS } from './target-labels'
 import { MappingPreview } from './mapping-preview'
@@ -51,27 +51,22 @@ export interface ColumnPairingProps {
   /** Data rows the file holds, for the count UX-DR24 requires. */
   readonly totalDataRows?: number
   /**
-   * Who guesses which column is which — story 5.6, and **optional on purpose**.
+   * What to pre-fill the mapping with — story 5.6, computed server-side by 5.6b.
    *
-   * AC7: with no suggester at all the screen is exactly what story 5.4 built,
-   * plus a sentence saying nothing was suggested. Absent is a supported state,
-   * not a degraded one, which is what keeps 5.6b's model a thing that can be
-   * turned off rather than a thing the wizard depends on.
+   * **A suggestion, not a suggester.** Story 5.6 took a `ColumnSuggester` and
+   * called it during render. Story 5.6b's model-backed half is async and needs a
+   * credential that exists only on the server, so `readSample` now computes this
+   * and `SampleState` carries it here.
    *
-   * **Must be referentially stable.** The reset below compares this *by
-   * reference*, so an object rebuilt on every render — `suggester={{ suggest }}`
-   * — makes the condition true on every pass, and React aborts the tree with
-   * "Too many re-renders". Pass a module constant, as `mapping-wizard.tsx` does,
-   * or `useMemo` it in the caller.
+   * That also retires the referential-stability contract this prop used to
+   * carry: an array has no identity to compare, so there is no "must be a module
+   * constant" rule and no reset keyed on a function's identity. Raised on MR !83
+   * as a footgun 5.6b would arm; 5.6b removed the gun instead.
    *
-   * A ref instead of state would not save it: the new identity arrives every
-   * render either way. The constraint is inherent to comparing a function by
-   * identity, so it is stated here rather than defended against. No current
-   * caller is affected; **story 5.6b is the one that makes it reachable**, since
-   * a model-backed suggester assembled in a component body is the natural shape
-   * for that change. Raised by CodeRabbit.
+   * `undefined` means **nobody was asked**; an array whose positions are all
+   * `null` means asked and nothing found. AC7 rests on that difference.
    */
-  readonly suggester?: ColumnSuggester
+  readonly suggestions?: readonly Suggestion[]
 }
 
 /**
@@ -105,24 +100,24 @@ export const columnLabel = (heading: Heading): string =>
     : `Column ${heading.position} — ${heading.text}`
 
 /**
- * The suggestion, and the draft it pre-fills.
+ * The draft a suggestion pre-fills.
  *
  * One function called from both the initialiser and the new-sample reset, so the
- * two cannot drift. That drift is the whole risk here: the reset path is the one
+ * two cannot drift. That drift is the whole risk: the reset path is the one
  * nobody demonstrates, and a pre-fill living only in the initialiser is silently
  * absent from the second sample onward.
  */
 const preFill = (
   kind: DocumentKind,
   headings: readonly Heading[],
-  suggester: ColumnSuggester | undefined,
+  suggestions: readonly Suggestion[] | undefined,
 ): { draft: DraftMapping; suggestions: readonly Suggestion[]; applied: number } => {
-  // No suggester means no suggestions — not an empty guess, which is a different
-  // thing the screen has to be able to say (AC7).
-  const suggestions = suggester?.suggest(headings, kind) ?? []
-  const { draft, applied } = draftFromSuggestion(headings, kind, suggestions)
+  // No suggestions at all is not an empty guess — a different thing the screen
+  // has to be able to say (AC7).
+  const offered = suggestions ?? []
+  const { draft, applied } = draftFromSuggestion(headings, kind, offered)
 
-  return { draft, suggestions, applied }
+  return { draft, suggestions: offered, applied }
 }
 
 export function ColumnPairing({
@@ -131,9 +126,9 @@ export function ColumnPairing({
   problems = [],
   rows,
   totalDataRows,
-  suggester,
+  suggestions,
 }: ColumnPairingProps) {
-  const [initial] = useState(() => preFill(kind, headings, suggester))
+  const [initial] = useState(() => preFill(kind, headings, suggestions))
   const [draft, setDraft] = useState<DraftMapping>(initial.draft)
   const [suggested, setSuggested] = useState<readonly Suggestion[]>(initial.suggestions)
   const [appliedCount, setAppliedCount] = useState(initial.applied)
@@ -163,31 +158,27 @@ export function ColumnPairing({
   // bytes themselves. Git then classed this file as binary and ESLint could
   // not read it, while every test stayed green, because a NUL is a perfectly
   // valid character in a template literal. Found by Argus.
-  const sample = JSON.stringify([kind, headings.map((h) => [h.position, h.text])])
+  // **The suggestion is part of what the draft was built from**, so it belongs in
+  // the key, by value. Comparing the array by *identity* would re-impose the
+  // contract MR !83 flagged and story 5.6b set out to remove — `suggestColumns`
+  // returns a fresh array per call, so any caller computing it inline would
+  // reset the draft on every render and silently discard the treasurer's
+  // overrides. Story 5.4 already chose value comparison here, for its stated
+  // reason: the component is correct however it is mounted.
+  const sample = JSON.stringify([
+    kind,
+    headings.map((h) => [h.position, h.text]),
+    suggestions ?? null,
+  ])
   const [renderedSample, setRenderedSample] = useState(sample)
-  /**
-   * The suggester is part of what the draft was built from, so a change to it
-   * has to reset the draft too.
-   *
-   * Tracked by reference rather than folded into `sample`, because a function
-   * has no useful string form — `JSON.stringify` renders every suggester as
-   * `null`, which would make every one of them look identical.
-   *
-   * Today `mapping-wizard.tsx` passes a stable constant, so this never fires.
-   * It is here because story 5.6b is exactly the change that makes the suggester
-   * dynamic — turning a model on or off — and at that point stale suggestions
-   * would sit on screen under a suggester that never produced them. Raised by
-   * `ocr`.
-   */
-  const [renderedSuggester, setRenderedSuggester] = useState(suggester)
 
-  if (renderedSample !== sample || renderedSuggester !== suggester) {
-    setRenderedSuggester(suggester)
+
+  if (renderedSample !== sample) {
     // **Re-suggested, not merely emptied.** Story 5.6: a pre-fill that only ran
     // in the initialiser would leave the second sample blank with nothing to
     // explain it — correct on the path anyone demonstrates, missing on the one
     // they do not, which is exactly the shape story 5.2 shipped.
-    const fresh = preFill(kind, headings, suggester)
+    const fresh = preFill(kind, headings, suggestions)
 
     setRenderedSample(sample)
     setDraft(fresh.draft)
@@ -293,7 +284,7 @@ export function ColumnPairing({
     draft.pairings.find((pairing) => pairing.position === position)?.target
 
   /**
-   * What the suggester said about `target`, if it said anything.
+   * What the suggestion said about `target`, if it said anything.
    *
    * `undefined` — never mentioned — and `null` — considered, nothing found — are
    * different answers, and AC2 exists for exactly that difference.
@@ -322,7 +313,7 @@ export function ColumnPairing({
    * which is what they need to decide how much to trust it.
    */
   const suggestionSummary =
-    suggester === undefined
+    suggestions === undefined
       ? 'Nothing was suggested for this file. Pair each column yourself below.'
       : appliedCount === 0
         ? 'We could not suggest a column for any of these fields. Pair them yourself below.'
@@ -474,13 +465,13 @@ export function ColumnPairing({
                       treasurer this project keeps in mind.
 
                       "No suggestion" is said only for a field still empty and
-                      only when there was a suggester to say it — a field the
+                      only when a suggestion was made at all — a field the
                       treasurer has since filled does not need telling that
-                      nobody guessed it, and with no suggester the sentence
+                      nobody guessed it, and with no suggestion at all the sentence
                       above already covers the whole screen.
                     */}
                     {isStillTheSuggestion(target, position) && ' — suggested'}
-                    {suggester !== undefined &&
+                    {suggestions !== undefined &&
                       position === undefined &&
                       suggestionFor(target) === null &&
                       ' — no suggestion'}

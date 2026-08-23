@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MAX_DOCUMENT_BYTES } from '@/core/ingestion/acceptance'
+import { specifiersIn } from '@/core/ports/module-specifiers'
 
 const auth = vi.fn()
 const decode = vi.fn<(bytes: Uint8Array) => { ok: true; rows: string[][] } | { ok: false }>(() => ({
@@ -86,7 +87,38 @@ describe('reading a sample', () => {
         ['2026-03-01', '1240.00', '12B'],
       ],
       totalDataRows: 1,
+      // Story 5.6b: the suggestion is computed here now, not in the client
+      // component, because the model-backed half needs a server-only
+      // credential. Written out rather than derived from `suggestColumns`, so
+      // this is a fixture and not a restatement of the implementation.
+      suggestions: [
+        { target: 'date', position: 1 },
+        { target: 'description', position: null },
+        { target: 'amount', position: 2 },
+        { target: 'unit', position: 3 },
+      ],
     })
+  })
+
+  it('still reads the sample when no model is configured (story 5.6b, AC2)', async () => {
+    /**
+     * **FR-10's requirement, at the layer where it would break.** No test here
+     * sets `GEMINI_API_KEY`, so the model half is unconfigured on every run in
+     * this file — which is exactly the production case of a deployment that has
+     * not enabled it. The action must return a readable sample with the
+     * deterministic suggestion, not an error and not a rejected promise.
+     */
+    const readSample = await act()
+
+    const state = await readSample(IDLE, form({ documentKind: 'deposit', sample: sample(CSV) }))
+
+    expect(state.status).toBe('read')
+    expect(state.status === 'read' && state.suggestions?.length).toBeGreaterThan(0)
+    // Deterministic matching still did its job; the absent model cost nothing.
+    expect(
+      state.status === 'read' &&
+        state.suggestions?.find((s) => s.target === 'amount')?.position,
+    ).toBe(2)
   })
 
   it('carries the duplicates and blanks story 5.3 reports rather than refusing them', async () => {
@@ -287,11 +319,12 @@ describe('nothing is stored', () => {
     // invisible to it, and so was a re-export or a dynamic `import()`. A guard
     // that misses the syntax someone actually writes is not a guard.
     // Raised by CodeRabbit.
-    const imported = [
-      ...source.matchAll(/(?:^|\n)\s*(?:import|export)\b[\s\S]*?from\s*['"]([^'"]+)['"]/g),
-      ...source.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
-      ...source.matchAll(/(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g),
-    ].map((match) => match[1] ?? '')
+    //
+    // **Now `specifiersIn`, shared.** Story 5.6 consolidated four private copies
+    // of this scanner after finding they had drifted apart; this was a fifth it
+    // never reached, and a weaker one — it did not blank comments, so a
+    // commented-out import would have failed the build for a line nobody runs.
+    const imported = specifiersIn(source)
 
     // Non-empty first: a filter over nothing reports success, which is how
     // story 5.3's `TABULAR_CONTENT_TYPES` round-trip passed against an empty

@@ -4,7 +4,6 @@ import { useActionState } from 'react'
 
 import { DOCUMENT_KINDS, type DocumentKind } from '@/core/extraction/record'
 import { TABULAR_CONTENT_TYPES } from '@/core/extraction/rectangle'
-import { deterministicSuggester } from '@/core/mapping/suggest'
 import { readSample } from './actions'
 import { ColumnPairing } from './column-pairing'
 import { EMPTY_SAMPLE_STATE, type SampleState } from './sample-state'
@@ -108,11 +107,10 @@ export function MappingWizard({ initialState = EMPTY_SAMPLE_STATE }: MappingWiza
           problems={state.problems}
           rows={state.rows}
           totalDataRows={state.totalDataRows}
-          // Story 5.6. Named here rather than defaulted inside the component, so
-          // "no suggester" stays a state the surface genuinely supports (AC7)
-          // rather than one only a test can reach — and so 5.6b swapping in a
-          // model-backed one is a change to this line and nothing else.
-          suggester={deterministicSuggester}
+          // Story 5.6b: computed in `readSample`, because the model-backed half
+          // needs a credential that exists only on the server. Absent when no
+          // suggester ran, which is a state the surface supports (AC7).
+          suggestions={state.suggestions}
         />
       )}
     </>
