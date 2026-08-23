@@ -44,8 +44,8 @@ import { readHeadings } from '@/core/extraction/headings'
 import { isDocumentKind } from '@/core/extraction/record'
 import { ingest } from '@/core/ingestion/ingest'
 import { previewReimport, reimport } from '@/core/mapping/reimport'
-import type { DraftMapping } from '@/core/mapping/draft'
 import { shapeKey } from '@/core/mapping/saved'
+import { draftFromPairings } from './parse-mapping'
 import type { ChangeState, PreviewState } from './change-state'
 import { ingestionDependencies } from '../../ingestion-dependencies'
 
@@ -69,7 +69,12 @@ async function context(formData: FormData) {
   const headings = readHeadings([header])
   if (!headings.ok) return null
 
-  return { member, kind, shape: shapeKey(kind, headings.headings) }
+  return {
+    member,
+    kind,
+    shape: shapeKey(kind, headings.headings),
+    columns: headings.headings.length,
+  }
 }
 
 function parseJson(value: FormDataEntryValue | null): unknown {
@@ -130,8 +135,22 @@ export async function changeMapping(
     return { status: 'error', error: 'That mapping could not be read. Start the wizard again.' }
   }
 
-  const mapping = parseJson(formData.get('mapping'))
-  if (!isDraft(mapping)) {
+  /**
+   * Built here from the pairings alone. The form sends no kind and no column
+   * count, so it cannot assert either.
+   *
+   * This took an entire `DraftMapping` from the form and checked its shape.
+   * Argus found the hole: a form could declare `documentKind: deposit` - so the
+   * shape was derived for a deposit - and send a mapping whose own `kind` was
+   * `invoice`. It would be stored under the deposit shape and applied to every
+   * later deposit export, pairing that file's columns to an invoice's fields,
+   * with nothing thrown and every value plausible where it landed.
+   *
+   * A kind check would have closed it. Deriving both instead means there is
+   * nothing to check.
+   */
+  const mapping = draftFromPairings(where.kind, where.columns, parseJson(formData.get('pairings')))
+  if (mapping === null) {
     return { status: 'error', error: 'That mapping is not valid. Check the columns and try again.' }
   }
 
@@ -161,23 +180,4 @@ export async function changeMapping(
   // Per document, not summarised. AC7 refuses a single "done", and a treasurer
   // whose statement could not be re-read needs to know which one.
   return { status: 'changed', documents }
-}
-
-/**
- * A shape check, not a validity check.
- *
- * `core/mapping/draft.ts` owns what a valid pairing is and `actions.ts` folds
- * through `assign` to enforce it. This guards the *transport*: that what arrived
- * is a mapping-shaped object at all, so `save` is not handed arbitrary JSON.
- */
-function isDraft(value: unknown): value is DraftMapping {
-  if (typeof value !== 'object' || value === null) return false
-
-  const draft = value as { kind?: unknown; columns?: unknown; pairings?: unknown }
-
-  return (
-    isDocumentKind(draft.kind) &&
-    typeof draft.columns === 'number' &&
-    Array.isArray(draft.pairings)
-  )
 }

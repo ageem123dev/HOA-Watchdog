@@ -82,8 +82,12 @@ describe('the wiring test itself', () => {
     // The control for the instrument. If the brace matching ran away to the end
     // of the file, every assertion above would pass on any file that mentions
     // `units:` anywhere at all, including in a comment.
-    const source = read('app/upload/actions.ts')
-    const at = source.indexOf('ingest(')
+    // Repointed with the call site it controls. Left on `app/upload/actions.ts`
+    // it brace-matched `return { outcomes, error: null }` - a two-key object
+    // that trivially satisfies "shorter than the file", so the control passed
+    // while controlling nothing. Raised by Argus.
+    const source = read('app/ingestion-dependencies.ts')
+    const at = source.indexOf('return {')
     const open = source.indexOf('{', at)
 
     let depth = 0

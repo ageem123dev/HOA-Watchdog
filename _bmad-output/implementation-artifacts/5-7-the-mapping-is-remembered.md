@@ -586,6 +586,47 @@ something the client asserts, which is worse than having none.
 re-imported and then reported the number would be showing somebody the bill after
 taking the money.
 
+#### Argus on the change actions - one high, and it was a real hole
+
+Four findings, all verified against the files, all mine.
+
+**HIGH - a mapping storable under another kind's shape.** `changeMapping` took a
+whole `DraftMapping` from the form and checked its *shape*, not its agreement
+with anything. So a form could declare `documentKind: deposit` - deriving a
+deposit shape key - and send a mapping whose own `kind` was `invoice`. Stored
+under the deposit shape, it would then be applied to every later deposit export,
+pairing that file's columns to an invoice's fields. Nothing throws, and every
+value is still plausible where it lands.
+
+`saveMapping` never had this: it builds the draft from `emptyDraft(kind, ...)`
+and folds through `assign`. The two paths validated differently, which is the
+duplicated-rule defect inverted - one copy correct, one not.
+
+**The fix is not a kind check.** Both actions now go through
+`draftFromPairings(kind, columns, pairings)`, and the form sends *only* pairings:
+the kind and the column count are derived from the request's own context. There
+is nothing left to assert, so the attack is unrepresentable rather than detected.
+That also answers the medium finding (`NaN`, negative and fractional column
+counts, non-object pairings) without a single extra check, because `assign`
+already refuses all of them and is now on both paths.
+
+**And a control test that had stopped controlling.** `payment-wiring.test.ts`
+guards its own brace-matcher against running away to the end of the file. I
+repointed the call sites and left the control reading `app/upload/actions.ts`,
+where it brace-matched `return { outcomes, error: null }` - a two-key object that
+satisfies "shorter than the file" trivially. It passed while controlling nothing.
+Repointed with the thing it controls.
+
+Plus orphaned JSDoc: my extraction deleted the singletons and left their comments
+annotating the next function, and the module header still called `upload/actions.ts`
+"the composition root for ingestion", which it had stopped being.
+
+**Five mutations on the fix, and one survived first.** The regression test is
+written against the payload that used to work. But `expect(Array.isArray(written.documents))`
+passed against a mutation that recorded `[]` without waiting for the re-import -
+`[]` is an array. Strengthened to one entry per candidate, which the record can
+only carry after the re-import produced it. All five killed now.
+
 ### Review Findings
 
 ### Completion Notes List

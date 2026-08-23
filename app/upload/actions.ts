@@ -11,27 +11,18 @@ import { ingestionDependencies } from '../ingestion-dependencies'
 import type { UploadState } from './upload-state'
 
 /**
- * The upload action: the composition root for ingestion.
+ * The upload action.
  *
- * This is the only place the adapters and the domain meet. Everything it does
- * with a file is decided in `core/ingestion` — what is accepted, what it hashes
- * to, where it goes, what the treasurer is told. This function's whole job is to
- * establish who is uploading, turn `FormData` into bytes, and hand over.
- */
-
-/**
- * Built once for the process, not once per request.
+ * Everything it does with a file is decided in `core/ingestion` — what is
+ * accepted, what it hashes to, where it goes, what the treasurer is told. This
+ * function's whole job is to establish who is uploading, turn `FormData` into
+ * bytes, and hand over.
  *
- * The S3 store reuses one client for its own lifetime, so constructing a store
- * per upload would open a socket pool per upload and the reuse would count for
- * nothing. Module scope is safe here precisely because neither factory reads its
- * environment at construction — that is the property `next build` depends on,
- * and both adapters have a test for it.
- */
-
-/**
- * The vendor spreadsheet parser, behind the port, so `core/` never sees it.
- * `readWorkbook` already returns the rectangle the contract expects.
+ * **The composition root moved** in story 5.7, to
+ * `app/ingestion-dependencies.ts`. It stopped being "the only place the adapters
+ * and the domain meet" the moment a mapping change also re-imported through
+ * `ingest`: two hand-built dependency objects would drift, and every collaborator
+ * missing from one of them is a step that silently does not happen.
  */
 
 export async function uploadDocuments(

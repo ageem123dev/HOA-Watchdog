@@ -7,8 +7,7 @@ import { isDocumentKind } from '@/core/extraction/record'
 import { readSampleHeadings } from '@/core/extraction/sample-headings'
 import { suggestWithModel } from '@/core/mapping/suggest-with-model'
 import { askModelForColumns } from '@/adapters/extraction/suggester-gemini'
-import { assign, emptyDraft, type DraftMapping } from '@/core/mapping/draft'
-import type { TargetField } from '@/core/mapping/targets'
+import { draftFromPairings } from './parse-mapping'
 import { readHeadings } from '@/core/extraction/headings'
 import { shapeKey } from '@/core/mapping/saved'
 import { createMappingStore } from '@/adapters/db/mapping-store-postgres'
@@ -104,12 +103,11 @@ export async function saveMapping(_previous: SaveState, formData: FormData): Pro
     return { status: 'error', error: 'That file has no readable column headings.' }
   }
 
-  const pairings = parseJson(formData.get('pairings'))
-  if (!Array.isArray(pairings)) {
-    return { status: 'error', error: 'That mapping could not be read. Start the wizard again.' }
-  }
-
-  const draft = fold(pairings, emptyDraft(kind, headings.headings.length))
+  const draft = draftFromPairings(
+    kind,
+    headings.headings.length,
+    parseJson(formData.get('pairings')),
+  )
   if (draft === null) {
     return { status: 'error', error: 'That mapping is not valid. Check the columns and try again.' }
   }
@@ -141,30 +139,7 @@ function parseJson(value: FormDataEntryValue | null): unknown {
   }
 }
 
-/**
- * Every pairing through `assign`, or nothing.
- *
- * All-or-nothing because a partially applied mapping is the failure that looks
- * like success: the treasurer sees "saved" and one column they set is quietly
- * absent, which surfaces later as a column of empty amounts.
- */
-function fold(pairings: readonly unknown[], start: DraftMapping): DraftMapping | null {
-  let draft = start
 
-  for (const pairing of pairings) {
-    if (typeof pairing !== 'object' || pairing === null) return null
-
-    const { target, position } = pairing as { target?: unknown; position?: unknown }
-    if (typeof target !== 'string' || typeof position !== 'number') return null
-
-    const result = assign(draft, target as TargetField, position)
-    if (!result.ok) return null
-
-    draft = result.draft
-  }
-
-  return draft
-}
 
 
 /** One sample, so the whole-submission limits do not apply — this is the per-document one. */
