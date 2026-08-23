@@ -328,6 +328,15 @@ tests to prove it are already written and will run the moment `DATABASE_URL` and
 `WATCHDOG_WRITER_DATABASE_URL` are set. Recorded rather than guessed, as the `replySchema` casing
 question was on 5.6b.
 
+**Corroborated, still not executed.** The Argus round on this commit found no defects and addressed
+the construct directly: CTEs bound in a `WITH` are visible to scalar subqueries in an enclosing
+INSERT's `RETURNING` list from PostgreSQL 9.1, `previous` evaluates against the pre-insert snapshot,
+and a first insert yields SQL NULL through those subqueries - which is the `row.shape === null` the
+adapter reads as "nothing was replaced". That is a second model's reading of the manual, from a
+different family, and it moves the odds. It is not a run. The label stays *unverified* until this
+file's database half executes, because "two of us read it the same way" is how a shared wrong
+assumption survives.
+
 ### Review Findings
 
 ### Completion Notes List
