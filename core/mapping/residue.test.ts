@@ -197,8 +197,23 @@ describe('the bounds the port already published', () => {
   })
 
   it('imports the caps rather than restating them', () => {
-    // AC7: no new magic numbers. Asserted by using the exported constants above
-    // — this only pins that they are the real, non-trivial ones.
+    /**
+     * The name claims something the value assertions cannot show: two
+     * `toBeGreaterThan(0)` checks pass just as happily against numbers written
+     * out again inside `residue.ts`. AC7 is "no new magic numbers", and that is
+     * a fact about the source. Raised by CodeRabbit.
+     */
+    const source = readFileSync(fileURLToPath(new URL('./residue.ts', import.meta.url)), 'utf8')
+    const code = neutralise(source).commentsBlanked
+
+    expect(code).toContain('MAX_SUGGESTIBLE_HEADINGS')
+    expect(code).toContain('MAX_HEADING_LENGTH')
+    // Imported from the port, not declared here.
+    expect(code).not.toContain('const MAX_SUGGESTIBLE_HEADINGS')
+    expect(code).not.toContain('const MAX_HEADING_LENGTH')
+    // The blanker must not be what makes this pass.
+    expect(code).toContain('export function residueOf')
+
     expect(MAX_SUGGESTIBLE_HEADINGS).toBeGreaterThan(0)
     expect(MAX_HEADING_LENGTH).toBeGreaterThan(0)
   })

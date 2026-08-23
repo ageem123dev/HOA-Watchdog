@@ -511,6 +511,49 @@ sweep's scope. Writing a check does not exempt it from being checked.
 
 ### Completion Notes List
 
+#### Second CLI round (requested), and one finding deliberately not acted on
+
+Four findings against `7cd9d93`. **Three fixed:**
+
+- The greedy asker in the per-kind cross-check padded with `position: -1` when a kind had more
+  unfilled targets than the residue had headings. Since the merge became all-or-nothing, one such
+  entry discards the *whole* model answer - so for those kinds the cross-check was exercising
+  deterministic pairings only, which is not what its name claims. It now offers only as many targets
+  as it was given columns, and asserts the model actually added something.
+- `imports the caps rather than restating them` asserted only that two constants exceed zero, which
+  is equally true of numbers written out again inside `residue.ts`. It now reads the source.
+- **No test covered the model being configured.** Pinning the credential in `beforeEach` - the fix
+  for a real hazard in the previous round - left every test in that file running with the model half
+  disabled. Two tests added: the model's pairing reaching `SampleState`, and a rejecting model
+  falling back. The first failed on its first run because the fixture's columns were all matched, so
+  the residue was empty and the model was correctly never asked; it needed a sample with something
+  left over.
+
+**Not acted on: `replySchema` uses lowercase `type` values.**
+
+The finding says the REST `generateContent` API rejects them and they must be uppercase. It may be
+right, but acting on it as scoped would be wrong, because **this module copies the shipped
+precedent exactly**:
+
+| Call site | Casing |
+| --- | --- |
+| `adapters/extraction/extractor-gemini.ts` (in production since story 1.5c) | lowercase |
+| `scripts/verify-extraction.mjs` (the live probe) | lowercase |
+| `adapters/extraction/suggester-gemini.ts` (this story) | lowercase |
+
+Changing only this one would make two modules that must behave identically disagree. And if the
+finding is right, the consequence is far larger than this story: document extraction has been sending
+a schema the provider rejects, and AD-9's enforcement has never held.
+
+**It cannot be settled from here** - every test in this repository fakes `fetch`, which story 1.5c
+already records: *"none of them proves the provider actually honours `responseSchema` - only that
+this code sends it and revalidates the reply."*
+
+**What settles it:** `scripts/verify-extraction.mjs`, the probe story 1.5c built as a deliverable for
+exactly this, run once with a real `GEMINI_API_KEY`. One run answers it for all three call sites. If
+uppercase is required, all three change together; if not, none do. Recorded as an action item rather
+than guessed at, and flagged to the author.
+
 ### AC audit
 
 Each criterion, the test that fails if the behaviour is removed, and the evidence that it does. **A

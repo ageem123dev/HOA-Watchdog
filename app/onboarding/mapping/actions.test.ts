@@ -30,7 +30,12 @@ const decode = vi.fn<(bytes: Uint8Array) => { ok: true; rows: string[][] } | { o
   ],
 }))
 
+const askModel = vi.fn()
+
 vi.mock('@/adapters/auth/auth', () => ({ auth: () => auth() }))
+vi.mock('@/adapters/extraction/suggester-gemini', () => ({
+  askModelForColumns: (...args: unknown[]) => askModel(...args),
+}))
 vi.mock('@/adapters/extraction/workbook-sheetjs', () => ({
   readWorkbook: (bytes: Uint8Array) => decode(bytes),
 }))
@@ -38,6 +43,17 @@ vi.mock('@/adapters/extraction/workbook-sheetjs', () => ({
 const SIGNED_IN = { user: { id: 'director-1', email: 'treasurer@example.com' } }
 
 const CSV = 'Date,Amount,Unit\r\n2026-03-01,1240.00,12B\r\n'
+
+/**
+ * The same sample plus a column nothing recognises.
+ *
+ * The model is only asked about the **residue**, so a file whose columns are all
+ * matched produces no call at all — that is the behaviour, not a defect, and the
+ * first version of the configured-path test below failed for exactly that
+ * reason. `Mystery` is what makes a call happen: `description` stays unfilled
+ * and column 4 stays unclaimed.
+ */
+const CSV_WITH_RESIDUE = 'Date,Amount,Unit,Mystery\r\n2026-03-01,1240.00,12B,x\r\n'
 
 /** A `File` the action will read, with a size it can check before reading. */
 function sample(
@@ -139,6 +155,57 @@ describe('reading a sample', () => {
       state.status === 'read' &&
         state.suggestions?.find((s) => s.target === 'amount')?.position,
     ).toBe(2)
+  })
+
+  it('carries a model suggestion through when the model is configured', async () => {
+    /**
+     * **The path no test covered.** Pinning the credential in `beforeEach` — the
+     * fix for a real hazard — left every test in this file running with the
+     * model half disabled, so nothing exercised it being *on*. Raised by
+     * CodeRabbit, and it is the shape where one fix opens a gap somewhere else.
+     *
+     * `Unit` is matched deterministically; `description` is not, so it is what
+     * the model is asked about and what it fills here.
+     */
+    vi.stubEnv('GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('GEMINI_SUGGEST_MODEL', 'test-model')
+    askModel.mockResolvedValue([{ target: 'description', position: 4 }])
+
+    const readSample = await act()
+    const state = await readSample(
+      IDLE,
+      form({ documentKind: 'deposit', sample: sample(CSV_WITH_RESIDUE) }),
+    )
+
+    expect(askModel).toHaveBeenCalledTimes(1)
+    expect(state.status).toBe('read')
+    expect(
+      state.status === 'read' && state.suggestions?.find((s) => s.target === 'description')?.position,
+    ).toBe(4)
+  })
+
+  it('falls back to the deterministic suggestion when the model rejects', async () => {
+    // AC2 with the model configured and failing, rather than absent.
+    vi.stubEnv('GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('GEMINI_SUGGEST_MODEL', 'test-model')
+    askModel.mockRejectedValue(new Error('provider exploded'))
+
+    const readSample = await act()
+    const state = await readSample(
+      IDLE,
+      form({ documentKind: 'deposit', sample: sample(CSV_WITH_RESIDUE) }),
+    )
+
+    // The same sample as the success case, so the only difference is how the
+    // model answered — otherwise this could pass by never asking at all.
+    expect(askModel).toHaveBeenCalledTimes(1)
+    expect(state.status).toBe('read')
+    expect(
+      state.status === 'read' && state.suggestions?.find((s) => s.target === 'amount')?.position,
+    ).toBe(2)
+    expect(
+      state.status === 'read' && state.suggestions?.find((s) => s.target === 'description')?.position,
+    ).toBeNull()
   })
 
   it('carries the duplicates and blanks story 5.3 reports rather than refusing them', async () => {

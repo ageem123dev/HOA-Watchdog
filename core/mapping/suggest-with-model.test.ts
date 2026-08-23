@@ -270,18 +270,33 @@ describe('the model is not asked when there is nothing to ask', () => {
 describe('the cross-check: assign accepts everything', () => {
   it.each(DOCUMENT_KINDS)('produces only pairings assign accepts, for a %s', async (kind: DocumentKind) => {
     const headings = headingsOf('Txn Date', 'Booking ref', 'Sum paid', 'Unit #', 'Whatsit')
-    // An asker that claims every unfilled target, in order, on the columns it
-    // was offered — the most aggressive well-formed answer possible.
-    const greedy: ResidueAsker = async (residue) =>
-      residue.unfilled.map((target, index) => ({
-        target,
-        position: residue.headings[index]?.position ?? -1,
-      }))
 
+    /**
+     * An asker that claims as many unfilled targets as it was offered columns —
+     * the most aggressive **well-formed** answer possible.
+     *
+     * It used to pad with `position: -1` when a kind had more unfilled targets
+     * than the residue had headings. Since the merge became all-or-nothing, one
+     * such entry discards the *entire* model answer — so for those kinds this
+     * cross-check was quietly exercising deterministic pairings only, which is
+     * not what its name claims. Raised by CodeRabbit.
+     */
+    const greedy: ResidueAsker = async (residue) =>
+      residue.headings
+        .slice(0, residue.unfilled.length)
+        .map((heading, index) => ({ target: residue.unfilled[index]!, position: heading.position }))
+
+    const deterministic = suggestColumns(headings, kind)
     const result = await suggestWithModel(headings, kind, greedy)
     const proposed = result.filter((s) => s.position !== null)
 
     expect(proposed.length).toBeGreaterThan(0)
+
+    // The model actually contributed something, rather than the cross-check
+    // passing on the deterministic half alone.
+    const filledBefore = deterministic.filter((s) => s.position !== null).length
+
+    expect(proposed.length, `${kind}: the model added nothing`).toBeGreaterThan(filledBefore)
 
     let draft = emptyDraft(kind, headings.length)
     for (const suggestion of proposed) {
