@@ -409,6 +409,59 @@ thing it exists to catch is worse than none."*
 
 ### Review Findings
 
+#### Local round, before the merge request
+
+| Reviewer | Found |
+| --- | --- |
+| **Argus** (per commit) | A CRLF-fragile structural check in the AD-8 test; then the forbidden-import classifier's own hole — `../../adapters/db`, a directory root with no trailing slash, matched none of its three patterns. Clean on tasks 1, 3, 4 and 5. |
+| **`ocr`** (whole branch) | 32 comments, **6 confirmed**. `readBounded` allocated the whole body before measuring it, so the cap bounded parsing and nothing about memory; `suggestWithModel` had no deadline of its own and a hanging promise never rejects; the merge filtered where the adapter refuses; `readsEnvironmentVariable` misses a computed key. |
+| **CodeRabbit CLI** (once, last) | 5 findings, **all confirmed**. The redundant `published` set I had deleted from the merge and left in the adapter; AC2's test assuming the runner's environment rather than pinning it; two vacuity holes in my own boundary guard; a timer never cleared when the answer won the race. |
+
+**`ocr` ran partial and it is recorded as such**: 13 of 14 files, with
+`core/mapping/residue.ts` dropped on budget. `--resume` refused because commits
+landed after the run started - my error. Not re-run at full cost; Argus reviewed
+that module at Task 1 and CodeRabbit covered the whole diff.
+`summary.files_reviewed` reported 14, which is the field known to lie.
+
+**CodeRabbit's findings could not be ingested.** The join needs an Argus run on
+the exact SHA reviewed, and I ran Argus, *then* committed a fix, then started
+CodeRabbit - so the SHA moved. The adapter skipped it rather than scoring Argus
+against code it never saw, which is the right behaviour. The lesson is ordering:
+Argus last, immediately before the CodeRabbit round.
+
+#### Integration pass
+
+**Argus was unavailable**: every call failed with `EISDIR: illegal operation on a
+directory, read`, including `provider: offline`, so the fault is in the harness
+rather than the model or the network. All of its own paths check out as files.
+The routing contract's fallback is the Claude subagent layers, which this session
+does not permit - so this pass was **done by hand**, and is reported as that
+rather than as a satisfied gate.
+
+It still earned its place. Everything below came from reading the whole-story
+diff rather than per-commit output:
+
+- **A two-line change showed as 684.** Committing the control-byte escapes
+  renormalised `tabular-roll.test.ts` from CRLF to LF. `.gitattributes` records a
+  repo-wide renormalisation as a separate open item, and doing a partial one as a
+  side effect of a story about column suggestions buries the real diff. Restored -
+  and the first attempt broke `ocr-to-argus.mjs` in the opposite direction, which
+  is why the second was verified against the base blob rather than assumed.
+- **The control-character guard was invisible to review.** It spelled the
+  forbidden range as literal bytes, so git classified it `Bin` - on the very MR
+  that widens it. Now escapes: text, reviewable, and inside its own sweep. Its
+  self-exclusion turned out to be dead code.
+- **A third literal backspace**, in the doc comment I wrote *explaining that
+  hazard*. The file already records the same thing happening twice before.
+- **A glob in prose closed a block comment early** - `**/` contains `*/`. Caught
+  by the file failing to parse.
+
+**A pattern worth naming:** three times on this branch the weak part was a
+guard's own machinery rather than the thing it guards -
+`readsEnvironmentVariable`, the import classifier, and the control-character
+sweep's scope. Writing a check does not exempt it from being checked.
+
+
 ### Completion Notes List
 
 ### AC audit
