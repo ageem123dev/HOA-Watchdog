@@ -811,6 +811,37 @@ Repaired by building the string from `chr(92)`, which leaves no escape to
 collapse. Fourth time on this project that writing *about* an escape has
 produced the escape.
 
+### The integration pass - the one thing no per-task review could see
+
+Run on the whole branch at once, which is what this step is for. It found a gap
+that every previous reviewer, every mutation and the AC audit had all walked past.
+
+**Nothing proved the re-import applies the *changed* mapping.** Every test asserted
+the re-import *ran*: documents fetched, `extractions.replace` reached, per-document
+outcomes reported, the preview agreeing with the run. None asserted that the
+records afterwards reflect the **new** pairings - which is the entire content of
+AC4.
+
+The gap is invisible per task, and that is exactly why it survived. Task 4 owns
+"re-import the affected documents"; Task 3 owns "an upload applies the saved
+mapping". The re-import gets its parse from Task 3's code, by calling `ingest`.
+Each task's tests are complete on their own terms. If that lookup returned a
+stale mapping, every one of them would still pass - the same number of records
+written to the same document, all wrong in the same way they were before, and the
+treasurer told their documents had been re-imported.
+
+Now asserted with a four-column file carrying two plausible money columns
+(`Amt` and `Fee`), so only the amount moves when the mapping changes. Two
+mutations confirm it: `ingest` ignoring the saved mapping kills 10 tests, and
+`reimport` never calling `ingest` kills 4.
+
+**And the cross-check was comparing the wrong thing.** It compared
+`{documentId, count}` - the same *number* of records, not the same records. Two
+paths producing identically wrong rows would have agreed perfectly. CodeRabbit
+raised this as a minor and I confirmed it without fixing it; the integration pass
+is what made it matter, because it is the assertion the finding above depends on.
+The harness now captures the records themselves.
+
 ### Review Findings
 
 ### Completion Notes List

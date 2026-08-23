@@ -72,7 +72,7 @@ const doc = (id: string, filename: string): Reimportable => ({
 interface Harness {
   readonly deps: IngestDependencies
   readonly candidates: ReimportCandidates
-  readonly replaced: { documentId: string; count: number }[]
+  readonly replaced: { documentId: string; count: number; records: readonly unknown[] }[]
   readonly fetched: string[]
 }
 
@@ -81,7 +81,7 @@ function harness(
   bytesFor: Record<string, string>,
   mapping: SavedMapping | null = MAPPING,
 ): Harness {
-  const replaced: { documentId: string; count: number }[] = []
+  const replaced: { documentId: string; count: number; records: readonly unknown[] }[] = []
   const fetched: string[] = []
 
   const mappings: MappingStore = {
@@ -111,8 +111,11 @@ function harness(
       releaseExtractionClaim: vi.fn(async () => undefined),
     },
     extractions: {
+      // The records themselves, not their count. A cross-check comparing lengths
+      // passes when two paths produce the same number of wrong rows - which is
+      // exactly the failure a re-import can have. Raised by CodeRabbit.
       replace: vi.fn(async (documentId: string, records: readonly unknown[]) => {
-        replaced.push({ documentId, count: records.length })
+        replaced.push({ documentId, count: records.length, records })
       }),
       findByDocument: vi.fn(async () => []),
     },
@@ -150,7 +153,7 @@ describe('a mapping change re-imports what it affects', () => {
 
     await run(h)
 
-    expect(h.replaced).toEqual([{ documentId: 'doc-x', count: 1 }])
+    expect(h.replaced).toMatchObject([{ documentId: 'doc-x', count: 1 }])
   })
 
   it('leaves a document of a different shape alone', async () => {
@@ -341,6 +344,84 @@ describe('the warning before the act (AC6)', () => {
     await preview(h)
 
     expect(h.replaced).toEqual([])
+  })
+})
+
+describe('the point of the whole thing: the new mapping is what gets applied', () => {
+  /**
+   * **The integration pass found this missing.** Every test above proves the
+   * re-import *ran* - documents fetched, `extractions.replace` reached, outcomes
+   * reported. None proved it re-parsed under the **changed** mapping, which is
+   * the entire content of AC4.
+   *
+   * That gap is invisible per task. Task 4 owns "re-import the affected
+   * documents" and Task 3 owns "an upload applies the saved mapping"; the
+   * re-import gets its parse from Task 3's code, by calling `ingest`. If that
+   * lookup returned a stale mapping, every assertion in this file would still
+   * pass - the same number of records would be written to the same document, and
+   * they would all be wrong in the same way as before.
+   *
+   * A four-column file with two plausible money columns is what makes the
+   * difference observable: only the amount moves.
+   */
+  const FOUR =
+    'Txn Date,Descr,Amt,Fee\r\n2026-03-01,Willow Creek Landscaping,1240.00,35.00\r\n'
+
+  const mappingFor = (amountColumn: number): SavedMapping => ({
+    savedBy: TREASURER,
+    kind: 'deposit',
+    shape: shapeOf(FOUR),
+    mapping: {
+      kind: 'deposit',
+      columns: 4,
+      pairings: [
+        { target: 'date', position: 1 },
+        { target: 'description', position: 2 },
+        { target: 'amount', position: amountColumn },
+      ],
+    },
+  })
+
+  const amountsUnder = async (mapping: SavedMapping) => {
+    const h = harness([doc('a', 'march.csv')], { 'key/a': FOUR })
+    // The store answers with this mapping for the file's shape, which is what
+    // `ingest` consults on the way back in. Passed rather than assigned:
+    // `IngestDependencies.mappings` is readonly, and casting past that would be
+    // working around the contract in order to test it.
+    const mappings = {
+      find: vi.fn(async (_who: string, _kind: string, shape: string) =>
+        shape === mapping.shape ? mapping : null,
+      ),
+      save: vi.fn(async () => ({ replaced: false, previous: null })),
+    }
+
+    await reimport(TREASURER, 'deposit', mapping.shape, {
+      ...h.deps,
+      mappings,
+      ingest,
+      candidates: h.candidates,
+    })
+
+    return h.replaced.flatMap((call) =>
+      // `totalAmount`, a decimal string — never a number. `record.ts` is
+      // explicit that a binary float cannot represent an association's ledger.
+      call.records.map((record) => (record as { totalAmount?: unknown }).totalAmount),
+    )
+  }
+
+  it('reads the column the current mapping names, not the one it used to', async () => {
+    const underAmt = await amountsUnder(mappingFor(3))
+    const underFee = await amountsUnder(mappingFor(4))
+
+    // Both re-imports produced records — otherwise the comparison below is two
+    // empty lists agreeing with each other.
+    expect(underAmt.length).toBeGreaterThan(0)
+    expect(underFee.length).toBe(underAmt.length)
+
+    // And the figures moved with the mapping, which is the whole of AC4.
+    expect(underAmt).not.toEqual(underFee)
+    expect(String(underAmt[0])).toContain('1240')
+    expect(String(underFee[0])).toContain('35')
   })
 })
 
