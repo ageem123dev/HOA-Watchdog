@@ -38,19 +38,22 @@ function dependenciesOf(source: string, path: string, call: string): string {
   throw new Error(`${path}: could not find the end of the dependency object`)
 }
 
-describe('the upload action, which is the path a roll takes', () => {
-  const path = 'app/upload/actions.ts'
+describe('the shared ingestion composition, which is the path a roll takes', () => {
+  // Story 5.7 moved this out of the upload action: a mapping change re-imports
+  // through `ingest` too, and two hand-built dependency objects would drift.
+  // Asserting it here covers both callers at once.
+  const path = 'app/ingestion-dependencies.ts'
   const source = read(path)
 
   it('passes a roll repository to ingest', () => {
-    expect(dependenciesOf(source, path, 'ingest(')).toMatch(/\brolls\s*:/)
+    expect(dependenciesOf(source, path, 'return {')).toMatch(/\brolls\s*:/)
   })
 
   it('passes the real adapter, not undefined', () => {
     // The mutation this exists for: `rolls: undefined` satisfies a test that
     // only looks for the property name, and behaves exactly like no wiring at
     // all. Story 2.5 met that shape and its test checks the constructor call.
-    expect(dependenciesOf(source, path, 'ingest(')).toMatch(/\brolls\s*:\s*createRollRepository\(/)
+    expect(dependenciesOf(source, path, 'return {')).toMatch(/\brolls\s*:\s*createRollRepository\(/)
   })
 
   it('imports that adapter, so the call resolves to something', () => {

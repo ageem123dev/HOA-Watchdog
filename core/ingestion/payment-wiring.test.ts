@@ -23,9 +23,15 @@ const read = (path: string): string => readFileSync(join(process.cwd(), path), '
 /** The two call sites, and the dependency object each builds. */
 const CALL_SITES = [
   {
-    what: 'the upload action, which is the path a deposit CSV takes',
-    path: 'app/upload/actions.ts',
-    call: 'ingest(',
+    // Story 5.7 moved this composition out of the upload action: a mapping
+    // change re-imports through `ingest` too, and two hand-built dependency
+    // objects would drift. Asserting it here now covers both callers at once.
+    what: 'the shared ingestion composition (the upload action, which is the path a deposit CSV takes)',
+    path: 'app/ingestion-dependencies.ts',
+    // The composition is what this module *returns*, so the brace-matcher
+    // anchors on the return rather than on a call `ingest(` that is now one
+    // layer out in each caller.
+    call: 'return {',
   },
   {
     what: 'the extract route, which is the path a scanned deposit takes',

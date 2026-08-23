@@ -26,8 +26,11 @@ const read = (path: string): string => readFileSync(join(process.cwd(), path), '
 
 const CALL_SITES = [
   {
-    what: 'the upload action, the path an invoice CSV takes',
-    path: 'app/upload/actions.ts',
+    // Story 5.7 moved this composition out of the upload action: a mapping
+    // change re-imports through `ingest` too, and two hand-built dependency
+    // objects would drift. Asserting it here now covers both callers at once.
+    what: 'the shared ingestion composition (the upload action, the path an invoice CSV takes)',
+    path: 'app/ingestion-dependencies.ts',
   },
   {
     what: 'the extract route, the path a scanned invoice takes',

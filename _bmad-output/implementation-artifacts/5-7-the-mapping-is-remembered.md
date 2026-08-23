@@ -116,7 +116,7 @@ already owns them, stop.** That is the violation, not a shortcut.
       with bytes from object storage. Per-document outcomes, no partial documents. (AC4, AC7)
 - [x] **Task 5 — Raise no alert twice.** Prove the suppression over a re-import, not only over a
       re-upload. (AC5)
-- [ ] **Task 6 — The record, and the warning before it.** What will change, then what did. (AC6)
+- [x] **Task 6 — The record, and the warning before it.** What will change, then what did. (AC6)
 
 ## Dev Notes
 
@@ -534,6 +534,57 @@ than the rest of this story carries.
 mapping a later upload matches, so the form's `headerRow` is re-read through
 `readHeadings` and `shapeKey` - the same two functions an upload goes through -
 and a `shape` field sent by the client is ignored. A test sends one to prove it.
+
+#### Task 6, completed - and the defect I nearly shipped composing it
+
+Task 6 was **not** done when the preview and the change-log table existed. Nothing
+called the log, so AC6's record was a table nobody wrote to. The composition
+module - `reimport-actions.ts`, with `previewMappingChange` and `changeMapping` -
+is what closes it, and building it surfaced the worst near-miss of this story.
+
+**A re-import needs the same fifteen collaborators an upload needs.** My first
+instinct was to compose them for the new call site, starting from
+`{store, repository, extractions}` - which looks complete. It is four stories
+behind, and **not one of the omissions throws**:
+
+- no `payments`: a re-imported deposit produces extraction rows and no payments,
+  so money vanishes from a ledger it was already in
+- no `rolls`: a re-imported roll creates no units, so every deposit afterwards is
+  held `unknown-unit`
+- no `findings`: the re-import erases the old parse's findings and raises none of
+  the new ones
+- no `alerts`/`recipients`: a genuine new finding is raised and nobody is told
+
+The upload path accumulated these one story at a time - 2.5, 4.2, 4.8, the roll
+repository - and `alert-wiring.test.ts` exists because exactly this omission
+happened once already.
+
+So the composition was **extracted into `app/ingestion-dependencies.ts` and
+shared**, and `app/upload/actions.ts` rewired onto it. A behavioural test cannot
+catch this: comparing two paths that share an omission sees nothing. So
+`ingestion-dependencies.test.ts` asserts it structurally - every silent-if-absent
+collaborator is present, both callers reach `ingest` only through the shared
+function, and neither imports the adapters a hand-rolled set is made of.
+
+**The extraction broke sixteen tests, which is the system working.** Four wiring
+guards read `app/upload/actions.ts` by path and brace-match the dependency object
+from `ingest(`. They were repointed at the composition's new home and re-anchored
+on `return {` - and then re-proven: six mutations of the shared module (`rolls`,
+`payments`, `alerts`, `findings` removed; `rolls`, `units` set to `undefined`)
+all still fail them. A guard that follows a refactor without being re-proven is a
+guard that has quietly stopped looking.
+
+**Why saving and re-importing are one action.** `save` returns the mapping it
+replaced and that value exists nowhere else afterwards - the row is overwritten.
+AC6's record names both the old and the new mapping, so the only place it can be
+written is the call still holding both. The alternative - handing the previous
+mapping to the browser and accepting it back - makes an audit record's content
+something the client asserts, which is worse than having none.
+
+**Why two actions and not one.** AC6 says the treasurer is told *before* it runs.
+`previewMappingChange` writes nothing; `changeMapping` acts. One call that
+re-imported and then reported the number would be showing somebody the bill after
+taking the money.
 
 ### Review Findings
 
