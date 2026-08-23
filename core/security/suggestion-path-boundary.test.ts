@@ -131,7 +131,14 @@ const forbidden = (specifier: string): boolean => {
  */
 function computedEnvReads(text: string): string[] {
   const found: string[] = []
-  const opener = /(?:process\s*\.\s*)?\benv\s*\[/g
+
+  // **Three ways to reach the object, not one.** `process.env[…]`, a bare
+  // `env[…]` after destructuring, and `process['env'][…]` — the last of which
+  // the first version missed entirely, because after `env` the source has a
+  // quote where the pattern wanted a bracket. It is ordinary working JavaScript
+  // that reads a credential by computed key, so missing it failed open.
+  // Raised by CodeRabbit.
+  const opener = /(?:process\s*\[\s*(['"`])env\1\s*\]|(?:process\s*\.\s*)?\benv)\s*\[/g
 
   for (const match of text.matchAll(opener)) {
     const start = (match.index ?? 0) + match[0].length
@@ -303,11 +310,17 @@ describe('the guard can actually fail', () => {
     expect(computedEnvReads('process.env[`${name}`]')).toHaveLength(1)
     expect(computedEnvReads("process.env['PREFIX_' + name]")).toHaveLength(1)
     expect(computedEnvReads('const { env } = process; env[k]')).toHaveLength(1)
+    // Bracket access to the object itself, which the first version missed
+    // because after `env` the source has a quote where it wanted a bracket.
+    expect(computedEnvReads("process['env'][k]")).toHaveLength(1)
+    expect(computedEnvReads('process["env"][`${name}`]')).toHaveLength(1)
 
     // A literal key is the *allowed* form. Naming a real credential here would
     // trip AD-10's guard, for the reason given above.
     expect(computedEnvReads("process.env['EXAMPLE_NOT_A_SECRET']")).toEqual([])
     expect(computedEnvReads('process.env.EXAMPLE_NOT_A_SECRET')).toEqual([])
+    // A literal key stays allowed through the bracket form too.
+    expect(computedEnvReads("process['env']['EXAMPLE_NOT_A_SECRET']")).toEqual([])
   })
 })
 
