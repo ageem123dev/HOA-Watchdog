@@ -201,7 +201,17 @@ describe('the model is checked, never trusted', () => {
     await expect(ask(fetchImpl)).resolves.toEqual([])
   })
 
-  it('refuses a target the kind does not publish', async () => {
+  it('refuses a target outside the residue, whatever the kind publishes', async () => {
+    /**
+     * `cycle` belongs to a roll, not a deposit — but that is **not** what this
+     * refuses it for, and saying so matters. The check is `wanted`, the
+     * residue's unfilled set, and a `published` set stood beside it that could
+     * never fire: `unfilled` is built from `targetsForKind().required`, so
+     * anything `wanted` accepts is published by definition.
+     *
+     * The old name claimed a distinction the code does not make, and no input
+     * could tell the two apart. Raised by CodeRabbit.
+     */
     const fetchImpl = replyWith({ pairings: [{ position: 1, target: 'cycle' }] })
 
     await expect(ask(fetchImpl)).resolves.toEqual([])

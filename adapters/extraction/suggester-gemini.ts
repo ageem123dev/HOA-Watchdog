@@ -45,7 +45,7 @@ import type { Heading } from '@/core/extraction/headings'
 import type { DocumentKind } from '@/core/extraction/record'
 import type { Residue } from '@/core/mapping/residue'
 import type { Suggestion } from '@/core/mapping/suggest'
-import { targetsForKind, type TargetField } from '@/core/mapping/targets'
+import type { TargetField } from '@/core/mapping/targets'
 import { raceAbort } from './extractor-gemini'
 
 const ORIGIN = 'https://generativelanguage.googleapis.com'
@@ -141,11 +141,12 @@ export async function askModelForColumns(
   if (!apiKey || !model) return []
 
   const offered = new Set(residue.headings.map((heading) => heading.position))
+  // `wanted` alone. A `published` set stood beside it and could never fire:
+  // `residue.unfilled` is built from `targetsForKind(kind).required`, so a
+  // target `wanted` accepts is published by definition. **The identical
+  // redundancy was deleted from `suggest-with-model.ts` and left here** —
+  // raised by CodeRabbit, which is what a second reviewer is for.
   const wanted = new Set(residue.unfilled)
-  const published = new Set<TargetField>([
-    ...targetsForKind(kind).required,
-    ...targetsForKind(kind).optional,
-  ])
 
   const doFetch = options.fetch ?? globalThis.fetch
   const controller = new AbortController()
@@ -188,7 +189,7 @@ export async function askModelForColumns(
     const text = await readBounded(response, controller.signal)
     if (text === null) return []
 
-    return validate(text, offered, wanted, published)
+    return validate(text, offered, wanted)
   } catch {
     // The deadline, or a body that never finished arriving.
     return []
@@ -281,7 +282,6 @@ function validate(
   raw: string,
   offered: ReadonlySet<number>,
   wanted: ReadonlySet<TargetField>,
-  published: ReadonlySet<TargetField>,
 ): readonly Suggestion[] {
   let pairings: unknown
 
@@ -324,7 +324,7 @@ function validate(
     // The position must be one this module offered — **this is where an
     // instruction smuggled into a heading stops.**
     if (!offered.has(position)) return []
-    if (!wanted.has(asTarget) || !published.has(asTarget)) return []
+    if (!wanted.has(asTarget)) return []
     if (seenPositions.has(position) || seenTargets.has(asTarget)) return []
 
     seenPositions.add(position)

@@ -38,7 +38,7 @@ if (!inPath) {
 
 // ocr writes progress before the JSON when stderr and stdout share a file, and
 // colour codes survive `--audience agent`. Strip both, then take the object.
-const raw = readFileSync(inPath, 'utf8').replace(/\[[0-9;]*m/g, '')
+const raw = readFileSync(inPath, 'utf8').replace(/\u001b\[[0-9;]*m/g, '')
 const start = raw.indexOf('{')
 if (start === -1) throw new Error(`no JSON object in ${inPath}`)
 const report = JSON.parse(raw.slice(start))

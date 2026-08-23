@@ -115,7 +115,21 @@ const forbidden = (specifier: string): boolean => {
 }
 
 /** `process.env[expression]` — a read whose name is not in the source at all. */
-const COMPUTED_ENV_READ = /process\s*\.\s*env\s*\[\s*[^'"`\]]/
+const COMPUTED_ENV_READ = /(?:process\s*\.\s*)?env\s*\[\s*[^'"`\]]/
+
+/**
+ * The source of `path`, or a loud failure.
+ *
+ * The lookups below used `?? ''`, which lets every assertion in this file pass
+ * against an empty string if the entry is ever missing — the vacuity these
+ * guards exist to prevent, inside the guard. Raised by CodeRabbit.
+ */
+const sourceFor = (path: string): string => {
+  const found = sources.find((source) => source.path === path)
+
+  expect(found, `no source read for ${path}`).toBeDefined()
+  return found!.text
+}
 
 const sources = SUGGESTION_PATH.map((path) => ({
   path,
@@ -209,7 +223,7 @@ describe('the guard can actually fail', () => {
 
 describe('no data credential', () => {
   it.each(SUGGESTION_PATH)('%s reads none of them', (path) => {
-    const text = sources.find((source) => source.path === path)?.text ?? ''
+    const text = sourceFor(path)
 
     expect(FORBIDDEN_CREDENTIALS.length).toBeGreaterThan(0)
 
@@ -234,7 +248,7 @@ describe('no data credential', () => {
 
 describe('no tool access', () => {
   it.each(SUGGESTION_PATH)('%s imports no store, catalog or chat client', (path) => {
-    const text = sources.find((source) => source.path === path)?.text ?? ''
+    const text = sourceFor(path)
     const specifiers = specifiersIn(text)
 
     // Non-empty first for the core modules; the check below is a filter, and a
@@ -264,7 +278,7 @@ describe('core stays core', () => {
       // `boundary.test.ts` holds this repo-wide; asserted here too because this
       // path is the one where an adapter import would be most tempting — the
       // model lives in one.
-      const text = sources.find((source) => source.path === path)?.text ?? ''
+      const text = sourceFor(path)
       const outward = specifiersIn(text).filter((specifier) => specifier.includes('adapters'))
 
       expect(outward).toEqual([])

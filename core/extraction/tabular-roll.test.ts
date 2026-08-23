@@ -538,8 +538,8 @@ describe('readRollRow measures length the way the database does', () => {
   })
 
   it.each([
-    ['unit number', { unitNumber: '4B ' }],
-    ['holder name', { holderName: 'Jane Smith' }],
+    ['unit number', { unitNumber: '4B\u0000' }],
+    ['holder name', { holderName: 'Jane\u0000Smith' }],
   ])('refuses a NUL in the %s', (_label, override) => {
     // Tested here, not through `readRows`. `validate` runs on the same cells
     // first and also yields `invalid-row`, so the table-level assertion cannot

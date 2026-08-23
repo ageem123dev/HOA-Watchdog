@@ -69,6 +69,7 @@ export async function suggestWithModel(
   if (residue.unfilled.length === 0 || residue.headings.length === 0) return deterministic
 
   let answered: readonly Suggestion[]
+  let timer: ReturnType<typeof setTimeout> | undefined
 
   try {
     // `await` inside the `try`: a rejected promise and a synchronous throw are
@@ -84,9 +85,11 @@ export async function suggestWithModel(
     answered = await Promise.race([
       ask(residue, kind),
       new Promise<never>((_resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('ask timed out')), timeoutMs)
-        // `unref` where the runtime has it: a pending timer must not hold a
-        // process open after the answer already arrived.
+        timer = setTimeout(() => reject(new Error('ask timed out')), timeoutMs)
+        // `unref` where the runtime has it, *and* cleared in `finally`: unref
+        // alone stops a pending timer holding the process open, but the timer
+        // still sits in the queue for the whole timeout after an answer that
+        // arrived in milliseconds.
         ;(timer as unknown as { unref?: () => void }).unref?.()
       }),
     ])
@@ -95,6 +98,12 @@ export async function suggestWithModel(
     // holding a credential, and its errors are the ones most likely to carry
     // something that must not be kept.
     return deterministic
+  } finally {
+    // **Cleared however the race ends.** `unref` alone only stops a pending
+    // timer holding the process open; it still sits in the queue for the whole
+    // timeout after an answer that arrived in milliseconds. Raised by
+    // CodeRabbit.
+    if (timer !== undefined) clearTimeout(timer)
   }
 
   if (!Array.isArray(answered)) return deterministic

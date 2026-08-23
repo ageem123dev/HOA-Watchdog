@@ -62,6 +62,9 @@ const IDLE = { status: 'idle' } as const
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Any env stubbed by a test is undone here, so one test cannot leak a
+  // pinned variable into the next.
+  vi.unstubAllEnvs()
   auth.mockResolvedValue(SIGNED_IN)
 })
 
@@ -107,7 +110,15 @@ describe('reading a sample', () => {
      * this file — which is exactly the production case of a deployment that has
      * not enabled it. The action must return a readable sample with the
      * deterministic suggestion, not an error and not a rejected promise.
+     *
+     * **Pinned rather than assumed.** "No test here sets it" was a claim about
+     * the *runner's* environment, not about this test: a developer or a CI job
+     * with `GEMINI_API_KEY` exported would have turned this suite into one that
+     * makes a real outbound request. Raised by CodeRabbit.
      */
+    vi.stubEnv('GEMINI_API_KEY', '')
+    vi.stubEnv('GEMINI_SUGGEST_MODEL', '')
+
     const readSample = await act()
 
     const state = await readSample(IDLE, form({ documentKind: 'deposit', sample: sample(CSV) }))
