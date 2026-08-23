@@ -31,6 +31,8 @@ import { join } from 'node:path'
 import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { neutralise } from '@/core/ports/declared-members'
+
 import { createMappingStore } from './mapping-store-postgres'
 
 const SOURCE = readFileSync(join(__dirname, 'mapping-store-postgres.ts'), 'utf8')
@@ -40,8 +42,15 @@ const adminUrl = process.env.DATABASE_URL
 const configured = Boolean(writerUrl && adminUrl)
 const describeWithDatabase = configured ? describe : describe.skip
 
-/** The comments here necessarily discuss tenancy; only the code may satisfy it. */
-const code = SOURCE.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+/**
+ * The comments here necessarily discuss tenancy; only the code may satisfy it.
+ *
+ * `neutralise` rather than a local regex: a hand-rolled `//`-stripper also eats
+ * `//` inside a string literal, and this project already consolidated four
+ * private copies of that scanner in story 5.6 after they drifted. I wrote a
+ * fifth. Raised by ocr.
+ */
+const code = neutralise(SOURCE).commentsBlanked
 
 const DEPOSIT = {
   kind: 'deposit' as const,
@@ -171,7 +180,23 @@ describeWithDatabase('against a real database', () => {
   })
 
   afterAll(async () => {
-    if (configured) await admin.end()
+    if (!configured) return
+
+    // This file creates two associations, two members and every mapping saved
+    // under them, and cleaned up none of it. Left alone it accumulates a fresh
+    // set on every run, and `find`'s association scoping is exactly the kind of
+    // assertion that a database full of other runs' rows starts to hide.
+    // Raised by ocr.
+    for (const association of [mine, theirs]) {
+      await admin.query(
+        `delete from column_mapping where association_id =
+           (select association_id from board_member where id = $1)`,
+        [association],
+      )
+    }
+    await admin.query(`delete from board_member where email like $1`, [`${prefix}-%`])
+    await admin.query(`delete from association where name like $1`, [`${prefix} %`])
+    await admin.end()
   })
 
   const store = () => createMappingStore()

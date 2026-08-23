@@ -112,12 +112,29 @@ export async function saveMapping(_previous: SaveState, formData: FormData): Pro
     return { status: 'error', error: 'That mapping is not valid. Check the columns and try again.' }
   }
 
-  const replaced = await createMappingStore().save({
-    savedBy,
-    kind,
-    shape: shapeKey(kind, headings.headings),
-    mapping: draft,
-  })
+  /**
+   * Guarded, because everything above this line is validation and this is the
+   * first thing that can fail for reasons the treasurer did not cause. An
+   * unhandled rejection in a server action is a generic 500 - the wizard they
+   * just filled in is gone, with nothing said about whether it saved. Raised by
+   * ocr.
+   *
+   * The real error goes to the log, never to the page: it can name a table, a
+   * constraint or a connection string.
+   */
+  let replaced
+  try {
+    replaced = await createMappingStore().save({
+      savedBy,
+      kind,
+      shape: shapeKey(kind, headings.headings),
+      mapping: draft,
+    })
+  } catch (error) {
+    console.error('[mapping] a mapping could not be saved', error)
+
+    return { status: 'error', error: 'That mapping could not be saved. Try again in a moment.' }
+  }
 
   // Changed, not created - and that is *all* this reports. Counting what the
   // change affects means reading every candidate document's bytes back out of

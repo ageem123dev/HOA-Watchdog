@@ -167,15 +167,31 @@ export async function changeMapping(
     candidates: createReimportCandidates(),
   })
 
-  await createMappingChangeLog().record({
-    changedBy: where.member,
-    kind: where.kind,
-    shape: where.shape,
-    // Null when nothing was replaced, which the column is nullable for.
-    previous: replaced?.mapping ?? null,
-    next: mapping,
-    documents,
-  })
+  try {
+    await createMappingChangeLog().record({
+      changedBy: where.member,
+      kind: where.kind,
+      shape: where.shape,
+      // Null when nothing was replaced, which the column is nullable for.
+      previous: replaced?.mapping ?? null,
+      next: mapping,
+      documents,
+    })
+  } catch (error) {
+    /**
+     * The change already happened: the mapping is replaced and the documents
+     * are re-parsed. Rethrowing would report a failure that did not occur and
+     * invite the treasurer to run it again.
+     *
+     * So it is reported as its own outcome. There is no transaction that could
+     * have avoided this - the act spans object storage and many rows across two
+     * tables, and 027 revokes UPDATE so the record cannot be written first and
+     * corrected after. Raised by ocr.
+     */
+    console.error('[mapping-change] the change was applied but not recorded', error)
+
+    return { status: 'changed-unrecorded', documents }
+  }
 
   // Per document, not summarised. AC7 refuses a single "done", and a treasurer
   // whose statement could not be re-read needs to know which one.

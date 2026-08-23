@@ -528,6 +528,23 @@ describe('confirming a mapping (AC3)', () => {
     expect(save).not.toHaveBeenCalled()
   })
 
+  it('reports a store failure to the treasurer instead of throwing', async () => {
+    /**
+     * Everything before the write is validation; this is the first thing that
+     * can fail for a reason the treasurer did not cause. Unhandled, a server
+     * action's rejection is a generic 500 - the wizard they just filled in is
+     * gone, with nothing said about whether it saved. Raised by ocr.
+     */
+    auth.mockResolvedValue(SIGNED_IN)
+    save.mockRejectedValue(new Error('the database said no'))
+
+    const state = await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
+
+    expect(state.status).toBe('error')
+    // The real error names a table or a connection; it must not reach the page.
+    expect(JSON.stringify(state)).not.toContain('the database said no')
+  })
+
   it('reports a first mapping as saved', async () => {
     auth.mockResolvedValue(SIGNED_IN)
     save.mockResolvedValue(null)

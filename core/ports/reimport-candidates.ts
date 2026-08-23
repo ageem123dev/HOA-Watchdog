@@ -25,8 +25,8 @@
  *
  * ## The association is derived, not passed
  *
- * `uploadedBy` is a member, and the adapter reads the association from that
- * member in SQL. 5.1's rule, and it matters more here than almost anywhere: a
+ * `member` is a board member, and the adapter reads the association from them
+ * in SQL. 5.1's rule, and it matters more here than almost anywhere: a
  * re-import scoped to the wrong association rewrites another board's financial
  * history through a path that is *supposed* to rewrite history.
  */
@@ -44,9 +44,17 @@ export interface ReimportCandidates {
   /**
    * Every document of `kind` held by this member's association.
    *
+   * **`member`, not `uploadedBy`** - and the difference is not cosmetic. This
+   * parameter is the person *asking for the re-import*, and the scope is their
+   * whole association: a mapping change affects documents whoever uploaded them.
+   * Named `uploadedBy` it reads as a filter on the uploader, and the obvious
+   * "fix" for a future reader is to add `and d.uploaded_by = $1` to the query -
+   * which would silently skip every document another director uploaded, leaving
+   * them parsed under the old mapping with nothing reported. Raised by ocr.
+   *
    * One document has many extraction rows, so an implementation joining to
    * `extraction` for the kind must return each document once - a duplicate here
    * becomes a document re-imported twice.
    */
-  importedUnder(uploadedBy: string, kind: string): Promise<readonly Reimportable[]>
+  importedUnder(member: string, kind: string): Promise<readonly Reimportable[]>
 }

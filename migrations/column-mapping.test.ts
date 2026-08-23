@@ -66,6 +66,43 @@ describe('the migration says what it does', () => {
     expect(sql).not.toMatch(/revoke[^;]*\bupdate\b[^;]*on column_mapping/)
   })
 
+  it('carries the composite key that keeps a saver inside their own association', () => {
+    /**
+     * Migration 024's convention, which this table is too new to be inside: every
+     * association-scoped table gets a composite foreign key "so a child cannot
+     * belong to a different association than its parent".
+     *
+     * Without it the schema permits a saver from one association against a row in
+     * another. The adapter derives `association_id` from that member, so the two
+     * always agree in practice - but 024's point is that the database refuses it
+     * rather than the application remembering to. Raised by ocr.
+     */
+    const sql = executable(MIGRATION)
+
+    expect(sql).toContain('add constraint column_mapping_id_association_key unique (id, association_id)')
+    expect(sql).toMatch(
+      /foreign key \(saved_by, association_id\) references board_member \(id, association_id\)/,
+    )
+  })
+
+  it('adds those constraints idempotently, like every other statement here', () => {
+    // `add constraint` has no `if not exists`, so a re-applied migration would
+    // fail on the second run - and every other statement in the file is guarded.
+    const sql = executable(MIGRATION)
+
+    expect(sql).toMatch(/select 1 from pg_constraint where conname = 'column_mapping_id_association_key'/)
+    expect(sql).toMatch(/select 1 from pg_constraint where conname = 'column_mapping_saved_by_fk'/)
+  })
+
+  it('indexes the column that references board_member', () => {
+    // Migration 005's rule, stated on its own index: "Referencing columns get no
+    // index automatically. Without this, deleting a board_member scans
+    // column_mapping." A convention, not a case-by-case call. Raised by ocr.
+    const sql = executable(MIGRATION)
+
+    expect(sql).toContain('create index if not exists column_mapping_saved_by_idx on column_mapping (saved_by)')
+  })
+
   it('grants the reader nothing', () => {
     /**
      * Migration 003 revoked `watchdog_reader`'s blanket SELECT so that read
@@ -129,7 +166,12 @@ describeWithDatabase('against a real database', () => {
 
   afterAll(async () => {
     if (configured) {
+      // The mapping rows are not the only thing this file creates. Leaving the
+      // association and its member behind accumulates a row per run forever,
+      // and the next test that counts anything association-wide inherits them.
       await admin.query(`delete from column_mapping where association_id = $1`, [associationId])
+      await admin.query(`delete from board_member where association_id = $1`, [associationId])
+      await admin.query(`delete from association where id = $1`, [associationId])
       await admin.end()
       await writer.end()
     }

@@ -17,10 +17,12 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { neutralise } from '@/core/ports/declared-members'
+
 const SOURCE = readFileSync(join(__dirname, 'mapping-change-log-postgres.ts'), 'utf8')
 
-/** Comments stripped: this file's prose states every rule it asserts. */
-const code = SOURCE.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+/** Comments blanked by the shared `neutralise`, not a local regex - see the sibling test. */
+const code = neutralise(SOURCE).commentsBlanked
 
 describe('the record insert', () => {
   it('derives the association from the member rather than taking it', () => {

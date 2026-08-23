@@ -73,5 +73,44 @@ create unique index if not exists column_mapping_shape_is_unique
 -- a column mapping is setup configuration, not association records, and no
 -- catalog entry has any reason to read one.
 
+-- Migration 024's convention, which this table is too new to be inside: every
+-- association-scoped table carries a composite foreign key, "so a child cannot
+-- belong to a different association than its parent". Without it the schema
+-- permits a saver from one association against a mapping in another. The
+-- adapter derives `association_id` from that member so the two always agree in
+-- practice -- but 024's whole point is that the database refuses it rather than
+-- the application remembering to. Raised by ocr.
+--
+-- The parent side of the composite key already exists: 024 gave `board_member`
+-- `unique (id, association_id)`.
+-- Migration 005's rule, stated on its own index: "Referencing columns get no
+-- index automatically. Without this, deleting a board_member scans column_mapping."
+-- Board members are disabled rather than deleted today, but 005 made this a
+-- convention rather than a case-by-case judgement, and a referencing column
+-- without one is the kind of omission noticed years later under load.
+-- Raised by ocr.
+create index if not exists column_mapping_saved_by_idx on column_mapping (saved_by);
+
+-- Guarded, because every other statement in this file is idempotent and a
+-- migration that fails on its second run is one nobody can safely re-apply.
+-- `add constraint` has no `if not exists`, so 024's own pattern is used.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'column_mapping_id_association_key'
+  ) then
+    alter table column_mapping
+      add constraint column_mapping_id_association_key unique (id, association_id);
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'column_mapping_saved_by_fk'
+  ) then
+    alter table column_mapping
+      add constraint column_mapping_saved_by_fk
+      foreign key (saved_by, association_id) references board_member (id, association_id);
+  end if;
+end $$;
+
 revoke delete, truncate on column_mapping from watchdog_writer;
 revoke delete, truncate on column_mapping from public;

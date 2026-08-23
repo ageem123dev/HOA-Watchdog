@@ -670,6 +670,60 @@ type back - are KILLED.
 This is the tenth consecutive story on which the audit found something, and the
 second time it has found an AC that nothing implemented at all.
 
+### The `ocr` round - 59 findings, 9 confirmed, and a partial run
+
+**The run did not complete, and exit 0 said nothing about that.** `terminal_state`
+was `partial`: 34 of 36 items completed and **2 failed - both of my new
+migrations**. `summary.files_reviewed` said 36, which is the lie this project has
+recorded before (59 reported against 17 actually reviewed).
+
+The cause is worth keeping. Both migration headers say *"Migration 002's default
+privileges..."*. `ocr` turned that description into a filename and tried
+`git show HEAD:migrations/002_default_privileges.sql`; the real file is
+`002_roles.sql`, the read failed, and it abandoned both items. My prose is
+accurate - 002 does contain `alter default privileges` - so this is a reviewer
+failure mode, not a defect: **a descriptive cross-reference in a comment can make
+`ocr` fabricate a path and drop the file entirely.** Those two migrations were
+reviewed by Argus and carry text-assertion tests with mutations, so they are not
+unreviewed; they are un-`ocr`-reviewed, and that is stated rather than glossed.
+
+**Nine confirmed.** Three of them are conventions this project had already
+written down and my new tables did not follow - the kind of thing no amount of
+care finds, because you have to know the convention exists:
+
+| # | Finding | Why it is real |
+| --- | --- | --- |
+| 57 | no composite foreign key on `mapping_change` | Migration 024 gives every association-scoped table one "so a child cannot belong to a different association than its parent". Applied to 026 as well, by symmetry, since nothing raised it there |
+| 59 | `saved_by`/`changed_by` unindexed | Migration 005 exists for exactly this and says so on its own index: "Referencing columns get no index automatically" |
+| 47 | `importedUnder(uploadedBy, ...)` misnamed | It is the member *asking for* the re-import, and the scope is their whole association. Named `uploadedBy`, the obvious future "fix" is `and d.uploaded_by = $1` - which would silently skip every document another director uploaded |
+| 15 | `saveMapping` did not guard its store call | An unhandled rejection in a server action is a generic 500: the wizard is gone with nothing said about whether it saved |
+| 19 | `changeMapping` has no transaction across save/re-import/record | Real and unfixable as a transaction. Named instead: `changed-unrecorded` |
+| 2, 48, 52 | three database test files created associations and members and cleaned up none of it | Accumulates per run, and `find`'s association scoping is exactly the assertion a database full of other runs' rows starts to hide |
+| 3 | a hand-rolled comment-stripping regex in three adapter tests | Story 5.6 consolidated four private copies of this scanner after they drifted. I wrote a fifth. Now `neutralise` |
+
+**The composite-FK statements needed guarding.** `add constraint` has no
+`if not exists`, and every other statement in both files is idempotent - a
+migration that fails on its second run is one nobody can re-apply. Wrapped in
+024's own `do $$ ... end $$` pattern.
+
+**`changed-unrecorded` is not an error state, deliberately.** By the time
+`record` runs, the mapping is replaced and the documents are re-parsed. Reporting
+failure would be a lie inviting the treasurer to run it again; reporting
+`changed` would claim a durable record that AC6 requires and does not exist. Both
+mutations - rethrowing, and reporting plain success - are KILLED.
+
+**Refuted, and why.** #11 (log injection through a filename) is the design
+already in place, passed as a structured field rather than interpolated, and the
+finding acknowledges the mitigation. #38 said `reimport.test.ts` does not verify
+AC5 - `reimport-alerts.test.ts` does, and `ocr` reviews per file so it could not
+see it. #42 wanted `SavedMapping` coverage that lives in the adapter and
+migration tests. #54 wanted explicit grants where this project deliberately
+relies on 002's defaults and revokes what it does not want. #16's `NaN` case is
+refused by `assign` already - the code needed no change, though it now has a test.
+
+**Argus found none of these nine.** Ingested at `a10f059` with recall 0, which is
+the measurement that justifies running both rather than an opinion about it.
+
 ### Review Findings
 
 ### Completion Notes List

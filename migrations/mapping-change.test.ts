@@ -76,6 +76,43 @@ describe('the migration says what it does', () => {
     )
   })
 
+  it('carries the composite key that keeps a changer inside their own association', () => {
+    /**
+     * Migration 024's convention, which this table is too new to be inside: every
+     * association-scoped table gets a composite foreign key "so a child cannot
+     * belong to a different association than its parent".
+     *
+     * Without it the schema permits a changer from one association against a row in
+     * another. The adapter derives `association_id` from that member, so the two
+     * always agree in practice - but 024's point is that the database refuses it
+     * rather than the application remembering to. Raised by ocr.
+     */
+    const sql = executable(MIGRATION)
+
+    expect(sql).toContain('add constraint mapping_change_id_association_key unique (id, association_id)')
+    expect(sql).toMatch(
+      /foreign key \(changed_by, association_id\) references board_member \(id, association_id\)/,
+    )
+  })
+
+  it('adds those constraints idempotently, like every other statement here', () => {
+    // `add constraint` has no `if not exists`, so a re-applied migration would
+    // fail on the second run - and every other statement in the file is guarded.
+    const sql = executable(MIGRATION)
+
+    expect(sql).toMatch(/select 1 from pg_constraint where conname = 'mapping_change_id_association_key'/)
+    expect(sql).toMatch(/select 1 from pg_constraint where conname = 'mapping_change_changed_by_fk'/)
+  })
+
+  it('indexes the column that references board_member', () => {
+    // Migration 005's rule, stated on its own index: "Referencing columns get no
+    // index automatically. Without this, deleting a board_member scans
+    // mapping_change." A convention, not a case-by-case call. Raised by ocr.
+    const sql = executable(MIGRATION)
+
+    expect(sql).toContain('create index if not exists mapping_change_changed_by_idx on mapping_change (changed_by)')
+  })
+
   it('grants the reader nothing', () => {
     const sql = executable(MIGRATION)
 
@@ -119,7 +156,11 @@ describeWithDatabase('against a real database', () => {
 
   afterAll(async () => {
     if (configured) {
+      // As in `column-mapping.test.ts`: the association and its member are this
+      // file's litter too, not just the rows under test.
       await admin.query(`delete from mapping_change where association_id = $1`, [associationId])
+      await admin.query(`delete from board_member where association_id = $1`, [associationId])
+      await admin.query(`delete from association where id = $1`, [associationId])
       await admin.end()
       await writer.end()
     }

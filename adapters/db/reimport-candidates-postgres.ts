@@ -46,14 +46,14 @@ interface Row {
 
 export function createReimportCandidates(): ReimportCandidates {
   return {
-    async importedUnder(uploadedBy, kind): Promise<readonly Reimportable[]> {
+    async importedUnder(member, kind): Promise<readonly Reimportable[]> {
       const found = await writerPool().query<Row>(
         `select distinct d.id, d.storage_key, d.filename, d.content_type
            from document d
            join extraction e on e.document_id = d.id
           where d.association_id = (select association_id from board_member where id = $1)
             and e.document_kind = $2`,
-        [uploadedBy, kind],
+        [member, kind],
       )
 
       return found.rows.map((row) => ({

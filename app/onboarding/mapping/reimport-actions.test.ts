@@ -72,6 +72,9 @@ beforeEach(() => {
   save.mockResolvedValue(null)
   find.mockResolvedValue(null)
   importedUnder.mockResolvedValue([])
+  // `clearAllMocks` keeps implementations, so a rejection set by one test would
+  // survive into the next.
+  record.mockResolvedValue(undefined)
 })
 
 describe('what the form is allowed to decide', () => {
@@ -189,6 +192,47 @@ describe('the order of the three things it does', () => {
     // Null, not absent and not `{}`: migration 027 leaves the column nullable
     // precisely so "nothing was replaced" is a recordable fact.
     expect(written.previous).toBeNull()
+  })
+})
+
+describe('when a step fails after the change has happened', () => {
+  it('says the change was applied but not recorded, rather than reporting failure', async () => {
+    /**
+     * The mapping is replaced and the documents are re-parsed before `record`
+     * runs. Rethrowing would report a failure that did not happen and invite the
+     * treasurer to run it again; reporting `changed` would claim a durable
+     * record AC6 asks for and there is none. Both are lies, in opposite
+     * directions. Raised by ocr.
+     */
+    record.mockRejectedValue(new Error('the database said no'))
+    importedUnder.mockResolvedValue([
+      { id: 'doc-1', storageKey: 'key/doc-1', filename: 'march.csv', contentType: 'text/csv' },
+    ])
+
+    const state = await change({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: DEPOSIT_PAIRINGS,
+    })
+
+    expect(state.status).toBe('changed-unrecorded')
+    // The outcomes still reach the treasurer: the work really was done.
+    expect(save).toHaveBeenCalled()
+    expect(state).toMatchObject({ documents: [{ documentId: 'doc-1' }] })
+  })
+
+  it('refuses a pairing whose position is NaN', async () => {
+    // `typeof NaN === 'number'`, so the transport check passes it through and
+    // `assign`'s `Number.isInteger` is what refuses it. Asserted rather than
+    // reasoned about, which is the difference ocr's finding was worth.
+    const state = await change({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: '[{"target":"date","position":null}]',
+    })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
   })
 })
 
