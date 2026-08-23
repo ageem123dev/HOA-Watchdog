@@ -796,6 +796,21 @@ And one behavioural gap: the swallowed store failure in `mapped()` now reports
 through `onError`. Failing open is right, but a store that is down looked exactly
 like a store with no mapping, with nothing in any log saying which.
 
+#### The guard caught me writing about the guard
+
+Committing the note about a vacuous regex put two **backspace bytes** into this
+file. \\b inside a non-raw Python string is \b, which is 0x08 - so quoting the
+regex /\bextraction\b/ in prose wrote the control character it was describing,
+twice, in the sentence explaining that the regex matched nothing.
+
+`docs/no-control-characters.test.ts` failed the whole suite on it. That is exactly
+why story 5.6b widened that sweep from markdown to source and rewrote its own
+forbidden range as \uXXXX escapes, so the guard file sits inside its own sweep.
+
+Repaired by building the string from `chr(92)`, which leaves no escape to
+collapse. Fourth time on this project that writing *about* an escape has
+produced the escape.
+
 ### Review Findings
 
 ### Completion Notes List
