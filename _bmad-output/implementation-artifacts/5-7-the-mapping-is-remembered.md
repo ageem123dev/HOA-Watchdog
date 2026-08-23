@@ -762,7 +762,7 @@ got an error where they were owed a number. The asymmetry survives review becaus
 both functions read correctly on their own.
 
 **A boundary assertion that matched nothing.** `reimport-boundary.test.ts` had
-`expect(code).not.toMatch(/extraction\s*\(/i)` - and no code here would ever
+`expect(code).not.toMatch(/\bextraction\b\s*\(/i)` - and no code here would ever
 write that: the writer is reached as `deps.extractions.replace(...)`. The
 assertion passed against every possible file, including one writing derived rows
 on every line. A guard that guards nothing, inside the file whose entire job is

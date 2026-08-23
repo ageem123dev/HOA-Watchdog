@@ -172,11 +172,10 @@ export async function changeMapping(
       changedBy: where.member,
       kind: where.kind,
       shape: where.shape,
-      // Null when nothing was replaced, which the column is nullable for.
-      // `previous`, which is null both when nothing was replaced and when a
-    // concurrent insert hid the old row. `replaced` is the fact; this is the
-    // detail, and the record stores what could be read.
-    previous: replaced.previous?.mapping ?? null,
+      // Null both when nothing was replaced and when a concurrent insert hid the
+      // old row from the statement that overwrote it. `replaced` is the fact;
+      // this is the detail, and the record stores what could be read.
+      previous: replaced.previous?.mapping ?? null,
       next: mapping,
       documents,
     })
