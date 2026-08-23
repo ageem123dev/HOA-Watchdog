@@ -116,49 +116,38 @@ const forbidden = (specifier: string): boolean => {
 }
 
 /**
- * Bracket reads of `env` whose key is **not one complete literal**.
+ * Any bracket indexing of `env`, in any form. **Dot access only, on this path.**
  *
- * The first version inspected only the *first character* inside the bracket and
- * rejected anything that was not a quote — which let two forms straight through,
- * both of which hide the name exactly as `env[name]` does:
+ * ## Why this is a flat rule rather than a clever one
  *
- * - a template key, `` env[`${name}`] ``
- * - a concatenated key, `env['PREFIX_' + name]`
+ * It began as "report a computed key", which required deciding whether a key was
+ * a static literal — and that decision was wrong four times running, each time
+ * failing *open*:
  *
- * Raised by CodeRabbit. Now the whole bracket is read and compared against one
- * complete literal, so anything else — a variable, a template, a concatenation,
- * a call — is reported.
+ * 1. it inspected only the first character inside the bracket;
+ * 2. it accepted `` env[`${name}`] `` and `env['PREFIX_' + name]`;
+ * 3. it never matched `process['env'][key]`;
+ * 4. it never matched `process.env?.[key]` or `process['env']?.[key]`.
+ *
+ * Each fix closed one hole and left the shape that produced it. So the question
+ * is removed instead of answered: **no module on this path indexes `env` at
+ * all** — the one that reads configuration reaches its two variables by dot
+ * access — so bracket access can simply be forbidden outright. Nothing has to
+ * classify a key, which is where every one of those bugs lived.
+ *
+ * (Named without spelling the access expression, for the reason the planted
+ * cases below record: AD-10's guard reads raw text and cannot tell a sentence
+ * about a credential read from a credential read.)
+ *
+ * This is stricter than before: `process.env['LITERAL']` is now reported too.
+ * That costs nothing here and buys a rule with no soft edge.
  */
-function computedEnvReads(text: string): string[] {
-  const found: string[] = []
+function bracketEnvAccess(text: string): string[] {
+  // `env` reached by name or through `process['env']`, then indexed — with or
+  // without optional chaining.
+  const pattern = /(?:\benv|\[\s*(['"`])env\1\s*\])\s*(?:\?\.)?\s*\[/g
 
-  // **Three ways to reach the object, not one.** `process.env[…]`, a bare
-  // `env[…]` after destructuring, and `process['env'][…]` — the last of which
-  // the first version missed entirely, because after `env` the source has a
-  // quote where the pattern wanted a bracket. It is ordinary working JavaScript
-  // that reads a credential by computed key, so missing it failed open.
-  // Raised by CodeRabbit.
-  const opener = /(?:process\s*\[\s*(['"`])env\1\s*\]|(?:process\s*\.\s*)?\benv)\s*\[/g
-
-  for (const match of text.matchAll(opener)) {
-    const start = (match.index ?? 0) + match[0].length
-    const close = text.indexOf(']', start)
-    if (close === -1) continue
-
-    const key = text.slice(start, close).trim()
-
-    // One complete literal, and nothing beside it — **and a backtick key only
-    // counts if it interpolates nothing.** `` `${name}` `` is a complete literal
-    // by shape and hides the name entirely, which is the whole point of the
-    // check; the first attempt at this accepted it for exactly that reason.
-    const literal = /^(['"`])((?:(?!\1).)*)\1$/s.exec(key)
-
-    if (literal !== null && !(literal[1] === '`' && (literal[2] ?? '').includes('${'))) continue
-
-    found.push(`env[${key}]`)
-  }
-
-  return found
+  return [...text.matchAll(pattern)].map((match) => match[0].trim())
 }
 
 /**
@@ -249,12 +238,13 @@ describe('the guard can actually fail', () => {
      * none — `boundary.test.ts`'s lesson, applied to this file's own detector.
      *
      * **Planted with a name that is not a real credential**, and that is not
-     * fussiness. Writing `process.env.REASONING_API_KEY` here — even as test
-     * data inside a string — made AD-10's own guard report *this file* as a
-     * module reading both sides of the boundary, because a text scanner cannot
-     * tell a planted violation from a real one. `no-model-in-alerts.test.ts`
-     * avoids it by keeping credential names as bare strings and never spelling
-     * `process.env.` beside one.
+     * fussiness. Spelling a real credential name directly after `process.env.`
+     * — even as test data inside a string, and even inside *this comment* —
+     * made AD-10's own guard report this file as a module reading both sides of
+     * the boundary, because a text scanner cannot tell a planted violation, or a
+     * sentence about one, from the real thing. It has now happened three times
+     * on this branch. `no-model-in-alerts.test.ts` avoids it by keeping
+     * credential names as bare strings and never writing one in that position.
      */
     expect(readsEnvironmentVariable('const x = process.env.EXAMPLE_NOT_A_SECRET', 'EXAMPLE_NOT_A_SECRET')).toBe(true)
     expect(readsEnvironmentVariable('const x = 1', 'EXAMPLE_NOT_A_SECRET')).toBe(false)
@@ -296,31 +286,51 @@ describe('the guard can actually fail', () => {
     for (const { path, text } of sources) {
       // Comments blanked, like `specifiersIn` does: prose mentioning `env[k]`
       // is not a read. Raised by CodeRabbit alongside the forms below.
-      const reads = computedEnvReads(neutralise(text).commentsBlanked)
+      const reads = bracketEnvAccess(neutralise(text).commentsBlanked)
 
-      expect(reads, `${path} reads env through a computed key: ${reads.join(', ')}`).toEqual([])
+      expect(reads, `${path} indexes env: ${reads.join(', ')}`).toEqual([])
     }
   })
 
-  it('detects a planted computed env read', () => {
-    // The detector above, shown to fail on the thing it exists to catch.
-    // Every shape that hides the name, including the two the first version let
-    // straight through by inspecting only the opening character.
-    expect(computedEnvReads('const k = n; process.env[k]')).toHaveLength(1)
-    expect(computedEnvReads('process.env[`${name}`]')).toHaveLength(1)
-    expect(computedEnvReads("process.env['PREFIX_' + name]")).toHaveLength(1)
-    expect(computedEnvReads('const { env } = process; env[k]')).toHaveLength(1)
-    // Bracket access to the object itself, which the first version missed
-    // because after `env` the source has a quote where it wanted a bracket.
-    expect(computedEnvReads("process['env'][k]")).toHaveLength(1)
-    expect(computedEnvReads('process["env"][`${name}`]')).toHaveLength(1)
+  it('detects every shape of bracket access to env', () => {
+    // Each of these hides the name from the source, and each was missed by one
+    // of the four earlier versions of this check.
+    for (const planted of [
+      'const k = n; process.env[k]',
+      'process.env[`${name}`]',
+      "process.env['PREFIX_' + name]",
+      'const { env } = process; env[k]',
+      "process['env'][k]",
+      'process["env"][`${name}`]',
+      'process.env?.[k]',
+      "process['env']?.[k]",
+      // Stricter than the rule it replaces: a literal key is bracket access too,
+      // and no module on this path has any reason to write one.
+      "process.env['EXAMPLE_NOT_A_SECRET']",
+    ]) {
+      expect(bracketEnvAccess(planted), planted).not.toEqual([])
+    }
+  })
 
-    // A literal key is the *allowed* form. Naming a real credential here would
-    // trip AD-10's guard, for the reason given above.
-    expect(computedEnvReads("process.env['EXAMPLE_NOT_A_SECRET']")).toEqual([])
-    expect(computedEnvReads('process.env.EXAMPLE_NOT_A_SECRET')).toEqual([])
-    // A literal key stays allowed through the bracket form too.
-    expect(computedEnvReads("process['env']['EXAMPLE_NOT_A_SECRET']")).toEqual([])
+  it('leaves dot access alone, which is the form this path uses', () => {
+    /**
+     * The adapter reads its two configuration variables by dot access, with
+     * optional chaining. If this rule reported that, it would be unusable and
+     * would get relaxed rather than obeyed.
+     *
+     * **Spelled with a name that is not a real credential.** Writing the actual
+     * variable beside `env.` here made AD-10's own guard report *this file* as
+     * reading both sides of the boundary — the third time on this branch that a
+     * planted fixture has been read as the real thing by a scanner that cannot
+     * tell them apart.
+     */
+    for (const allowed of [
+      'process.env.EXAMPLE_NOT_A_SECRET',
+      'const apiKey = env.EXAMPLE_NOT_A_SECRET?.trim()',
+      'const model = env.EXAMPLE_ALSO_NOT_A_SECRET?.trim()',
+    ]) {
+      expect(bracketEnvAccess(allowed), allowed).toEqual([])
+    }
   })
 })
 
