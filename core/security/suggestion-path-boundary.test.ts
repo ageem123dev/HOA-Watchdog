@@ -1,0 +1,203 @@
+/**
+ * The column-suggestion path holds no tool access and no data credential.
+ *
+ * epics.md names this as epic 5's one real architectural risk, and names the
+ * controls: *"The suggestion path carries **no tool access and no data
+ * credential**; input is bounded and output schema-validated; headers are not
+ * retained; deterministic matching runs first so the model sees only what could
+ * not be resolved; and the manual path works when the model does not."*
+ *
+ * **Human confirmation is not the control.** The same passage is explicit that
+ * the first draft got this wrong: confirming a mapping governs what is *stored*,
+ * while prompt injection is about what the runtime *does* on the way there. So
+ * the control is what these modules are *able* to reach — which is what this
+ * file reads.
+ *
+ * ## What "no data credential" can honestly mean here
+ *
+ * Not process isolation. `deploy-units.json` puts `GEMINI_API_KEY` in the same
+ * `web` unit as both database URLs and the R2 keys, because extraction runs
+ * inside the Node gateway. A test claiming the suggester cannot *reach* a
+ * database because of where it runs would be claiming something this topology
+ * does not provide.
+ *
+ * What is enforceable, and what is asserted, is the module boundary: what these
+ * files import and which environment variables they read.
+ *
+ * ## The lesson inherited from `no-model-in-alerts.test.ts`
+ *
+ * **The coverage list is asserted**, because every check below is generated from
+ * it. Dropping an entry removes its cases rather than failing anything, so the
+ * guard can silently shrink to nothing — found there by a sensitivity pass that
+ * turned 19 passing tests into 17.
+ */
+
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { describe, expect, it } from 'vitest'
+
+import { specifiersIn } from '../ports/module-specifiers'
+import { readsEnvironmentVariable } from './dual-llm-boundary'
+
+const REPO_ROOT = process.cwd()
+
+/**
+ * Every module between a treasurer's sample and the model.
+ *
+ * Listed rather than globbed, for `no-model-in-alerts.test.ts`'s reason: a glob
+ * silently stops covering the path the moment a file moves, and adding to this
+ * list should be a conscious act — since adding a module here is exactly when
+ * somebody might be reaching for a credential.
+ */
+const SUGGESTION_PATH = [
+  'core/mapping/heading-match.ts',
+  'core/mapping/suggest.ts',
+  'core/mapping/residue.ts',
+  'core/mapping/suggest-with-model.ts',
+  'core/mapping/prefill.ts',
+  'adapters/extraction/suggester-gemini.ts',
+] as const
+
+/** The one module on the path that may hold a model credential. */
+const THE_ADAPTER = 'adapters/extraction/suggester-gemini.ts'
+
+/**
+ * Credentials that would mean this path can reach the association's records, or
+ * the wrong side of AD-10.
+ */
+const FORBIDDEN_CREDENTIALS = [
+  'WATCHDOG_WRITER_DATABASE_URL',
+  'WATCHDOG_READER_DATABASE_URL',
+  'AUTH_SECRET',
+  'ACTOR_ASSERTION_KEY',
+  'AGENT_SERVICE_TOKEN',
+  'GATEWAY_SERVICE_TOKEN',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'R2_BUCKET',
+  // AD-10: raw extracted text must never reach the reasoning side.
+  'REASONING_API_KEY',
+  'REASONING_MODEL',
+] as const
+
+/** Directories nothing on this path may import from. */
+const FORBIDDEN_IMPORTS = [
+  'adapters/db',
+  'adapters/agent',
+  'adapters/storage',
+  'adapters/auth',
+  'catalog',
+  'core/answer',
+] as const
+
+const sources = SUGGESTION_PATH.map((path) => ({
+  path,
+  text: readFileSync(join(REPO_ROOT, path), 'utf8'),
+}))
+
+describe('the guard can actually fail', () => {
+  it('covers every module on the suggestion path', () => {
+    // Asserted explicitly: every check below is generated from this list, so a
+    // dropped entry removes cases rather than failing anything.
+    expect([...SUGGESTION_PATH].sort()).toEqual([
+      'adapters/extraction/suggester-gemini.ts',
+      'core/mapping/heading-match.ts',
+      'core/mapping/prefill.ts',
+      'core/mapping/residue.ts',
+      'core/mapping/suggest-with-model.ts',
+      'core/mapping/suggest.ts',
+    ])
+  })
+
+  it('read every one of them, non-empty', () => {
+    expect(sources).toHaveLength(SUGGESTION_PATH.length)
+    for (const { path, text } of sources) expect(text.length, path).toBeGreaterThan(0)
+  })
+
+  it('detects a planted credential read', () => {
+    // A scanner reporting green on the thing it exists to catch is worse than
+    // none — `boundary.test.ts`'s lesson, applied to this file's own detector.
+    expect(readsEnvironmentVariable('const x = process.env.REASONING_API_KEY', 'REASONING_API_KEY'))
+      .toBe(true)
+    expect(readsEnvironmentVariable('const x = 1', 'REASONING_API_KEY')).toBe(false)
+  })
+
+  it('detects a planted forbidden import', () => {
+    expect(specifiersIn("import { x } from '@/adapters/db/catalog'")).toContain(
+      '@/adapters/db/catalog',
+    )
+  })
+})
+
+describe('no data credential', () => {
+  it.each(SUGGESTION_PATH)('%s reads none of them', (path) => {
+    const text = sources.find((source) => source.path === path)?.text ?? ''
+
+    expect(FORBIDDEN_CREDENTIALS.length).toBeGreaterThan(0)
+
+    const read = FORBIDDEN_CREDENTIALS.filter((name) => readsEnvironmentVariable(text, name))
+
+    expect(read, `${path} reads ${read.join(', ')}`).toEqual([])
+  })
+
+  it('keeps the extraction credential in exactly one module', () => {
+    /**
+     * 4e. The adapter needs it; nothing else on the path does. "At most one" is
+     * not enough — a path where *nothing* reads it would pass that while meaning
+     * the guard is watching a model call that no longer exists.
+     */
+    const readers = sources
+      .filter((source) => readsEnvironmentVariable(source.text, 'GEMINI_API_KEY'))
+      .map((source) => source.path)
+
+    expect(readers).toEqual([THE_ADAPTER])
+  })
+})
+
+describe('no tool access', () => {
+  it.each(SUGGESTION_PATH)('%s imports no store, catalog or chat client', (path) => {
+    const text = sources.find((source) => source.path === path)?.text ?? ''
+    const specifiers = specifiersIn(text)
+
+    // Non-empty first for the core modules; the check below is a filter, and a
+    // filter over nothing passes by describing an empty world.
+    expect(specifiers.length, `${path} imports nothing at all`).toBeGreaterThan(0)
+
+    const forbidden = specifiers.filter((specifier) =>
+      FORBIDDEN_IMPORTS.some(
+        (directory) =>
+          specifier.includes(`/${directory}/`) ||
+          specifier.startsWith(`@/${directory}`) ||
+          specifier.startsWith(`${directory}/`),
+      ),
+    )
+
+    expect(forbidden, `${path} imports ${forbidden.join(', ')}`).toEqual([])
+  })
+
+  it('reaches the model through exactly one door', () => {
+    // The same property `sole-chat-path.test.ts` holds for the agent: one file
+    // knows the address. A second route would have to name the origin.
+    const namesTheOrigin = sources
+      .filter((source) => source.text.includes('generativelanguage.googleapis.com'))
+      .map((source) => source.path)
+
+    expect(namesTheOrigin).toEqual([THE_ADAPTER])
+  })
+})
+
+describe('core stays core', () => {
+  it.each(SUGGESTION_PATH.filter((path) => path.startsWith('core/')))(
+    '%s imports nothing from adapters',
+    (path) => {
+      // `boundary.test.ts` holds this repo-wide; asserted here too because this
+      // path is the one where an adapter import would be most tempting — the
+      // model lives in one.
+      const text = sources.find((source) => source.path === path)?.text ?? ''
+      const outward = specifiersIn(text).filter((specifier) => specifier.includes('adapters'))
+
+      expect(outward).toEqual([])
+    },
+  )
+})

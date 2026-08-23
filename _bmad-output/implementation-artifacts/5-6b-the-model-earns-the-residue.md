@@ -174,7 +174,7 @@ referentially stable" contract both go away.
       `suggestWithModel` that runs the deterministic suggester, asks the model only about the residue,
       merges through the same rules `assign` enforces, and returns the deterministic answer unchanged
       whenever the model does not produce a valid one. (AC1, AC2, AC8)
-- [ ] **Task 4 — The structural boundary, asserted.** The import allow-list, the no-reasoning-
+- [x] **Task 4 — The structural boundary, asserted.** The import allow-list, the no-reasoning-
       credential check, the no-interpolation check, and AD-10's boundary guard still clean. (AC5)
 - [ ] **Task 5 — Move the seam, then wire it.** `readSample` computes the suggestions and
       `SampleState` carries them; `ColumnPairing` takes `suggestions` instead of `suggester`, and
@@ -377,6 +377,35 @@ every result to `assign` and requires acceptance, per kind.
 
 **Cross-check:** for every kind, every pairing in the merged result is accepted by `assign`, and the
 result with a silent asker equals the result of `suggestColumns` exactly.
+
+#### Task 4 - the suggestion path's boundary, asserted
+
+**If it ran correctly, how would I know?** Reading any module on the suggestion path shows it reaching
+no store, no catalog, no chat client, and no credential except the one extraction key the adapter
+needs.
+
+**How am I going to test it?** The shape `no-model-in-alerts.test.ts` already uses, with its detector
+(`readsEnvironmentVariable`) and story 5.6's scanner (`specifiersIn`) reused rather than copied - a
+second copy of a subtle matcher is how two versions come to disagree, which is the defect story 5.6
+found in four places.
+
+**Could this happen elsewhere?** Yes, and that file records the lesson this one has to inherit: **the
+coverage list itself must be asserted**, because every check is generated from it. Dropping an entry
+removes its cases rather than failing anything, so the guard silently shrinks. Found there by a
+sensitivity pass that turned 19 passing tests into 17.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4a | The coverage list shrinking, so the guard passes by checking less | GUARD - the list is asserted explicitly, and the case count is pinned |
+| 4b | A module on the path reading a **data** credential - a database URL, an R2 key, `AUTH_SECRET`, a service token | GUARD - `readsEnvironmentVariable` over the forbidden set |
+| 4c | A module reading `REASONING_API_KEY`, putting raw extracted text on the wrong side of AD-10 | GUARD - asserted by name, and `module-reads-both` must stay clean |
+| 4d | A module importing a store, repository, catalog or the chat client | GUARD - `specifiersIn` against an allow-list |
+| 4e | The extraction credential spreading beyond the one adapter that needs it | GUARD - **exactly one** module on the path may read it |
+| 4f | The scanner reporting clean because it read nothing at all | GUARD - non-empty asserted before every filter, and the detector is exercised against a planted violation |
+
+**Cross-check:** the detectors are run against planted violations, so this file can be shown to fail
+on the things it exists to catch. `boundary.test.ts` records why: *"a scanner reporting green on the
+thing it exists to catch is worse than none."*
 
 ### Review Findings
 
