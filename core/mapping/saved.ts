@@ -31,15 +31,24 @@ import type { DocumentKind } from '../extraction/record'
 import type { DraftMapping } from './draft'
 
 /**
- * A mapping, and the three things that identify which uploads it is for.
+ * A mapping, and what identifies which uploads it is for.
  *
- * `associationId` is 5.1's tenancy, not a new scheme. It is part of the identity
- * rather than only a filter on the query, because a mapping found across
- * associations would import one board's file under another board's column
- * meanings.
+ * **No `associationId` field, deliberately.** The association is 5.1's tenancy
+ * and this project derives it *in SQL from an authenticated anchor*, never from
+ * a parameter — `document-repository-postgres.ts` says why: *"`association_id` is
+ * read from the uploader rather than passed in, so a caller cannot supply the
+ * wrong one."* `payment-repository-postgres.ts` takes it from the parent
+ * document for the same reason.
+ *
+ * A first draft of this type carried `associationId: string`, which is exactly
+ * the parameter that convention exists to refuse. The association is still part
+ * of the identity — a mapping found across associations would import one board's
+ * file under another board's column meanings — but it is established by
+ * `savedBy`, not asserted by the caller.
  */
 export interface SavedMapping {
-  readonly associationId: string
+  /** The board member whose association this mapping belongs to. */
+  readonly savedBy: string
   readonly kind: DocumentKind
   /** `shapeKey` of the heading row this was built against. */
   readonly shape: string

@@ -13,6 +13,12 @@
  * under another board's column meanings, and one found across kinds would read a
  * deposit export as a roll.
  *
+ * **The association is not a parameter.** `find` takes the *uploader* and `save`
+ * carries the *saver*, and the adapter derives the association from that member
+ * in SQL — the rule `document-repository-postgres.ts` states as "a caller cannot
+ * supply the wrong one". Passing an association id would make tenancy something
+ * a caller asserts rather than something the database establishes.
+ *
  * ## Saving replaces, and says what it replaced
  *
  * A treasurer who re-maps a shape they have already mapped is *changing* it, and
@@ -40,7 +46,7 @@ export interface MappingStore {
    * `null` is "nobody has mapped this shape", which is what sends an upload to
    * the wizard. It is not an error and must not be reported as one.
    */
-  find(associationId: string, kind: SavedMapping['kind'], shape: string): Promise<SavedMapping | null>
+  find(uploadedBy: string, kind: SavedMapping['kind'], shape: string): Promise<SavedMapping | null>
 
   /**
    * Remember `mapping`, replacing any mapping for the same identity.

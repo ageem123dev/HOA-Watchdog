@@ -159,7 +159,7 @@ describe('the round trip, which is what the mapping is for', () => {
      */
     const headings = headingsOf('Date', 'Description', 'Amount')
     const saved: SavedMapping = {
-      associationId: 'association-1',
+      savedBy: 'director-1',
       kind: 'deposit',
       shape: shapeKey('deposit', headings),
       mapping: DEPOSIT,
@@ -181,7 +181,7 @@ describe('the round trip, which is what the mapping is for', () => {
   it('carries the column count the mapping was built against', () => {
     const headings = headingsOf('Date', 'Description', 'Amount')
     const saved: SavedMapping = {
-      associationId: 'association-1',
+      savedBy: 'director-1',
       kind: 'deposit',
       shape: shapeKey('deposit', headings),
       mapping: DEPOSIT,
