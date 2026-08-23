@@ -12,8 +12,7 @@ import type { TargetField } from '@/core/mapping/targets'
 import { readHeadings } from '@/core/extraction/headings'
 import { shapeKey } from '@/core/mapping/saved'
 import { createMappingStore } from '@/adapters/db/mapping-store-postgres'
-import type { SaveState } from './sample-state'
-import type { SampleState } from './sample-state'
+import type { SampleState, SaveState } from './sample-state'
 
 /**
  * A sample in, its column headings out.
@@ -32,8 +31,7 @@ import type { SampleState } from './sample-state'
  * triggers needs all three - which is exactly why it lives in its own module and
  * not here.
  *
- * A behavioural test cannot prove the absence of a write it never triggered - a
- * behavioural test cannot prove the absence of a write it never triggered —
+ * A behavioural test cannot prove the absence of a write it never triggered —
  * story 5.3 made the same argument for the shared folding, after a check that
  * asserted the nearest observable thing passed against a decorative import.
  *

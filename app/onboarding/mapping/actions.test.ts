@@ -100,6 +100,12 @@ beforeEach(() => {
   vi.stubEnv('GEMINI_API_KEY', '')
   vi.stubEnv('GEMINI_SUGGEST_MODEL', '')
   auth.mockResolvedValue(SIGNED_IN)
+
+  // `vi.clearAllMocks()` clears calls but keeps implementations, so a
+  // `mockResolvedValue` set by one test survives into the next. Here that would
+  // mean a later test seeing a *replaced* mapping it never arranged - and the
+  // one it would break is the one asserting a first save reports `saved`.
+  save.mockResolvedValue(null)
 })
 
 describe('reading a sample', () => {
