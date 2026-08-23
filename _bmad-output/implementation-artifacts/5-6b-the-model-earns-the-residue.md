@@ -411,6 +411,55 @@ thing it exists to catch is worse than none."*
 
 ### Completion Notes List
 
+### AC audit
+
+Each criterion, the test that fails if the behaviour is removed, and the evidence that it does. **A
+name alone is not evidence** - a vacuous test satisfies "I named one" while staying green when the
+behaviour is deleted, and this story produced seven such tests before the mutation rounds caught them.
+
+| AC | Test | Sensitivity shown by |
+| --- | --- | --- |
+| 1 The model is asked only about the residue | `suggest-with-model.test.ts::does not call the asker for a fully matched file`, `::does call the asker when something is unmatched`, `suggester-gemini.test.ts::does not call the model for an empty residue` | The fake **throws** if called, rather than recording. Both sides asserted, so an implementation that never calls the asker fails the second. Removing the empty-residue shortcut - **1 red** in each file |
+| 2 The wizard works when the model does not | `suggest-with-model.test.ts::every way the model can fail (AC2)` (7 cases), `::never rejects`, `actions.test.ts::still reads the sample when no model is configured` | Seven distinct failures each return the deterministic answer. The action-level test runs with `GEMINI_API_KEY` unset on every run, which *is* the unconfigured deployment. Dropping the non-array guard - **1 red**; dropping the catch - **1 red** |
+| 3 Headers never interpolated into the prompt | `suggester-gemini.test.ts::never puts header text in the instruction`, `::sends the headings as JSON data, in their own part`, `::builds the instruction as a frozen constant, not a template` | Equality against the constant, not containment - there is nowhere to append. Appending the headings - **1 red**. The structural half was itself CRLF-fragile and is now proven under both line endings |
+| 4 The reply is schema-validated; invalid is a refusal | `suggester-gemini.test.ts::the model is checked, never trusted` (11 cases), `::discards the whole reply when only part of it is bad` | Dropping the position check - **3 red**; the target check - **2 red**; the duplicate check - **2 red**. Turning the refusal into a filter - **1 red**, and *only* the mixed-reply fixture can tell |
+| 5 No tool access, no data credential, no reasoning key | `core/security/suggestion-path-boundary.test.ts` (23 cases) | **Six planted violations, all caught.** The coverage list is asserted; shrinking it by one turns 23 tests into 21 *and* fails. Detectors exercised against planted input so the file can be shown to fail |
+| 6 Headers not logged or retained | `suggester-gemini.test.ts::logs nothing and keeps nothing`, `::returns nothing when the transport throws, without inspecting the error` | Structural over comments-blanked source, with the "did the blanker eat the code" control beside it |
+| 7 Input bounded before it leaves | `suggester-gemini.test.ts::bounds the reply rather than truncating it`, `::gives up on an unresponsive provider`; `residue.test.ts::the bounds the port already published` (4 cases) | Removing the reply bound - **1 red**, but only after the fixture was rewritten to be otherwise-valid. Never-arming the timeout - **1 red**. The caps are imported, not restated |
+| 8 Every model pairing is one `assign` accepts | `suggest-with-model.test.ts::the cross-check: assign accepts everything` (per kind), `::keeps the same shape as a purely deterministic answer` | The greedy asker claims every unfilled target, so the cross-check is not vacuous. Every merge guard turns red individually |
+
+**What the audit found:** nothing new, and that is worth stating plainly rather than claiming a
+clean sweep. The mutation rounds ran per task and caught seven vacuous tests before this point -
+three transport fixtures that failed for a second reason, one test whose reference threw inside the
+fake `fetch`, and three guards shadowed by an earlier check. Running the audit at the end found no
+eighth, which is a statement about when the checking happened, not about the audit being unnecessary.
+
 ### File List
+
+- `core/mapping/residue.ts` *(new)* - `residueOf`, derived from `suggestColumns` rather than recomputed
+- `core/mapping/residue.test.ts` *(new)* - 17 cases, including the structural check that a fork fails
+- `core/mapping/suggest-with-model.ts` *(new)* - `ResidueAsker` port and the merge; deterministic wins
+- `core/mapping/suggest-with-model.test.ts` *(new)* - 25 cases, including the per-kind `assign` cross-check
+- `adapters/extraction/suggester-gemini.ts` *(new)* - the model adapter: frozen instruction, headings as
+  data, schema-validated reply, bounded and timed out
+- `adapters/extraction/suggester-gemini.test.ts` *(new)* - 35 cases, all against an injected `fetch`
+- `core/security/suggestion-path-boundary.test.ts` *(new)* - 23 cases over all six path modules
+- `app/onboarding/mapping/actions.ts` *(updated)* - computes the suggestions server-side
+- `app/onboarding/mapping/sample-state.ts` *(updated)* - carries them to the client
+- `app/onboarding/mapping/column-pairing.tsx` *(updated)* - `suggestions` replaces `suggester`; the
+  referential-stability contract is gone
+- `app/onboarding/mapping/mapping-wizard.tsx` *(updated)* - passes `state.suggestions`
+- `app/onboarding/mapping/suggestion-surface.test.tsx` *(updated)* - story 5.6's surface tests moved
+  onto the new prop
+- `app/onboarding/mapping/actions.test.ts` *(updated)* - the fifth scanner copy migrated; AC2 asserted
+- `app/findings/register/export-control.test.tsx` *(updated, epic 4)* - one over-broad assertion
+  tightened to the specific blob; it failed under load because an earlier test in that file leaks a
+  pending revocation. Verified more precise, not weaker
+
+**Configuration.** `GEMINI_SUGGEST_MODEL` is new and belongs in `.env.example`. It is a model
+identifier, **not** a secret, so it must not go in `deploy-units.json`'s `credentials` array - that
+file's own comment records why `GEMINI_OCR_MODEL` was removed from it. Unset, the wizard behaves
+exactly as it did before this story.
+
 
 ## Change Log
