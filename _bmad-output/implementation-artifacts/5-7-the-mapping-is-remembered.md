@@ -256,8 +256,7 @@ units it is built from.
 #### Task 3 - the sensitivity check, and the one mutation that lived
 
 Five decisions in `mapped()`, each mutated on its own, `mapping-wiring.test.ts` run against each,
-every mutation verified as applied by anchor count before the run (a `
-` pattern against a CRLF file
+every mutation verified as applied by anchor count before the run (a `\n` pattern against a CRLF file
 silently no-ops, and a no-op mutation is indistinguishable from a caught one):
 
 | Mutation | Result |

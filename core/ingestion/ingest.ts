@@ -382,13 +382,11 @@ type Reading = ReturnType<typeof readRows> | 'no-reader'
  *
  * `no-reader` stays distinct from `unreadable-file` here as it always has: a
  * type nothing reads yet is *held* for a human, which is the outcome above.
- */
-/**
- * Bytes to records, through the treasurer's saved column mapping if they have
- * one (story 5.7, AC2).
  *
- * The mapping goes here and nowhere else. `toRectangle` has just produced rows
- * whose first is the export's own heading row, and `applyMapping` turns exactly
+ * ## And then the treasurer's saved mapping, if they have one
+ *
+ * Story 5.7's AC2. The mapping goes here and nowhere else. `toRectangle` has
+ * just produced rows whose first is the export's own heading row, and `applyMapping` turns exactly
  * that into a rectangle headed by the *importer's* vocabulary - which is what
  * `readRows` already expects. Everything downstream is unchanged and does not
  * know a mapping was involved.
