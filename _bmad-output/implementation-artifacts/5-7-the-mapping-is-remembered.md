@@ -846,6 +846,99 @@ The harness now captures the records themselves.
 
 ### Completion Notes List
 
+**What this story is.** A treasurer maps an export's columns once; the next export
+of the same shape imports without asking, and changing a mapping re-imports the
+documents it affects through the component that already owns their rows.
+
+**The AD-13 constraint held.** `reimport` writes nothing. It fetches bytes and
+calls `ingest`, and `reimport-boundary.test.ts` asserts that as a prohibition
+rather than as an observation - which the behavioural test structurally cannot do.
+
+**Reviewers, and what each was worth on this branch.** Argus (nine rounds) caught a
+mapping storable under another kind's shape. `ocr` caught nine, three of them
+conventions this project had already written down. The CodeRabbit CLI caught
+eleven, all real, including a save that could report a replacement as a first
+save under concurrency. The AC audit caught two ACs implemented by nothing. The
+integration pass caught the one thing none of them could: that nothing proved the
+re-import applies the *changed* mapping.
+
+**Argus's recall was 0 against both `ocr` and CodeRabbit**, measured through
+`argus_ingest` rather than assumed. That is the number that justifies running
+three reviewers instead of one.
+
+**Not verified, and not claimed to be.** No database was configured on this
+machine, so every migration and adapter test's database half skipped. All the SQL
+in this story - both migrations' constraints, `save`'s `xmax` branch, the
+candidate join's `distinct` - is asserted as text and has never executed.
+
+**One `ocr` failure mode worth carrying forward.** A descriptive cross-reference in
+a comment (*"Migration 002's default privileges"*) made it fabricate a filename,
+fail to read it, and silently drop both migrations from the review while exiting 0.
+
+
 ### File List
 
+**Added (26)**
+
+- `adapters/db/mapping-change-log-postgres.test.ts`
+- `adapters/db/mapping-change-log-postgres.ts`
+- `adapters/db/mapping-store-postgres.test.ts`
+- `adapters/db/mapping-store-postgres.ts`
+- `adapters/db/reimport-candidates-postgres.test.ts`
+- `adapters/db/reimport-candidates-postgres.ts`
+- `app/ingestion-dependencies.test.ts`
+- `app/ingestion-dependencies.ts`
+- `app/onboarding/mapping/change-state.ts`
+- `app/onboarding/mapping/parse-mapping.ts`
+- `app/onboarding/mapping/reimport-actions.test.ts`
+- `app/onboarding/mapping/reimport-actions.ts`
+- `core/ingestion/mapping-wiring.test.ts`
+- `core/mapping/reimport-alerts.test.ts`
+- `core/mapping/reimport-boundary.test.ts`
+- `core/mapping/reimport.test.ts`
+- `core/mapping/reimport.ts`
+- `core/mapping/saved.test.ts`
+- `core/mapping/saved.ts`
+- `core/ports/mapping-change-log.ts`
+- `core/ports/mapping-store.ts`
+- `core/ports/reimport-candidates.ts`
+- `migrations/026_column_mapping.sql`
+- `migrations/027_mapping_change.sql`
+- `migrations/column-mapping.test.ts`
+- `migrations/mapping-change.test.ts`
+
+**Modified (12)**
+
+- `README.md`
+- `app/onboarding/mapping/actions.test.ts`
+- `app/onboarding/mapping/actions.ts`
+- `app/onboarding/mapping/sample-state.ts`
+- `app/upload/actions.ts`
+- `core/ingestion/alert-wiring.test.ts`
+- `core/ingestion/detection-wiring.test.ts`
+- `core/ingestion/ingest.ts`
+- `core/ingestion/payment-wiring.test.ts`
+- `core/ingestion/roll-wiring.test.ts`
+- `core/ingestion/upload-feedback.test.ts`
+- `core/ingestion/upload-feedback.ts`
+
+`_bmad-output/**` is excluded above: the story document and the sprint status are
+this workflow's own bookkeeping, not the story's code.
+
+
 ## Change Log
+
+| Date | Change |
+| --- | --- |
+| 2026-08-23 | Migration 026 and the mapping store; the shape key folded through the importer's own `normaliseHeading` |
+| 2026-08-23 | `read()` in `ingest.ts` became async and routes the rectangle through a saved mapping |
+| 2026-08-23 | `core/mapping/reimport.ts`: the re-import, and the preview that precedes it |
+| 2026-08-23 | Migration 027, the mapping-change record, and its port and adapter |
+| 2026-08-23 | `saveMapping` and the change actions; the structural claim narrowed to what is true |
+| 2026-08-23 | The ingestion composition extracted to `app/ingestion-dependencies.ts` and shared |
+| 2026-08-23 | Argus: a mapping was storable under another kind's shape; the form now sends only pairings |
+| 2026-08-23 | `ocr`: composite foreign keys, indexes on referencing columns, test-data cleanup, a misleading parameter name |
+| 2026-08-23 | CodeRabbit CLI: `save` decides "replaced" from `(xmax = 0)`, not from a CTE a concurrent insert can hide |
+| 2026-08-23 | AC audit: AC8's first clause made structural; AC2's reason now reaches the treasurer |
+| 2026-08-23 | Integration pass: proved the re-import applies the *changed* mapping, not merely that it ran |
+
