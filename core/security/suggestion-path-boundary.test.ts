@@ -98,13 +98,21 @@ const FORBIDDEN_IMPORTS = [
  * copies would let the planted cases pass against a rule the sweep does not
  * actually apply, which is the shape of a guard that proves nothing.
  */
-const forbidden = (specifier: string): boolean =>
-  FORBIDDEN_IMPORTS.some(
-    (directory) =>
-      specifier.includes(`/${directory}/`) ||
-      specifier.startsWith(`@/${directory}`) ||
-      specifier.startsWith(`${directory}/`),
+const forbidden = (specifier: string): boolean => {
+  // Leading `./` and `../` carry no meaning for *which* directory is named, and
+  // stripping them is what lets one rule cover `@/adapters/db`,
+  // `../../adapters/db` and a bare `adapters/db` alike.
+  //
+  // **The bare directory root was escaping.** `../../adapters/db` has no
+  // trailing slash, so `includes('/adapters/db/')` missed it, and it starts with
+  // neither `@/` nor the directory name — three patterns and a hole through the
+  // middle of them. Raised by Argus, and now planted below rather than argued.
+  const bare = specifier.replace(/^(?:\.\.?\/)+/, '').replace(/^@\//, '')
+
+  return FORBIDDEN_IMPORTS.some(
+    (directory) => bare === directory || bare.startsWith(`${directory}/`),
   )
+}
 
 /** `process.env[expression]` — a read whose name is not in the source at all. */
 const COMPUTED_ENV_READ = /process\s*\.\s*env\s*\[\s*[^'"`\]]/
@@ -156,6 +164,10 @@ describe('the guard can actually fail', () => {
     ['a side-effect import', "import '@/adapters/db/init'", '@/adapters/db/init'],
     ['a dynamic import', "await import('@/adapters/db')", '@/adapters/db'],
     ['relative traversal', "import { x } from '../../adapters/db/catalog'", '../../adapters/db/catalog'],
+    ['a relative directory root', "import { x } from '../../adapters/db'", '../../adapters/db'],
+    ['a one-level relative root', "import { x } from '../adapters/agent'", '../adapters/agent'],
+    ['a bare directory name', "import { x } from 'adapters/db'", 'adapters/db'],
+    ['a bare core directory', "import { x } from 'core/answer'", 'core/answer'],
   ])('detects a planted forbidden import: %s', (_label, source, expected) => {
     // Each of these is a shape `ocr` asked whether the sweep below would catch.
     // Asserting the answer beats arguing it — and the traversal case turned out
