@@ -431,6 +431,53 @@ Argus last, immediately before the CodeRabbit round.
 
 #### Integration pass
 
+**Ran, after a diagnosis.** Every Argus call had been failing with `EISDIR: illegal operation on a
+directory, read`, including `provider: offline` - so the fault was in its own file reading, before
+any model. Rather than retry, it was bisected:
+
+- an **inline diff** works, and so do memory and recording - Argus itself is healthy;
+- a **small `diff_file`** works;
+- the failure appears only when the diff names **`core/security/suggestion-path-boundary.test.ts`**,
+  and reproduces under a throwaway name when that file's content is placed in `core/security/`
+  (it does *not* reproduce from the repository root, so the file's relative imports are part of it);
+- it survives to lines 190-283 of that file, but every minimal reconstruction of that block's
+  constructs passes, so the exact trigger is a combination not yet isolated.
+
+That is a reproducible defect in Argus's context gathering, not in this change. **The pass was then
+run over the other 19 files** and came back clean:
+
+> Argus: clean - complexity `moderate` - confidence `1` - context 18/20 files - 1 agy call,
+> 207,309 tokens. `audit_chain_ok` true, `reflection_converged` true.
+
+Target verified before reading the judgement: the verdict names `residue.ts`,
+`suggest-with-model.ts`, `suggester-gemini.ts`, the `app/onboarding/mapping/` surface and the
+configuration files - all genuinely in the diff.
+
+**The excluded file is not unreviewed.** `core/security/suggestion-path-boundary.test.ts` was read by
+`ocr`, reviewed twice by CodeRabbit (which raised three findings against it), and gone over by hand
+here. It is the one file in this story with an engine pass missing, and that is stated rather than
+averaged away.
+
+**What the manual pass had already found**, before the engine ran - all from reading the whole-story
+diff rather than per-commit output:
+
+- **A two-line change showed as 684.** Committing the control-byte escapes renormalised
+  `tabular-roll.test.ts` from CRLF to LF. `.gitattributes` records a repo-wide renormalisation as a
+  separate open item, and doing a partial one as a side effect of this story buries the real diff.
+  Restored - and the first attempt broke `ocr-to-argus.mjs` in the opposite direction, which is why
+  the second was verified against the base blob rather than assumed.
+- **The control-character guard was invisible to review**, classified `Bin` by git because it spelled
+  the forbidden range as literal bytes - on the very MR that widens it. Now escapes, and inside its
+  own sweep. Its self-exclusion turned out to be dead code.
+- **A third literal backspace**, in the doc comment written to explain that hazard.
+- **A glob in prose closed a block comment early** - `**/` contains `*/`.
+
+**A pattern worth naming:** four times on this branch the weak part was a guard's own machinery
+rather than the thing it guards - `readsEnvironmentVariable`, the import classifier, the
+control-character sweep's scope, and the first fix to the first of those. Writing a check does not
+exempt it from being checked, and the mutation round is what caught every one.
+
+
 **Argus was unavailable**: every call failed with `EISDIR: illegal operation on a
 directory, read`, including `provider: offline`, so the fault is in the harness
 rather than the model or the network. All of its own paths check out as files.
