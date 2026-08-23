@@ -1,6 +1,6 @@
 ---
 Status: ready-for-dev
-baseline_commit:
+baseline_commit: 4310b9f
 merge_request:
 ---
 
@@ -189,6 +189,40 @@ key, or a treasurer maps the same export twice and wonders why.
 ## Dev Agent Record
 
 ### Test Design
+
+**Task order note.** Task 1 is written first in the list because it is the warning, but it has nothing
+to move until a store exists - `actions.ts` reaches no repository today, so its scan is *true*. Task 2
+comes first in execution, and Task 1's change lands with Task 3, when `actions.ts` actually gains the
+import. Recorded so the order looks deliberate rather than skipped.
+
+#### Task 2 - `savedMapping`: what is remembered, and how it is found again
+
+**If it ran correctly, how would I know?** A mapping saved for an association, a kind and a heading
+row comes back for the *same* heading row and does not come back for a different one, nor for another
+association.
+
+**How am I going to test it?** The shape key is pure and gets its own tests. The port gets a fake; the
+Postgres adapter is a separate task's concern. **Nothing here writes derived rows**, so AD-13's
+one-write-path rule is not yet in play - Task 4 is where that bites.
+
+**Could this happen elsewhere?** The key is the fifth thing in this epic that must fold headings the
+way the importer folds them. `normaliseHeading` is imported, never re-derived - story 5.3's finding,
+re-proved by story 5.6 Task 1 and again by 5.6b's residue.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | The key computed with a second folding, so two files the importer calls identical get two mappings and the treasurer maps the same export twice | GUARD - `normaliseHeading` imported; observed parity **plus** a structural check, since 5.6 proved a fork passes every behavioural assertion |
+| 2b | The key sensitive to column **order** when the importer is not, or insensitive when it is - a reordered export is a different shape and must not silently reuse a mapping whose positions no longer point at the same columns | GUARD - order is part of the key, asserted both ways |
+| 2c | A mapping found across associations, which is 5.1's tenancy leaking - and worse here than elsewhere, because it would import one board's file under another board's column meanings | GUARD - association is part of the key and of the query; asserted with two associations |
+| 2d | A mapping found across **kinds**, so a deposit export imports under a roll's mapping | GUARD - kind is part of the key |
+| 2e | The stored `columns` count disagreeing with the heading row it was saved for, so `assign`'s bounds check refuses every pairing on reuse | GUARD - stored together, asserted against `applyMapping` |
+| 2f | A blank or duplicate heading changing the key between two uploads of the same export - story 5.3 reports both rather than refusing, so both reach here | GUARD - asserted with the fixtures story 5.3 uses |
+| 2g | Saving silently overwriting a different mapping that happens to share a key, losing the treasurer's earlier work without a record | GUARD - AC6's record is the answer; a save that replaces must say what it replaced |
+
+**Cross-check:** a mapping saved from a draft and read back must be accepted by `applyMapping` against
+the same rectangle, producing the same records - the round trip, not the fields.
+
+### Review Findings
 
 ### Review Findings
 
