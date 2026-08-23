@@ -627,6 +627,49 @@ passed against a mutation that recorded `[]` without waiting for the re-import -
 `[]` is an array. Strengthened to one entry per candidate, which the record can
 only carry after the re-import produced it. All five killed now.
 
+### The AC audit
+
+For each criterion, the test that fails if the behaviour is removed, and where its
+sensitivity was proven.
+
+| AC | Test | Sensitivity |
+| --- | --- | --- |
+| 1 | `saved.test.ts::treats the same headings under a different kind as a different shape`; `mapping-store-postgres.test.ts::derives it from the member in SQL` | mutations: association as parameter on read *and* write, both KILLED |
+| 2 | `mapping-wiring.test.ts::imports when a mapping for its shape has been remembered`, with `::does not import when nothing has been mapped` as the control | mutation: "applying the mapping at all" KILLED |
+| 3 | `actions.test.ts::stores the shape it derives, never one the form sends`; `reimport-actions.test.ts::writes nothing even when a mapping does exist` | mutations: shape taken from the form, preview writing as a side effect, both KILLED |
+| 4 | `reimport.test.ts::replaces the derived rows through the component that already owns them` (behavioural) and `reimport-boundary.test.ts` (structural) | 10 mutations, all KILLED |
+| 5 | `reimport-alerts.test.ts`, all five | mutations: ledger dropped, `claim` removed, both KILLED |
+| 6 | `reimport.test.ts::promises exactly what the re-import then does`; `reimport-actions.test.ts::records only after the re-import` | 11 + 5 mutations, all KILLED |
+| 7 | `reimport.test.ts::never reports a document it skipped as one it re-imported` | mutation: "a failing document aborts the batch" KILLED |
+| 8 | **See below** | — |
+
+#### What the audit found, on the tenth consecutive story
+
+**AC8's first clause was not implemented.** It has two: *"Nothing that reads a
+mapping can write one, and nothing on the suggestion path can reach the store at
+all."* The second was covered - 5.6b's six-module boundary test stayed green
+throughout. The first was covered by nothing.
+
+`ingest` was handed the whole `MappingStore`, `save` included. It only ever called
+`find` - but *"it does not"* and *"it cannot"* are different statements, and the
+gap between them is one edit wide. No test named the difference.
+
+What it would cost is specific: an upload that wrote a mapping would turn a
+file's own heading row into a stored mapping nobody confirmed, applied from then
+on to every later export of that shape - and AC3 says saving is explicit.
+
+Fixed by making it unrepresentable rather than merely tested: the dependency is
+now `Pick<MappingStore, 'find'>`. Three assertions back it up, because a type is
+erased at runtime and one `as MappingStore` would restore the hole silently - two
+behavioural (no `save` on the path that finds a mapping, none on the path that
+finds nothing, which is where the tempting bug lives: *"no mapping for this
+shape, so remember this one"*) and one structural, because behaviour cannot prove
+a prohibition. Both mutations - writing on the not-found path, and widening the
+type back - are KILLED.
+
+This is the tenth consecutive story on which the audit found something, and the
+second time it has found an AC that nothing implemented at all.
+
 ### Review Findings
 
 ### Completion Notes List

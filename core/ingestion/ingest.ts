@@ -109,8 +109,16 @@ export interface IngestDependencies {
    * every release before story 5.7. Optional so an unconfigured deploy ingests
    * rather than fails, and so the many callers that have no mapping to offer
    * need not know this exists.
+   *
+   * **`find` only, and that is AC8's first clause made structural.** *"Nothing
+   * that reads a mapping can write one."* Handed the whole `MappingStore`, this
+   * module could call `save` - it does not, but nothing stopped it, and the AC
+   * audit is what noticed the difference between those two statements. A
+   * mapping is written where a treasurer confirms one; an upload that quietly
+   * wrote one would mean a file's own headings became a stored mapping nobody
+   * agreed to, applied to every later export of that shape.
    */
-  readonly mappings?: MappingStore
+  readonly mappings?: Pick<MappingStore, 'find'>
 
   readonly store: DocumentStore
   readonly repository: DocumentRepository

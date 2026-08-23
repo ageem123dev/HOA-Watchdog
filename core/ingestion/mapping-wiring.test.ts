@@ -27,7 +27,12 @@
  * occur.
  */
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it, vi } from 'vitest'
+
+import { neutralise } from '../ports/declared-members'
 
 import { readHeadings } from '../extraction/headings'
 import { shapeKey } from '../mapping/saved'
@@ -130,6 +135,61 @@ describe('a file whose columns the importer does not recognise', () => {
     await ingest([file()], UPLOADER, { ...deps(), mappings } as IngestDependencies)
 
     expect(mappings.find).toHaveBeenCalledWith(UPLOADER, 'deposit', MAPPING.shape)
+  })
+})
+
+describe('reading a mapping is not writing one (AC8)', () => {
+  /**
+   * *"Nothing that reads a mapping can write one."*
+   *
+   * Found by the AC audit, not by a review: `ingest` only ever called `find`,
+   * and nothing said it had to. The two statements are different, and the gap
+   * between them is one edit wide.
+   *
+   * The type now says so - `mappings` is `Pick<MappingStore, 'find'>`, so
+   * `save` is not reachable from here at all. These assert it anyway, because a
+   * type is erased at runtime and a later `as MappingStore` would restore the
+   * hole silently.
+   *
+   * What it would cost: an upload that wrote a mapping would turn a file's own
+   * headings into a stored mapping nobody confirmed, applied from then on to
+   * every export of that shape.
+   */
+  it('never calls save, on the path that does find one', async () => {
+    const save = vi.fn(async () => null)
+    const mappings = { find: vi.fn(async () => MAPPING), save }
+
+    const [outcome] = await ingest([file()], UPLOADER, {
+      ...deps(),
+      mappings,
+    } as unknown as IngestDependencies)
+
+    // The control: this is the path that *succeeds*, so the absence below is an
+    // absence during real work rather than during an early return.
+    expect(outcome?.outcome).toBe('read')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('never calls save on the path that finds nothing', async () => {
+    const save = vi.fn(async () => null)
+    const mappings = { find: vi.fn(async () => null), save }
+
+    await ingest([file()], UPLOADER, { ...deps(), mappings } as unknown as IngestDependencies)
+
+    // The tempting bug: "no mapping for this shape, so remember this one."
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('declares the store read-only rather than trusting itself', () => {
+    // The structural half. Behaviour cannot prove a *prohibition*: both cases
+    // above pass against a module that writes under some third condition.
+    const source = readFileSync(fileURLToPath(new URL('./ingest.ts', import.meta.url)), 'utf8')
+    const code = neutralise(source).commentsBlanked
+
+    expect(code).toContain("Pick<MappingStore, 'find'>")
+    expect(code).not.toMatch(/mappings\??\.save/)
+    // Not passing because the blanker emptied it.
+    expect(code).toContain('deps.mappings.find(')
   })
 })
 
