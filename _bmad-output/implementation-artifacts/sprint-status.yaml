@@ -136,7 +136,7 @@ development_status:
   # no-credential, bounded, nothing-retained boundary; 5.6b adds the model adapter
   # behind that port. FR-10 explicitly allows the model to be switched off entirely,
   # so 5.6 alone is a state the FR describes rather than a half-built one.
-  5-6b-the-model-earns-the-residue: in-progress  # FR-10, AD-8; the adapter behind the 5.6 port
+  5-6b-the-model-earns-the-residue: done  # FR-10, AD-8; the adapter behind the 5.6 port
   5-7-the-mapping-is-remembered: backlog  # and a mapping change is a deliberate act
   5-8-the-order-that-works: backlog  # no deposits before a roll
   5-9-the-first-directors: backlog  # retires or constrains scripts/add-board-member.mjs
