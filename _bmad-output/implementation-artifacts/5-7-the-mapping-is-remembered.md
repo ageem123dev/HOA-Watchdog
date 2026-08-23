@@ -108,7 +108,7 @@ already owns them, stop.** That is the violation, not a shortcut.
       from 5.3/5.4/5.6 say `actions.ts` reaches no repository. That stops being true here, and the
       tests must say what *is* true instead — a mapping store, and still no document store, no object
       storage, no `ingest`. (AC8)
-- [ ] **Task 2 — Remember a mapping.** The port, the shape key, and the adapter. Per association and
+- [x] **Task 2 — Remember a mapping.** The port, the shape key, and the adapter. Per association and
       kind, with 5.1's tenancy. (AC1, AC3)
 - [x] **Task 3 — A matching upload skips the wizard.** Look up by shape at upload time; fall through
       to the wizard when nothing matches, visibly. (AC2)
@@ -285,6 +285,48 @@ all, so those assertions passed for every outcome including success - three guar
 in the file whose whole purpose is proving something. Caught by running them: one *other* assertion
 failed with `expected 'read' to be 'recorded'`, which named the vocabulary error. Now asserted as
 `toBe('unreadable')` and `toBe('read')`.
+
+#### Task 2 - the adapter, and three things mutation found that review would not have
+
+Five mutations of `mapping-store-postgres.ts`, each run against its own test file. The first pass
+killed two of five; the two that lived and the one that never applied were all real.
+
+| Mutation | First pass | Now |
+| --- | --- | --- |
+| `find` drops its association clause | **SURVIVED** | KILLED |
+| the previous-row CTE drops its association clause | not applied | KILLED |
+| the insert takes an association parameter instead of deriving it | **SURVIVED** | KILLED |
+| the previous-row CTE renamed away | not applied | KILLED |
+| a `delete from` creeps in | KILLED | KILLED |
+
+**1. A guard satisfied by a different query than the one it names.** The scoping assertion was
+`expect(code).toMatch(/where[\s\S]{0,200}association_id\s*=/)`, run over the whole file. Deleting the
+association clause from `find` did not fail it: the regex found `save`'s CTE instead, several hundred
+characters further down. It is now asserted per read - the source is split on `from column_mapping`
+and every resulting chunk must carry the clause - so a third read added later is checked rather than
+silently exempt.
+
+**2. The write path was not covered at all.** `never names an association id as a bound parameter`
+looked like it covered this and does not: in SQL the parameter is `$5`, and the identifier
+`associationId` need never appear. Replacing the `values` subquery with a bound parameter passed
+every assertion in the file. Now asserted directly. This is the worse direction of the two - a read
+scoped to the wrong association discloses a mapping, but a write under a caller-supplied association
+plants one *inside another board's data*, where it is then applied to their imports.
+
+**3. `tsc` caught what the whole suite could not.** The adapter imported `pool` from `./pool`, which
+exports `writerPool`. Every test passed: the text half never executes the module's queries and the
+database half is `describe.skip` here. An adapter whose import does not resolve went green across
+4263 tests. Named because it is the shape of the gap, not the typo: on this machine the adapter's
+*runtime* is exercised by nothing.
+
+**Unverified, and not claimed as verified.** `save` returns the mapping it replaced by capturing it
+in a CTE and reading it back through `returning (select shape from previous)`. I believe PostgreSQL
+resolves a WITH-bound CTE inside an INSERT's RETURNING list, but no database was configured on this
+machine, so all six of the adapter's database assertions skipped and **that construct has never been
+executed**. It needs one run of this file against a real server before the adapter is trusted; the
+tests to prove it are already written and will run the moment `DATABASE_URL` and
+`WATCHDOG_WRITER_DATABASE_URL` are set. Recorded rather than guessed, as the `replySchema` casing
+question was on 5.6b.
 
 ### Review Findings
 
