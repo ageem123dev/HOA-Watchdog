@@ -135,7 +135,7 @@ function world() {
       find: vi.fn(async (_who: string, _kind: string, shape: string) =>
         shape === MAPPING.shape ? MAPPING : null,
       ),
-      save: vi.fn(async () => null),
+      save: vi.fn(async () => ({ replaced: false, previous: null })),
     } satisfies MappingStore,
     store: {
       get: vi.fn(async () => new TextEncoder().encode(CSV)),

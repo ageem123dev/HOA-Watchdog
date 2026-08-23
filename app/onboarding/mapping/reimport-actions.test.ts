@@ -69,7 +69,7 @@ const DEPOSIT_PAIRINGS = JSON.stringify([
 beforeEach(() => {
   vi.clearAllMocks()
   auth.mockResolvedValue(SIGNED_IN)
-  save.mockResolvedValue(null)
+  save.mockResolvedValue({ replaced: false, previous: null })
   find.mockResolvedValue(null)
   importedUnder.mockResolvedValue([])
   // `clearAllMocks` keeps implementations, so a rejection set by one test would
@@ -146,7 +146,10 @@ describe('the order of the three things it does', () => {
      * re-import it would claim one that had not run — and migration 027 revokes
      * UPDATE, so there is no correcting it.
      */
-    save.mockResolvedValue({ mapping: { kind: 'deposit', columns: 3, pairings: [] } })
+    save.mockResolvedValue({
+      replaced: true,
+      previous: { mapping: { kind: 'deposit', columns: 3, pairings: [] } },
+    })
     importedUnder.mockResolvedValue([
       { id: 'doc-1', storageKey: 'key/doc-1', filename: 'march.csv', contentType: 'text/csv' },
     ])
@@ -183,7 +186,7 @@ describe('the order of the three things it does', () => {
   })
 
   it('records a first mapping with no previous rather than skipping the record', async () => {
-    save.mockResolvedValue(null)
+    save.mockResolvedValue({ replaced: false, previous: null })
 
     await change({ documentKind: 'deposit', headerRow: HEADER, pairings: DEPOSIT_PAIRINGS })
 
@@ -221,14 +224,22 @@ describe('when a step fails after the change has happened', () => {
     expect(state).toMatchObject({ documents: [{ documentId: 'doc-1' }] })
   })
 
-  it('refuses a pairing whose position is NaN', async () => {
-    // `typeof NaN === 'number'`, so the transport check passes it through and
-    // `assign`'s `Number.isInteger` is what refuses it. Asserted rather than
-    // reasoned about, which is the difference ocr's finding was worth.
+  it('refuses a pairing whose position is not a whole number', async () => {
+    /**
+     * **A fraction, not `null`.** The first version sent `position: null`, which
+     * `typeof position !== 'number'` refuses at the transport check - so it
+     * never reached `assign` at all, and the comment claiming `Number.isInteger`
+     * was doing the work was wrong. The test passed for a different reason than
+     * the one it named, which is the same defect as a vacuous assertion wearing
+     * a better disguise. Raised by CodeRabbit.
+     *
+     * `1.5` is a number, so it gets through the transport check and `assign` is
+     * genuinely what refuses it.
+     */
     const state = await change({
       documentKind: 'deposit',
       headerRow: HEADER,
-      pairings: '[{"target":"date","position":null}]',
+      pairings: '[{"target":"date","position":1.5}]',
     })
 
     expect(state.status).toBe('error')

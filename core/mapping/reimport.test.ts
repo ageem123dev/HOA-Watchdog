@@ -90,7 +90,7 @@ function harness(
     find: vi.fn(async (_who: string, _kind: string, shape: string) =>
       mapping && shape === mapping.shape ? mapping : null,
     ),
-    save: vi.fn(async () => null),
+    save: vi.fn(async () => ({ replaced: false, previous: null })),
   }
 
   const deps = {
@@ -283,6 +283,27 @@ describe('the warning before the act (AC6)', () => {
      * reads as zero.
      */
     const h = harness([doc('a', 'march.csv'), doc('gone', 'lost.csv')], { 'key/a': MAPPED })
+
+    expect(await preview(h)).toEqual({ considered: 2, affected: 1, unreadable: 1 })
+  })
+
+  it('counts a document whose storage throws, instead of failing the whole warning', async () => {
+    /**
+     * `reimport` catches per document; `previewReimport` did not, so one
+     * unreachable object took down the count for every other document - and the
+     * treasurer got an error where they were owed a number. The asymmetry is
+     * exactly the kind that survives review because both functions read
+     * correctly on their own. Raised by CodeRabbit.
+     */
+    const h = harness([doc('a', 'march.csv'), doc('b', 'april.csv')], {
+      'key/a': MAPPED,
+      'key/b': MAPPED,
+    })
+    let call = 0
+    h.deps.store.get = vi.fn(async () => {
+      if (++call === 1) throw new Error('object storage said no')
+      return new TextEncoder().encode(MAPPED)
+    })
 
     expect(await preview(h)).toEqual({ considered: 2, affected: 1, unreadable: 1 })
   })

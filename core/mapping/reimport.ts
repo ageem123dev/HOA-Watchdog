@@ -142,7 +142,24 @@ export async function previewReimport(
   let unreadable = 0
 
   for (const document of held) {
-    const verdict = await classify(document, shape, kind, deps)
+    /**
+     * Caught per document, as `reimport` does. Without this one unreachable
+     * object took down the count for every other document, and the treasurer
+     * got an error where they were owed a number - the asymmetry survives
+     * review because both functions read correctly on their own. Raised by
+     * CodeRabbit.
+     *
+     * A document that cannot be classified is counted as unreadable, which is
+     * what it is from the treasurer's side: held, and beyond this change's
+     * reach.
+     */
+    let verdict: Verdict
+    try {
+      verdict = await classify(document, shape, kind, deps)
+    } catch {
+      unreadable += 1
+      continue
+    }
 
     if (verdict.affected) affected += 1
     // Counted and shown, not hidden. A document whose bytes are gone or will not
@@ -202,9 +219,6 @@ async function one(
     const verdict = await classify(document, shape, kind, deps)
     if (!verdict.affected) return verdict.result
     const bytes = verdict.bytes
-    // Not an exception. A key object storage does not have is a fact about this
-    // document, and the batch continues — reported so it can be chased, never
-    // folded into `unaffected`, which would say the mapping simply did not apply.
 
     const [outcome] = await deps.ingest(
       [{ filename: document.filename, contentType: document.contentType, bytes, documentKind: kind }],

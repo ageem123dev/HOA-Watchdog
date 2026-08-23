@@ -43,11 +43,13 @@
 
 import type { DraftMapping } from '@/core/mapping/draft'
 import type { SavedMapping } from '@/core/mapping/saved'
-import type { MappingStore } from '@/core/ports/mapping-store'
+import type { MappingStore, SaveResult } from '@/core/ports/mapping-store'
 
 import { writerPool } from './pool'
 
 interface Row {
+  /** `xmax = 0` is true only of a row this statement inserted. */
+  readonly inserted: boolean
   readonly shape: string
   readonly document_kind: string
   readonly saved_by: string
@@ -86,7 +88,7 @@ export function createMappingStore(): MappingStore {
       return row === undefined ? null : toMapping(row)
     },
 
-    async save(mapping) {
+    async save(mapping): Promise<SaveResult> {
       const written = await writerPool().query<Row>(
         // `previous` reads the pre-insert snapshot, so it holds the row this
         // statement is about to replace — the thing `returning` cannot give
@@ -109,19 +111,36 @@ export function createMappingStore(): MappingStore {
          do update set mapping = excluded.mapping,
                        saved_by = excluded.saved_by,
                        saved_at = now()
-         returning (select shape from previous) as shape,
+         returning (xmax = 0) as inserted,
+                   (select shape from previous) as shape,
                    (select document_kind from previous) as document_kind,
                    (select saved_by from previous) as saved_by,
                    (select mapping from previous) as mapping`,
         [mapping.savedBy, mapping.kind, mapping.shape, JSON.stringify(mapping.mapping)],
       )
 
-      // A first save returns the row with every `previous` column null, which is
-      // "nothing was replaced" — not a failed write. `shape` is the one checked
-      // because migration 026 makes it `not null`, so a real previous row can
-      // never present it as null.
+      /**
+       * **`inserted`, not `previous === null`.** The CTE reads this statement's
+       * snapshot, so a row another transaction inserts and commits *after* that
+       * snapshot is invisible to it - while the conflict still fires, making
+       * this an update. Deciding from `previous` alone would report "first save"
+       * for a replacement: the treasurer would not be warned, and the documents
+       * already imported under the old mapping would never be re-imported. That
+       * is the concurrency migration 026's unique index exists for - two
+       * treasurers confirming the same wizard at once. Raised by CodeRabbit.
+       *
+       * `xmax = 0` is true only of a row this statement inserted, the technique
+       * `finding-postgres.ts` uses and verifies against a real database.
+       */
       const row = written.rows[0]
-      return row === undefined || row.shape === null ? null : toMapping(row)
+      if (row === undefined) return { replaced: false, previous: null }
+
+      return {
+        replaced: !row.inserted,
+        // Null when nothing was replaced, and also when a concurrent insert made
+        // the previous row invisible to the CTE. `replaced` tells those apart.
+        previous: row.shape === null ? null : toMapping(row),
+      }
     },
   }
 }

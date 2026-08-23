@@ -724,6 +724,78 @@ refused by `assign` already - the code needed no change, though it now has a tes
 **Argus found none of these nine.** Ingested at `a10f059` with recall 0, which is
 the measurement that justifies running both rather than an opinion about it.
 
+### The CodeRabbit CLI round - 11 findings, 11 confirmed
+
+`review_completed`, 39 reviewedFiles reconciling exactly against the diff. Every
+finding verified against the real file first; **all eleven were real**, which is
+the highest confirmed rate any reviewer has had on this project.
+
+**The ingest join failed the first time and had to be repaired.** `argus_ingest`
+skipped the review: *"no Argus run recorded for 22f18da"*. I had run Argus on the
+previous commit and started CodeRabbit without running it on the `ocr`-fix commit,
+so there was nothing to join to. Ran `argus_review` on 22f18da and re-ingested -
+6 compared, recall 0, 4 lessons. Argus found none of CodeRabbit's, as it found
+none of `ocr`'s.
+
+#### The three majors
+
+**A save could report "first save" for a replacement.** `save` read the previous
+row through a CTE and returned `SavedMapping | null`, with null meaning nothing
+was replaced. The CTE reads the statement's snapshot - so a row another
+transaction inserts and commits *after* that snapshot is invisible to it while
+the conflict still fires, making the statement an update that reports a first
+save. The treasurer is not warned, and the documents under the old mapping are
+never re-imported. That is precisely the concurrency migration 026's unique index
+exists for.
+
+CodeRabbit named the fix and the precedent: `finding-postgres.ts` already does
+`returning id, (xmax = 0) as inserted`, with a comment calling it *"the one way
+to learn which branch ran without a second round trip"*. So `save` now returns
+`{ replaced, previous }` - the fact and the detail, separated, because they come
+apart exactly here. This is the construct I had flagged as unverified and Argus
+had corroborated as correct; **it was correct about what it does and wrong about
+what it concludes.**
+
+**`previewReimport` did not catch per document** where `reimport` does. One
+unreachable object took down the count for every other document, so the treasurer
+got an error where they were owed a number. The asymmetry survives review because
+both functions read correctly on their own.
+
+**A boundary assertion that matched nothing.** `reimport-boundary.test.ts` had
+`expect(code).not.toMatch(/extraction\s*\(/i)` - and no code here would ever
+write that: the writer is reached as `deps.extractions.replace(...)`. The
+assertion passed against every possible file, including one writing derived rows
+on every line. A guard that guards nothing, inside the file whose entire job is
+guarding, in the test I wrote *specifically* because AD-13 is a prohibition. The
+twelfth of this shape on this project. Corrected, and a mutation now confirms it
+catches a writer.
+
+#### The minors, all of them mine and all of them vacuity
+
+- **`storeHolding` ignored the requested shape**, answering its mapping for any
+  key. The shape-mismatch test passed `null` and got `null`, so a wrong lookup
+  key in `ingest` - the whole point of that test - would have gone unnoticed. The
+  re-import tests' fake had it right; this one did not.
+- **My pairing test sent `position: null`**, which the transport check refuses,
+  so it never reached `assign` - while its comment claimed `Number.isInteger` was
+  doing the work. A test passing for a different reason than the one it names.
+  Now `1.5`.
+- **The `replace` mock kept counts, not records**, so the cross-check compared
+  lengths rather than contents.
+
+#### The trivials
+
+A doc comment claiming per-request construction "would multiply connections"
+when the adapters share `writerPool()` - describing neither what the code does
+nor why. An unreachable `configured` check inside a `describe.skip` block. A
+stale comment left behind by the `classify` extraction. A missing blank-header
+test - which matters, because a blank header row that got through would key every
+such export to one mapping.
+
+And one behavioural gap: the swallowed store failure in `mapped()` now reports
+through `onError`. Failing open is right, but a store that is down looked exactly
+like a store with no mapping, with nothing in any log saying which.
+
 ### Review Findings
 
 ### Completion Notes List

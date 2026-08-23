@@ -67,7 +67,16 @@ describe('the re-import reaches no writer of its own', () => {
     // injected pool, say.
     expect(code).not.toMatch(/\binsert\s+into\b/i)
     expect(code).not.toMatch(/\bupdate\s+\w+\s+set\b/i)
-    expect(code).not.toMatch(/\bextraction\b\s*\(/i)
+    /**
+     * The call form that actually exists. This was `/\bextraction\b\s*\(/i`,
+     * which matches nothing any code here would write - the writer is reached
+     * as `deps.extractions.replace(...)`. The assertion therefore passed
+     * against every possible file, including one writing derived rows on every
+     * line: a guard that guards nothing, inside the file whose entire job is
+     * guarding. Raised by CodeRabbit, and the twelfth of this shape here.
+     */
+    expect(code).not.toMatch(/extractions\s*[.?]/)
+    expect(code).not.toMatch(/\breplace\s*\(/)
   })
 
   it('touches the store only to read', () => {

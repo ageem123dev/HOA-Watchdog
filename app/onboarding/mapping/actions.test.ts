@@ -41,7 +41,10 @@ vi.mock('@/adapters/extraction/workbook-sheetjs', () => ({
 }))
 
 /** What `save` reports it replaced. `null` is a first mapping. */
-const save = vi.fn<(mapping: unknown) => Promise<unknown>>(async () => null)
+const save = vi.fn<(mapping: unknown) => Promise<unknown>>(async () => ({
+  replaced: false,
+  previous: null,
+}))
 vi.mock('@/adapters/db/mapping-store-postgres', () => ({
   createMappingStore: () => ({ save: (mapping: unknown) => save(mapping), find: vi.fn() }),
 }))
@@ -105,7 +108,7 @@ beforeEach(() => {
   // `mockResolvedValue` set by one test survives into the next. Here that would
   // mean a later test seeing a *replaced* mapping it never arranged - and the
   // one it would break is the one asserting a first save reports `saved`.
-  save.mockResolvedValue(null)
+  save.mockResolvedValue({ replaced: false, previous: null })
 })
 
 describe('reading a sample', () => {
@@ -545,9 +548,29 @@ describe('confirming a mapping (AC3)', () => {
     expect(JSON.stringify(state)).not.toContain('the database said no')
   })
 
+  it('refuses a header row whose cells are all blank', async () => {
+    /**
+     * `readHeadings` has its own failure for this and nothing here exercised it.
+     * It matters because the shape key is built from those headings: a blank
+     * header row that got through would key every such export to one mapping,
+     * and the first treasurer to map one would have it applied to all of them.
+     * Raised by CodeRabbit.
+     */
+    auth.mockResolvedValue(SIGNED_IN)
+
+    const state = await confirm({
+      documentKind: 'deposit',
+      headerRow: JSON.stringify(['', '  ', '']),
+      pairings: PAIRINGS,
+    })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it('reports a first mapping as saved', async () => {
     auth.mockResolvedValue(SIGNED_IN)
-    save.mockResolvedValue(null)
+    save.mockResolvedValue({ replaced: false, previous: null })
 
     const state = await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
 
@@ -558,7 +581,11 @@ describe('confirming a mapping (AC3)', () => {
     // The distinction the story's second half turns on. Collapsing the two into
     // one `saved` would make the warning impossible to render.
     auth.mockResolvedValue(SIGNED_IN)
-    save.mockResolvedValue({ savedBy: 'director-1', kind: 'deposit', shape: 's', mapping: {} })
+    // `replaced` is the fact the state turns on, not `previous`.
+    save.mockResolvedValue({
+      replaced: true,
+      previous: { savedBy: 'director-1', kind: 'deposit', shape: 's', mapping: {} },
+    })
 
     const state = await confirm({ documentKind: 'deposit', headerRow: HEADER, pairings: PAIRINGS })
 

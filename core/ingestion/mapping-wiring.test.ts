@@ -96,9 +96,20 @@ function deps(overrides: Partial<IngestDependencies> = {}): IngestDependencies {
   } as unknown as IngestDependencies
 }
 
+/**
+ * A store that answers only for the shape its mapping was made for.
+ *
+ * It used to answer `mapping` for *any* shape, which made the shape-mismatch
+ * test pass by construction: it passed `null` and got `null`, so nothing was
+ * exercised. A wrong lookup key in `ingest` - the whole point of that test -
+ * would have gone unnoticed. Raised by CodeRabbit; the re-import tests' fake
+ * had it right and this one did not.
+ */
 const storeHolding = (mapping: SavedMapping | null): MappingStore => ({
-  find: vi.fn(async () => mapping),
-  save: vi.fn(async () => null),
+  find: vi.fn(async (_who: string, _kind: string, shape: string) =>
+    mapping !== null && shape === mapping.shape ? mapping : null,
+  ),
+  save: vi.fn(async () => ({ replaced: false, previous: null })),
 })
 
 describe('a file whose columns the importer does not recognise', () => {
@@ -135,6 +146,52 @@ describe('a file whose columns the importer does not recognise', () => {
     await ingest([file()], UPLOADER, { ...deps(), mappings } as IngestDependencies)
 
     expect(mappings.find).toHaveBeenCalledWith(UPLOADER, 'deposit', MAPPING.shape)
+  })
+})
+
+describe('the difference is visible to the treasurer (AC2)', () => {
+  /**
+   * *"A file whose shape does not match a saved mapping still goes to the
+   * wizard, and the difference is visible to the treasurer rather than silent."*
+   *
+   * Found by the AC audit. The *outcome* already differed - `read` against
+   * `unreadable` - but the reason did not survive: `ingest` collapsed every
+   * `!reading.ok` into `unreadable` and dropped `problems` on the floor. So a
+   * file whose columns simply are not mapped was reported with the sentence for
+   * a file that would not open: *"It may be damaged, or saved in another
+   * format."*
+   *
+   * That is worse than silent. It is a wrong cause, and it sends the treasurer
+   * to re-export a file that was fine, when what they needed was the wizard.
+   */
+  it('says a file was not recognised, not that it could not be read', async () => {
+    const [outcome] = await ingest([file()], UPLOADER, deps())
+
+    expect(outcome?.outcome).toBe('unreadable')
+    // The reason survives, so the surface can tell the two apart.
+    expect(outcome).toMatchObject({ reason: 'missing-headers' })
+  })
+
+  it('does not claim unrecognised columns for a file that genuinely will not open', async () => {
+    // The control. Without it, `reason` could be hard-coded to
+    // `missing-headers` and both cases would look mappable.
+    const [outcome] = await ingest(
+      [{ ...file(), bytes: new TextEncoder().encode('') }],
+      UPLOADER,
+      deps(),
+    )
+
+    expect(outcome).not.toMatchObject({ reason: 'missing-headers' })
+  })
+
+  it('reports no reason at all once a mapping makes the file readable', async () => {
+    const [outcome] = await ingest([file()], UPLOADER, {
+      ...deps(),
+      mappings: storeHolding(MAPPING),
+    } as IngestDependencies)
+
+    expect(outcome?.outcome).toBe('read')
+    expect(outcome).not.toHaveProperty('reason')
   })
 })
 
@@ -216,7 +273,7 @@ describe('when the mapping cannot help', () => {
       find: vi.fn(async () => {
         throw new Error('the database said no')
       }),
-      save: vi.fn(async () => null),
+      save: vi.fn(async () => ({ replaced: false, previous: null })),
     }
 
     const [outcome] = await ingest([file()], UPLOADER, { ...deps(), mappings } as IngestDependencies)
@@ -233,9 +290,12 @@ describe('when the mapping cannot help', () => {
      */
     const reordered = 'Descr,Txn Date,Amt\r\n Willow Creek,2026-03-01,1240.00\r\n'
 
+    // Holding the *real* mapping now, not `null`: the store is asked for the
+    // reordered file's shape and must decline it itself. Passing `null` proved
+    // only that a store answering nothing changes nothing.
     const [outcome] = await ingest([file(reordered)], UPLOADER, {
       ...deps(),
-      mappings: storeHolding(null),
+      mappings: storeHolding(MAPPING),
     } as IngestDependencies)
 
     expect(outcome?.outcome).toBe('unreadable')

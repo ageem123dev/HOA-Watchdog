@@ -142,7 +142,11 @@ export async function saveMapping(_previous: SaveState, formData: FormData): Pro
   // prohibition on a document store and `ingest` is what keeps a wizard from
   // touching the permanent record. The count is `previewReimport`, asked for
   // separately by the module that owns the re-import.
-  return replaced === null ? { status: 'saved' } : { status: 'replaced' }
+  // `replaced.replaced`, never `previous !== null`: a concurrent insert can hide
+  // the old row from the statement that overwrote it, and reading the detail
+  // instead of the fact would report a change as a first save. Raised by
+  // CodeRabbit.
+  return replaced.replaced ? { status: 'replaced' } : { status: 'saved' }
 }
 
 /** `JSON.parse` that answers `null` rather than throwing at a form field. */

@@ -34,6 +34,17 @@ export interface UploadFeedback {
  * next steps — an unlocked copy versus a cleaner export — and briefly, while
  * both constants shared a name, they were the same message.
  */
+/**
+ * For a file that opened and whose **columns** were not recognised.
+ *
+ * The third of the three, and the one story 5.7 added. It names the columns as
+ * what is missing and points at the thing that fixes it, because "not read" with
+ * no cause is what sends a treasurer to re-export a file that was fine.
+ */
+const COLUMNS_UNRECOGNISED_MESSAGE =
+  'This file opened, but its columns are not ones this importer recognises. ' +
+  'Set up a column mapping for this export and it will import on its own from then on.'
+
 const FILE_UNREADABLE_MESSAGE =
   'This file cannot be read. It might be password protected or corrupted. ' +
   'Please upload an unlocked or clearer version.'
@@ -77,6 +88,22 @@ export function uploadFeedback(outcome: IngestOutcome): UploadFeedback {
       }
 
     case 'unreadable':
+      /**
+       * Two events, not one - story 5.7's AC2.
+       *
+       * `missing-headers` means the file **opened** and its columns are not the
+       * importer's vocabulary. That is a mapping away from working, and until
+       * 5.7 it shared a sentence with a scan that could not be read: a clean
+       * bank CSV was answered with *"upload a clearer scan"*, which sends the
+       * treasurer to re-export a file that was never the problem.
+       *
+       * Everything else keeps the original sentence. The distinction only
+       * exists where the reading gave a reason for it.
+       */
+      if (outcome.reason === 'missing-headers') {
+        return { status: 'Not recognised', message: COLUMNS_UNRECOGNISED_MESSAGE, offerReplacement: true }
+      }
+
       // The sentence itself lives in `core/extraction`, which owns the concept.
       // A second copy here would drift, and the version a treasurer reads is the
       // one that would be wrong.

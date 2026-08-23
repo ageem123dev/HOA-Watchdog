@@ -40,11 +40,22 @@ import type { IngestDependencies } from '@/core/ingestion/ingest'
  * behind. `ingestion-dependencies.test.ts` asserts the two callers pass the same
  * set, so a dependency added for one is added for both.
  *
- * ## The singletons are module-level on purpose
+ * ## What is module-level, and what is not
  *
- * Each `create*` opens or reuses pooled resources. Building them per request
- * would multiply connections across concurrent uploads, which is the reason
- * `notify-findings.ts` reads its recipients once per run rather than per finding.
+ * Four things are built once for the process: the object store, the document
+ * repository, the extraction repository and the workbook decoder. The S3 store
+ * is the reason - it reuses one client for its own lifetime, so constructing it
+ * per upload would open a socket pool per upload and the reuse would count for
+ * nothing. Module scope is safe for them precisely because neither factory reads
+ * its environment at construction, which is what `next build` depends on and
+ * both adapters have a test for.
+ *
+ * **Everything else is built per call, and that is cheap.** The Postgres
+ * adapters close over `writerPool()`, a pool shared by the whole process, so a
+ * fresh `createPaymentRepository()` is an object literal and not a connection.
+ * An earlier version of this comment claimed per-request construction would
+ * "multiply connections across concurrent uploads"; it would not, and the
+ * comment described neither what the code does nor why. Raised by CodeRabbit.
  */
 
 const documentStore = createS3DocumentStore()

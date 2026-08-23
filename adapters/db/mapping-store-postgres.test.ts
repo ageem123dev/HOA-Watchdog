@@ -145,6 +145,24 @@ describe('saving replaces, and says what it replaced', () => {
     expect(code).toMatch(/on conflict[\s\S]{0,120}do update/i)
   })
 
+  it('decides "was anything replaced" from the row, not from the CTE', () => {
+    /**
+     * The CTE reads this statement's snapshot. A row another transaction inserts
+     * and commits *after* that snapshot is invisible to it - while the conflict
+     * still fires, so the statement performs an update and the previous columns
+     * come back null. Deciding from those alone reports "first save" for a
+     * replacement: no warning, and the documents under the old mapping never
+     * re-imported. That is the concurrency 026's unique index exists for.
+     *
+     * `xmax = 0` is true only of a row this statement inserted -
+     * `finding-postgres.ts` uses it for the same question. Asserted here because
+     * this file's database half skips without a connection, and on this machine
+     * it does. Raised by CodeRabbit.
+     */
+    expect(code).toContain('(xmax = 0) as inserted')
+    expect(code).toContain('replaced: !row.inserted')
+  })
+
   it('does not delete, because the migration revoked it', () => {
     // Migration 026 revokes DELETE from `watchdog_writer`. An adapter issuing
     // one would fail at runtime, in production, on a treasurer's re-map.
@@ -180,8 +198,9 @@ describeWithDatabase('against a real database', () => {
   })
 
   afterAll(async () => {
-    if (!configured) return
-
+    // No `configured` check: this block is `describe.skip` without a database, so
+    // the hook does not run at all. Guarding it again asserted something already
+    // guaranteed and read as though it might not be. Raised by CodeRabbit.
     // This file creates two associations, two members and every mapping saved
     // under them, and cleaned up none of it. Left alone it accumulates a fresh
     // set on every run, and `find`'s association scoping is exactly the kind of
@@ -218,17 +237,27 @@ describeWithDatabase('against a real database', () => {
     expect(found?.shape).toBe(shape)
   })
 
-  it('returns null from a first save and the old mapping from a change', async () => {
+  it('reports a first save as not replaced, and a change as replaced', async () => {
     const shape = `${prefix}-replaced`
     const changed = { ...DEPOSIT, pairings: [{ target: 'amount' as const, position: 1 }] }
 
     const first = await store().save({ savedBy: mine, kind: 'deposit', shape, mapping: DEPOSIT })
     const second = await store().save({ savedBy: mine, kind: 'deposit', shape, mapping: changed })
 
-    // Not `void`: this is how a caller tells a change from a first save, which
-    // is what AC6's warning is built on.
-    expect(first).toBeNull()
-    expect(second?.mapping).toEqual(DEPOSIT)
+    /**
+     * `replaced` is the fact and `previous` is the detail. They used to be one
+     * nullable value, and CodeRabbit found where they come apart: a row another
+     * transaction inserts after this statement's snapshot is invisible to the
+     * CTE while still firing the conflict, so `previous` is null on what is
+     * really an update. `replaced` comes from `xmax` on the row itself and
+     * cannot be fooled that way.
+     */
+    expect(first.replaced).toBe(false)
+    expect(first.previous).toBeNull()
+
+    expect(second.replaced).toBe(true)
+    expect(second.previous?.mapping).toEqual(DEPOSIT)
+
     expect((await store().find(mine, 'deposit', shape))?.mapping).toEqual(changed)
   })
 

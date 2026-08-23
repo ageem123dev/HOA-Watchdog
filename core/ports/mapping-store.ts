@@ -39,6 +39,42 @@
 
 import type { SavedMapping } from '../mapping/saved'
 
+/**
+ * What a save did.
+ *
+ * ## Why two fields and not one nullable mapping
+ *
+ * `save` used to return `SavedMapping | null`, with `null` meaning "nothing was
+ * replaced". That conflated two different facts, and CodeRabbit found the case
+ * where they come apart.
+ *
+ * The previous row is read by a CTE in the same statement as the upsert, against
+ * that statement's snapshot. If another transaction inserts the same shape and
+ * commits *after* that snapshot is taken, the CTE sees nothing while the
+ * conflict still fires — so the statement performs an **update** and reports
+ * "first save". A treasurer would then be told nothing was replaced, and the
+ * documents already imported under the old mapping would never be re-imported.
+ *
+ * That is exactly the concurrency migration 026's unique index exists for: two
+ * treasurers confirming the same wizard at once.
+ *
+ * So `replaced` comes from the row itself — `xmax = 0` is true only of a row the
+ * statement inserted, the technique `finding-postgres.ts` already uses and
+ * verifies against a real database. `previous` is the mapping when it could be
+ * read, and `null` when it could not. A caller that needs to know *whether* a
+ * change happened must read `replaced`, never `previous !== null`.
+ */
+export interface SaveResult {
+  /** False only when this statement inserted the row. */
+  readonly replaced: boolean
+  /**
+   * What was replaced, if it was visible. `null` when nothing was replaced —
+   * and also when a concurrent write means it could not be read. Those two are
+   * distinguished by `replaced`, not by this.
+   */
+  readonly previous: SavedMapping | null
+}
+
 export interface MappingStore {
   /**
    * The mapping for this association, kind and shape, or `null`.
@@ -51,8 +87,7 @@ export interface MappingStore {
   /**
    * Remember `mapping`, replacing any mapping for the same identity.
    *
-   * Returns the mapping that was replaced, or `null` if this is the first for
-   * that shape — see the note above on why this is not `void`.
+   * See the note above on why this is not `void`.
    */
-  save(mapping: SavedMapping): Promise<SavedMapping | null>
+  save(mapping: SavedMapping): Promise<SaveResult>
 }

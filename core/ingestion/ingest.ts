@@ -89,7 +89,25 @@ export type IngestOutcome =
    * and on a re-ingest none are deleted either, so a document that already had
    * a good set still has it. Carries the document id for exactly that reason.
    */
-  | { readonly filename: string; readonly outcome: 'unreadable'; readonly documentId: string }
+  | {
+      readonly filename: string
+      readonly outcome: 'unreadable'
+      readonly documentId: string
+      /**
+       * Why, when the reading said. Story 5.7's AC2 asks that a file whose
+       * columns are not mapped be *visibly* different from one that would not
+       * open - and every `!reading.ok` used to collapse to this outcome with
+       * `problems` dropped, so the treasurer was told a readable file "may be
+       * damaged, or saved in another format" and sent to re-export something
+       * that was fine.
+       *
+       * `missing-headers` is the mappable case: the file opened, and its
+       * columns are not the importer's vocabulary. Optional because not every
+       * failure has one worth carrying, and adding it must not force every
+       * existing caller to handle it.
+       */
+      readonly reason?: string
+    }
   | { readonly filename: string; readonly outcome: 'already-held'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'rejected'; readonly reason: RejectionReason }
   /** The file was fine; something underneath was not. Retryable, and not the file's fault. */
@@ -231,6 +249,7 @@ async function ingestOne(
       bytes,
       documentKind,
       uploadedBy,
+      filename,
       deps,
     )
 
@@ -247,7 +266,15 @@ async function ingestOne(
     if (!reading.ok) {
       // Nothing is written and nothing is deleted. On a re-ingest the previous
       // set is still there, because replacement has not been reached.
-      return { filename, outcome: 'unreadable', documentId: recorded.id }
+      //
+      // The first problem's reason travels with the outcome. It is the whole of
+      // AC2's "visible rather than silent": without it, a file needing a column
+      // mapping and a file that will not open are one word to the treasurer.
+      const reason = reading.problems[0]?.reason
+
+      return reason === undefined
+        ? { filename, outcome: 'unreadable', documentId: recorded.id }
+        : { filename, outcome: 'unreadable', documentId: recorded.id, reason }
     }
 
     // Replacement only now, with a complete validated set in hand. This is the
@@ -407,6 +434,7 @@ async function read(
   bytes: Uint8Array,
   documentKind: DocumentKind,
   uploadedBy: string,
+  filename: string,
   deps: IngestDependencies,
 ): Promise<Reading> {
   const rectangle = toRectangle(contentType, bytes, deps.workbooks)
@@ -421,7 +449,10 @@ async function read(
       : { ok: false, problems: [{ reason: 'unreadable-file' }] }
   }
 
-  return readRows(await mapped(rectangle.rows, documentKind, uploadedBy, deps), documentKind)
+  return readRows(
+    await mapped(rectangle.rows, documentKind, uploadedBy, filename, deps),
+    documentKind,
+  )
 }
 
 /**
@@ -450,6 +481,8 @@ async function mapped(
   rows: readonly (readonly string[])[],
   documentKind: DocumentKind,
   uploadedBy: string,
+  /** Only so a failed lookup can be reported against the file it happened on. */
+  filename: string,
   deps: IngestDependencies,
 ): Promise<readonly (readonly string[])[]> {
   if (!deps.mappings) return rows
@@ -465,7 +498,16 @@ async function mapped(
     )
 
     return saved ? applyMapping(rows, saved.mapping) : rows
-  } catch {
+  } catch (error) {
+    /**
+     * Reported, not merely swallowed. Failing open is right - a mapping lookup
+     * must not be able to fail an upload - but a store that is down then looks
+     * exactly like a store with no mapping, and the treasurer's export goes to
+     * the wizard they already completed with nothing in any log saying why.
+     * Raised by CodeRabbit.
+     */
+    deps.onError?.(error, filename)
+
     return rows
   }
 }
