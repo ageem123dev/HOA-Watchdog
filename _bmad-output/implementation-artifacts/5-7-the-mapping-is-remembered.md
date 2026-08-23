@@ -1,7 +1,7 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: 4310b9f
-merge_request:
+merge_request: 85
 ---
 
 # Story 5.7 — the mapping is remembered
