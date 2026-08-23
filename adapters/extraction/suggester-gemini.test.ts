@@ -156,7 +156,22 @@ describe('AD-8: the headers are data, never instructions', () => {
     )
     const code = neutralise(source).commentsBlanked
     const declaration = code.slice(code.indexOf('SUGGESTION_INSTRUCTION'))
-    const body = declaration.slice(0, declaration.indexOf('\n\n'))
+
+    /**
+     * **`search(/\r?\n\r?\n/)`, not `indexOf('\n\n')`.** The files here are LF
+     * as written and CRLF after a checkout, and on CRLF `indexOf` returns `-1` —
+     * so `slice(0, -1)` silently became "almost the whole file", which contains
+     * `${ORIGIN}` further down and failed the `${` assertion below. Reproduced
+     * by converting the source and watching this test go red.
+     *
+     * That is this project's recurring trap: a `\n` pattern that silently
+     * matches nothing on CRLF. Raised by Argus.
+     */
+    const blankLine = declaration.search(/\r?\n\r?\n/)
+
+    expect(blankLine).toBeGreaterThan(0)
+
+    const body = declaration.slice(0, blankLine)
 
     // No `${`, no `+`, no `.replace(`, no `concat` anywhere in the declaration.
     expect(body).not.toContain('${')
