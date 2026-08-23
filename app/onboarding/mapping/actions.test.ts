@@ -41,7 +41,7 @@ vi.mock('@/adapters/extraction/workbook-sheetjs', () => ({
 }))
 
 /** What `save` reports it replaced. `null` is a first mapping. */
-const save = vi.fn(async (_mapping: unknown) => null as unknown)
+const save = vi.fn<(mapping: unknown) => Promise<unknown>>(async () => null)
 vi.mock('@/adapters/db/mapping-store-postgres', () => ({
   createMappingStore: () => ({ save: (mapping: unknown) => save(mapping), find: vi.fn() }),
 }))
