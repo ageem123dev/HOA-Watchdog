@@ -324,6 +324,57 @@ assertion over both files, expecting opposite answers. A rule asserted only as a
 because the matcher is wrong; running it where the answer should be *present* proves the matcher
 works.
 
+### The AC audit
+
+For each criterion, the test that fails if the behaviour is removed, and where its sensitivity was
+proven.
+
+| AC | Test | Sensitivity |
+| --- | --- | --- |
+| 1 | `actions.test.ts::refuses deposits while the association holds no units`, `::names the assessment roll`, `::refuses before it reads any file` | mutations 2d and 2a KILLED, the second by physically moving the guard below the size limits |
+| 2 | **See below** | — |
+| 3 | `actions.test.ts::still accepts %s when the association holds no units`, over all four other kinds | mutation 2b KILLED |
+| 4 | `actions.test.ts` (server side) and `upload-form.test.tsx::says the roll comes first` | mutations 2b and 3a KILLED |
+| 5 | `unit-census-postgres.test.ts::reads it from the member in SQL`, `::scopes the unit lookup`; `actions.test.ts::asks about the signed-in member` | mutations 1a, 1e, 2e KILLED |
+| 6 | `reimport-boundary.test.ts::never reaches the unit census`; `ingestion-dependencies.test.ts::does not carry the unit census` | mutations 4a and 4b KILLED by *adding* the forbidden import |
+| 7 | `upload-contract.test.ts::does not describe the order as optional`, `::says a deposit upload is refused` | KILLED by reverting the document to "worth following" |
+
+#### What the audit found, on the eleventh consecutive story
+
+**AC2 was implemented correctly and asserted nowhere.** The criterion says the test is *"do units
+exist"*, not *"has a roll been uploaded"* - and the census does query `unit` and never touches
+`document`. But nothing said it had to.
+
+That gap matters because the wrong version is the *attractive* one: the document table is already to
+hand and needs no join, so "check whether an assessment_roll was ingested" reads like the same
+question and a cheaper way to ask it. It is not the same question. A roll uploaded as the wrong kind,
+or unreadable, or with no valid rows, leaves a document behind and creates no units - and deposits
+after it would be let through into exactly the trap this story removes.
+
+Now asserted: the census must name `unit` and must not name `document` or `extraction`. Mutating the
+query into the document form kills two tests.
+
+#### Two things that went wrong while auditing, both mine
+
+**The `\b` escape collapsed again - the fifth time this session.** `\\b` inside a non-raw Python
+string is a literal backspace, so the new assertion shipped as `/from unit\x08/` and could match
+nothing. It failed loudly, which is how it was caught. Repaired by building the pattern from
+`chr(92)`.
+
+Worth recording: **story 5.6b's control-character sweep catches this on its own.** Re-introducing the
+backspace and running only `docs/no-control-characters.test.ts` fails it. That guard was widened from
+markdown to source two stories ago and is still earning its place.
+
+**A security guard failed, and it was my fault rather than a defect.**
+`dual-llm-boundary.test.ts::scans a non-empty set of source files` failed once - AD-10's own control,
+the assertion that proves the guard has something to scan. It passed in isolation and passed again on
+a clean full run. The cause was two `npm test` runs executing concurrently, mine and a backgrounded
+one, with a source glob reading files another process was mid-write on.
+
+Recorded rather than waved away. "A security guard failed and I decided it was a flake" is precisely
+the reasoning that ships one, so the resolution is that it reproduces nowhere and the cause is known,
+not that it looked unlikely.
+
 ### Review Findings
 
 ### Completion Notes List

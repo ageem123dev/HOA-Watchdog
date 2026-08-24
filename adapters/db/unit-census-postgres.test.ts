@@ -83,6 +83,27 @@ describe('the association is derived, not asserted', () => {
     expect(code).not.toContain('readerPool')
   })
 
+  it('asks about units, never about whether a roll was uploaded', () => {
+    /**
+     * The distinction the whole story turns on, and it was implemented correctly
+     * and asserted nowhere until the AC audit looked for it.
+     *
+     * "Has an assessment_roll document been ingested" reads like the same
+     * question and is cheaper to answer -- the document table is already to hand
+     * and needs no join. It is not the same question. A roll uploaded as the
+     * wrong kind, or unreadable, or with no valid rows, leaves a document behind
+     * and creates no units, and deposits after it would be let through into
+     * exactly the trap this story removes.
+     *
+     * So the census must name `unit` and must not name `document` or
+     * `extraction`. A later edit making that substitution would look like a
+     * sensible optimisation.
+     */
+    expect(code).toMatch(/from unit\b/)
+    expect(code).not.toMatch(/\bdocument\b(?!_)/)
+    expect(code).not.toMatch(/\bextraction\b/)
+  })
+
   it('reads and does not write', () => {
     expect(code).not.toMatch(/\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bdelete\s+from\b/i)
   })
