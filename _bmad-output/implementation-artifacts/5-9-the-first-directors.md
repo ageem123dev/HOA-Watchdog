@@ -446,6 +446,41 @@ apart. That assertion exists now, and the mutation is killed.
 **Argus found none of the nine.** Ingested at `375d016` with recall 0: the seventh consecutive
 measurement of that kind on this project.
 
+### The integration pass - the account nobody proved could sign in
+
+**AC1 says the new account can sign in afterwards. Three tests each proved a third of that and
+nothing joined them.**
+
+`actions.test.ts` proved the shown password verifies against the hash handed to the roster.
+`director-roster-postgres.test.ts` proved the row lands in the right association - in its database
+half, which skips here. And `authenticate` has its own tests, which know nothing about either.
+
+The join was a chain of reasoning: the roster lower-cases, `authenticate` lower-cases what it is
+given, so they meet. That is true, and it is exactly the kind of true thing that stops being true
+when one side changes - which is the shape story 5.8's integration pass found, one story ago.
+
+`core/auth/provisioned-director-can-sign-in.test.ts` asserts it, and needs no database because
+`authenticate` takes its directory as an argument: the test holds what the roster *would have*
+stored and asks the real sign-in path about it. The fixture copies
+`email.trim().toLowerCase()` from the adapter rather than importing it - sharing the folding would
+make the drift this file exists to catch undetectable.
+
+**It catches drift on either side**, which is what a join test has to do: removing the roster's
+lower-casing fails it, and removing `authenticate`'s normalisation fails it. Its control - a wrong
+password is rejected - is what stops it passing against an `authenticate` that accepts anything.
+
+### Argus on the whole branch - one low, and the escape trap inverted
+
+The assertion that `argv.slice(0, associationAt)` is gone read
+`/argv\\.slice\\(0, associationAt\\)/`. In a regex literal `\\` matches a **literal backslash**,
+and this source contains none - so the negative assertion was tautologically true and would have
+passed with the old truncating slice still in place.
+
+This is the same escape trap that produced literal backspaces six times in this session, pointing the
+other way: there I under-escaped and got a control character, here I over-escaped and got a matcher
+that matches nothing. Corrected, and reintroducing the old slice now fails the test - which it did
+not before.
+
 ### Review Findings
 
 ### Completion Notes List

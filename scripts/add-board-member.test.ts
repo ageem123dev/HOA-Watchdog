@@ -144,8 +144,14 @@ describe('what the review found in the first version', () => {
      * after the positionals, a display name following the flag and its value,
      * and a flag given with no value.
      */
-    expect(code).toContain("parseArguments")
-    expect(code).not.toMatch(/argv\\.slice\\(0, associationAt\\)/)
+    expect(code).toContain('parseArguments')
+
+    // Single backslashes: `\\.` in a regex literal matches a *literal
+    // backslash*, and this source has none — so the over-escaped version was
+    // tautologically true and would have passed with the old slice still there.
+    // The same escape trap that produced literal backspaces elsewhere in this
+    // story, pointing the other way. Raised by Argus.
+    expect(code).not.toMatch(/argv\.slice\(0, associationAt\)/)
   })})
 
 describe('the guard can actually fail', () => {
