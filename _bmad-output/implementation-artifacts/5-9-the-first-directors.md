@@ -84,7 +84,7 @@ constrains".
 
 - [x] **Task 1 — A port for adding a director, and its adapter.** Association derived from the
       inviting member in SQL. Refuses a duplicate address rather than resetting it. (AC1, AC2, AC4)
-- [ ] **Task 2 — The server action.** Session required, password generated server-side, shown once.
+- [x] **Task 2 — The server action.** Session required, password generated server-side, shown once.
       (AC1, AC3, AC5)
 - [ ] **Task 3 — The page.** A form, and the one-time password displayed where the inviting director
       can copy it. (AC1, AC3)
@@ -184,6 +184,32 @@ gate: `WATCHDOG_WRITER_DATABASE_URL` for the pool the adapter uses, `DATABASE_UR
 `user-directory-postgres.ts`'s lookup - the same read `authenticate` uses - with the association the
 inviting director has. Storing the fields is not the point; being able to sign in afterwards is.
 
+#### Task 2 - the server action
+
+**Behaviour: `addDirector(previous, formData)` provisions and returns the password once.**
+
+1. *If it ran correctly, how would I know?* A signed-in director submits an address and gets back a
+   password they can pass on; the roster was asked to add that address for *them*; and a second
+   submission of the same address returns a refusal with no new password.
+2. *How am I going to test it?* Through the action with `auth` and `createDirectorRoster` mocked -
+   the pattern `app/upload/actions.test.ts` and the mapping actions already use.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* Every server action in this project has the session guard; this is
+   the first that produces a secret, so the logging rule is new here.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | The password reaching a log. It is the one value in this story that is dangerous in transit, and a `console.error(error, formData)` on a failure path would put it in the log store forever | GUARD - asserted: no logged argument contains the generated password |
+| 2b | Provisioning without a session. A server action is its own entry point and the page guards nothing | GUARD - refused, and the roster is never called |
+| 2c | The password hashed with something other than `core/auth/password.ts`, so the account exists and can never sign in | GUARD - `hashPassword`, and the stored value is asserted to be what it returns rather than the plaintext |
+| 2d | The plaintext stored instead of the hash - the worst available failure here, and one letter apart from correct | GUARD - asserted that what reaches the roster is not the password shown |
+| 2e | A duplicate address reported as success, so a director believes a colleague was added and hands them a password that works for nobody | GUARD - `add` returning `false` becomes a refusal, not a password |
+| 2f | An adapter failure escaping as a generic 500, losing the form and saying nothing | GUARD - caught, refused with a message, and the real error logged without the submission |
+| 2g | A malformed address accepted and refused by the database constraint instead | NOTE - migration 001 has three shape constraints and 2f catches the throw. The action checks for a non-empty address so the common case is a message rather than an exception, and the database stays the authority on shape |
+
+**Cross-check:** what the action shows and what it stores are different values, and the stored one is
+the hash of the shown one. `verifyPassword(shown, stored)` is true - the inverse of `hashPassword`,
+and the only check that proves the director can actually sign in with what they were handed.
 ### Review Findings
 
 ### Completion Notes List
