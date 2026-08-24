@@ -1,5 +1,5 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: 2f8df62
 merge_request:
 ---
@@ -88,11 +88,11 @@ reason this story exists rather than a nicer hint:
       by the member in SQL. Read-only. (AC1, AC5)
 - [x] **Task 2 — Refuse the submission.** In `app/upload/actions.ts`, before a byte is read, when the
       kind is `deposit` and the association has no units. (AC1, AC2, AC3, AC4)
-- [ ] **Task 3 — Say it before they choose.** The upload form states the order, so the refusal is a
+- [x] **Task 3 — Say it before they choose.** The upload form states the order, so the refusal is a
       backstop rather than the first the treasurer hears of it. (AC4)
-- [ ] **Task 4 — Prove the re-import is untouched.** Structurally, because a behavioural test cannot
+- [x] **Task 4 — Prove the re-import is untouched.** Structurally, because a behavioural test cannot
       prove a path does *not* acquire a guard. (AC6)
-- [ ] **Task 5 — Correct the contract.** `docs/upload-contract.md`, and any test that guards it. (AC7)
+- [x] **Task 5 — Correct the contract.** `docs/upload-contract.md`, and any test that guards it. (AC7)
 
 ## Dev Notes
 
@@ -274,17 +274,133 @@ core test, since the two must not be able to disagree about the same association
 census answer, holding the submission identical, must flip only the outcome. That is the inverse
 relation this behaviour has instead of a round trip.
 
+#### Task 3 - saying it before they choose
+
+**Behaviour: the kind hint states the order.**
+
+1. *If it ran correctly, how would I know?* A treasurer reading the form before choosing a kind is
+   told the roll comes first. The refusal then confirms a rule they already knew rather than
+   announcing one.
+2. *How am I going to test it?* `upload-form.test.tsx` renders it already - jsdom, per-file opt-in
+   (story 1.6c). Queried through the accessible description, not by scanning the document for a
+   string, so the test fails if the text is present but not announced.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* The mapping wizard has the same hint-beside-a-control shape, and
+   `heading-problems.test.tsx` is the nearest example of asserting one through its association.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | The sentence rendered but not associated with the control, so a screen-reader user reaches the select without it | GUARD - asserted through `aria-describedby`, which is what makes it a description rather than nearby text |
+| 3b | The hint and the refusal drifting into two wordings of one rule | NOTE - not a shared constant. The two are different sentences on purpose: one is advice before a choice, the other is a refusal after it, and forcing them to share text would make both worse. The risk is real but small, and a constant would be the wrong fix |
+| 3c | The existing sentence replaced rather than extended, losing "every file you choose is uploaded as this kind" | GUARD - that assertion already exists (`says the declaration applies to every file chosen`) and must stay green |
+| 3d | The order stated as advice a treasurer may ignore, when it is now a refusal | GUARD - the wording says the upload will be refused, not that the order is "worth following". A hint that undersells an enforced rule is how somebody plans a session around uploading deposits first |
+
+**Cross-check:** the form's claim and the action's behaviour must agree. The action refuses deposits
+without units; the form must not promise anything the action does not do. Asserted by keeping both
+assertions in one story and running the full suite - there is no shared symbol to bind them, which is
+why 3b is recorded as an accepted risk rather than solved.
+
+#### Task 4 - the re-import must not inherit this
+
+**Behaviour: `core/mapping/reimport.ts` and its actions never reach the unit census.**
+
+1. *If it ran correctly, how would I know?* A mapping change re-imports deposits and is unaffected
+   by whether the census would answer yes - because it never asks.
+2. *How am I going to test it?* Structurally. A behavioural test cannot prove a path did **not**
+   acquire a guard: it can only show that today, on this input, the guard did not fire.
+   `reimport-boundary.test.ts` already exists for exactly this shape of claim.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* The extract route is the other ingestion entry point; it
+   re-extracts a document already held, so there is no first upload to order. Checked.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4a | The guard moved into `ingest` during a later tidy-up, so a mapping change fails for a reason about first-time setup | GUARD - the boundary test forbids the import, and `ingest` is where a well-meaning refactor would put it |
+| 4b | The census reached through the shared `ingestionDependencies`, which both callers use | GUARD - asserted absent from the composition; adding it there would hand it to `ingest` and therefore to the re-import |
+| 4c | The assertion written against a symbol no code would use, so it passes against everything | GUARD - a mutation adds the import to prove the test sees it. This is story 5.7's twelfth-instance defect, and the reason that check exists |
+
+**Cross-check:** the upload path *does* reach the census and the re-import path does not - the same
+assertion over both files, expecting opposite answers. A rule asserted only as an absence can pass
+because the matcher is wrong; running it where the answer should be *present* proves the matcher
+works.
+
 ### Review Findings
 
 ### Completion Notes List
 
+**What this story does.** A deposit upload is refused while the association holds no units, before
+any file is read, with a message naming the assessment roll. `docs/upload-contract.md` carried that
+order as advice for two epics; it is now a rule the system keeps.
+
+**The check is "do units exist", not "was a roll uploaded".** A roll uploaded as the wrong kind, or
+unreadable, or with no valid rows, leaves a document behind and creates nothing - and the trap stays
+open. Asking the question the deposits will ask is the only form that cannot drift from what it
+protects.
+
+**Only deposits are refused, and that is the load-bearing part.** Refusing every kind would refuse
+the assessment roll, which is the only thing that creates units, and the situation would become
+permanent rather than removed. Asserted across all five kinds.
+
+**What the pool taught.** A SELECT belongs on `readerPool` by instinct, and cannot work here:
+migration 003 revokes all on `board_member` from `watchdog_reader`, so deriving an association from
+a member is not something the reader may do. A reader-pool version throws a permission error at
+upload time rather than answering wrongly.
+
+**Sibling defect found, not fixed.** `unit-directory-postgres.ts` uses the reader and does not scope
+by association at all. That is pre-existing and is the gap AD-4 names about itself - "SELECT-only is
+a capability control, not an isolation one" - and out of scope here. Recorded because question 4 of
+the failure-mode analysis asks for it.
+
+**`app/upload/actions.ts` had no test file.** `upload-form.test.tsx` mocks it away, so its session,
+kind and file-count guards were argued for in comments and asserted nowhere. They are asserted now,
+alongside the new one.
+
+**Reviews.** Argus ran on Tasks 1, 2 and 3 and was clean each time. **Tasks 4 and 5 were exempt**:
+their diff is entirely test files and `docs/upload-contract.md`, with no production change. Stated
+explicitly, because a skipped check nobody mentions reads exactly like a check that passed.
+
+**Eighteen mutations, eighteen killed.** Including two that a plain "disable the line" mutation
+cannot reach: the ordering claim was tested by physically moving the guard below the size limits,
+and the two prohibitions in Task 4 were tested by *adding* the forbidden import, since a prohibition
+passes by construction and its only real red is the mutation.
+
+**Not verified.** No database is configured on this machine, so `unit-census-postgres.test.ts`'s
+four database assertions skipped. The SQL is asserted as text and has never executed.
+
 ### File List
+
+**Added (4)**
+
+- `adapters/db/unit-census-postgres.test.ts`
+- `adapters/db/unit-census-postgres.ts`
+- `app/upload/actions.test.ts`
+- `core/ports/unit-census.ts`
+
+**Modified (8)**
+
+- `app/ingestion-dependencies.test.ts`
+- `app/upload/actions.ts`
+- `app/upload/upload-form.test.tsx`
+- `app/upload/upload-form.tsx`
+- `bmad-output/implementation-artifacts/5-8-the-order-that-works.md`
+- `core/mapping/reimport-boundary.test.ts`
+- `docs/upload-contract.md`
+- `docs/upload-contract.test.ts`
+
+`_bmad-output/**` is excluded: the story document and sprint status are this workflow's
+bookkeeping, not the story's code.
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-24 | Story created from the epic row and `docs/upload-contract.md`'s "Order matters on a fresh install" |
+| 2026-08-24 | `UnitCensus` port and its Postgres adapter — writer pool, because the reader may not read `board_member` |
+| 2026-08-24 | `uploadDocuments` refuses a deposit submission while the association holds no units |
+| 2026-08-24 | The upload form states the order, as an enforced rule rather than advice |
+| 2026-08-24 | The re-import path and the shared composition asserted free of the census |
+| 2026-08-24 | `docs/upload-contract.md` rewritten: the order is enforced, and the recovery is named |
+
 
 ## Questions for the author
 

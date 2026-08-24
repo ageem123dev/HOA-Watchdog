@@ -187,9 +187,21 @@ So on a new installation:
    each unit owes for the year.
 2. Then upload **deposits**. Each line now finds the unit it names.
 
-Upload them the other way round and every deposit line is held with `unknown-unit`. That is the
-system working correctly — it will not invent a unit to make a payment fit — but on a fresh install
-it looks like a failure, so the order is worth following.
+**This order is enforced, not advised.** A deposit upload is **refused** while the association holds
+no units, before any file is read, and the refusal names the roll. Only deposits are refused — the
+roll itself, invoices, statements and anything else upload as they always have, because the roll is
+the only thing that creates units and refusing it would make the situation permanent.
+
+The rule is about units, not about documents: a roll uploaded as the wrong kind, or one that could
+not be read, creates no units and does not unlock deposits.
+
+Before that refusal existed, uploading them the other way round held every deposit line with
+`unknown-unit` — the system working correctly, refusing to invent a unit to make a payment fit, and
+looking like a total failure on somebody's first use.
+
+If you already have held lines from an out-of-order upload, a roll arriving later does not clear
+them. Upload the roll, then **send the deposit file again**: re-ingesting a document replaces what
+the previous reading produced, so the lines are resolved against the units that now exist.
 
 ## Billing cycles
 

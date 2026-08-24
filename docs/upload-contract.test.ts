@@ -257,3 +257,36 @@ describe('the test itself', () => {
     )
   })
 })
+
+describe('the order it describes is the order the system enforces (story 5.8)', () => {
+  /**
+   * This section spent two epics telling the reader the order was "worth
+   * following". Story 5.8 made it a refusal: a deposit upload is rejected until
+   * an assessment roll has created units.
+   *
+   * A contract that still reads as advice after that is wrong in the direction
+   * that matters -- it understates the system, so a reader plans around a
+   * sequence the product will not accept and finds out at the upload.
+   */
+  it('does not describe the order as optional', () => {
+    const section = contract.slice(contract.indexOf('## Order matters on a fresh install'))
+
+    expect(section).not.toMatch(/worth following/i)
+  })
+
+  it('says a deposit upload is refused without units', () => {
+    const section = contract
+      .slice(contract.indexOf('## Order matters on a fresh install'))
+      .slice(0, 1500)
+
+    expect(section).toMatch(/refus/i)
+  })
+
+  it('is reading the section it claims to read', () => {
+    // The control. `indexOf` returning -1 would slice from the end of the
+    // string, and both assertions above would run against an empty section --
+    // the "not" one passing, which is the direction that hides a defect.
+    expect(contract).toContain('## Order matters on a fresh install')
+    expect(contract.indexOf('## Order matters on a fresh install')).toBeGreaterThan(-1)
+  })
+})

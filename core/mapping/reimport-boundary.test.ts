@@ -87,6 +87,25 @@ describe('the re-import reaches no writer of its own', () => {
     expect(code).not.toContain('store.put')
   })
 
+  it('never reaches the unit census (story 5.8)', () => {
+    /**
+     * Story 5.8 refuses a deposit upload until an assessment roll has created
+     * units. That rule is about a *first* upload, and the re-import is not one:
+     * by the time anyone re-maps a column, units exist.
+     *
+     * The danger is not today's code. It is that `ingest` looks like the safer
+     * home for the guard, and moving it there hands it to this path too - a
+     * mapping change failing for a reason about first-time setup, with a message
+     * nobody could act on.
+     *
+     * The positive control is in `app/upload/actions.test.ts`, where the census
+     * *is* reached. An absence asserted with a matcher that matches nothing
+     * passes forever.
+     */
+    expect(imports.filter((specifier) => specifier.includes('unit-census'))).toEqual([])
+    expect(code).not.toMatch(/hasUnits/)
+  })
+
   it('is not passing because the blanker emptied the file', () => {
     // Every assertion above is an absence. If `neutralise` or `specifiersIn`
     // ever returned nothing, all of them would pass and this file would be a

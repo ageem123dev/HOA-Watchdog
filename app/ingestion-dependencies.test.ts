@@ -98,6 +98,16 @@ describe('the composition is one thing', () => {
     expect(assembled).toEqual([])
   })
 
+  it('does not carry the unit census (story 5.8)', () => {
+    /**
+     * The census decides whether a *first* deposit upload may proceed. Putting
+     * it in the shared composition would hand it to `ingest`, and therefore to
+     * the mapping-change re-import, which is not a first upload and must not be
+     * refused for being one. It belongs to the upload action alone.
+     */
+    expect(code(SHARED)).not.toMatch(/unit-census|hasUnits/)
+  })
+
   it('is not passing because the blanker emptied the files', () => {
     // Most assertions above are satisfiable by an empty string or an empty list.
     expect(code(SHARED)).toContain('export function ingestionDependencies')
