@@ -89,7 +89,7 @@ constrains".
 - [x] **Task 3 — The page.** A form, and the one-time password displayed where the inviting director
       can copy it. (AC1, AC3)
 - [x] **Task 4 — Constrain the script and correct its header.** (AC6)
-- [ ] **Task 5 — Close the set of `board_member` writers.** (AC7)
+- [x] **Task 5 — Close the set of `board_member` writers.** (AC7)
 
 ## Dev Notes
 
@@ -287,6 +287,45 @@ for claims about what it **does**.
 Four earlier mutations plus three on the fixes, all killed - including one that survived first
 because the assertion checked the association argument *existed* without checking it reached the
 insert. A parsed-and-discarded argument is what a half-finished refactor leaves behind.
+#### Task 5 - the closed set, and AC7 was wrong
+
+**AC7 says "the new path and the script are the two writers". There are three.**
+
+`adapters/auth/user-directory-postgres.ts` has `updatePasswordHash`, and it is legitimate:
+`authenticate.ts:86` calls it on a successful sign-in when `needsRehash` says the stored hash uses
+outdated scrypt parameters. It writes `password_hash` for a member who already exists and can create
+nobody.
+
+So the criterion was written from what this story adds rather than from what the codebase holds. The
+test corrects it rather than restating it, and the distinction it draws is the one that matters:
+**creating a director is the privilege; updating a hash is not.**
+
+| Writer | What it may do |
+| --- | --- |
+| `app/directors/actions.ts` via `director-roster-postgres.ts` | creates, scoped to the inviting director's association |
+| `scripts/add-board-member.mjs` | creates the first director of an association, and resets a locked-out password |
+| `user-directory-postgres.ts` | **updates a hash only**, on sign-in, for a member who already exists |
+
+**Behaviour: no fourth writer appears without a decision.**
+
+1. *If it ran correctly, how would I know?* The set of files writing `board_member` equals the named
+   three, each with what it may do written beside it.
+2. *How am I going to test it?* Structurally, scanning source for writes. Story 5.8's
+   `ingest-callers.test.ts` is the same shape for a different verb.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* This is the second closed-set guard in two stories, which is
+   itself the answer: enforcing a rule per entry point means the entry points must be enumerable.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 5a | A fourth writer added silently - a seeding script, an admin route, a migration helper - inheriting none of the association scoping | GUARD - the set is asserted equal, so a new one fails until somebody decides about it |
+| 5b | Test fixtures counted as writers. Nine test files insert `board_member` rows legitimately | GUARD - `.test.ts` excluded, and that exclusion is exactly where a real writer could hide, so the count of excluded files is not asserted - the *production* set is |
+| 5c | The scanner matching nothing, so the assertion passes against an empty set forever | GUARD - a non-empty control, and a positive control naming the adapter that certainly does write |
+| 5d | The scan missing a writer that spells the statement differently - `INSERT INTO Board_Member`, or a string built at runtime | PROPAGATE - case-insensitive matching, and the limit is stated: a query assembled from fragments is not visible to any text scan, which is why the port-level rule matters more than this test |
+
+**Cross-check:** the three named files are exactly the three the grep finds, and each one's entry
+says what it may do. A list that named a file which does not write, or omitted one that does, fails
+in both directions rather than one.
 ### Review Findings
 
 ### Completion Notes List
