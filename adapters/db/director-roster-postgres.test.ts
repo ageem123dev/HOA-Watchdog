@@ -42,6 +42,9 @@ const adminUrl = process.env.DATABASE_URL
 const configured = Boolean(writerUrl && adminUrl)
 const describeWithDatabase = configured ? describe : describe.skip
 
+/** Postgres: not-null violation — `association_id` has no value to take. */
+const NOT_NULL_VIOLATION = '23502'
+
 describe('the association is the inviting director s own', () => {
   it('derives it from the inviting member in SQL rather than taking it as a parameter', () => {
     /**
@@ -204,7 +207,12 @@ describeWithDatabase('against a real database', () => {
      */
     const email = `${prefix}-ghost@example.com`
 
-    await expect(roster().add('00000000-0000-0000-0000-000000000000', email, null, hash)).rejects.toThrow()
+    // The specific violation, not any rejection. A bare `toThrow()` also passes
+    // for a connection error or a missing table, so it would not notice the
+    // not-null protection being removed — which is the subject of this test.
+    await expect(
+      roster().add('00000000-0000-0000-0000-000000000000', email, null, hash),
+    ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
 
     /**
      * And nothing was written. `rejects.toThrow()` alone proves the call failed,

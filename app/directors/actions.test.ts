@@ -154,13 +154,24 @@ describe('the password never reaches a log', () => {
     const state = await provision({ email: 'new@example.com', displayName: '' })
 
     expect(state.status).toBe('error')
-    expect(logged.length).toBeGreaterThan(0)
 
-    // Nothing logged may contain a password-shaped value. The generated password
-    // is not returned on this path, so the check is that the *submission* did
-    // not travel either — the address is fine, the secret is not.
-    const everything = JSON.stringify(logged)
-    expect(everything).not.toMatch(/password/i)
+    /**
+     * The exact permitted shape, not the absence of one word.
+     *
+     * `not.toMatch(/password/i)` passes for a log line carrying the whole
+     * submission, or the generated secret under a different name, or anything
+     * else that happens not to spell "password" - and the risk here is a
+     * `console.error(error, formData)` written while debugging. Asserting the
+     * shape means any extra argument fails, whatever it contains. Raised by
+     * CodeRabbit.
+     */
+    expect(logged).toHaveLength(1)
+
+    const [message, thrown, ...extra] = logged[0] as [string, Error, ...unknown[]]
+
+    expect(message).toBe('[directors] a director could not be added')
+    expect(thrown).toBeInstanceOf(Error)
+    expect(extra).toEqual([])
   })
 
   it('logs nothing at all on the happy path', async () => {

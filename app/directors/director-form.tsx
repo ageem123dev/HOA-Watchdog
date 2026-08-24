@@ -39,7 +39,7 @@ export function DirectorForm() {
           name="email"
           type="email"
           required
-          aria-describedby="director-email-hint"
+          aria-describedby="director-email-hint director-error"
           style={styles.field}
         />
 
@@ -53,7 +53,17 @@ export function DirectorForm() {
         </button>
       </form>
 
-      {state.status === 'error' && <p style={styles.error}>{state.error}</p>}
+      {/*
+        Always mounted, so assistive technology announces the message when it
+        appears. A live region that is created *with* its content is not
+        announced - the region has to be watched before the text arrives, which
+        is why this renders empty rather than conditionally. Raised by
+        CodeRabbit, and this project has an accessibility floor (UX-DR19-21)
+        that a form refusing submissions silently would not meet.
+      */}
+      <p id="director-error" role="alert" aria-live="assertive" style={styles.error}>
+        {state.status === 'error' ? state.error : ''}
+      </p>
 
       {state.status === 'added' && (
         <section style={styles.result} aria-live="polite">

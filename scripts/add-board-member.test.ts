@@ -132,16 +132,21 @@ describe('what the review found in the first version', () => {
     expect(code).toMatch(/rows\.length === 0[\s\S]{0,200}select name from association/i)
   })
 
-  it('does not lose arguments that follow --association', () => {
+  it('delegates argument parsing to a module a test can import', () => {
     /**
-     * `argv.slice(0, associationAt)` drops everything after the flag, so
-     * `<email> --association "X" "Display Name"` silently loses the name, and
-     * `--association X <email>` fails with a usage error for a well-formed
-     * command.
+     * This was a text assertion that `argv.slice(0, associationAt)` is gone,
+     * which could only see that the *shape* had changed - not whether
+     * `--association X <email>` actually parses. CodeRabbit asked for the real
+     * thing, and the parsing moved to `board-member-arguments.mjs`, which needs
+     * no database and so can be imported and exercised.
+     *
+     * `board-member-arguments.test.ts` covers the cases: the flag before and
+     * after the positionals, a display name following the flag and its value,
+     * and a flag given with no value.
      */
-    expect(code).not.toMatch(/argv\.slice\(0, associationAt\)/)
-  })
-})
+    expect(code).toContain("parseArguments")
+    expect(code).not.toMatch(/argv\\.slice\\(0, associationAt\\)/)
+  })})
 
 describe('the guard can actually fail', () => {
   it('is reading the script and not an empty string', () => {

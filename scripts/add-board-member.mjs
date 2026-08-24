@@ -35,19 +35,11 @@ import { randomBytes } from 'node:crypto'
 import pg from 'pg'
 import { hashPassword } from '../core/auth/password.ts'
 
-const argv = process.argv.slice(2)
-// The flag and its value are removed from the list rather than truncating it.
-// `argv.slice(0, associationAt)` dropped everything after the flag, so
-// `<email> --association "X" "Display Name"` lost the name, and
-// `--association X <email>` failed with a usage error for a well-formed command.
-const associationAt = argv.indexOf('--association')
-const associationName = associationAt === -1 ? null : argv[associationAt + 1]
-const positional = argv.filter(
-  (_argument, index) =>
-    associationAt === -1 || (index !== associationAt && index !== associationAt + 1),
-)
+import { parseArguments } from './board-member-arguments.ts'
 
-const [rawEmail, ...nameParts] = positional
+const { email: rawEmail, displayName, associationName, missingAssociationValue } = parseArguments(
+  process.argv.slice(2),
+)
 
 if (!rawEmail) {
   console.error(
@@ -56,13 +48,12 @@ if (!rawEmail) {
   process.exit(1)
 }
 
-if (associationAt !== -1 && !associationName) {
+if (missingAssociationValue) {
   console.error('--association needs a name: --association "Willow Creek"')
   process.exit(1)
 }
 
 const email = rawEmail.trim().toLowerCase()
-const displayName = nameParts.join(' ') || null
 
 // Four base64url words: long enough that the scrypt cost is not the only thing
 // standing between a guess and the association's records.

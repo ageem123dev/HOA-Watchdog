@@ -66,6 +66,35 @@ describe('the form a director fills in', () => {
     expect(field.required).toBe(false)
   })
 
+  it('keeps the error region mounted before there is an error to announce', () => {
+    /**
+     * A live region created *with* its content is not announced: assistive
+     * technology has to be watching the node before the text arrives. So the
+     * region renders empty rather than conditionally, and this asserts the
+     * empty case - which is the only one that can tell the two implementations
+     * apart. Without it, mutating the component back to
+     * `{state.status === 'error' && <p>...}` passes every other assertion here.
+     *
+     * Raised by CodeRabbit; the mutation is what showed the first version of
+     * this test could not see the difference.
+     */
+    render(<DirectorForm />)
+
+    const region = document.getElementById('director-error')
+
+    expect(region).not.toBeNull()
+    expect(region?.getAttribute('aria-live')).toBe('assertive')
+    expect(region?.textContent).toBe('')
+  })
+
+  it('points the address field at the error region, so the two are connected', () => {
+    render(<DirectorForm />)
+
+    const field = document.querySelector('input[name="email"]') as HTMLInputElement
+
+    expect(field.getAttribute('aria-describedby')).toContain('director-error')
+  })
+
   it('shows no password before anything has been submitted', () => {
     // The control for everything below: if the idle render already contained
     // something password-shaped, the assertions about the added state would be

@@ -403,6 +403,49 @@ were ever relaxed, that assertion is what would notice rather than the throw dis
 **Argus found none of the three.** Ingested at `cb09431` with recall 0 - the sixth consecutive
 measurement of that kind here.
 
+### The CodeRabbit CLI round - 10 findings, 4 majors, all confirmed
+
+`review_completed`, 16 reviewedFiles reconciling exactly against the diff.
+
+**The join worked first time.** `argus_ingest` compared rather than skipped, because `argus_review`
+ran on this head *before* the CodeRabbit round started. That is the rule written into story 5.8 after
+the ingest silently skipped on two consecutive stories - the first time it has been applied in
+advance rather than repaired afterwards.
+
+#### The four majors
+
+**A text assertion standing in for a real test.** The argument-parsing check asserted that
+`argv.slice(0, associationAt)` was gone - which can see that the *shape* changed and not whether
+`--association X <email>` actually parses. The parsing moved into
+`scripts/board-member-arguments.ts`, which needs no database and so can be imported and exercised;
+eight cases now cover the flag before and after the positionals, a display name following the flag
+and its value, and a flag given with nothing usable after it.
+
+`verify-extraction.test.ts` reads its probe as text *because* that probe calls a live provider on
+import. The same was true here - and extracting the pure part removes the constraint rather than
+accepting it.
+
+**A bare `rejects.toThrow()`** where the subject was specifically the not-null protection. Now
+`23502`. Same finding as story 5.8 got, in the same shape, one story later.
+
+**An error message no screen reader would announce.** The failure text was mounted *with* its
+content, and a live region created that way is not announced - the node has to be watched before the
+text arrives. Now always mounted and empty, `role="alert"`, and referenced from the address field.
+This project has an accessibility floor that a form refusing submissions silently would not meet.
+
+**A log assertion that searched for a word.** `not.toMatch(/password/i)` passes for a line carrying
+the whole submission, or the secret under another name. It now asserts the exact permitted shape -
+message, error, nothing else - so any extra argument fails whatever it contains.
+
+#### And one fix's mutation survived
+
+The live-region change passed every existing assertion after being reverted, because nothing checked
+the region exists *before* there is an error - the only case that tells the two implementations
+apart. That assertion exists now, and the mutation is killed.
+
+**Argus found none of the nine.** Ingested at `375d016` with recall 0: the seventh consecutive
+measurement of that kind on this project.
+
 ### Review Findings
 
 ### Completion Notes List
