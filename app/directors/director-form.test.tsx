@@ -15,6 +15,11 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { neutralise } from '@/core/ports/declared-members'
+
 import type { DirectorState } from './director-state'
 
 const state = vi.fn<() => DirectorState>(() => ({ status: 'idle' }))
@@ -68,6 +73,53 @@ describe('the form a director fills in', () => {
     render(<DirectorForm />)
 
     expect(screen.queryByTestId('one-time-password')).toBeNull()
+  })
+})
+
+describe('nothing keeps the password anywhere (AC3)', () => {
+  /**
+   * "Shown exactly once and never recoverable" was true by accident of
+   * implementation and asserted by nothing until the AC audit looked for it.
+   *
+   * `useActionState` holds the value in memory, so a refresh loses it — which is
+   * the intended behaviour. But nothing stopped a later edit from "helpfully"
+   * stashing it in `sessionStorage` so a refresh would not lose the treasurer's
+   * work, and that would put a credential somewhere it outlives the page, the
+   * session and the browser being closed.
+   *
+   * Structural, because behaviour cannot express this: a render test can only
+   * show what *did* happen on one render, never that nothing anywhere persists.
+   */
+  // `process.cwd()` rather than `import.meta.url`: under jsdom that is not a
+  // file URL, and `fileURLToPath` throws. `alert-wiring.test.ts` reads sources
+  // the same way.
+  const source = neutralise(
+    readFileSync(join(process.cwd(), 'app/directors/director-form.tsx'), 'utf8'),
+  ).commentsBlanked
+
+  it('writes the password to no browser storage', () => {
+    expect(source).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/)
+  })
+
+  it('sends it nowhere either', () => {
+    // A `fetch` carrying it would be the same failure by a different route.
+    expect(source).not.toMatch(/\bfetch\s*\(|navigator\.clipboard/)
+  })
+
+  it('is not passing because the file was read as empty', () => {
+    // All three assertions above are absences.
+    expect(source).toContain('export function DirectorForm')
+    expect(source).toContain('state.password')
+  })
+
+  it('offers no association field, because the association is not the form s to choose', () => {
+    // AC2's other half. Nothing reads such a field today, so one added later
+    // would be inert -- and inert-but-present is how a picker gets wired up by
+    // somebody who assumes it was meant to work.
+    render(<DirectorForm />)
+
+    expect(document.querySelector('[name="association"]')).toBeNull()
+    expect(document.querySelector('[name="associationId"]')).toBeNull()
   })
 })
 

@@ -326,6 +326,39 @@ test corrects it rather than restating it, and the distinction it draws is the o
 **Cross-check:** the three named files are exactly the three the grep finds, and each one's entry
 says what it may do. A list that named a file which does not write, or omitted one that does, fails
 in both directions rather than one.
+### The AC audit
+
+| AC | Test | Sensitivity |
+| --- | --- | --- |
+| 1 | `actions.test.ts::returns a password the new director can actually sign in with` | mutations 2d, 2c KILLED |
+| 2 | `director-roster-postgres.test.ts::derives it from the inviting member in SQL`; **and see below** | mutation 1a KILLED |
+| 3 | `actions.test.ts::stores a hash, never the password itself`, `::logs the failure without the secret`; **and see below** | mutations 2a, 2d KILLED |
+| 4 | `director-roster-postgres.test.ts::does nothing on conflict`; `actions.test.ts::refuses an address already on a board` | mutations 1d, 2e KILLED |
+| 5 | `actions.test.ts::refuses without a session`; `page.test.tsx`, all four | mutations 2b, 3a KILLED |
+| 6 | `add-board-member.test.ts`, all ten | mutations 4a-4d KILLED |
+| 7 | `board-member-writers.test.ts` | fails in both directions, proven |
+
+#### What the audit found, on the twelfth consecutive story
+
+**AC3 says the password "must not survive a page refresh". Nothing checked that.** It was true - by
+accident of implementation. `useActionState` holds the value in memory and a refresh loses it, which
+is the intended behaviour, and nothing stopped a later edit from "helpfully" stashing it in
+`sessionStorage` so the treasurer would not lose their work on a stray reload.
+
+That edit would be reasonable-looking and would put a credential somewhere it outlives the page, the
+session, and the browser being closed. It is asserted structurally, because a render test can only
+show what happened on one render and never that nothing anywhere persists. Mutating the component to
+write `sessionStorage` now fails it.
+
+**AC2 says "no association picker, no association id in the form". The port half was asserted; the
+form half was not.** A field added there is inert today, because nothing reads it - and
+inert-but-present is exactly how a picker gets wired up later by somebody who assumes it was meant to
+work. Now asserted absent, and adding a hidden `associationId` input fails it.
+
+**And the control-character guard caught me again** - the sixth time this session that `\\b` in a
+Python string became a literal backspace while writing a regex. Story 5.6b's sweep failed the suite
+on it, unaided, in a file two stories' worth of guards were not written for.
+
 ### Review Findings
 
 ### Completion Notes List
