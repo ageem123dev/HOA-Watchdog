@@ -1,6 +1,6 @@
 ---
 Status: ready-for-dev
-baseline_commit:
+baseline_commit: d2a54db
 merge_request:
 ---
 
@@ -82,7 +82,7 @@ constrains".
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — A port for adding a director, and its adapter.** Association derived from the
+- [x] **Task 1 — A port for adding a director, and its adapter.** Association derived from the
       inviting member in SQL. Refuses a duplicate address rather than resetting it. (AC1, AC2, AC4)
 - [ ] **Task 2 — The server action.** Session required, password generated server-side, shown once.
       (AC1, AC3, AC5)
@@ -156,6 +156,33 @@ gate: `WATCHDOG_WRITER_DATABASE_URL` for the pool the adapter uses, `DATABASE_UR
 ## Dev Agent Record
 
 ### Test Design
+
+#### Task 1 - adding a director to the inviting director's own association
+
+**Behaviour: `DirectorRoster.add(invitedBy, email, displayName, passwordHash)`.**
+
+1. *If it ran correctly, how would I know?* A row exists in `board_member` with that address, the
+   inviting director's association, and a hash that `authenticate` accepts - so the new director can
+   sign in. And a second call with the same address does not change the first row.
+2. *How am I going to test it?* Text assertions over the adapter SQL, which always run, plus a
+   database half that skips. No database is configured here, so the text half is where the tenancy
+   rule is pinned - story 5.8 established this and CodeRabbit tried to change the gate on it.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* `scripts/add-board-member.mjs` is the sibling and has the defect
+   1d names - it upserts, which is a password reset in the shape of an insert. Task 4 constrains it.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | The association taken as a parameter rather than derived from the inviting member - a caller could enrol somebody into another board | GUARD - scalar subquery over `board_member`, asserted in text and killed by mutation |
+| 1b | An unknown inviting member: the subquery yields NULL and `association_id` is `not null`, so the insert raises rather than creating a director belonging to nobody | GUARD - and raising is right; a row with a null association is invisible to every association-scoped read afterwards |
+| 1c | The address stored with different case, so `authenticate` lower-cases at sign-in and never matches | GUARD - migration 001 has `board_member_email_is_lowercase`, so the constraint refuses it; the adapter lower-cases first so the refusal is not how we find out |
+| 1d | A duplicate address silently resetting the existing password - the script's `on conflict do update` reproduced | GUARD - `on conflict do nothing`, and the caller is told nothing was created. AC4 |
+| 1e | The reader pool, which cannot read `board_member` at all (migration 003) | GUARD - `writerPool`, asserted in text because the database half skips here |
+| 1f | The password hash written in a format `authenticate` does not accept | OUT-OF-SCOPE - `core/auth/password.ts` owns the format and migration 001 has a check constraint on its shape. The adapter stores what it is handed |
+
+**Cross-check:** the round trip. A director added through this port is found by
+`user-directory-postgres.ts`'s lookup - the same read `authenticate` uses - with the association the
+inviting director has. Storing the fields is not the point; being able to sign in afterwards is.
 
 ### Review Findings
 
