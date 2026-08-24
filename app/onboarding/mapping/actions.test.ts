@@ -568,6 +568,26 @@ describe('confirming a mapping (AC3)', () => {
     expect(save).not.toHaveBeenCalled()
   })
 
+  it('refuses a mapping with no pairings at all', async () => {
+    /**
+     * An empty mapping is worse than no mapping. `applyMapping` emits an empty
+     * header row from it, so every later upload of that shape fails with
+     * `missing-headers` **and** finds a saved mapping - which is precisely the
+     * state the wizard exists to get the treasurer out of, now unreachable
+     * because the shape looks mapped. Raised by CodeRabbit.
+     */
+    auth.mockResolvedValue(SIGNED_IN)
+
+    const state = await confirm({
+      documentKind: 'deposit',
+      headerRow: HEADER,
+      pairings: '[]',
+    })
+
+    expect(state.status).toBe('error')
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it('reports a first mapping as saved', async () => {
     auth.mockResolvedValue(SIGNED_IN)
     save.mockResolvedValue({ replaced: false, previous: null })

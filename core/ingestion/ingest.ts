@@ -1,5 +1,6 @@
 import type { DocumentKind } from '../extraction/record'
 import { toRectangle } from '../extraction/rectangle'
+import type { TableProblem } from '../extraction/tabular'
 import { readRows } from '../extraction/tabular'
 import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
@@ -106,7 +107,13 @@ export type IngestOutcome =
        * failure has one worth carrying, and adding it must not force every
        * existing caller to handle it.
        */
-      readonly reason?: string
+      /**
+       * The reader's own union, never `string`. Typed loosely, a renamed or
+       * mistyped literal in `upload-feedback.ts`'s comparison would compile and
+       * silently stop matching - the treasurer quietly back on the wrong
+       * sentence. Raised by CodeRabbit.
+       */
+      readonly reason?: TableProblem['reason']
     }
   | { readonly filename: string; readonly outcome: 'already-held'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'rejected'; readonly reason: RejectionReason }

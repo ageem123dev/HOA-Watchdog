@@ -45,7 +45,7 @@ import { isDocumentKind } from '@/core/extraction/record'
 import { ingest } from '@/core/ingestion/ingest'
 import { previewReimport, reimport } from '@/core/mapping/reimport'
 import { shapeKey } from '@/core/mapping/saved'
-import { draftFromPairings } from './parse-mapping'
+import { draftFromPairings, parseJson } from './parse-mapping'
 import type { ChangeState, PreviewState } from './change-state'
 import { ingestionDependencies } from '../../ingestion-dependencies'
 
@@ -77,16 +77,6 @@ async function context(formData: FormData) {
   }
 }
 
-function parseJson(value: FormDataEntryValue | null): unknown {
-  if (typeof value !== 'string') return null
-
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
-}
-
 /**
  * How many documents changing this mapping would re-read. Writes nothing.
  *
@@ -103,16 +93,30 @@ export async function previewMappingChange(
     return { status: 'error', error: 'That mapping could not be read. Start the wizard again.' }
   }
 
-  const existing = await createMappingStore().find(where.member, where.kind, where.shape)
-  if (existing === null) return { status: 'nothing-to-change' }
+  /**
+   * Guarded, as `actions.ts` guards its own store call. Unhandled, a database
+   * blip in either of these rejects out of the server action and Next.js turns
+   * it into a generic 500 - while `PreviewState` has an `error` case sitting
+   * unused. Raised by CodeRabbit, which noted this module had the rule only
+   * around `record`.
+   */
+  try {
+    const existing = await createMappingStore().find(where.member, where.kind, where.shape)
+    if (existing === null) return { status: 'nothing-to-change' }
 
-  const { affected, unreadable } = await previewReimport(where.member, where.kind, where.shape, {
-    ...ingestionDependencies('mapping-change'),
-    ingest,
-    candidates: createReimportCandidates(),
-  })
+    const { affected, unreadable } = await previewReimport(where.member, where.kind, where.shape, {
+      ...ingestionDependencies('mapping-change'),
+      ingest,
+      candidates: createReimportCandidates(),
+    })
 
-  return { status: 'would-replace', affected, unreadable }
+    return { status: 'would-replace', affected, unreadable }
+  } catch (error) {
+    // The real error names a table or a connection; it never reaches the page.
+    console.error('[mapping-change] the preview could not be built', error)
+
+    return { status: 'error', error: 'That could not be checked. Try again in a moment.' }
+  }
 }
 
 /**
@@ -154,18 +158,45 @@ export async function changeMapping(
     return { status: 'error', error: 'That mapping is not valid. Check the columns and try again.' }
   }
 
-  const replaced = await createMappingStore().save({
-    savedBy: where.member,
-    kind: where.kind,
-    shape: where.shape,
-    mapping,
-  })
+  /**
+   * Guarded on its own, before anything has changed. A failure here means the
+   * mapping was never replaced, so nothing is inconsistent and the treasurer can
+   * simply try again.
+   */
+  let replaced
+  try {
+    replaced = await createMappingStore().save({
+      savedBy: where.member,
+      kind: where.kind,
+      shape: where.shape,
+      mapping,
+    })
+  } catch (error) {
+    console.error('[mapping-change] the mapping could not be saved', error)
 
-  const documents = await reimport(where.member, where.kind, where.shape, {
-    ...ingestionDependencies('mapping-change'),
-    ingest,
-    candidates: createReimportCandidates(),
-  })
+    return { status: 'error', error: 'That mapping could not be saved. Try again in a moment.' }
+  }
+
+  /**
+   * Guarded separately, because past this line the mapping *has* changed. A
+   * rejection escaping here would report a failure while the new mapping is
+   * live - and every later upload of that shape would use it, with nothing
+   * recorded. `reimport` already catches per document, so reaching this catch
+   * means something outside the per-document loop broke; the change is reported
+   * as unrecorded rather than as a failure that did not happen.
+   */
+  let documents
+  try {
+    documents = await reimport(where.member, where.kind, where.shape, {
+      ...ingestionDependencies('mapping-change'),
+      ingest,
+      candidates: createReimportCandidates(),
+    })
+  } catch (error) {
+    console.error('[mapping-change] the mapping changed but the re-import did not run', error)
+
+    return { status: 'changed-unrecorded', documents: [] }
+  }
 
   try {
     await createMappingChangeLog().record({

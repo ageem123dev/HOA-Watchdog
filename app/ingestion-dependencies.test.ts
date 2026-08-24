@@ -83,6 +83,11 @@ describe('the composition is one thing', () => {
 
     expect(imports.some((specifier) => specifier.includes('ingestion-dependencies'))).toBe(true)
 
+    // And *calls* it. An import alone passes while the caller keeps a stale
+    // import and assembles its own set beside it - which is the exact drift this
+    // file exists to prevent. Raised by CodeRabbit.
+    expect(code(source())).toMatch(/ingestionDependencies\(/)
+
     // Adapter imports are what a hand-rolled set is made of. Neither caller has
     // any: `reimport-actions.ts`'s three are the mapping store, the change log
     // and the candidates — none of which `ingest` takes.

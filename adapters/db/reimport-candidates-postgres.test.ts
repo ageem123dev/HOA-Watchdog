@@ -47,6 +47,12 @@ describe('the candidate query', () => {
     expect(code).toMatch(/e\.document_kind = \$2/)
   })
 
+  it('returns the documents in a defined order', () => {
+    // `select distinct` has no defined order, and `reimport` preserves whatever
+    // order it gets into the outcome list the treasurer reads.
+    expect(code).toMatch(/order by d\.id/)
+  })
+
   it('reads and does not write', () => {
     expect(code).not.toMatch(/\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bdelete\s+from\b/i)
   })

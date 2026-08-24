@@ -42,6 +42,9 @@ const adminUrl = process.env.DATABASE_URL
 const configured = Boolean(writerUrl && adminUrl)
 const describeWithDatabase = configured ? describe : describe.skip
 
+/** Postgres: not-null violation. */
+const NOT_NULL_VIOLATION = '23502'
+
 /**
  * The comments here necessarily discuss tenancy; only the code may satisfy it.
  *
@@ -295,6 +298,11 @@ describeWithDatabase('against a real database', () => {
         shape: `${prefix}-ghost`,
         mapping: DEPOSIT,
       }),
-    ).rejects.toThrow()
+      // Not a bare `rejects.toThrow()`: that also passes for a connection error,
+      // a missing table or a serialisation failure, so it would not notice the
+      // not-null protection being removed - which is the whole subject of this
+      // test. `23502` is Postgres for a not-null violation. This project has
+      // found a bare `toThrow` passing against an absent table before.
+    ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION })
   })
 })

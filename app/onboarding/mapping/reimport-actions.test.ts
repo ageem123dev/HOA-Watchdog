@@ -260,6 +260,23 @@ describe('the warning, which writes nothing', () => {
     expect(record).not.toHaveBeenCalled()
   })
 
+  it('reports a store failure instead of throwing out of the action', async () => {
+    /**
+     * `PreviewState` has an `error` case, and before this it was unreachable:
+     * every database call in this module except `record` rejected straight out
+     * of the server action, which Next.js turns into a generic 500 - while
+     * `actions.ts` had already established the opposite rule for the same
+     * `save`. Raised by CodeRabbit.
+     */
+    find.mockRejectedValue(new Error('the database said no'))
+
+    const state = await preview({ documentKind: 'deposit', headerRow: HEADER })
+
+    expect(state.status).toBe('error')
+    // The real error names a table or a connection; it must not reach the page.
+    expect(JSON.stringify(state)).not.toContain('the database said no')
+  })
+
   it('writes nothing even when a mapping does exist', async () => {
     find.mockResolvedValue({ kind: 'deposit', shape: 's', savedBy: 'director-1', mapping: {} })
 

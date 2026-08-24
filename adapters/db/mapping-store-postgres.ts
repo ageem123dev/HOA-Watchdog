@@ -48,12 +48,29 @@ import type { MappingStore, SaveResult } from '@/core/ports/mapping-store'
 import { writerPool } from './pool'
 
 interface Row {
-  /** `xmax = 0` is true only of a row this statement inserted. */
-  readonly inserted: boolean
   readonly shape: string
   readonly document_kind: string
   readonly saved_by: string
   readonly mapping: DraftMapping
+}
+
+/**
+ * What `save`'s statement returns, which is not the same shape `find` returns.
+ *
+ * The previous-row columns come from scalar subqueries over a CTE that is empty
+ * on a first save, so every one of them is nullable. Declaring them as `Row`
+ * said otherwise and made `row.shape === null` a comparison between types with
+ * no overlap - true today only because nothing narrows them. Raised by
+ * CodeRabbit; a separate type is the honest description, and it is what lets the
+ * narrowing below be checked rather than asserted.
+ */
+interface SaveRow {
+  /** `xmax = 0` is true only of a row this statement inserted. */
+  readonly inserted: boolean
+  readonly shape: string | null
+  readonly document_kind: string | null
+  readonly saved_by: string | null
+  readonly mapping: DraftMapping | null
 }
 
 const toMapping = (row: Row): SavedMapping => ({
@@ -89,7 +106,7 @@ export function createMappingStore(): MappingStore {
     },
 
     async save(mapping): Promise<SaveResult> {
-      const written = await writerPool().query<Row>(
+      const written = await writerPool().query<SaveRow>(
         // `previous` reads the pre-insert snapshot, so it holds the row this
         // statement is about to replace — the thing `returning` cannot give
         // back once the update has run.
@@ -139,7 +156,18 @@ export function createMappingStore(): MappingStore {
         replaced: !row.inserted,
         // Null when nothing was replaced, and also when a concurrent insert made
         // the previous row invisible to the CTE. `replaced` tells those apart.
-        previous: row.shape === null ? null : toMapping(row),
+        // Narrowed, not cast. `shape` is `not null` in migration 026, so a real
+        // previous row can never present it as null - which makes it the one
+        // column that distinguishes "there was a row" from "the CTE was empty".
+        previous:
+          row.shape === null || row.document_kind === null || row.saved_by === null || row.mapping === null
+            ? null
+            : toMapping({
+                shape: row.shape,
+                document_kind: row.document_kind,
+                saved_by: row.saved_by,
+                mapping: row.mapping,
+              }),
       }
     },
   }

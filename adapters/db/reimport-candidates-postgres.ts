@@ -47,12 +47,25 @@ interface Row {
 export function createReimportCandidates(): ReimportCandidates {
   return {
     async importedUnder(member, kind): Promise<readonly Reimportable[]> {
+      /**
+       * `order by d.id` is not decoration. `select distinct` has no defined
+       * order, and this order is what the treasurer reads: `reimport` preserves
+       * it in the per-document outcome list. Without it the same change reports
+       * its documents differently after a plan change or a vacuum. Raised by
+       * CodeRabbit.
+       *
+       * The explanation lives here rather than inside the SQL because a backtick
+       * in a template literal ends the string - which is how the first version
+       * of this comment turned the query into a syntax error that the text
+       * assertions could not see, since they only read the file.
+       */
       const found = await writerPool().query<Row>(
         `select distinct d.id, d.storage_key, d.filename, d.content_type
            from document d
            join extraction e on e.document_id = d.id
           where d.association_id = (select association_id from board_member where id = $1)
-            and e.document_kind = $2`,
+            and e.document_kind = $2
+          order by d.id`,
         [member, kind],
       )
 

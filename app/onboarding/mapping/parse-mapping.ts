@@ -43,6 +43,17 @@ export function draftFromPairings(
 ): DraftMapping | null {
   if (!Array.isArray(pairings)) return null
 
+  /**
+   * An empty list is not a mapping.
+   *
+   * `assign` never sees it, so nothing downstream refuses it - and a stored
+   * mapping with no pairings is worse than no mapping at all: `applyMapping`
+   * emits an empty header row, so every later upload of that shape fails with
+   * `missing-headers` *and* finds a saved mapping, which is the state the wizard
+   * exists to get the treasurer out of. Raised by CodeRabbit.
+   */
+  if (pairings.length === 0) return null
+
   let draft = emptyDraft(kind, columns)
 
   for (const pairing of pairings) {
@@ -61,4 +72,22 @@ export function draftFromPairings(
   }
 
   return draft
+}
+
+/**
+ * `JSON.parse` that answers `null` rather than throwing at a form field.
+ *
+ * Shared by both actions. It existed verbatim in each, and two copies of a
+ * transport rule is how one entry point ends up stricter than the other -
+ * the defect this project has spent six review rounds on, in miniature.
+ * Raised by CodeRabbit.
+ */
+export function parseJson(value: FormDataEntryValue | null): unknown {
+  if (typeof value !== 'string') return null
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
 }

@@ -842,6 +842,70 @@ raised this as a minor and I confirmed it without fixing it; the integration pas
 is what made it matter, because it is the assertion the finding above depends on.
 The harness now captures the records themselves.
 
+### The CodeRabbit MR round - 10 findings, 10 confirmed
+
+The first request was **rate limited**, not clean: *"You've used the included
+review currently available. Your 64 included PR review attempts over the past 7
+days set your current allowance at 1 review per hour."* No findings were
+produced. Reading the absence of comments as approval is exactly the false-clean
+this pipeline warns about.
+
+I also got the cost model wrong. I pushed a documentation-only commit expecting
+`.coderabbit.yaml`'s `!_bmad-output/**` filter to make it free; it triggered an
+attempt anyway, was refused, and restarted the 20-minute clock. **The path filter
+governs which files are reviewed, not whether a push spends an attempt.**
+
+#### The four majors
+
+- **An empty mapping was storable.** `draftFromPairings` accepted `[]`, and
+  nothing downstream refused it. `applyMapping` emits an empty header row from
+  such a mapping, so every later upload of that shape fails with
+  `missing-headers` *and* finds a saved mapping - the state the wizard exists to
+  get the treasurer out of, now unreachable because the shape looks mapped.
+- **No error boundary in the change actions.** Only `record` was guarded, while
+  `actions.ts` had already established the opposite rule for the same `save`
+  call. `PreviewState` and `ChangeState` both declare an `error` case that was
+  unreachable. Now guarded in three places, and `save` and `reimport` separately -
+  a failure before the save leaves nothing changed, and one after it does not.
+- **`Row` lied about nullability.** `save`'s previous-row columns come from scalar
+  subqueries over a CTE that is empty on a first save, so all four are nullable;
+  `Row` declared them otherwise, which made `row.shape === null` a comparison
+  between types with no overlap. A separate `SaveRow` now says what the query
+  actually returns, and the narrowing is checked rather than asserted.
+- **`reason` was typed `string`** rather than the reader's own union, so a
+  renamed literal in `upload-feedback.ts` would compile and silently stop
+  matching - the treasurer quietly back on the wrong sentence.
+
+#### The control I wrote to prevent vacuity was itself vacuous
+
+`does not claim unrecognised columns for a file that genuinely will not open`
+used **empty bytes** - which `assess` refuses outright, so the file came back
+`rejected` and the `unreadable` branch carrying the reason was never entered. A
+regression hard-coding `missing-headers` on that branch would have passed it.
+
+CodeRabbit quoted this file's own header back at me. Rewritten to use a
+header-only CSV, which passes acceptance, reaches the reading and fails there for
+a *different* reason - so the reason is asserted positively. The hard-coding
+mutation now kills it.
+
+#### The rest
+
+A bare `rejects.toThrow()` that would also pass for a connection error or a
+missing table, where the subject was specifically the not-null protection - now
+`23502`. No `order by` on the candidate query, whose order is what the treasurer
+reads per document. An assertion that a caller *imports* the shared composition
+without checking it *calls* it. And `parseJson` duplicated verbatim across both
+action modules.
+
+**Two of my fixes' mutations survived the first pass** - no test made the preview
+throw, and my mutation for the import-versus-call finding renamed the wrong
+thing. Both now killed.
+
+**And `tsc` caught what the tests could not, again.** Adding the `order by`
+comment inside the SQL template literal put backticks in it, ending the string
+and breaking the file - while the text-assertion tests passed, because they read
+the file rather than execute it. The comment moved out of the literal.
+
 ### Review Findings
 
 ### Completion Notes List

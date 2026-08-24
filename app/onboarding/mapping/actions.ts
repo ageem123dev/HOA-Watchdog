@@ -7,7 +7,7 @@ import { isDocumentKind } from '@/core/extraction/record'
 import { readSampleHeadings } from '@/core/extraction/sample-headings'
 import { suggestWithModel } from '@/core/mapping/suggest-with-model'
 import { askModelForColumns } from '@/adapters/extraction/suggester-gemini'
-import { draftFromPairings } from './parse-mapping'
+import { draftFromPairings, parseJson } from './parse-mapping'
 import { readHeadings } from '@/core/extraction/headings'
 import { shapeKey } from '@/core/mapping/saved'
 import { createMappingStore } from '@/adapters/db/mapping-store-postgres'
@@ -147,17 +147,6 @@ export async function saveMapping(_previous: SaveState, formData: FormData): Pro
   // instead of the fact would report a change as a first save. Raised by
   // CodeRabbit.
   return replaced.replaced ? { status: 'replaced' } : { status: 'saved' }
-}
-
-/** `JSON.parse` that answers `null` rather than throwing at a form field. */
-function parseJson(value: FormDataEntryValue | null): unknown {
-  if (typeof value !== 'string') return null
-
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
 }
 
 

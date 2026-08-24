@@ -172,16 +172,26 @@ describe('the difference is visible to the treasurer (AC2)', () => {
     expect(outcome).toMatchObject({ reason: 'missing-headers' })
   })
 
-  it('does not claim unrecognised columns for a file that genuinely will not open', async () => {
-    // The control. Without it, `reason` could be hard-coded to
-    // `missing-headers` and both cases would look mappable.
-    const [outcome] = await ingest(
-      [{ ...file(), bytes: new TextEncoder().encode('') }],
-      UPLOADER,
-      deps(),
-    )
+  it('carries a different reason for a file that reads but yields no rows', async () => {
+    /**
+     * **The control, rewritten because the first one could not fail.** It used
+     * empty bytes - which `assess` refuses outright, so the file came back
+     * `rejected` and the `unreadable` branch carrying the reason was never
+     * entered at all. A regression hard-coding `missing-headers` on that branch
+     * would have passed it. CodeRabbit found it, and quoted this file's own
+     * header back at me: asserting the absence of a value proves nothing when
+     * the code under test never ran.
+     *
+     * A header row with no data rows passes acceptance, reaches the reading, and
+     * fails there for a *different* reason - so the reason is asserted
+     * positively rather than negatively.
+     */
+    const headerOnly = 'date,description,amount\r\n'
 
-    expect(outcome).not.toMatchObject({ reason: 'missing-headers' })
+    const [outcome] = await ingest([file(headerOnly)], UPLOADER, deps())
+
+    expect(outcome?.outcome).toBe('unreadable')
+    expect(outcome).toMatchObject({ reason: 'no-rows' })
   })
 
   it('reports no reason at all once a mapping makes the file readable', async () => {
