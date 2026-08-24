@@ -84,6 +84,12 @@ export async function uploadDocuments(
    * the treasurer's file selection gone.
    */
   if (declaredKind === 'deposit') {
+    // `let` with the try around only the awaited call, rather than `const`
+    // inside a try that also wraps the refusal below. The narrower catch is the
+    // point: it covers the thing that can throw and nothing else, so a future
+    // edit inside the refusal branch cannot quietly acquire this handler.
+    // Raised three times by ocr, which is a fair reading of the shape - the
+    // reason is recorded rather than the shape changed.
     let ready: boolean
     try {
       ready = await createUnitCensus().hasUnits(uploaderId)

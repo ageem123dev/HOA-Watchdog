@@ -268,25 +268,27 @@ describe('the order it describes is the order the system enforces (story 5.8)', 
    * that matters -- it understates the system, so a reader plans around a
    * sequence the product will not accept and finds out at the upload.
    */
-  it('does not describe the order as optional', () => {
-    const section = contract.slice(contract.indexOf('## Order matters on a fresh install'))
+  const order = () => section('## Order matters on a fresh install')
 
-    expect(section).not.toMatch(/worth following/i)
+  it('does not describe the order as optional', () => {
+    expect(order()).not.toMatch(/worth following/i)
   })
 
   it('says a deposit upload is refused without units', () => {
-    const section = contract
-      .slice(contract.indexOf('## Order matters on a fresh install'))
-      .slice(0, 1500)
-
-    expect(section).toMatch(/refus/i)
+    expect(order()).toMatch(/refus/i)
   })
 
   it('is reading the section it claims to read', () => {
-    // The control. `indexOf` returning -1 would slice from the end of the
-    // string, and both assertions above would run against an empty section --
-    // the "not" one passing, which is the direction that hides a defect.
-    expect(contract).toContain('## Order matters on a fresh install')
-    expect(contract.indexOf('## Order matters on a fresh install')).toBeGreaterThan(-1)
+    /**
+     * The control. Both assertions above would pass against an empty string --
+     * the negative one silently, which is the direction that hides a defect.
+     *
+     * `section()` is the file's own helper and stops at the next heading. The
+     * first version of this sliced 1500 characters from `indexOf`, which is a
+     * second answer to "where does a section end" and would have run into the
+     * next section as soon as this one grew. Raised by ocr.
+     */
+    expect(order().length).toBeGreaterThan(0)
+    expect(order()).not.toContain('## Billing cycles')
   })
 })

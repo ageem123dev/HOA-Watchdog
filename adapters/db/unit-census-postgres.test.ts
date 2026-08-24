@@ -162,20 +162,23 @@ describeWithDatabase('against a real database', () => {
     await expect(createUnitCensus().hasUnits(withUnits)).resolves.toBe(true)
   })
 
-  it('answers false for an association that holds none', async () => {
-    // The fresh install. This is the state the whole story exists for.
-    await expect(createUnitCensus().hasUnits(withoutUnits)).resolves.toBe(false)
-  })
-
-  it('does not let one association\'s units answer for another', async () => {
+  it('answers false for an association that holds none, while another holds some', async () => {
     /**
-     * The disaster case, and the reason the association is in the query at all.
-     * Both members exist and one association holds units; the other must still
-     * answer `false`, or a second board onboarding would silently unlock deposits
+     * The fresh install, and the isolation case, in one assertion — which is why
+     * there is no longer a separate test for the latter.
+     *
+     * `beforeAll` gives the *other* association a unit, so `exists (select 1
+     * from unit)` is true in this database at this moment. An unscoped query
+     * would therefore answer `true` here, and only the association clause makes
+     * it `false`. A second board onboarding must not silently unlock deposits
      * for every board after it.
+     *
+     * A third test asserting both members' answers together was removed: it
+     * repeated this one and the one above and added no case. Raised by ocr, and
+     * the reason is kept, because "we already have a test for that" is how a
+     * duplicate earns its place back.
      */
     await expect(createUnitCensus().hasUnits(withoutUnits)).resolves.toBe(false)
-    await expect(createUnitCensus().hasUnits(withUnits)).resolves.toBe(true)
   })
 
   it('answers false for a member who does not exist, rather than throwing', async () => {

@@ -109,12 +109,12 @@ describe('declaring what the documents are', () => {
     expect(hint?.textContent).toMatch(/first|before/i)
   })
 
+  /**
+   * `docs/upload-contract.md` called this "worth following" for two epics, which
+   * was true then and is not now. A hint that undersells an enforced rule is how
+   * somebody plans an evening around uploading deposits first.
+   */
   it('says the order is enforced, not merely advisable', () => {
-    /**
-     * 3d. `docs/upload-contract.md` called this "worth following" for two epics,
-     * which was true then and is not now. A hint that undersells an enforced
-     * rule is how somebody plans an evening around uploading deposits first.
-     */
     render(<UploadForm />)
 
     const control = document.querySelector('select[name="documentKind"]') as HTMLSelectElement

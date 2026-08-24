@@ -375,6 +375,44 @@ Recorded rather than waved away. "A security guard failed and I decided it was a
 the reasoning that ships one, so the resolution is that it reproduces nowhere and the cause is known,
 not that it looked unlikely.
 
+### The `ocr` round - 12 findings, 3 confirmed
+
+A properly complete run this time: `terminal_state: complete`, 11 of 11 items completed, none failed
+or waived. Worth stating, because the same tool exited 0 on a **partial** run last story and reported
+36 files reviewed when two had been dropped.
+
+**Confirmed and fixed.**
+
+- **A magic slice where the file had a helper.** The contract tests sliced 1500 characters from
+  `indexOf` to isolate a section. `upload-contract.test.ts` already has `section()`, which stops at
+  the next heading -- so the slice was a second answer to "where does a section end" and would have
+  run into the next section as soon as this one grew. Now uses the helper, and the control asserts the
+  extracted section does *not* contain the following heading.
+- **A test that repeated two others.** `does not let one association's units answer for another`
+  asserted exactly what the two tests above it already asserted. Removed, and the surviving test
+  renamed to say what it actually proves: the other association holds a unit, so an unscoped query
+  would answer `true` here, and only the association clause makes it `false`. The reason is recorded
+  because "we already have a test for that" is how a duplicate earns its place back.
+- **Comment placement**, for consistency with the rest of the file.
+
+**Refuted, with reasons.**
+
+- **Three findings on `let ready`** wanting `const` inside a wider `try`. The narrow catch is
+  deliberate: it covers the call that can throw and nothing else, so a later edit inside the refusal
+  branch cannot quietly acquire the handler. Recorded in the code rather than changed.
+- **Document the expected indexes.** Already covered: migration 025 creates
+  `unit (association_id, normalised_number)`, whose leading column is what this query filters on. The
+  finding was right that a reader would wonder, so the note was added; there was no missing index.
+- **Text assertions are brittle to formatting.** True, and the deliberate trade: the database half of
+  every adapter test skips on this machine, so a rule proven only there is proven nowhere. Story 5.7
+  settled this.
+- **Two findings on the error wording** proposing "Unable to verify system readiness", which is
+  jargon a treasurer does not use. Kept.
+- **LIKE-pattern cleanup could match unintended rows.** With a random hex prefix, not a real risk.
+
+**Argus found none of the three.** Ingested at `629c5d7` with recall 0 - the same result as both of
+story 5.7's rounds, and the measurement that justifies running more than one reviewer.
+
 ### Review Findings
 
 ### Completion Notes List

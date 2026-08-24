@@ -16,6 +16,13 @@
  * does not scope by association. That is the gap AD-4 names about itself:
  * "SELECT-only is a capability control, not an isolation one."
  *
+ * ## What makes this cheap
+ *
+ * Migration 025's `unit (association_id, normalised_number)` has `association_id`
+ * as its leading column, so the scoped lookup uses it. Nothing new is needed;
+ * recorded because the next person to read this will wonder, and because an
+ * unindexed version of this query runs on every upload.
+ *
  * ## `exists`, not `count`
  *
  * One row is enough to answer, and this runs on every upload. `count(*)` would
