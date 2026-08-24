@@ -93,6 +93,36 @@ describe('declaring what the documents are', () => {
     expect(hint?.textContent).toMatch(/every file you choose is uploaded as this kind/i)
   })
 
+  /**
+   * Story 5.8. The order stopped being advice and became a refusal: deposits are
+   * rejected until an assessment roll has created units. A treasurer who learns
+   * that from the refusal has already chosen their files and planned their
+   * session around the wrong sequence.
+   */
+  it('says the roll comes first, before a kind is chosen', () => {
+    render(<UploadForm />)
+
+    const control = document.querySelector('select[name="documentKind"]') as HTMLSelectElement
+    const hint = document.getElementById(control.getAttribute('aria-describedby') ?? '')
+
+    expect(hint?.textContent).toMatch(/roll/i)
+    expect(hint?.textContent).toMatch(/first|before/i)
+  })
+
+  it('says the order is enforced, not merely advisable', () => {
+    /**
+     * 3d. `docs/upload-contract.md` called this "worth following" for two epics,
+     * which was true then and is not now. A hint that undersells an enforced
+     * rule is how somebody plans an evening around uploading deposits first.
+     */
+    render(<UploadForm />)
+
+    const control = document.querySelector('select[name="documentKind"]') as HTMLSelectElement
+    const hint = document.getElementById(control.getAttribute('aria-describedby') ?? '')
+
+    expect(hint?.textContent).toMatch(/refus|cannot|until|won't|will not/i)
+  })
+
   it('still offers the file input, so the kind was added rather than substituted', () => {
     render(<UploadForm />)
 

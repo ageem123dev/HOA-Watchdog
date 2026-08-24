@@ -59,6 +59,8 @@ export function UploadForm() {
         </label>
         <p id="documentKind-hint" style={styles.hint}>
           Every file you choose is uploaded as this kind. Send a roll and a bank feed separately.
+          Upload the assessment roll first — it creates the units that deposits are matched against,
+          and deposits are refused until it has.
         </p>
         <select
           id="documentKind"
