@@ -88,7 +88,7 @@ constrains".
       (AC1, AC3, AC5)
 - [x] **Task 3 — The page.** A form, and the one-time password displayed where the inviting director
       can copy it. (AC1, AC3)
-- [ ] **Task 4 — Constrain the script and correct its header.** (AC6)
+- [x] **Task 4 — Constrain the script and correct its header.** (AC6)
 - [ ] **Task 5 — Close the set of `board_member` writers.** (AC7)
 
 ## Dev Notes
@@ -234,6 +234,59 @@ and the only check that proves the director can actually sign in with what they 
 **Cross-check:** what the page shows is exactly what the action returned - the password in the
 rendered output equals `state.password`, not a re-derivation. There is no second source for it, which
 is the property that makes "shown once" true rather than merely intended.
+#### Task 4 - narrowing the script, and a gap found while doing it
+
+**Behaviour: `scripts/add-board-member.mjs` serves the cases the product cannot, and says so.**
+
+1. *If it ran correctly, how would I know?* Its header names the product as the route for every
+   director after the first, and the script still creates the first director of an association.
+2. *How am I going to test it?* By reading the file. `verify-extraction.test.ts` shows scripts are
+   testable here, and `dual-llm-boundary.test.ts` reads source text for claims exactly like this one.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* The comment naming this story as its replacement is the sibling
+   defect: prose that becomes wrong when the thing it predicts arrives.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 4a | The header still naming this story as its future replacement, after this story shipped - prose that has quietly become false | GUARD - asserted absent |
+| 4b | **The script cannot bootstrap a second association.** `(select id from association)` returns two rows once one exists, and raises. AC6 says the script keeps working for the first director *of an association*; with two associations it does not | GUARD - an optional association argument. Found while writing this task, not planned |
+| 4c | The argument making it *easier* to enrol somebody into the wrong board - the failure the bare subquery was chosen to prevent | GUARD - matched by name and refused unless exactly one association matches, so a typo raises rather than picking one |
+| 4d | The upsert removed as "the product refuses duplicates now", taking the only password-reset path with it | OUT-OF-SCOPE as a removal, and stated: a locked-out director has no other route, and the product deliberately refuses to reset. The upsert stays and the header says why |
+
+**Cross-check:** the header's claims and the code agree - it says the product is the route for later
+directors, and `app/directors/actions.ts` exists; it says one association is chosen by name, and the
+query takes a parameter. A header asserting something the file does not do is the defect 4a names,
+pointed the other way.
+#### Task 4 - Argus found three, and one of them this story created
+
+**HIGH: a cross-association password reset, reported as the wrong board.** `email` is unique across
+the whole table, so `on conflict (email) do update set password_hash` fires for an address held by
+*any* association. Run with `--association B` for an address already in association A and the script
+reset A's password, left the account in A, and printed "association: B".
+
+The upsert predates this story. What this story added was **an association argument the upsert
+ignores** - which turned a silent reset into a confidently mislabelled one. Now checked separately,
+so the refusal is a sentence rather than a constraint violation, and *refused* rather than moved:
+shifting an account between boards is not something a provisioning script should decide.
+
+**MEDIUM: an error that offered help and delivered none.** On a name that matched nothing, the
+message said "There are:" and then listed `associations.rows` - the empty result of the search that
+had just failed. Now listed from a fresh query.
+
+**LOW: argument parsing that lost arguments.** `argv.slice(0, associationAt)` truncated at the flag,
+so `<email> --association "X" "Display Name"` silently lost the name and `--association X <email>`
+failed with a usage error for a well-formed command. Now the flag and its value are filtered out
+rather than the list truncated.
+
+**And one of my regression tests failed for the wrong reason first.** The assertion that
+`argv.slice(0, associationAt)` is gone matched the *comment* explaining why it is gone. Prose is not
+code - the sixth instance on this project, twice inside guards written to prevent it. The test file
+now splits its assertions: `SOURCE` for claims about what the file **says**, and `neutralise(...)`
+for claims about what it **does**.
+
+Four earlier mutations plus three on the fixes, all killed - including one that survived first
+because the assertion checked the association argument *existed* without checking it reached the
+insert. A parsed-and-discarded argument is what a half-finished refactor leaves behind.
 ### Review Findings
 
 ### Completion Notes List
