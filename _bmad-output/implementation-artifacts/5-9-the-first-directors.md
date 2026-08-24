@@ -86,7 +86,7 @@ constrains".
       inviting member in SQL. Refuses a duplicate address rather than resetting it. (AC1, AC2, AC4)
 - [x] **Task 2 — The server action.** Session required, password generated server-side, shown once.
       (AC1, AC3, AC5)
-- [ ] **Task 3 — The page.** A form, and the one-time password displayed where the inviting director
+- [x] **Task 3 — The page.** A form, and the one-time password displayed where the inviting director
       can copy it. (AC1, AC3)
 - [ ] **Task 4 — Constrain the script and correct its header.** (AC6)
 - [ ] **Task 5 — Close the set of `board_member` writers.** (AC7)
@@ -210,6 +210,30 @@ inviting director has. Storing the fields is not the point; being able to sign i
 **Cross-check:** what the action shows and what it stores are different values, and the stored one is
 the hash of the shown one. `verifyPassword(shown, stored)` is true - the inverse of `hashPassword`,
 and the only check that proves the director can actually sign in with what they were handed.
+#### Task 3 - the page
+
+**Behaviour: a form, and the one-time password shown where it can be copied.**
+
+1. *If it ran correctly, how would I know?* A signed-in director sees a form; after submitting they
+   see the new address and its password; an unauthenticated visitor is redirected to sign-in.
+2. *How am I going to test it?* jsdom render tests, per-file opt-in (story 1.6c). The form and the
+   result are one component driven by `useActionState`, so the state is injected by mocking the
+   action - the pattern `upload-form.test.tsx` uses.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* `app/upload/page.tsx` is the model for the redirect, and its
+   comment explains why the page checks even though the route matcher already does.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 3a | The page rendering for someone not signed in. `PUBLIC_ROUTES` is an allow-list and deny-by-default, but a page that creates credentials must not depend on a matcher pattern nobody edited carefully | GUARD - the second lock, as `app/upload/page.tsx` carries |
+| 3b | The password rendered but not selectable or findable - a value shown once that the director cannot copy is a value lost | GUARD - rendered as text in an element the test finds by role and content, not buried in an attribute |
+| 3c | The password persisting in the form after a refresh, or being re-shown on a later render, which would contradict "shown once" | NOTE - `useActionState` holds it in memory only; a refresh re-runs the page with the empty state. Nothing is written to storage, and the absence of any persistence call is what makes this true |
+| 3d | The error state and the success state rendering together, so a director reads a password from a failed submission | GUARD - the state is a union; asserted that an error shows no password |
+| 3e | The address shown back wrong, so the director hands the password to the right person for the wrong account | GUARD - the address in the result comes from the action's state rather than from the form input, which is cleared |
+
+**Cross-check:** what the page shows is exactly what the action returned - the password in the
+rendered output equals `state.password`, not a re-derivation. There is no second source for it, which
+is the property that makes "shown once" true rather than merely intended.
 ### Review Findings
 
 ### Completion Notes List
