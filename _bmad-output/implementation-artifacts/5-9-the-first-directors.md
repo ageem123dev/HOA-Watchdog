@@ -169,17 +169,21 @@ gate: `WATCHDOG_WRITER_DATABASE_URL` for the pool the adapter uses, `DATABASE_UR
 | --- | --- |
 | 2026-08-24 | Story created from the epic row, `scripts/add-board-member.mjs` and AD-3 |
 
-## Questions for the author
+## Questions for the author — answered 2026-08-24
 
-1. **Should revoking a director be in this story?** `disabled_at` exists and sign-in honours it, but
-   nothing sets it. "A member who leaves the board keeps their audit trail and loses access" is
-   already the schema's stated intent, and there is no surface for it. Adding is the epic's row;
-   removing is the obvious companion and is deliberately not assumed into scope.
+**1. Revocation is out of scope.** `disabled_at` exists and sign-in honours it; nothing sets it, and
+nothing will in this story. The epic's row is provisioning, and adding a second surface with its own
+failure modes would make one coherent change into two half-tested ones. Recorded as the obvious
+companion story rather than dropped.
 
-2. **Should the inviting director's own address be refusable?** Adding yourself is harmless but
-   pointless, and it is one more branch. Currently treated as a duplicate, which is what it is.
+**2. The password is shown once, on screen.** Confirmed rather than assumed, because the alternative
+was a different story: a mailed invite needs an invite table, an expiry, a consumed-once rule and a
+public route, and it changes Tasks 1 to 3 rather than adding to them.
 
-3. **Is a one-time on-screen password the right hand-off**, or should this be a mailed invite? The
-   mail sender exists (story 4.8). An invite needs a token, an expiry and a consumed-once rule, which
-   is a larger story — and the on-screen password matches how the script already works, so it is what
-   this story assumes.
+What the chosen option costs, stated plainly: **the password travels by whatever channel the
+inviting director picks** - Slack, SMS, spoken aloud. That is weaker than a link only the recipient's
+mailbox can open. It is also exactly what `scripts/add-board-member.mjs` does today, so this story
+moves the act into the product without changing that exposure. If the hand-off should be hardened,
+that is a story about invites and it now has a written starting point.
+
+**3. Adding yourself** is treated as a duplicate address, because that is what it is.
