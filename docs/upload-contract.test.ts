@@ -257,3 +257,45 @@ describe('the test itself', () => {
     )
   })
 })
+
+describe('the order it describes is the order the system enforces (story 5.8)', () => {
+  /**
+   * This section spent two epics telling the reader the order was "worth
+   * following". Story 5.8 made it a refusal: a deposit upload is rejected until
+   * an assessment roll has created units.
+   *
+   * A contract that still reads as advice after that is wrong in the direction
+   * that matters -- it understates the system, so a reader plans around a
+   * sequence the product will not accept and finds out at the upload.
+   */
+  const order = () => section('## Order matters on a fresh install')
+
+  it('does not describe the order as optional', () => {
+    expect(order()).not.toMatch(/worth following/i)
+  })
+
+  it('says a deposit upload is refused without units', () => {
+    /**
+     * Tied to all three of deposit, refusal and units in one match. `/refus/i`
+     * alone was satisfied by this section's *other* uses of the word - including
+     * the sentence explaining that refusing the roll would make the situation
+     * permanent - so it would have passed against a document that never said
+     * deposits are refused. Raised by CodeRabbit.
+     */
+    expect(order()).toMatch(/deposit upload is \*\*refused\*\* while the association holds\s+no units/i)
+  })
+
+  it('is reading the section it claims to read', () => {
+    /**
+     * The control. Both assertions above would pass against an empty string --
+     * the negative one silently, which is the direction that hides a defect.
+     *
+     * `section()` is the file's own helper and stops at the next heading. The
+     * first version of this sliced 1500 characters from `indexOf`, which is a
+     * second answer to "where does a section end" and would have run into the
+     * next section as soon as this one grew. Raised by ocr.
+     */
+    expect(order().length).toBeGreaterThan(0)
+    expect(order()).not.toContain('## Billing cycles')
+  })
+})
