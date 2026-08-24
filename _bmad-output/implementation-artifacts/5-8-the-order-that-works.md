@@ -86,7 +86,7 @@ reason this story exists rather than a nicer hint:
 
 - [x] **Task 1 — Ask whether the association has any units.** A narrow port and its adapter, scoped
       by the member in SQL. Read-only. (AC1, AC5)
-- [ ] **Task 2 — Refuse the submission.** In `app/upload/actions.ts`, before a byte is read, when the
+- [x] **Task 2 — Refuse the submission.** In `app/upload/actions.ts`, before a byte is read, when the
       kind is `deposit` and the association has no units. (AC1, AC2, AC3, AC4)
 - [ ] **Task 3 — Say it before they choose.** The upload form states the order, so the refusal is a
       backstop rather than the first the treasurer hears of it. (AC4)
@@ -245,6 +245,34 @@ control, not an isolation one"* - and it is not this story's to fix; noted under
 agrees with `unitIdsFor`. If `hasUnits` says `false`, `unitIdsFor` returns an empty map for any
 reference; if it says `true`, at least one unit exists to be found. Asserted against the fake in the
 core test, since the two must not be able to disagree about the same association.
+
+#### Task 2 - the refusal
+
+**Behaviour: `uploadDocuments` refuses a deposit submission while the association holds no units.**
+
+1. *If it ran correctly, how would I know?* A deposit submission on an association with no units
+   returns `{ outcomes: [], error }` naming the roll, and nothing is stored. The same submission after
+   a roll has produced units behaves exactly as it does today.
+2. *How am I going to test it?* Through the action, with `createUnitCensus` mocked - the pattern
+   `actions.test.ts` in `app/onboarding/mapping/` already uses for `createMappingStore`. The action is
+   the seam; no new one is needed.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* The extract route (`app/api/documents/[id]/extract/route.ts`) is the
+   other ingestion entry point, but it re-extracts a document already held rather than accepting a new
+   one - there is no first upload to order. Checked, not assumed.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 2a | The refusal placed after the files are read, so a large batch is held in memory to be rejected | GUARD - before the size checks, alongside the kind check, which is the position the file's own comments already argue for |
+| 2b | Every kind refused, not just deposits - a roll could not be uploaded, so the trap becomes permanent and unescapable | GUARD - the *worst* failure here, because it locks the only way out. Asserted for all five kinds |
+| 2c | The census throwing (a database blip) taking the upload down with a generic 500 | GUARD - caught, and the submission refused with a message the treasurer can act on. `actions.ts` in the mapping wizard set this precedent last story |
+| 2d | The refusal applied when units *do* exist, blocking ordinary uploads forever | GUARD - the positive case is asserted, and it is the control: without it every other assertion here passes against an action that refuses everything |
+| 2e | The census asked for someone other than the uploader | GUARD - asserted on the argument |
+| 2f | The check running for every submission, costing a query on paths that cannot need it | NOTE - it runs only when the declared kind is `deposit`, which is also what 2b requires. One query on a path that is about to read files and write rows |
+
+**Cross-check:** the refusal fires exactly when `hasUnits` is `false` - so a test that flips only the
+census answer, holding the submission identical, must flip only the outcome. That is the inverse
+relation this behaviour has instead of a round trip.
 
 ### Review Findings
 

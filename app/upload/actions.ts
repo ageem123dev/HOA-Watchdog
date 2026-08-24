@@ -6,6 +6,7 @@ import {
   MAX_UPLOAD_BATCH_BYTES,
 } from '@/core/ingestion/acceptance'
 import { isDocumentKind } from '@/core/extraction/record'
+import { createUnitCensus } from '@/adapters/db/unit-census-postgres'
 import { ingest } from '@/core/ingestion/ingest'
 import { ingestionDependencies } from '../ingestion-dependencies'
 import type { UploadState } from './upload-state'
@@ -60,6 +61,49 @@ export async function uploadDocuments(
     return {
       outcomes: [],
       error: 'Choose what kind of document this is before uploading.',
+    }
+  }
+
+  /**
+   * **Deposits need units, and only an assessment roll makes them.**
+   *
+   * `docs/upload-contract.md` carried this as advice for two epics: upload the
+   * roll first, or every deposit line is held `unknown-unit`. That is the system
+   * working correctly and looking broken - no error, no red text, just a screen
+   * of held payments on somebody's first use of the product.
+   *
+   * Checked here, with the other guards, before a byte is read: a submission
+   * about to be refused must not first be held in memory.
+   *
+   * **Only deposits.** Refusing every kind would refuse the roll too, and the
+   * roll is the only thing that creates units - the trap would become permanent
+   * rather than removed.
+   *
+   * **A failure refuses.** Not knowing whether units exist is not a reason to
+   * let deposits through, and an unhandled rejection here is a generic 500 with
+   * the treasurer's file selection gone.
+   */
+  if (declaredKind === 'deposit') {
+    let ready: boolean
+    try {
+      ready = await createUnitCensus().hasUnits(uploaderId)
+    } catch (error) {
+      // The real error can name a table or a connection; it goes to the log.
+      console.error('[upload] could not check whether the association holds units', error)
+
+      return {
+        outcomes: [],
+        error: 'That could not be checked just now. Try again in a moment.',
+      }
+    }
+
+    if (!ready) {
+      return {
+        outcomes: [],
+        error:
+          'Upload the assessment roll first. It creates the units that deposits are matched against, ' +
+          'and without them every line would be held for review.',
+      }
     }
   }
 
