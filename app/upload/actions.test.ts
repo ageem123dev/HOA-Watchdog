@@ -169,6 +169,30 @@ describe('deposits before a roll (story 5.8)', () => {
 
     expect(state.error).toMatch(/roll/i)
   })
+
+  it('reads no bytes from the file it refuses', async () => {
+    /**
+     * The other half of the same claim, and it needs its own fixture.
+     *
+     * CodeRabbit asked for the byte-read to be asserted directly rather than
+     * inferred from which message won. Adding the spy to the test above would
+     * not have worked: that file is deliberately oversized, so with the census
+     * guard removed the *size* guard would refuse it and `arrayBuffer` would
+     * still never be called - the assertion would pass for a reason unrelated to
+     * what it claims.
+     *
+     * An ordinary file has nothing else to stop it, so the spy is only silent if
+     * this guard is the one that fired.
+     */
+    hasUnits.mockResolvedValue(false)
+
+    const ordinary = file()
+    const read = vi.spyOn(ordinary, 'arrayBuffer')
+
+    await upload('deposit', [ordinary])
+
+    expect(read).not.toHaveBeenCalled()
+  })
 })
 
 describe('the guards that were never asserted', () => {

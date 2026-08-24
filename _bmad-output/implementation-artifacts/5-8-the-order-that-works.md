@@ -413,6 +413,37 @@ or waived. Worth stating, because the same tool exited 0 on a **partial** run la
 **Argus found none of the three.** Ingested at `629c5d7` with recall 0 - the same result as both of
 story 5.7's rounds, and the measurement that justifies running more than one reviewer.
 
+### The CodeRabbit CLI round - 2 findings, 2 confirmed
+
+`review_completed`, 14 reviewedFiles reconciling exactly against the diff. Both findings were about
+my assertions being weaker than their names claimed, which is the shape this project keeps finding.
+
+**"Refuses before it reads any file" inferred the claim rather than asserting it.** It checked that
+the *roll* message won over the *size* message - real evidence of ordering against one other guard,
+and not evidence that no byte was read. CodeRabbit asked for the read itself to be asserted.
+
+Adding the spy to that test would not have worked, and the reason is worth keeping: its file is
+deliberately oversized, so with the census guard removed the **size** guard refuses it and
+`arrayBuffer` is still never called. The assertion would have passed for a reason unrelated to what
+it claims - a vacuous guard produced by fixing a vacuous guard. Split into two tests, and the second
+uses an ordinary file, which nothing else stops.
+
+**The contract assertion could be satisfied by unrelated text.** `/refus/i` over the section matched
+that section's *other* uses of the word - including the sentence explaining that refusing the roll
+would make the situation permanent. It would have passed against a document that never said deposits
+are refused. Now matched against the whole clause, tying deposit, refusal and units together.
+
+Both mutations kill their tests.
+
+**The ingest join failed first, for the second story running.** `argus_ingest` skipped the review:
+*"no Argus run recorded for 9394a6a"*. Argus had run on the commit before it, and the CodeRabbit round
+started without a run on the head it was reviewing. Repaired the same way as last time - and it is
+now a pattern rather than an accident, so: **run `argus_review` on the head before starting any
+CodeRabbit round**, because that is what the review is joined to.
+
+After repair: 2 compared, recall 0, 2 lessons. Argus found neither, which is the fifth consecutive
+measurement of that kind on this project.
+
 ### Review Findings
 
 ### Completion Notes List

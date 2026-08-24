@@ -275,7 +275,14 @@ describe('the order it describes is the order the system enforces (story 5.8)', 
   })
 
   it('says a deposit upload is refused without units', () => {
-    expect(order()).toMatch(/refus/i)
+    /**
+     * Tied to all three of deposit, refusal and units in one match. `/refus/i`
+     * alone was satisfied by this section's *other* uses of the word - including
+     * the sentence explaining that refusing the roll would make the situation
+     * permanent - so it would have passed against a document that never said
+     * deposits are refused. Raised by CodeRabbit.
+     */
+    expect(order()).toMatch(/deposit upload is \*\*refused\*\* while the association holds\s+no units/i)
   })
 
   it('is reading the section it claims to read', () => {
