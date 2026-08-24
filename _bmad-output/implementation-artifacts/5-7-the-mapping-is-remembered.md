@@ -906,6 +906,41 @@ comment inside the SQL template literal put backticks in it, ending the string
 and breaking the file - while the text-assertion tests passed, because they read
 the file rather than execute it. The comment moved out of the literal.
 
+### One finding deliberately not fixed, and why
+
+CodeRabbit's tenth finding is real and is **not** addressed in this story:
+
+> This query returns every document of one kind that the association holds.
+> `reimport` then fetches and re-imports each one sequentially inside a server
+> action. For an association with a long history, the action would exceed the
+> request timeout. `changeMapping` records the audit row only after `reimport`
+> returns, so a timeout leaves the mapping replaced, some documents re-imported,
+> and no durable record of the change.
+
+The consequence is worse than "slow": migration 027 revokes UPDATE, so the
+missing audit row is permanent. It is the same gap `changed-unrecorded` was
+introduced for, except a timeout returns no state at all, so nothing is reported
+either.
+
+**What was checked.** The suggested index on `extraction (document_kind,
+document_id)` is largely redundant: migration 006 already creates
+`extraction_document_id_idx on extraction (document_id)`, which is what the join
+uses. Adding a second index for the kind filter is premature for a pilot whose
+associations hold a handful of exports.
+
+**What was not done, and why it is a decision rather than an omission.** The
+remedies are paging with batched re-imports, or moving the re-import to a
+background job that reports progress. Both change the treasurer's experience -
+the second one fundamentally, from "confirm and see the outcomes" to "confirm and
+be told later". Story 5.7's acceptance criteria say nothing about scale, and AC7
+explicitly asks for the per-document outcome to be *reported*, which a fire-and-
+forget job does not do without a new surface to report on.
+
+So it is recorded here rather than guessed at. The threshold is worth stating
+plainly: this is safe while an association's document count times the time to
+fetch and re-parse one stays inside the platform's request timeout, and it fails
+in the way described above the moment it does not.
+
 ### Review Findings
 
 ### Completion Notes List
