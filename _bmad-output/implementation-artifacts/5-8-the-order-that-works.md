@@ -1,6 +1,6 @@
 ---
 Status: ready-for-dev
-baseline_commit:
+baseline_commit: 2f8df62
 merge_request:
 ---
 
@@ -84,7 +84,7 @@ reason this story exists rather than a nicer hint:
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Ask whether the association has any units.** A narrow port and its adapter, scoped
+- [x] **Task 1 — Ask whether the association has any units.** A narrow port and its adapter, scoped
       by the member in SQL. Read-only. (AC1, AC5)
 - [ ] **Task 2 — Refuse the submission.** In `app/upload/actions.ts`, before a byte is read, when the
       kind is `deposit` and the association has no units. (AC1, AC2, AC3, AC4)
@@ -206,6 +206,45 @@ established there and directly reusable here:
 ## Dev Agent Record
 
 ### Test Design
+
+#### Task 1 - does this association hold any units?
+
+**Behaviour A: the port.** One question, one answer.
+
+1. *If it ran correctly, how would I know?* It answers `true` for a member whose association holds at
+   least one unit, and `false` for one whose association holds none.
+2. *How am I going to test it?* Text assertions over the adapter's SQL, which always run, plus a
+   database half that skips without a connection - story 5.7's split. **No database is configured on
+   this machine**, so the text half is the only half that will execute here, and it is where the
+   tenancy rule has to be pinned.
+3. *What else can go wrong?* Below.
+4. *Could this happen elsewhere?* Yes - `mapping-store-postgres.ts` and
+   `reimport-candidates-postgres.ts` are the two nearest adapters and both derive the association the
+   same way. Their text assertions are the model for this one's.
+
+| # | Failure mode | Class |
+| --- | --- | --- |
+| 1a | The association taken as a parameter rather than derived from the member, so a caller can name another board and satisfy the check with their units | GUARD - scalar subquery over `board_member`, asserted in text and killed by mutation |
+| 1b | An unknown member: the subquery yields NULL, `association_id = NULL` matches nothing, and the answer is `false` | GUARD - and `false` is the right answer, because refusing the upload is the safe direction. It must not throw |
+| 1c | `count(*)` over the whole table where existence is the question - a scan that grows with the association | GUARD - `exists`, so Postgres stops at the first row |
+| 1d | The reader pool, which cannot answer this at all | GUARD - see below. `writerPool`, and the reason is not preference |
+| 1e | A `true` answer for units belonging to *any* association - the join written but not applied | GUARD - the same assertion as 1a from the other side |
+
+**1d is the one worth writing down.** The instinct is that a read belongs on `readerPool`: it is
+SELECT-only, and AD-4 separates roles by pipeline stage. It cannot work here. Migration 003 revokes
+**all** on `board_member` from `watchdog_reader` - deliberately, so *"the LLM-driven query path has no
+business with credentials"* - and deriving an association from a member requires reading
+`board_member`. A reader-pool version of this query fails at runtime with a permission error, on a
+path that only executes when somebody uploads.
+
+`unit-directory-postgres.ts` uses `readerPool` and does **not** scope by association, which is why it
+has never hit this. That is a pre-existing gap AD-4 names itself - *"SELECT-only is a capability
+control, not an isolation one"* - and it is not this story's to fix; noted under sibling defects.
+
+**Cross-check (required by the workflow for a behaviour that reads persisted data):** the answer
+agrees with `unitIdsFor`. If `hasUnits` says `false`, `unitIdsFor` returns an empty map for any
+reference; if it says `true`, at least one unit exists to be found. Asserted against the fake in the
+core test, since the two must not be able to disagree about the same association.
 
 ### Review Findings
 
