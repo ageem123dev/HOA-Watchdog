@@ -1,5 +1,6 @@
 import type { DocumentKind } from '../extraction/record'
 import { toRectangle } from '../extraction/rectangle'
+import type { TableProblem } from '../extraction/tabular'
 import { readRows } from '../extraction/tabular'
 import type { DocumentRepository } from '../ports/document-repository'
 import type { DocumentStore } from '../ports/document-store'
@@ -21,6 +22,10 @@ import { recordRoll } from './record-roll'
 import { type RejectionReason, assess } from './acceptance'
 import { contentHash } from './content-hash'
 import { storageKeyFor } from './storage-key'
+import { readHeadings } from '../extraction/headings'
+import { applyMapping } from '../mapping/apply'
+import { shapeKey } from '../mapping/saved'
+import type { MappingStore } from '../ports/mapping-store'
 
 /**
  * Ingestion: the only way ledger data enters this system (AD-1).
@@ -85,7 +90,31 @@ export type IngestOutcome =
    * and on a re-ingest none are deleted either, so a document that already had
    * a good set still has it. Carries the document id for exactly that reason.
    */
-  | { readonly filename: string; readonly outcome: 'unreadable'; readonly documentId: string }
+  | {
+      readonly filename: string
+      readonly outcome: 'unreadable'
+      readonly documentId: string
+      /**
+       * Why, when the reading said. Story 5.7's AC2 asks that a file whose
+       * columns are not mapped be *visibly* different from one that would not
+       * open - and every `!reading.ok` used to collapse to this outcome with
+       * `problems` dropped, so the treasurer was told a readable file "may be
+       * damaged, or saved in another format" and sent to re-export something
+       * that was fine.
+       *
+       * `missing-headers` is the mappable case: the file opened, and its
+       * columns are not the importer's vocabulary. Optional because not every
+       * failure has one worth carrying, and adding it must not force every
+       * existing caller to handle it.
+       */
+      /**
+       * The reader's own union, never `string`. Typed loosely, a renamed or
+       * mistyped literal in `upload-feedback.ts`'s comparison would compile and
+       * silently stop matching - the treasurer quietly back on the wrong
+       * sentence. Raised by CodeRabbit.
+       */
+      readonly reason?: TableProblem['reason']
+    }
   | { readonly filename: string; readonly outcome: 'already-held'; readonly documentId: string }
   | { readonly filename: string; readonly outcome: 'rejected'; readonly reason: RejectionReason }
   /** The file was fine; something underneath was not. Retryable, and not the file's fault. */
@@ -100,6 +129,22 @@ export type IngestOutcome =
   | { readonly filename: string; readonly outcome: 'figures-not-stored'; readonly documentId: string }
 
 export interface IngestDependencies {
+  /**
+   * Absent means no upload finds a saved mapping - exactly the behaviour of
+   * every release before story 5.7. Optional so an unconfigured deploy ingests
+   * rather than fails, and so the many callers that have no mapping to offer
+   * need not know this exists.
+   *
+   * **`find` only, and that is AC8's first clause made structural.** *"Nothing
+   * that reads a mapping can write one."* Handed the whole `MappingStore`, this
+   * module could call `save` - it does not, but nothing stopped it, and the AC
+   * audit is what noticed the difference between those two statements. A
+   * mapping is written where a treasurer confirms one; an upload that quietly
+   * wrote one would mean a file's own headings became a stored mapping nobody
+   * agreed to, applied to every later export of that shape.
+   */
+  readonly mappings?: Pick<MappingStore, 'find'>
+
   readonly store: DocumentStore
   readonly repository: DocumentRepository
   readonly extractions: ExtractionRepository
@@ -206,7 +251,14 @@ async function ingestOne(
     // Everything above is durable now. Reading happens after, so a document
     // that cannot be read is still held and a corrected export needs no
     // re-upload — and a failed read cannot cost what was already stored.
-    const reading = read(assessment.contentType, bytes, documentKind, deps)
+    const reading = await read(
+      assessment.contentType,
+      bytes,
+      documentKind,
+      uploadedBy,
+      filename,
+      deps,
+    )
 
     if (reading === 'no-reader') {
       // Already-held wins here. The treasurer uploaded this file before, and
@@ -221,7 +273,15 @@ async function ingestOne(
     if (!reading.ok) {
       // Nothing is written and nothing is deleted. On a re-ingest the previous
       // set is still there, because replacement has not been reached.
-      return { filename, outcome: 'unreadable', documentId: recorded.id }
+      //
+      // The first problem's reason travels with the outcome. It is the whole of
+      // AC2's "visible rather than silent": without it, a file needing a column
+      // mapping and a file that will not open are one word to the treasurer.
+      const reason = reading.problems[0]?.reason
+
+      return reason === undefined
+        ? { filename, outcome: 'unreadable', documentId: recorded.id }
+        : { filename, outcome: 'unreadable', documentId: recorded.id, reason }
     }
 
     // Replacement only now, with a complete validated set in hand. This is the
@@ -364,13 +424,26 @@ type Reading = ReturnType<typeof readRows> | 'no-reader'
  *
  * `no-reader` stays distinct from `unreadable-file` here as it always has: a
  * type nothing reads yet is *held* for a human, which is the outcome above.
+ *
+ * ## And then the treasurer's saved mapping, if they have one
+ *
+ * Story 5.7's AC2. The mapping goes here and nowhere else. `toRectangle` has
+ * just produced rows whose first is the export's own heading row, and `applyMapping` turns exactly
+ * that into a rectangle headed by the *importer's* vocabulary - which is what
+ * `readRows` already expects. Everything downstream is unchanged and does not
+ * know a mapping was involved.
+ *
+ * Async because the lookup is. That cost is one `await` at the single call site,
+ * against putting the lookup where the shape is not yet known.
  */
-function read(
+async function read(
   contentType: string,
   bytes: Uint8Array,
   documentKind: DocumentKind,
+  uploadedBy: string,
+  filename: string,
   deps: IngestDependencies,
-): Reading {
+): Promise<Reading> {
   const rectangle = toRectangle(contentType, bytes, deps.workbooks)
 
   if (!rectangle.ok) {
@@ -383,7 +456,67 @@ function read(
       : { ok: false, problems: [{ reason: 'unreadable-file' }] }
   }
 
-  return readRows(rectangle.rows, documentKind)
+  return readRows(
+    await mapped(rectangle.rows, documentKind, uploadedBy, filename, deps),
+    documentKind,
+  )
+}
+
+/**
+ * The saved mapping applied, or the rows exactly as they arrived.
+ *
+ * Three ways this declines to act, and each is a decision rather than an
+ * oversight:
+ *
+ * - **No store configured.** An unconfigured deploy must ingest exactly as it
+ *   did before this story, so an absent `mappings` is not an error.
+ * - **No mapping for this shape.** `null` means nobody has mapped this export,
+ *   which is what sends the treasurer to the wizard. Not an error either.
+ * - **The store failed.** Caught, because a mapping lookup must not be able to
+ *   fail an upload. The file then reads as it would with no mapping - which for
+ *   a non-standard heading row is a refusal the treasurer is shown, not a wrong
+ *   import they are not. Failing *open* here would mean a database blip silently
+ *   turning a mapped export into an unreadable one, which is the safe direction.
+ *
+ * The shape key is computed from the rectangle's own headings, so a mapping can
+ * only be found for the exact heading row - in the exact order - it was built
+ * against. That is the whole defence against the disaster case: a mapping is a
+ * list of *positions*, so one applied to a file whose columns moved reads every
+ * value into the wrong field, and every value is still plausible there.
+ */
+async function mapped(
+  rows: readonly (readonly string[])[],
+  documentKind: DocumentKind,
+  uploadedBy: string,
+  /** Only so a failed lookup can be reported against the file it happened on. */
+  filename: string,
+  deps: IngestDependencies,
+): Promise<readonly (readonly string[])[]> {
+  if (!deps.mappings) return rows
+
+  const headings = readHeadings(rows)
+  if (!headings.ok) return rows
+
+  try {
+    const saved = await deps.mappings.find(
+      uploadedBy,
+      documentKind,
+      shapeKey(documentKind, headings.headings),
+    )
+
+    return saved ? applyMapping(rows, saved.mapping) : rows
+  } catch (error) {
+    /**
+     * Reported, not merely swallowed. Failing open is right - a mapping lookup
+     * must not be able to fail an upload - but a store that is down then looks
+     * exactly like a store with no mapping, and the treasurer's export goes to
+     * the wizard they already completed with nothing in any log saying why.
+     * Raised by CodeRabbit.
+     */
+    deps.onError?.(error, filename)
+
+    return rows
+  }
 }
 
 export async function ingest(

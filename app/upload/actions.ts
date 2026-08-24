@@ -1,59 +1,29 @@
 'use server'
 
 import { auth } from '@/adapters/auth/auth'
-import { createPostgresDocumentRepository } from '@/adapters/db/document-repository-postgres'
-import { createPostgresExtractionRepository } from '@/adapters/db/extraction-repository-postgres'
-import { readWorkbook } from '@/adapters/extraction/workbook-sheetjs'
-import { createPaymentRepository } from '@/adapters/db/payment-repository-postgres'
-import { createDuesReader } from '@/adapters/db/dues-reader-postgres'
-import { createInvoiceReader } from '@/adapters/db/invoice-reader-postgres'
-import { createFindingRegister } from '@/adapters/db/finding-postgres'
-import {
-  createBoardRecipients,
-  createFindingAlertLedger,
-} from '@/adapters/db/finding-alert-postgres'
-import { createFindingReader } from '@/adapters/db/finding-reader-postgres'
-import { createAlerting } from '@/adapters/mail/mail-sender-http'
-import { createQuarantine } from '@/adapters/db/quarantine-postgres'
-import { createRollRepository } from '@/adapters/db/roll-repository-postgres'
-import { createUnitDirectory } from '@/adapters/db/unit-directory-postgres'
-import { createVendorDirectory } from '@/adapters/db/vendor-directory-postgres'
-import { createS3DocumentStore } from '@/adapters/storage/document-store-s3'
 import {
   MAX_FILES_PER_UPLOAD,
   MAX_UPLOAD_BATCH_BYTES,
 } from '@/core/ingestion/acceptance'
 import { isDocumentKind } from '@/core/extraction/record'
 import { ingest } from '@/core/ingestion/ingest'
+import { ingestionDependencies } from '../ingestion-dependencies'
 import type { UploadState } from './upload-state'
 
 /**
- * The upload action: the composition root for ingestion.
+ * The upload action.
  *
- * This is the only place the adapters and the domain meet. Everything it does
- * with a file is decided in `core/ingestion` — what is accepted, what it hashes
- * to, where it goes, what the treasurer is told. This function's whole job is to
- * establish who is uploading, turn `FormData` into bytes, and hand over.
- */
-
-/**
- * Built once for the process, not once per request.
+ * Everything it does with a file is decided in `core/ingestion` — what is
+ * accepted, what it hashes to, where it goes, what the treasurer is told. This
+ * function's whole job is to establish who is uploading, turn `FormData` into
+ * bytes, and hand over.
  *
- * The S3 store reuses one client for its own lifetime, so constructing a store
- * per upload would open a socket pool per upload and the reuse would count for
- * nothing. Module scope is safe here precisely because neither factory reads its
- * environment at construction — that is the property `next build` depends on,
- * and both adapters have a test for it.
+ * **The composition root moved** in story 5.7, to
+ * `app/ingestion-dependencies.ts`. It stopped being "the only place the adapters
+ * and the domain meet" the moment a mapping change also re-imported through
+ * `ingest`: two hand-built dependency objects would drift, and every collaborator
+ * missing from one of them is a step that silently does not happen.
  */
-const documentStore = createS3DocumentStore()
-const documentRepository = createPostgresDocumentRepository()
-const extractionRepository = createPostgresExtractionRepository()
-
-/**
- * The vendor spreadsheet parser, behind the port, so `core/` never sees it.
- * `readWorkbook` already returns the rectangle the contract expects.
- */
-const workbookDecoder = { decode: readWorkbook }
 
 export async function uploadDocuments(
   _previous: UploadState,
@@ -128,59 +98,7 @@ export async function uploadDocuments(
     })),
   )
 
-  // Resolved once per request. Empty when mail is not configured, which
-  // `notifyFindings` treats as "do nothing" -- so an unconfigured deploy
-  // sends nothing and, importantly, claims nothing either. The named error
-  // goes to the log rather than being swallowed: a mailer that is silently
-  // absent is indistinguishable from one that had nothing to send.
-  const alerting = createAlerting((error) => {
-    console.error('[upload] alerting is not configured', error)
-  })
-
-  const outcomes = await ingest(files, uploaderId, {
-    store: documentStore,
-    repository: documentRepository,
-    extractions: extractionRepository,
-    workbooks: workbookDecoder,
-    vendors: createVendorDirectory(),
-    quarantine: createQuarantine(),
-    // The line that makes story 2.5 real for the format the pilot uses. A CSV
-    // never reaches the provider path, so this call site — not the deferred
-    // one — is where a deposit bank feed becomes payments.
-    units: createUnitDirectory(),
-    payments: createPaymentRepository(),
-    // Story 4.2, and the same shape of gap: absent, an uploaded invoice is
-    // stored and never compared against what came before.
-    invoices: createInvoiceReader(),
-    dues: createDuesReader(),
-    findings: createFindingRegister(),
-    // Story 4.8. Absent, a finding is raised and nobody is told -- and
-    // nothing fails. `alert-wiring.test.ts` asserts this call passes them.
-    //
-    // `alerting` is spread because it is empty when mail is not configured,
-    // which `notifyFindings` already treats as "do nothing". That keeps the
-    // configuration decision at this boundary, where the environment is
-    // readable, rather than inside `core/`, which imports nothing outward.
-    findingReader: createFindingReader(),
-    alerts: createFindingAlertLedger(),
-    recipients: createBoardRecipients(),
-    ...alerting,
-    // The line that makes an assessment roll do anything at all. Without it a
-    // roll is read, its extraction rows are stored, and no unit is created — so
-    // every deposit uploaded afterwards is held `unknown-unit`.
-    rolls: createRollRepository(),
-    // The real error goes to the server log, never to the page — its text can
-    // name a bucket, a path, or a library. The treasurer gets the per-file
-    // outcome instead.
-    // The filename is client-supplied, so it is passed as a structured field
-    // rather than interpolated into the line. Interpolating it lets a filename
-    // containing a newline forge log entries, and puts a name or an address —
-    // the very thing the hash-derived storage key keeps out of object storage —
-    // into the log store verbatim.
-    onError: (error, filename) => {
-      console.error('[upload] a file could not be ingested', { filename, error })
-    },
-  })
+  const outcomes = await ingest(files, uploaderId, ingestionDependencies('upload'))
 
   return { outcomes, error: null }
 }

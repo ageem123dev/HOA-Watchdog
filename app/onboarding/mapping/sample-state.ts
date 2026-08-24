@@ -47,3 +47,30 @@ export type SampleState =
   | { readonly status: 'error'; readonly error: string }
 
 export const EMPTY_SAMPLE_STATE: SampleState = { status: 'idle' }
+
+/**
+ * What confirming a mapping produced (story 5.7, AC3 and AC6).
+ *
+ * `replaced` is the distinction the whole second half of the story turns on. A
+ * first mapping is stored and that is the end of it; a *changed* mapping means
+ * documents already imported under the old one now read differently, and the
+ * treasurer has to be told before it happens. Collapsing the two into one
+ * `saved` would make the warning impossible to render.
+ */
+export type SaveState =
+  | { readonly status: 'idle' }
+  | { readonly status: 'saved' }
+  /**
+   * A mapping was replaced, so documents already imported under the old one now
+   * read differently.
+   *
+   * It carries no count. Working out how many documents are affected means
+   * reading their bytes back from object storage, and `actions.ts` may not reach
+   * it - that prohibition is what keeps the sample path away from the permanent
+   * record. The number AC6 puts in front of the treasurer comes from
+   * `previewReimport`, asked for by the module that owns the re-import.
+   */
+  | { readonly status: 'replaced' }
+  | { readonly status: 'error'; readonly error: string }
+
+export const EMPTY_SAVE_STATE: SaveState = { status: 'idle' }

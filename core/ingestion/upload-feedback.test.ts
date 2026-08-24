@@ -253,3 +253,42 @@ describe('uploadFeedback', () => {
     })
   })
 })
+
+describe('a file whose columns are not mapped (story 5.7, AC2)', () => {
+  /**
+   * AC2: the difference between "this file will not open" and "nobody has told
+   * us what its columns mean" must be visible. They shared one sentence, and it
+   * was the wrong one for the second: a treasurer was told their perfectly good
+   * export "may be damaged, or saved in another format" and sent to re-export
+   * it, when what they needed was the mapping wizard.
+   */
+  const notRecognised = {
+    filename: 'bank.csv',
+    outcome: 'unreadable',
+    documentId: 'doc-1',
+    reason: 'missing-headers',
+  } as const
+
+  it('does not blame the file', () => {
+    // The sentence it used to get: 'upload a clearer scan', said to a clean CSV.
+    expect(uploadFeedback(notRecognised).message).not.toMatch(/clearer scan|figures could not be read/i)
+  })
+
+  it('names the columns as the thing that is missing', () => {
+    expect(uploadFeedback(notRecognised).message).toMatch(/column/i)
+  })
+
+  it('still says it plainly to a file that genuinely would not open', () => {
+    // The control. Without it the branch could answer the mapping sentence for
+    // every unreadable file, which would be the same defect pointing the other
+    // way - and worse, because a damaged file would look mappable.
+    const wontOpen = { filename: 'x.csv', outcome: 'unreadable', documentId: 'doc-1' } as const
+
+    expect(uploadFeedback(wontOpen).message).toMatch(/clearer scan|figures could not be read/i)
+    expect(uploadFeedback(wontOpen).message).not.toMatch(/column/i)
+  })
+
+  it('still offers a replacement, because a corrected export is the way out', () => {
+    expect(uploadFeedback(notRecognised).offerReplacement).toBe(true)
+  })
+})
