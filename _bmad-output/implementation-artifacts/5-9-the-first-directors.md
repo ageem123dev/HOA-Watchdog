@@ -359,6 +359,50 @@ work. Now asserted absent, and adding a hidden `associationId` input fails it.
 Python string became a literal backspace while writing a regex. Story 5.6b's sweep failed the suite
 on it, unaided, in a file two stories' worth of guards were not written for.
 
+### The `ocr` round - 33 findings, 3 confirmed
+
+A complete run: `terminal_state: complete`, 13 of 13 items, none failed or waived.
+
+**The one that mattered was a hole this project had already found once, in the same directory.**
+`board-member-writers.test.ts` matched `\b(insert\s+into|update|delete\s+from)\s+board_member\b`, which
+`insert into public.board_member` walks straight past.
+
+`core/security/no-association-creation.test.ts` carries the optional schema qualifier and says why:
+the same bypass was found there on story 5.1b, by CodeRabbit, in both the CLI round and the MR round,
+and verified against the old pattern before the fix was written. I wrote a new guard in the same
+directory without it and reproduced the identical defect - which is what "reinventing a wheel that
+already has a documented shape" looks like in practice.
+
+The matcher now follows that precedent, with its own `describe('the matcher itself')` block: seven
+statements it must see, three near-misses it must not - including `board_member_audit`, where the
+trailing word boundary is what stops a guard flagging everything, which is as useless as flagging
+nothing.
+
+**A test that proved the throw but not the absence.** The ghost-inviter case asserted
+`rejects.toThrow()`, which shows the call failed and not that it failed *before* writing. The whole
+point of that refusal is that a director row with no association is invisible to every
+association-scoped read afterwards. It now asserts no row exists - and if the not-null constraint
+were ever relaxed, that assertion is what would notice rather than the throw disappearing quietly.
+
+**Refuted, with reasons.**
+
+- **The plaintext password in the DOM.** That is the hand-off this story deliberately chose, with its
+  cost recorded: the password travels by whatever channel the inviting director picks. A
+  copy-then-clear button is a real hardening and it is a different story. The finding also cites
+  browser history, which does not apply - nothing puts it in a URL.
+- **`auth()` lacking a try/catch on the page.** Every page in this project does the same;
+  `app/upload/page.tsx` is the model this one follows. Changing it here alone would make this page
+  inconsistent rather than safer.
+- **The fragile variable-name regex.** Its own example is what the code already says, so it passes;
+  the general point about text assertions is true and is the accepted trade while the database half
+  skips.
+- **No audit log for password resets in the script.** Fair, and out of scope: the script is run by a
+  person holding the writer credential, and adding an audit trail for `board_member` is its own
+  decision rather than a line in this story.
+
+**Argus found none of the three.** Ingested at `cb09431` with recall 0 - the sixth consecutive
+measurement of that kind here.
+
 ### Review Findings
 
 ### Completion Notes List

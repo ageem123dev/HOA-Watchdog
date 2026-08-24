@@ -65,7 +65,19 @@ function sources(from: string): string[] {
   return found
 }
 
-const WRITES = /\b(insert\s+into|update|delete\s+from)\s+board_member\b/i
+/**
+ * A write to `board_member`, in any of the shapes this repository could hold.
+ *
+ * The optional schema qualifier follows `no-association-creation.test.ts`, which
+ * carries it because `insert into public.association` bypassed the first version
+ * of that guard entirely. This one was written without it and had the same hole.
+ *
+ * `\b` at the end matters as much: without it `board_member_audit` would read as
+ * a write to `board_member`, and a guard that flags everything is as useless as
+ * one that flags nothing.
+ */
+const WRITES =
+  /\b(?:insert\s+into|update|delete\s+from)\s+(?:(?:"[^"]+"|[a-z_][a-z0-9_$]*)\s*\.\s*)?"?board_member"?\b/i
 
 const writers = [...sources('app'), ...sources('core'), ...sources('adapters'), ...sources('scripts')]
   .filter((path) => WRITES.test(readFileSync(path, 'utf8')))
@@ -81,6 +93,43 @@ const ALLOWED: Readonly<Record<string, string>> = {
   'adapters/auth/user-directory-postgres.ts':
     'updates a hash only, on sign-in, for a member who already exists',
 }
+
+describe('the matcher itself', () => {
+  /**
+   * A guard whose matcher is wrong reports success forever. The sweep below
+   * cannot tell "nothing writes" from "the regex never matches anything", so
+   * these say which.
+   *
+   * **The schema qualifier is not decoration.** `core/security/no-association-creation.test.ts`
+   * carries the same note, and it is there because `insert into public.association`
+   * walked straight past the first version of that guard - raised by CodeRabbit
+   * on story 5.1b, in both rounds. `public.` is the form somebody reaches for
+   * the moment a `search_path` looks ambiguous. This guard was written without
+   * it and had the identical hole; ocr found it.
+   */
+  it.each([
+    'insert into board_member (email) values ($1)',
+    'insert into public.board_member (email) values ($1)',
+    'insert into "public"."board_member" (email) values ($1)',
+    'INSERT INTO Board_Member (email) values ($1)',
+    'update board_member set password_hash = $1',
+    'update public.board_member set password_hash = $1',
+    'delete from board_member where id = $1',
+  ])('sees %s as a write', (statement) => {
+    expect(WRITES.test(statement)).toBe(true)
+  })
+
+  it.each([
+    'select id from board_member where email = $1',
+    'insert into board_member_audit (id) values ($1)',
+    'update association set name = $1',
+  ])('does not see %s as a write', (statement) => {
+    // A matcher that flags everything is as useless as one that flags nothing,
+    // and `board_member_audit` is the near-miss: `\\b` must not fall between
+    // `member` and `_audit`.
+    expect(WRITES.test(statement)).toBe(false)
+  })
+})
 
 describe('the set of things that can write board_member is closed', () => {
   it('has exactly the writers this project has decided about', () => {

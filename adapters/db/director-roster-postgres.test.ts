@@ -202,8 +202,20 @@ describeWithDatabase('against a real database', () => {
      * association is invisible to every association-scoped read afterwards, so
      * creating one silently would be worse than failing.
      */
-    await expect(
-      roster().add('00000000-0000-0000-0000-000000000000', `${prefix}-ghost@example.com`, null, hash),
-    ).rejects.toThrow()
+    const email = `${prefix}-ghost@example.com`
+
+    await expect(roster().add('00000000-0000-0000-0000-000000000000', email, null, hash)).rejects.toThrow()
+
+    /**
+     * And nothing was written. `rejects.toThrow()` alone proves the call failed,
+     * not that it failed *before* creating anything — and the whole point of the
+     * refusal is that a director row with no association would be invisible to
+     * every association-scoped read afterwards. If the not-null constraint were
+     * ever relaxed, the throw would go and this assertion is what would notice.
+     * Raised by ocr.
+     */
+    const found = await admin.query(`select id from board_member where email = $1`, [email])
+
+    expect(found.rowCount).toBe(0)
   })
 })
