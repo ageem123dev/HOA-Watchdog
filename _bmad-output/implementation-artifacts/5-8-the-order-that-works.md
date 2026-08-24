@@ -444,6 +444,42 @@ CodeRabbit round**, because that is what the review is joined to.
 After repair: 2 compared, recall 0, 2 lessons. Argus found neither, which is the fifth consecutive
 measurement of that kind on this project.
 
+### The integration pass - the guarantee was one entry point wide
+
+Run over the whole branch at once, which is what this step is for. It found the gap that follows
+directly from where the guard had to live, and that no per-task test could see.
+
+**The story's guarantee is not "the upload action refuses deposits". It is "deposits cannot land
+before a roll."** Those are the same sentence only while `ingest` has exactly the callers it has
+today.
+
+Both existing facts are asserted. `app/upload/actions.test.ts` proves the upload path is guarded;
+`reimport-boundary.test.ts` proves the re-import never reaches the census. **Neither says there is
+nothing else.** A third caller - a bulk import, a scheduled job, an admin route - would satisfy every
+test in this story and reopen the trap completely, because the guard lives at one entry point rather
+than inside `ingest`.
+
+And it cannot live inside `ingest`: the re-import calls `ingest` for exactly the deposits this rule is
+about, and refusing them there would break a mapping change for a reason about first-time setup. The
+price of enforcing per entry point is that **the set of entry points must be closed, and closed
+visibly**.
+
+`core/ingestion/ingest-callers.test.ts` closes it. It scans `app/`, `core/` and `adapters/` for files
+importing `ingest` as a *value* - a type-only import cannot call anything - and requires the set to
+equal a named list, each entry carrying what it does about this rule:
+
+- `app/upload/actions.ts` - refuses deposits until the association holds units
+- `app/onboarding/mapping/reimport-actions.ts` - exempt, because a re-import is not a first upload
+
+Failing it is the prompt to decide about a new caller, not an obstacle to adding one.
+
+**Proven by adding a third caller.** A probe file importing and calling `ingest` fails the test; the
+file was then removed and the suite re-run green. The two controls matter as much: the scanner must
+find a non-empty set, and must find `app/upload/actions.ts` specifically - if it cannot see the file
+that *does* call `ingest`, its silence about any other file means nothing.
+
+Argus reviewed the whole branch afterwards and found nothing.
+
 ### Review Findings
 
 ### Completion Notes List
