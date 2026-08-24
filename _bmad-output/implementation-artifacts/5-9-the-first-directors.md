@@ -1,5 +1,5 @@
 ---
-Status: review
+Status: done
 baseline_commit: d2a54db
 merge_request: 87
 ---
@@ -483,15 +483,114 @@ not before.
 
 ### Review Findings
 
+#### The CodeRabbit MR round on !87 - six findings, six confirmed
+
+Reviewed `d66c373..2f15777`, 16 files. Every finding checked against the real file before anything
+was changed; none were refuted. **Two were guards of mine that pass whether or not the behaviour
+they guard is present** - the defect class this project keeps finding, and both were written in this
+story's own review-fix commits.
+
+1. **The drift detector that detected nothing** (`core/auth/provisioned-director-can-sign-in.test.ts`).
+   The file's header claimed that copying `.trim().toLowerCase()` from the adapter rather than
+   importing it was what would catch the two sides drifting apart. It was not. `asStored` folds the
+   address itself and the adapter is never called, so the folding could be deleted from the adapter
+   and all four behavioural cases would keep passing.
+
+   **Proven by mutation**: with `.toLowerCase()` removed from the adapter, `4 passed`. Only the new
+   assertion - which reads the adapter source and pins the exact expression the fixture copied -
+   fails. The comment now says which case holds which side.
+
+2. **The scoping assertion that passed when nothing was written**
+   (`adapters/db/director-roster-postgres.test.ts`). The disaster-case test ignored `add`'s return
+   value and asserted with `not.toBe` through an optional chain. If the insert wrote nothing,
+   `rows[0]` is `undefined`, and `undefined` is not the other association's id - so the test passed
+   for the disaster. Now asserts `add` returned `true` and compares positively against the inviting
+   director's own association.
+
+3. **The cross-association check was advisory** (`scripts/add-board-member.mjs`, major). The
+   `select ... where email = $1` guard Argus asked for is a *separate statement*, so two invocations
+   can both read "no such address" before either writes; the second then resets the password of the
+   account the first created, in another association. The condition moves into the statement that
+   does the writing - `where board_member.association_id = excluded.association_id` - where nothing
+   can interleave. The separate check stays, because it is what turns the refusal into a sentence
+   rather than a silent no-op. The empty `returning` this now implies is read as the signal it is,
+   instead of being destructured into a `TypeError` reported as a database fault.
+
+4. **Presence is not shape** (`app/directors/actions.ts`). The action rejected an empty address only.
+   A server action is its own entry point, so the field's `type="email"` guards nothing, and `email`
+   is unique across `board_member` while the product refuses duplicates rather than resetting them -
+   so a row created against a malformed address occupies it permanently. The check is deliberately
+   minimal; a stricter pattern rejects real addresses, which is the more expensive failure. A control
+   case asserts the plus-addressed and multi-label forms still get through.
+
+5. **The live region holding the password was mounted with its content**
+   (`app/directors/director-form.tsx`). The component already carried this exact rule in a comment -
+   added when CodeRabbit raised it against the *error* region on the CLI round - and the success
+   section did not follow it. That is the section holding the only copy of the password, so a
+   director using a screen reader was told nothing at the one moment it exists.
+
+6. **An unreachable guard** (trivial). A `configured` early-return inside an `afterAll` belonging to
+   a suite that is `describe.skip` when unconfigured. No test could fail if it were removed, which is
+   this project's own standard for keeping a defensive guard.
+
+**One thing this round found about itself.** The first assertion written for finding 3's empty
+`returning` matched the bare text `rows.length === 0` - and it passed against the *unfixed* script,
+because the association-listing branch two dozen lines above already contains that phrase. It was
+rewritten to anchor on the insert's own `returning` clause. Found only by running it before applying
+the fix, which is the whole difference between a guard and a decoration.
+
+The ast-grep SQL-injection notes on the fixture cleanup are false positives: the prefix is passed as
+a bound parameter, not interpolated into the statement.
+
 ### Completion Notes List
 
+- **The script was narrowed, not retired.** The first director of an association cannot be added
+  in-product, because nobody is signed in and there is no session to derive an association from.
+  That is not a gap to design around - it is the same rule that stops one board enrolling somebody
+  into another.
+- **Narrowing it exposed that it could not bootstrap a second association at all.** The inline
+  `select id from association` returns two rows once one exists, and raises. Story 5.1 made that
+  representable, so the one case the script is still for had been silently broken for some time.
+- **Every reviewer and both audits found something.** Argus: a cross-association password reset this
+  story's own change had made worse, and an over-escaped regex that made a negative assertion
+  tautologically true. `ocr`: the writer guard missing the schema-qualified insert - the identical
+  hole `no-association-creation.test.ts` already carried a fix for, reproduced in a new guard beside
+  it. CodeRabbit CLI: four majors. The AC audit: two clauses true by accident and asserted nowhere.
+  The integration pass: nothing proved the provisioned account could sign in.
+- **Standing caveat.** No database is configured on this machine, so every database half **skipped**.
+  The tenancy SQL is asserted as text and has never executed. Finding 3's concurrency case in
+  particular is argued and pinned as text, not demonstrated against two live clients.
+- Gates green locally on the final head: lint (1 pre-existing warning in `tsconfig-coverage.test.ts`),
+  build, **4509 tests passing**, `tsc --noEmit` (1 pre-existing error in
+  `core/ingestion/upload-limits.test.ts`).
+
 ### File List
+
+**Added**
+
+- `core/ports/director-roster.ts`
+- `adapters/db/director-roster-postgres.ts` + `.test.ts`
+- `app/directors/page.tsx` + `.test.tsx`
+- `app/directors/director-form.tsx` + `.test.tsx`
+- `app/directors/director-state.ts`
+- `app/directors/actions.ts` + `.test.ts`
+- `scripts/board-member-arguments.ts` + `.test.ts`
+- `scripts/add-board-member.test.ts`
+- `core/security/board-member-writers.test.ts`
+- `core/auth/provisioned-director-can-sign-in.test.ts`
+
+**Modified**
+
+- `scripts/add-board-member.mjs`
 
 ## Change Log
 
 | Date | Change |
 | --- | --- |
 | 2026-08-24 | Story created from the epic row, `scripts/add-board-member.mjs` and AD-3 |
+| 2026-08-24 | Implemented test-first across five tasks; local reviews (Argus, `ocr`, CodeRabbit CLI), AC audit and integration pass applied |
+| 2026-08-24 | MR !87 opened |
+| 2026-08-24 | CodeRabbit MR round: six findings, six confirmed, all fixed - two were vacuous guards of my own |
 
 ## Questions for the author — answered 2026-08-24
 
