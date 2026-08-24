@@ -1,7 +1,7 @@
 ---
-Status: ready-for-dev
+Status: review
 baseline_commit: d2a54db
-merge_request:
+merge_request: 87
 ---
 
 # Story 5.9 — the first directors
