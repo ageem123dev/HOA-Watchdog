@@ -65,19 +65,29 @@ export function DirectorForm() {
         {state.status === 'error' ? state.error : ''}
       </p>
 
-      {state.status === 'added' && (
-        <section style={styles.result} aria-live="polite">
-          <h2 style={styles.resultHeading}>{state.email} can now sign in</h2>
-          <p style={styles.body}>
-            Give them this password. It is not stored anywhere and{' '}
-            <strong>cannot be shown again</strong> — if it is lost, the account has to be added
-            afresh.
-          </p>
-          <p data-testid="one-time-password" style={styles.password}>
-            {state.password}
-          </p>
-        </section>
-      )}
+      {/*
+        Mounted unconditionally for the same reason as the error region above,
+        which this originally failed to follow - and this is the region holding
+        the only copy of the password, so a director using a screen reader would
+        have been told nothing at the one moment it exists. `styles.result` is a
+        margin and nothing else, so the empty region shows nothing. Raised by
+        CodeRabbit on the merge request.
+      */}
+      <section id="director-result" style={styles.result} aria-live="polite">
+        {state.status === 'added' && (
+          <>
+            <h2 style={styles.resultHeading}>{state.email} can now sign in</h2>
+            <p style={styles.body}>
+              Give them this password. It is not stored anywhere and{' '}
+              <strong>cannot be shown again</strong> — if it is lost, the account has to be added
+              afresh.
+            </p>
+            <p data-testid="one-time-password" style={styles.password}>
+              {state.password}
+            </p>
+          </>
+        )}
+      </section>
     </>
   )
 }

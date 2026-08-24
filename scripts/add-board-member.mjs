@@ -139,12 +139,31 @@ try {
     // `on conflict do update` is a password reset, and it is deliberate here.
     // `/directors` refuses a duplicate address instead, so this is the only way
     // to recover a director who is locked out.
+    // And the `where` is what makes the refusal above real rather than
+    // advisory. That check is a separate statement, so two invocations can both
+    // read "no such address" before either writes, and the second would reset
+    // the first's password in another association. Evaluated here, inside the
+    // statement doing the writing, nothing can interleave. The separate check
+    // stays because it is what turns the refusal into a sentence.
     `insert into board_member (email, password_hash, display_name, association_id)
           values ($1, $2, $3, $4)
      on conflict (email) do update set password_hash = excluded.password_hash
+           where board_member.association_id = excluded.association_id
        returning id, (xmax = 0) as created`,
     [email, passwordHash, displayName, association.id],
   )
+
+  if (rows.length === 0) {
+    // The conflict fired and the `where` suppressed the update: the address
+    // belongs to another association. Only reachable when a concurrent run
+    // claimed it after the check above, which is why the wording differs.
+    // Without this, destructuring below throws a TypeError reported as a
+    // database fault - a refusal by accident that says nothing true.
+    console.error(
+      `${email} was claimed by another association while this ran. Nothing was changed.`,
+    )
+    process.exit(1)
+  }
 
   const { id, created } = rows[0]
   console.log(`\n${created ? 'Created' : 'Password reset for'} board member`)

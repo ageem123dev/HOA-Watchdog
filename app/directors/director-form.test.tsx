@@ -87,6 +87,28 @@ describe('the form a director fills in', () => {
     expect(region?.textContent).toBe('')
   })
 
+  it('keeps the success region mounted before there is a password to announce', () => {
+    /**
+     * The same rule as the error region, one section over - and this is the
+     * section holding the only copy of the password. A live region created
+     * *with* its content is not announced, so a director using a screen reader
+     * is told nothing at the one moment the password exists, and it cannot be
+     * shown again.
+     *
+     * The component already carried that rule in a comment, applied to the error
+     * region and not to this one. Asserting the empty case is what tells the two
+     * implementations apart: every other assertion in this file passes against
+     * the conditional version. Raised by CodeRabbit on the merge request.
+     */
+    render(<DirectorForm />)
+
+    const region = document.getElementById('director-result')
+
+    expect(region).not.toBeNull()
+    expect(region?.getAttribute('aria-live')).toBe('polite')
+    expect(region?.textContent).toBe('')
+  })
+
   it('points the address field at the error region, so the two are connected', () => {
     render(<DirectorForm />)
 

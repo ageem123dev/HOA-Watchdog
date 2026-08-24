@@ -123,6 +123,42 @@ describe('what the review found in the first version', () => {
     expect(code).toMatch(/association_id !== association\.id/)
   })
 
+  it('scopes the password reset inside the writing statement, not before it', () => {
+    /**
+     * The refusal above is advisory. `select association_id ... where email = $1`
+     * is a separate statement, so two invocations can both read "no such
+     * address" before either writes, and the second resets the password of the
+     * account the first just created in another association - the exact outcome
+     * the check exists to refuse.
+     *
+     * `where board_member.association_id = excluded.association_id` moves the
+     * condition into the statement that does the writing, where nothing can
+     * interleave. The separate check stays, because it is what turns the refusal
+     * into a sentence instead of a silent no-op. Raised by CodeRabbit on the
+     * merge request.
+     */
+    expect(code).toMatch(
+      /do update set password_hash[\s\S]{0,160}where board_member\.association_id = excluded\.association_id/,
+    )
+  })
+
+  it('refuses rather than crashing when that condition suppresses the update', () => {
+    /**
+     * With the `where` in place, a conflict in another association updates
+     * nothing and `returning` yields no row. Destructuring `rows[0]` there
+     * throws a TypeError caught as "Failed: Cannot destructure..." - a refusal
+     * by accident, reported as a database fault. The empty result is the signal
+     * the guard fired and has to be read as one.
+     */
+    // Tied to the insert's own result. A bare `rows.length === 0` is already
+    // satisfied by the association-listing branch two dozen lines above, so it
+    // passed against the unfixed script - found by running it before the fix,
+    // which is the only thing that separates a guard from a decoration.
+    expect(code).toMatch(
+      /returning id, \(xmax = 0\) as created[\s\S]{0,400}rows\.length === 0/,
+    )
+  })
+
   it('lists the associations that do exist when the name matches none', () => {
     /**
      * The message promises "There are:" and then prints nothing, because the

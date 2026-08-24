@@ -25,7 +25,12 @@
  * the roster *would have stored* and ask the real sign-in path about it.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
+
+import { neutralise } from '@/core/ports/declared-members'
 
 import type { UserDirectory } from '../ports/user-directory'
 import { authenticate } from './authenticate'
@@ -35,9 +40,16 @@ import { hashPassword } from './password'
  * What the roster writes, spelled the way the roster spells it.
  *
  * `email.trim().toLowerCase()` is copied from `director-roster-postgres.ts`
- * deliberately rather than imported: this file exists to catch the two sides
- * drifting apart, and sharing the folding would make that undetectable. The
- * assertion below is what notices if the adapter stops doing this.
+ * deliberately rather than imported: sharing the folding would make drift
+ * between the two sides undetectable.
+ *
+ * **The copy alone catches nothing.** `asStored` folds the address itself and
+ * the adapter is never called, so every behavioural case below keeps passing
+ * after the adapter stops folding - a guard that passes whether or not the
+ * behaviour it guards is present. The first version of this comment claimed
+ * otherwise; CodeRabbit caught the claim on the merge request. What makes it
+ * true is the one assertion at the bottom of this file, which reads the adapter
+ * and fails when the copy stops being faithful.
  */
 interface StoredDirector {
   readonly id: string
@@ -81,8 +93,9 @@ describe('an account added through the product', () => {
      * way when adding a colleague and that colleague types it another way when
      * signing in — and the row was stored in whatever case the adapter chose.
      *
-     * If the roster stopped lower-casing, this fails. If `authenticate` stopped
-     * normalising, this fails. Nothing else in the story would notice either.
+     * If `authenticate` stopped normalising, this fails. The roster side is
+     * held by `the fixture still matches the adapter` below - not by this case,
+     * which folds the address itself.
      */
     const password = 'aaaa-bbbb-cccc-dddd'
     const stored = await asStored('  New.Director@Example.com  ', password)
@@ -124,5 +137,29 @@ describe('an account added through the product', () => {
     })
 
     expect(result.kind).toBe('rejected')
+  })
+})
+
+describe('the fixture still matches the adapter', () => {
+  it('folds the address exactly the way the adapter does', () => {
+    /**
+     * What makes the copy above a drift detector rather than duplication.
+     *
+     * `asStored` spells the folding out because the adapter inlines it and
+     * exports nothing to import. That is only safe while the two spellings
+     * agree - and nothing else in this file can tell that they have stopped,
+     * because every case here folds its own input.
+     *
+     * `director-roster-postgres.test.ts` asserts the adapter lower-cases, and
+     * accepts `lower($2)` as an alternative. This is narrower on purpose: it
+     * pins the exact expression this file copied, trim included, so a move to
+     * SQL-side folding fails here and points at the fixture that needs changing.
+     */
+    const adapter = readFileSync(
+      join(__dirname, '..', '..', 'adapters', 'db', 'director-roster-postgres.ts'),
+      'utf8',
+    )
+
+    expect(neutralise(adapter).commentsBlanked).toContain('.trim().toLowerCase()')
   })
 })

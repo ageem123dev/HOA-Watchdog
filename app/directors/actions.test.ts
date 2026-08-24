@@ -127,6 +127,38 @@ describe('the ways it must refuse', () => {
     expect(add).not.toHaveBeenCalled()
   })
 
+  it('refuses an address that is not an address at all', async () => {
+    /**
+     * A server action is its own entry point, so `type="email"` on the field
+     * guards nothing here - a caller posts whatever it likes. Without this the
+     * adapter lower-cases the string and inserts it, and the row holds a working
+     * password hash against an address nobody can ever receive mail at.
+     *
+     * `email` is unique across `board_member`, so that row also occupies the
+     * address for good: the product refuses a duplicate rather than resetting
+     * it, which means a typo cannot be corrected by adding the colleague again.
+     * Raised by CodeRabbit on the merge request.
+     */
+    for (const notAnAddress of ['nonsense', 'no@domain', 'two@@example.com', 'spaced out@e.com']) {
+      const state = await provision({ email: notAnAddress, displayName: '' })
+
+      expect(state.status).toBe('error')
+    }
+
+    expect(add).not.toHaveBeenCalled()
+  })
+
+  it('still accepts the ordinary shapes a real address takes', async () => {
+    // The control. A validator that rejects everything satisfies the assertion
+    // above while refusing every director this story exists to add - and the
+    // plus-addressed and multi-label cases are the ones a careless pattern eats.
+    for (const address of ['a@b.co', 'first.last+board@example.co.uk', 'UPPER@Example.COM']) {
+      const state = await provision({ email: address, displayName: '' })
+
+      expect(state.status).toBe('added')
+    }
+  })
+
   it('reports a failure instead of throwing out of the action', async () => {
     // 2f. An unhandled rejection is a generic 500 with the form gone and
     // nothing said about whether the account exists.

@@ -133,8 +133,9 @@ describeWithDatabase('against a real database', () => {
   })
 
   afterAll(async () => {
-    if (!configured) return
-
+    // No `if (!configured) return` here: this suite is `describe.skip` when it
+    // is unconfigured, so the hook never runs and no test could fail if the
+    // guard were removed. Raised by CodeRabbit on the merge request.
     await admin.query(`delete from board_member where email like $1`, [`${prefix}%`])
     await admin.query(`delete from association where name like $1`, [`${prefix} %`])
     await admin.end()
@@ -168,18 +169,32 @@ describeWithDatabase('against a real database', () => {
      */
     const email = `${prefix}-scoped@example.com`
 
-    await roster().add(otherBoardInviter, email, null, hash)
+    /**
+     * Asserted positively, and the insert asserted to have happened at all.
+     *
+     * The first version was `expect(found.rows[0]?.association_id).not.toBe(...)`
+     * with the return value ignored. If nothing had been written, `rows[0]` is
+     * `undefined`, `undefined` is not the other association's id, and the
+     * assertion passed for the exact failure it exists to catch. Raised by
+     * CodeRabbit on the merge request.
+     */
+    expect(await roster().add(otherBoardInviter, email, null, hash)).toBe(true)
 
     const found = await admin.query<{ association_id: string }>(
       `select association_id from board_member where email = $1`,
       [email],
+    )
+    const right = await admin.query<{ association_id: string }>(
+      `select association_id from board_member where id = $1`,
+      [otherBoardInviter],
     )
     const wrong = await admin.query<{ association_id: string }>(
       `select association_id from board_member where id = $1`,
       [inviter],
     )
 
-    expect(found.rows[0]?.association_id).not.toBe(wrong.rows[0]!.association_id)
+    expect(found.rows[0]!.association_id).toBe(right.rows[0]!.association_id)
+    expect(found.rows[0]!.association_id).not.toBe(wrong.rows[0]!.association_id)
   })
 
   it('refuses an address already on the board without touching its password', async () => {

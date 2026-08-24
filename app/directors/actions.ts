@@ -19,7 +19,18 @@ export async function addDirector(
   }
 
   const email = String(formData.get('email') ?? '').trim()
-  if (email === '') {
+
+  /**
+   * Shape, not just presence. A server action is its own entry point, so the
+   * field's `type="email"` guards nothing here - and `email` is unique across
+   * `board_member` while the product refuses duplicates rather than resetting
+   * them, so a row created against a malformed address occupies it for good.
+   *
+   * Deliberately minimal: one `@`, a dot in the domain, no whitespace. Anything
+   * stricter starts rejecting real addresses, which is the more expensive
+   * failure - this refuses a typo, it does not prove the address receives mail.
+   */
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { status: 'error', error: 'Enter the email address the new director will sign in with.' }
   }
 
