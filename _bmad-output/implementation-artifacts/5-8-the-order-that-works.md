@@ -480,6 +480,37 @@ that *does* call `ingest`, its silence about any other file means nothing.
 
 Argus reviewed the whole branch afterwards and found nothing.
 
+### The CodeRabbit MR round - 1 finding, refuted with evidence
+
+The verdict was checked the way 5.7 taught: the **summary** note's commit range covers this head
+(`427949f` to `218fcc3`) *and* it does not say "Review limit reached". On 5.7 only the third of those
+was checked and a review that never ran was reported as clean.
+
+One inline finding, and acting on it would have broken the suite.
+
+**The claim.** `unit-census-postgres.test.ts` gates its database half on
+`WATCHDOG_WRITER_DATABASE_URL` and `DATABASE_URL`, where "the established adapter database suites"
+use the writer and the **reader** URLs - so this suite would skip in an environment where the others
+run.
+
+**Why it is wrong.** `createUnitCensus()` uses `writerPool()`, which resolves through
+`readWriterDatabaseUrl` and reads `WATCHDOG_WRITER_DATABASE_URL`. The database half calls that
+factory, so the writer URL is genuinely required. `DATABASE_URL` is the admin connection the fixture
+uses to create the association, the member and the units. Dropping either from the gate lets the
+suite run and then fail on connect.
+
+**And the premise is not a convention.** Across `adapters/db` the gate is `writerUrl && adminUrl` in
+seven suites, `writerUrl && readerUrl` in four, `writerUrl` alone in two, and all three in one. This
+file follows the most common - and follows it because of what it actually connects to, not by
+imitation. `WATCHDOG_READER_DATABASE_URL` is not involved at all: nothing here touches the reader,
+and migration 003 revoking the reader's access to `board_member` is the whole reason the adapter uses
+the writer pool.
+
+Answered on the thread with that evidence rather than silently ignored. This is the case the
+"verify every finding against the real file" rule exists for: the finding is plausible, specific, and
+cites a convention - and following it would have produced a suite that skips when it should run and
+crashes when it does.
+
 ### Review Findings
 
 ### Completion Notes List
@@ -525,20 +556,20 @@ four database assertions skipped. The SQL is asserted as text and has never exec
 
 ### File List
 
-**Added (4)**
+**Added (5)**
 
 - `adapters/db/unit-census-postgres.test.ts`
 - `adapters/db/unit-census-postgres.ts`
 - `app/upload/actions.test.ts`
+- `core/ingestion/ingest-callers.test.ts`
 - `core/ports/unit-census.ts`
 
-**Modified (8)**
+**Modified (7)**
 
 - `app/ingestion-dependencies.test.ts`
 - `app/upload/actions.ts`
 - `app/upload/upload-form.test.tsx`
 - `app/upload/upload-form.tsx`
-- `bmad-output/implementation-artifacts/5-8-the-order-that-works.md`
 - `core/mapping/reimport-boundary.test.ts`
 - `docs/upload-contract.md`
 - `docs/upload-contract.test.ts`
@@ -556,6 +587,11 @@ bookkeeping, not the story's code.
 | 2026-08-24 | The upload form states the order, as an enforced rule rather than advice |
 | 2026-08-24 | The re-import path and the shared composition asserted free of the census |
 | 2026-08-24 | `docs/upload-contract.md` rewritten: the order is enforced, and the recovery is named |
+| 2026-08-24 | AC audit: AC2 asserted for the first time — units, never a roll document |
+| 2026-08-24 | `ocr`: the section helper replaces a magic slice; a duplicate test removed |
+| 2026-08-24 | CodeRabbit CLI: the byte-read asserted directly, and the contract match tied to its clause |
+| 2026-08-24 | Integration pass: `ingest-callers.test.ts` closes the set of entry points |
+
 
 
 ## Questions for the author
