@@ -9,7 +9,7 @@ import { ExportControl } from './export-control'
 import { DEFAULT_LIMIT, filterFrom } from './filter'
 import { RegisterList } from './register-list'
 
-export const metadata = { title: 'Register — Fiduciary Watchdog' }
+export const metadata = { title: 'Register — HOA Watchdog' }
 
 /**
  * The reviewed register (UX-DR14) — the fiduciary artifact.
@@ -53,7 +53,7 @@ export default async function RegisterPage({
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Register</h1>
       <p style={styles.body}>
         Every finding the board has reviewed, and who reviewed it. Nothing leaves this record.

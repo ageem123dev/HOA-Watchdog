@@ -4,7 +4,7 @@ import { auth } from '@/adapters/auth/auth'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { DirectorForm } from './director-form'
 
-export const metadata = { title: 'Add a director — Fiduciary Watchdog' }
+export const metadata = { title: 'Add a director — HOA Watchdog' }
 
 /**
  * Provisioning a director (story 5.9).
@@ -25,7 +25,7 @@ export default async function DirectorsPage() {
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Add a director</h1>
       <p style={styles.body}>
         The new director joins your association and can sign in straight away. Their password is

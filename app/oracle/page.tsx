@@ -10,7 +10,7 @@ import { AnswerRefused, NoCatalogMatch, ServiceUnavailable } from './cannot-answ
 import { askOracle } from './ask'
 import { questionFrom } from './question'
 
-export const metadata = { title: 'Ask — Fiduciary Watchdog' }
+export const metadata = { title: 'Ask — HOA Watchdog' }
 
 /**
  * The Oracle (epic story 3.6b, UX-DR6 and UX-DR11).

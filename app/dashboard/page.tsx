@@ -34,7 +34,7 @@ function todayInUtc(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-export const metadata = { title: 'Dashboard — Fiduciary Watchdog' }
+export const metadata = { title: 'Dashboard — HOA Watchdog' }
 
 async function signOut() {
   'use server'
@@ -71,7 +71,7 @@ export default async function DashboardPage() {
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Dashboard</h1>
       <p style={styles.body}>
         Signed in as <strong>{user.email}</strong>.

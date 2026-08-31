@@ -5,7 +5,7 @@ import { MissingAuthConfigError } from '@/adapters/auth/env'
 import { DEFAULT_SIGNED_IN_ROUTE, SIGN_IN_ROUTE, safeRedirectTarget } from '@/core/auth/route-policy'
 import { signInMessage, type SignInReason } from '@/core/auth/sign-in-feedback'
 
-export const metadata = { title: 'Sign in — Fiduciary Watchdog' }
+export const metadata = { title: 'Sign in — HOA Watchdog' }
 
 /**
  * Auth.js reports a rejected credential as `CredentialsSignin`. Anything else —
@@ -65,7 +65,7 @@ export default async function SignInPage({
   return (
     <main style={styles.main}>
       <div style={styles.sheet}>
-        <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+        <p style={styles.eyebrow}>HOA Watchdog</p>
         <h1 style={styles.heading}>Sign in</h1>
         <p style={styles.intro}>
           The association&rsquo;s records are open to board members only.

@@ -7,7 +7,7 @@ import { LogTable } from './log-table'
 import { filterFrom, DEFAULT_LIMIT } from './filter'
 import type { QueryLogFilter } from '@/core/ports/query-log-reader'
 
-export const metadata = { title: 'Access log — Fiduciary Watchdog' }
+export const metadata = { title: 'Access log — HOA Watchdog' }
 
 /**
  * The access log (story 3.8, NFR-5 and UX-DR16).
@@ -40,7 +40,7 @@ export default async function AccessLogPage({
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Access log</h1>
       <p style={styles.body}>
         Every question asked of the association&rsquo;s records, and who asked it.
