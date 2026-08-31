@@ -4,7 +4,7 @@ import { auth } from '@/adapters/auth/auth'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { MappingWizard } from './mapping-wizard'
 
-export const metadata = { title: 'Match your columns — Fiduciary Watchdog' }
+export const metadata = { title: 'Match your columns — HOA Watchdog' }
 
 /**
  * The mapping step of onboarding (FR-9, UX-DR19–21).
@@ -22,7 +22,7 @@ export default async function MappingPage() {
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Match your columns</h1>
       <p style={styles.body}>
         Show us one export of each kind you upload, and tell us which of your columns is which. We

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { applicationStylesheet } from '@/core/design/stylesheet'
 
 export const metadata: Metadata = {
-  title: 'Fiduciary Watchdog',
+  title: 'HOA Watchdog',
   description: 'Financial records for a condominium association board.',
 }
 

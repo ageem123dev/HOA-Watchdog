@@ -34,8 +34,8 @@ call; iterating over files is not.
 
 ```
 argus_review(
-  repo_root: "c:/Users/magee/repos/HOA-Treasurer-Assistant",
-  project:   "HOA-Treasurer-Assistant",
+  repo_root: "c:/Users/magee/repos/HOA-Watchdog",
+  project:   "HOA-Watchdog",
   diff:      {diff_output},
   provider:  "antigravity",
   refine:    true,

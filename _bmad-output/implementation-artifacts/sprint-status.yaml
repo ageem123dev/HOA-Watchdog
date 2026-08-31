@@ -1,6 +1,6 @@
 # generated: 2026-07-30
 # last_updated: "2026-08-10"
-# project: HOA-Treasurer-Assistant
+# project: HOA-Watchdog
 # project_key: NOKEY
 # tracking_system: file-system
 # story_location: _bmad-output/implementation-artifacts
@@ -46,7 +46,7 @@
 
 generated: 2026-07-30
 last_updated: 2026-08-24
-project: HOA-Treasurer-Assistant
+project: HOA-Watchdog
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts

@@ -7,7 +7,7 @@ import { toFindingDetail } from '@/core/findings/detail-view'
 import { markFindingReviewed } from '../actions'
 import { FindingDetailPanel } from './detail-panel'
 
-export const metadata = { title: 'Finding — Fiduciary Watchdog' }
+export const metadata = { title: 'Finding — HOA Watchdog' }
 
 /**
  * One finding, and the only action in the pilot (AC1, AC2, AC6, AC8, AC9).

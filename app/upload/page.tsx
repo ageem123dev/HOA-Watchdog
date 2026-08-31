@@ -4,7 +4,7 @@ import { auth } from '@/adapters/auth/auth'
 import { SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { UploadForm } from './upload-form'
 
-export const metadata = { title: 'Upload documents — Fiduciary Watchdog' }
+export const metadata = { title: 'Upload documents — HOA Watchdog' }
 
 /**
  * The upload surface (FR-1, UX-DR12).
@@ -22,7 +22,7 @@ export default async function UploadPage() {
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Upload documents</h1>
       <p style={styles.body}>
         Statements, invoices, and ledger exports. Each file is recorded once — uploading the same

@@ -12,7 +12,7 @@ import { distinctNamesForSuggestions, suggestionKey } from '@/core/quarantine/su
 import { confirmHeld, matchHeld } from './actions'
 import { QueueList } from './queue-list'
 
-export const metadata = { title: 'Waiting on you — Fiduciary Watchdog' }
+export const metadata = { title: 'Waiting on you — HOA Watchdog' }
 
 /**
  * How many candidates a row offers.
@@ -81,7 +81,7 @@ export default async function QuarantinePage({
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>Fiduciary Watchdog</p>
+      <p style={styles.eyebrow}>HOA Watchdog</p>
       <h1 style={styles.heading}>Waiting on you</h1>
       <p style={styles.body}>
         These invoices named a vendor nobody here recognises. Their figures are stored; what is
