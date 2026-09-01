@@ -10,10 +10,19 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { accessSync, constants as fsConstants, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import {
+  accessSync,
+  constants as fsConstants,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+
+import { recordingTarget } from './password-recorder.ts'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MIGRATIONS_DIR = join(REPO_ROOT, 'migrations')
@@ -47,6 +56,25 @@ function setEnvValue(key, value) {
     : `${source.trimEnd()}\n${line}\n`
 
   writeFileSync(ENV_FILE, updated, 'utf8')
+}
+
+/**
+ * What `.env.local` is, as `recordingTarget` needs to see it.
+ *
+ * Two calls rather than one `accessSync`, because absence and unwritability are
+ * different answers there and `accessSync` reports both as a throw. A missing
+ * file is not a permissions problem, and treating it as one is the whole defect
+ * this pair exists to fix.
+ */
+function probeEnvFile() {
+  if (!existsSync(ENV_FILE)) return { exists: false, writable: false }
+
+  try {
+    accessSync(ENV_FILE, fsConstants.W_OK)
+    return { exists: true, writable: true }
+  } catch {
+    return { exists: true, writable: false }
+  }
 }
 
 function roleUrl(adminUrl, role, password) {
@@ -127,20 +155,24 @@ async function main() {
     }
 
     /**
-     * The other half of the same problem: ALTER ROLE succeeds, the file write then
-     * fails, and the new password exists nowhere but in the database. Checked here,
-     * before the first ALTER ROLE, so that failure happens while it is still
-     * harmless.
+     * The other half of the same problem: ALTER ROLE succeeds, the record of the
+     * password is lost, and it exists nowhere but in the database.
+     *
+     * **Resolved lazily, and only on the run that is about to write one.** It
+     * used to be checked unconditionally before this loop, which failed a run
+     * whose every role was going to be skipped — nothing was going to be
+     * recorded, so there was nothing to refuse. It also cost nothing on a
+     * workstation and everything in a container, where the answer is `stdout`
+     * rather than an error.
+     *
+     * Still before the first ALTER ROLE, which is the half that matters: a
+     * failure has to land while it is still harmless.
      */
-    try {
-      accessSync(ENV_FILE, fsConstants.W_OK)
-    } catch (cause) {
-      throw new Error(
-        `${ENV_FILE} is not writable, so a new role password could not be recorded; ` +
-          'refusing to change one that would then exist only in the database',
-        { cause },
-      )
-    }
+    let recording = null
+    const resolveRecording = () => (recording ??= recordingTarget(probeEnvFile(), ENV_FILE))
+
+    /** Whether anything was printed rather than filed, so the closing warning is earned. */
+    let printed = false
 
     for (const role of ROLES) {
       const key = `${role.toUpperCase()}_DATABASE_URL`
@@ -154,6 +186,11 @@ async function main() {
       if (recorded !== '') {
         console.log(`reset ${key} (recorded URL does not connect)`)
       }
+
+      // Before the password exists, let alone before it is set: this throws when
+      // `.env.local` is present and unwritable, and that has to happen while the
+      // role is still untouched.
+      const target = resolveRecording()
 
       const password = generatePassword()
 
@@ -170,8 +207,34 @@ async function main() {
 
       await client.query(`alter role "${role}" password '${password}'`)
 
-      setEnvValue(key, roleUrl(adminUrl, role, password))
-      console.log(`set   ${key}`)
+      const url = roleUrl(adminUrl, role, password)
+
+      if (target === 'file') {
+        setEnvValue(key, url)
+        console.log(`set   ${key}`)
+      } else {
+        // Printed the moment it is set, not collected for a summary at the end.
+        // A run that dies between the two roles must still have shown the first
+        // one — a summary is the version of this that loses a live credential.
+        //
+        // The URL is on its own line and nothing else is, so it survives being
+        // copied out of a console by eye.
+        printed = true
+        console.log(`set   ${key} (no .env.local here — record this before you close the shell)`)
+        console.log('')
+        console.log(`${key}=${url}`)
+        console.log('')
+      }
+    }
+
+    if (printed) {
+      // Said once, at the end, where it is read. The values above are the only
+      // record there is, and a console is not a secret store: a shell whose
+      // scrollback is retained has retained a database credential, which is a
+      // rotation rather than a disaster — `migrate` resets a role whose recorded
+      // URL no longer connects.
+      console.log('The URLs above exist nowhere else. Put them in the service variables now.')
+      console.log('If this console keeps scrollback, treat them as exposed and re-run to rotate.')
     }
 
     console.log('\nmigrations complete')
