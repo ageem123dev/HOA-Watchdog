@@ -191,8 +191,68 @@ describe('NFR-2: no external write credentials in this deploy unit', () => {
     // silently unread — which is the failure this test exists to catch.
     expect(scanDeployUnit().filesInspected).not.toHaveLength(0)
   })
+})
 
-  it('inspects the CI workflow, whose secret references are its reach over the CI secret store', () => {
-    expect(scanDeployUnit().filesInspected).toContain('.github/workflows/ci.yml')
+/**
+ * Surface 3 — reach over a CI secret store — proved against a fixture rather
+ * than against a workflow file that happens to be in the tree.
+ *
+ * It used to assert `filesInspected` contained `.github/workflows/ci.yml`. That
+ * file was deleted when this repository began mirroring to GitHub, and with
+ * `.gitlab-ci.yml` already gone since 2026-08-07 there is now **no CI file at
+ * all** for a scan of the real tree to find. Left as it was, the assertion could
+ * only be deleted, and this claim would have gone with it.
+ *
+ * The fixture is the better test regardless, and that is worth saying plainly
+ * rather than presenting a loss as a win. The old assertion proved a file was
+ * *read*; it never proved a secret reference was found inside one, so it would
+ * have stayed green with `secretReferencesFromText` returning nothing. What
+ * follows exercises the whole path the README describes: a workflow reaches for
+ * a banking credential, maps it onto an innocuous variable name, and is caught.
+ *
+ * The limit is stated too, since NFR-2's other limits are: this no longer proves
+ * the `.github/workflows/*.yml` pathspec matches anything, because there is
+ * nothing for it to match. The pathspecs are kept so a workflow added later is
+ * scanned, and `read at least one configuration file` above still fails if the
+ * collection breaks entirely.
+ */
+describe('NFR-2 surface 3: what a CI workflow reaches for', () => {
+  /**
+   * The shape that defeats a left-hand-side check, and the reason
+   * `secretReferencesFromText` exists at all: the variable is called something
+   * unremarkable and the secret it is mapped from names the rail.
+   */
+  const WORKFLOW = [
+    'jobs:',
+    '  deploy:',
+    '    env:',
+    '      MISC_TOKEN: ${{ secrets.PLAID_SECRET }}',
+  ].join('\n')
+
+  it('finds the secret a workflow reaches for, not the name it maps it onto', () => {
+    expect(secretReferencesFromText('.github/workflows/fixture.yml', WORKFLOW)).toEqual([
+      { source: '.github/workflows/fixture.yml', name: 'PLAID_SECRET' },
+    ])
+  })
+
+  it('flags that reference as an NFR-2 violation', () => {
+    const violations = findForbiddenCredentials(
+      secretReferencesFromText('.github/workflows/fixture.yml', WORKFLOW),
+    )
+
+    expect(violations.map((violation) => violation.patternId)).toEqual(['plaid'])
+  })
+
+  /**
+   * **The control, and the whole point of the pair.** Reading assignments alone
+   * sees `MISC_TOKEN`, which matches no forbidden pattern and carries no value
+   * pattern for Plaid — so this returns clean. If it ever started reporting a
+   * violation, the test above would pass for a reason that has nothing to do
+   * with secret references and the surface would be unguarded without failing.
+   */
+  it('is missed by assignment parsing alone, which is why the reference parser exists', () => {
+    expect(findForbiddenCredentials(entriesFromText('.github/workflows/fixture.yml', WORKFLOW))).toEqual(
+      [],
+    )
   })
 })
