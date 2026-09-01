@@ -10,19 +10,12 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import {
-  accessSync,
-  constants as fsConstants,
-  existsSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-} from 'node:fs'
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
-import { recordingTarget } from './password-recorder.ts'
+import { probeEnvFile, recordingTarget } from './password-recorder.ts'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MIGRATIONS_DIR = join(REPO_ROOT, 'migrations')
@@ -56,25 +49,6 @@ function setEnvValue(key, value) {
     : `${source.trimEnd()}\n${line}\n`
 
   writeFileSync(ENV_FILE, updated, 'utf8')
-}
-
-/**
- * What `.env.local` is, as `recordingTarget` needs to see it.
- *
- * Two calls rather than one `accessSync`, because absence and unwritability are
- * different answers there and `accessSync` reports both as a throw. A missing
- * file is not a permissions problem, and treating it as one is the whole defect
- * this pair exists to fix.
- */
-function probeEnvFile() {
-  if (!existsSync(ENV_FILE)) return { exists: false, writable: false }
-
-  try {
-    accessSync(ENV_FILE, fsConstants.W_OK)
-    return { exists: true, writable: true }
-  } catch {
-    return { exists: true, writable: false }
-  }
 }
 
 function roleUrl(adminUrl, role, password) {
@@ -169,7 +143,7 @@ async function main() {
      * failure has to land while it is still harmless.
      */
     let recording = null
-    const resolveRecording = () => (recording ??= recordingTarget(probeEnvFile(), ENV_FILE))
+    const resolveRecording = () => (recording ??= recordingTarget(probeEnvFile(ENV_FILE), ENV_FILE))
 
     /** Whether anything was printed rather than filed, so the closing warning is earned. */
     let printed = false
