@@ -19,3 +19,8 @@ samples/*.xlsx binary
 # specifies them, and build-samples.mjs writes them. Marked -text so no
 # normalisation rewrites them into LF and breaks the byte comparison.
 samples/*.csv -text
+
+# The wordmark, for the same reason and against the same future pass. Git
+# already infers binary from the NUL bytes, so this changes nothing today —
+# it is here so a repo-wide `* text=auto` cannot decide otherwise later.
+public/*.png binary

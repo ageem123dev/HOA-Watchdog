@@ -4,6 +4,7 @@ import { auth, signOut as authSignOut } from '@/adapters/auth/auth'
 import { createCheckedDocuments, createFindingReader } from '@/adapters/db/finding-reader-postgres'
 import { QUARANTINE_ROUTE, REGISTER_ROUTE, SIGN_IN_ROUTE } from '@/core/auth/route-policy'
 import { toDashboardView } from '@/core/findings/dashboard-view'
+import { BrandMark } from '@/app/brand-mark'
 import { AskField } from './ask-field'
 import { FigureBlock } from './figure-block'
 import { FindingsList } from './findings-list'
@@ -71,7 +72,12 @@ export default async function DashboardPage() {
 
   return (
     <main style={styles.main}>
-      <p style={styles.eyebrow}>HOA Watchdog</p>
+      {/*
+        The mark, where the text eyebrow naming the product used to be. Its
+        `alt` is the product name, so the heading order a screen reader walks —
+        the mark, then "Dashboard" — reads the same as it did before.
+      */}
+      <BrandMark width={192} />
       <h1 style={styles.heading}>Dashboard</h1>
       <p style={styles.body}>
         Signed in as <strong>{user.email}</strong>.
@@ -161,13 +167,6 @@ const styles = {
     flexDirection: 'column',
     gap: 'var(--space-block)',
     alignItems: 'flex-start',
-  },
-  eyebrow: {
-    fontSize: 'var(--type-scale-label)',
-    letterSpacing: 'var(--type-tracking-label)',
-    textTransform: 'uppercase',
-    color: 'var(--color-ink-muted)',
-    margin: 0,
   },
   heading: {
     fontFamily: 'var(--type-serif)',
