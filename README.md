@@ -255,8 +255,15 @@ npx --no-install tsc --noEmit  # type-check; compare against a baseline of 1 pre
 ```
 
 **There is no CI.** The GitLab pipeline was removed on 2026-08-07 — the account bills per minute —
-and AD-2's amendment records that withdrawal. `.github/workflows/ci.yml` is a GitHub Actions file
-and this repository's remote is GitLab, so it has never run against it.
+and AD-2's amendment records that withdrawal. A GitHub Actions workflow sat in the tree unused for
+months afterwards and has now gone too: this repository's remote is GitLab, so it had never run
+against anything, and GitHub refuses a mirrored push touching `.github/workflows/**` from a token
+without the `workflow` scope.
+
+Deleting it cost something worth knowing about, because that file was the only CI config left for
+`core/security/nfr2-guard.test.ts` to read. NFR-2's reach over a CI secret store is now proved
+against a fixture instead — see [the guard's own note](core/security/nfr2-guard.test.ts) for what
+that does and does not still establish.
 
 That makes the list above the only gate there is. An unrun check is simply an unmade claim: neither
 ESLint nor Vitest type-checks, and `npm run build` does not compile test files, which is why `tsc`
