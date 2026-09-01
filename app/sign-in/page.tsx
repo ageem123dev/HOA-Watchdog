@@ -4,6 +4,7 @@ import { signIn as authSignIn } from '@/adapters/auth/auth'
 import { MissingAuthConfigError } from '@/adapters/auth/env'
 import { DEFAULT_SIGNED_IN_ROUTE, SIGN_IN_ROUTE, safeRedirectTarget } from '@/core/auth/route-policy'
 import { signInMessage, type SignInReason } from '@/core/auth/sign-in-feedback'
+import { BrandMark } from '@/app/brand-mark'
 
 export const metadata = { title: 'Sign in — HOA Watchdog' }
 
@@ -65,7 +66,12 @@ export default async function SignInPage({
   return (
     <main style={styles.main}>
       <div style={styles.sheet}>
-        <p style={styles.eyebrow}>HOA Watchdog</p>
+        {/*
+          The mark stands in for the text eyebrow that used to name the product
+          here. It carries the name in its `alt`, so nothing is lost to a screen
+          reader — this page has no other statement of what it is a sign-in to.
+        */}
+        <BrandMark width={216} />
         <h1 style={styles.heading}>Sign in</h1>
         <p style={styles.intro}>
           The association&rsquo;s records are open to board members only.
@@ -157,13 +163,6 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: 'var(--space-block)',
-  },
-  eyebrow: {
-    fontSize: 'var(--type-scale-label)',
-    letterSpacing: 'var(--type-tracking-label)',
-    textTransform: 'uppercase',
-    color: 'var(--color-ink-muted)',
-    margin: 0,
   },
   heading: {
     fontFamily: 'var(--type-serif)',

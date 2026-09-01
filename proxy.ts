@@ -61,7 +61,14 @@ export const config = {
   // the protection there. It is narrowed to a **versioned** path — `tools/v1/`,
   // `tools/v2/` — so a future page under app/tools/ is still guarded; excluding
   // all of `tools/` would unguard it silently. Raised by Argus.
+  // `hoa-watchdog-logo.png` is excluded as a whole filename, exactly as
+  // `favicon.ico` is, because the sign-in page shows it and sign-in is the one
+  // surface reached without a session. Guarded, the image request answered 307
+  // to /sign-in — and the optimizer, which fetches the original through this
+  // same gate, then reported the file as "not a valid image". A brand asset
+  // redirecting to the login page is invisible in every test that renders the
+  // markup rather than loading it.
   matcher: [
-    '/((?!_next/|api/auth/|tools/v\\d+/|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
+    '/((?!_next/|api/auth/|tools/v\\d+/|favicon\\.ico$|hoa-watchdog-logo\\.png$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|\\.well-known/).*)',
   ],
 }

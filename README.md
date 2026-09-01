@@ -1,4 +1,8 @@
-# Fiduciary Watchdog
+<p align="center">
+  <img src="public/hoa-watchdog-logo.png" alt="HOA Watchdog" width="420">
+</p>
+
+# HOA Watchdog
 
 An AI condominium treasury assistant. A board uploads the association's invoices, bank statements
 and assessment rolls; the system reads them into structured records, refuses to guess when a
@@ -6,7 +10,26 @@ document is ambiguous, answers questions with the underlying records on screen, 
 duplicate invoices, unusual vendor billing and missed dues before the board pays.
 
 Planning artifacts live in [`_bmad-output/planning-artifacts/`](_bmad-output/planning-artifacts/);
-the product requirements are in [`docs/prd/prd.md`](docs/prd/prd.md).
+the product requirements are in [`docs/prd/prd.md`](docs/prd/prd.md). What the code actually does,
+checked against the source rather than against the intent, is in
+[`docs/as-built.md`](docs/as-built.md).
+
+## Where this stands
+
+Six epics were planned. Four are complete, the fifth has landed every story, and the sixth has not
+started.
+
+| Epic | What it is | Status |
+| --- | --- | --- |
+| 1 | Sign in, upload, read a document, hold what cannot be resolved | Done |
+| 2 | Units, holders, assessments, and deposits becoming payments | Done |
+| 3 | The Oracle — a versioned query catalog, a reasoning service, a numeric validator, an ask surface | Done |
+| 4 | The watchdog — duplicate invoices, vendor spikes, dues shortfalls, and the alert email | Done |
+| 5 | Onboarding — a document declares its kind, its columns are mapped and remembered, directors are provisioned in the product | Stories done; retrospective outstanding |
+| 6 | Connected document sources | Backlog |
+
+One caveat worth reading before the feature list below: **this product has been exercised by its
+tests and by its authors, not by a board.** Every claim of correctness here is a claim about a suite.
 
 ## Prerequisites
 
@@ -15,6 +38,8 @@ the product requirements are in [`docs/prd/prd.md`](docs/prd/prd.md).
   see [Environment](#environment).
 - **An S3-compatible bucket** (Cloudflare R2 in the pilot) for the uploaded bytes.
 - **A Google Gemini API key**, used only to read scans and photographs. Spreadsheets never reach it.
+- **Python 3.13**, for the agent service — 3.13 specifically, because CrewAI refuses 3.14. Needed
+  only to answer questions; upload and detection never touch it.
 
 ## Getting started
 
@@ -29,8 +54,11 @@ node scripts/add-board-member.mjs board@example.org
 npm run dev
 ```
 
-`add-board-member.mjs` is how a director is created. There is deliberately no sign-up, password
-reset, or invitation surface in the pilot — one association, a handful of directors.
+`add-board-member.mjs` creates the **first** director of an association, and resets a password for
+somebody locked out. Every director after the first is added inside the product, at `/directors` —
+that surface derives the association from whoever is doing the adding, which is what makes it safe
+and is exactly why it cannot serve the first one: nobody is signed in yet, so there is no
+association to derive.
 
 Then sign in and go to **Upload**. Start with `samples/assessment-roll.csv`; see
 [What to upload first](#what-to-upload-first).
@@ -59,6 +87,27 @@ do without them is sign anyone in, store a file, or read a scan.
 `npm run test:db` is the exception: it needs both database URLs, and **skips silently without
 them**. A skipped suite reports green, so check the skip count rather than the colour.
 
+## The surfaces
+
+Every route below except sign-in requires a session. The rule in
+[`core/auth/route-policy.ts`](core/auth/route-policy.ts) is deny-by-default over an allow-list, so a
+route nobody thought about is closed rather than open, and each page checks a second time for
+itself.
+
+| Route | What a director does there |
+| --- | --- |
+| `/sign-in` | Email and password. There is deliberately no sign-up, reset or invitation surface |
+| `/dashboard` | Unreviewed findings, documents checked, the ask field, and the way in to everything else |
+| `/upload` | Upload documents, declaring what each one is. Refuses deposits until a roll has made units |
+| `/onboarding/mapping` | Say which column of an unfamiliar spreadsheet is which, see what that mapping would produce, then apply it |
+| `/oracle` | Ask a question, and get an answer with the rows it was built from |
+| `/quarantine` | Resolve a held vendor or a held deposit line — the things the system refused to guess at |
+| `/findings/[id]` | One finding, its evidence, and marking it reviewed |
+| `/findings/register` | The permanent reviewed register, and a CSV export of it for an auditor |
+| `/access-log` | Who asked what, and which catalog entry answered — with a CSV export of that too |
+| `/directors` | Add a director to your own association. Their password is shown once and stored nowhere |
+| `/tools/v1/catalog`, `/tools/v1/catalog/execute` | Not pages. The agent service's only door to data (AD-15) |
+
 ## What you can upload
 
 The full contract — every format, limit, column and refusal reason, each naming the constant that
@@ -67,6 +116,10 @@ page and the code ever disagree.
 
 The short version: **CSV and Excel are read immediately**, at upload time, and never reach a model.
 **PDF, PNG and JPG** are stored and read a few seconds later by Gemini.
+
+A document also **declares its kind at upload** rather than having one inferred from its rows. If
+its columns are not ones this association has seen before, the mapping surface asks a person which
+column is which — it offers a guess and applies nothing — and remembers the answer for next time.
 
 ### Sample files
 
@@ -94,9 +147,10 @@ Editing one is fine; re-running the script will not overwrite it.
 **Upload `assessment-roll.csv` before anything else.** Uploading an assessment roll is the only way
 units come to exist — there is no units screen.
 
-Upload the deposits first instead and every line is held with `unknown-unit`. That is the system
-working correctly: it will not invent a unit to make a payment fit. On a fresh install it looks like
-a failure, which is why the order is worth following.
+Upload the deposits first instead and, since story 5.8, the upload is **refused**, with the reason,
+rather than accepted into a pile of held lines. Before that it was accepted and every line was held
+with `unknown-unit`: correct behaviour that looked exactly like a broken install, which is why the
+order is now enforced rather than only documented.
 
 ## How a document travels
 
@@ -105,16 +159,19 @@ Everything else follows from it — cost, latency, and what can go wrong.
 
 ```mermaid
 flowchart TD
-  U[Board member uploads files] --> A{"Acceptance gate<br/>type, signature bytes, size"}
+  U["Board member uploads files,<br/>declaring what each one is"] --> A{"Acceptance gate<br/>type, signature bytes, size"}
   A -->|refused| R["Rejected, per file<br/>the rest of the batch still uploads"]
   A -->|accepted| S[Store bytes in R2<br/>key is the content hash]
   S --> D[(document row)]
 
   D --> F{Content type}
-  F -->|"CSV, .xls, .xlsx"| T["Tabular reader, in core/<br/>at upload time"]
+  F -->|"CSV, .xls, .xlsx"| M{"Are these columns<br/>ones we know?"}
+  M -->|no| MAP["Mapping surface — a person<br/>decides, and it is remembered"]
+  M -->|yes| T["Tabular reader, in core/<br/>at upload time"]
+  MAP --> T
   F -->|"PDF, PNG, JPG"| H["Held, read on a later request"]
 
-  H --> G["Gemini extractor<br/>the only model call"]
+  H --> G["Gemini extractor<br/>the only model call in intake"]
   G --> V
   T --> V["validate() — one bad row refuses the document"]
 
@@ -133,29 +190,68 @@ flowchart TD
   PM --> E
   HP --> E
 
-  E -.-> O["Epic 3: the catalogue<br/>NOT BUILT"]
-  E -.-> W["Epic 4: the watchdog<br/>NOT BUILT"]
-
-  classDef unbuilt stroke-dasharray: 5 5,color:#888
-  class O,W unbuilt
+  E --> O["The Oracle — a question,<br/>answered from the catalog"]
+  E --> W["The watchdog — duplicates,<br/>spikes, shortfalls"]
+  W --> AL["A finding: the dashboard queue,<br/>and one email per finding"]
 ```
-
-**Dashed boxes are not built.** The catalogue and the watchdog are epics 3 and 4; the planning
-artifacts describe them in the present tense, and they do not exist.
 
 A longer walkthrough — what each step refuses, and why the split exists at all — is in
 [docs/as-built.md](docs/as-built.md).
 
+## What the watchdog looks for
+
+Three detectors, run after each ingestion. **No model is anywhere in this path**, and
+[`core/security/no-model-in-alerts.test.ts`](core/security/no-model-in-alerts.test.ts) is what keeps
+it that way: SQL compares, templated prose describes.
+
+| Detector | What it notices |
+| --- | --- |
+| [`detect-duplicates.ts`](core/detection/detect-duplicates.ts) | The same invoice twice — matching vendor, amount and date, or a repeated invoice number |
+| [`detect-vendor-spikes.ts`](core/detection/detect-vendor-spikes.ts) | A vendor who charged materially more than their own history |
+| [`detect-dues-shortfalls.ts`](core/detection/detect-dues-shortfalls.ts) | Assessments that were owed and did not arrive |
+
+Each raises a **finding**, which lands in two places: the dashboard's unreviewed queue, and one
+email per finding to every director who has not been disabled. The email says what was noticed and
+where to look. It may not say a payment was blocked, held or cancelled — this system holds no
+payment credential and can stop nothing, see [NFR-2](#nfr-2-no-external-write-credentials) — and it
+says *possible* duplicate, because two payments matching on amount and date is a comparison rather
+than an accusation.
+
+Detection re-runs on re-upload and amends rather than appends, and `finding_alert` holds one row per
+finding under a unique key, so no second email goes out for a finding already raised.
+
+## How a question is answered
+
+A director asks in plain English, and the answer they see is built only from rows the database
+returned.
+
+1. The question travels from the dashboard's ask field to `/oracle` already asked — no intermediate
+   empty state, no second submit.
+2. The gateway mints a **signed actor assertion** naming that director and calls the Python agent
+   service. The agent relays the assertion; it can neither mint nor read one (AD-18).
+3. The agent picks an entry from the **query catalog** — reviewed SQL with typed parameters, held in
+   [`catalog/`](catalog/) and frozen once its version is published (AD-14). It cannot write SQL of
+   its own.
+4. The entry runs under the read-only database role, through `/tools/v1/catalog/execute`, which is
+   the catalog's only door. The provenance row is written **before** the query runs, not after
+   (AD-12).
+5. The model narrates the rows. Then the **numeric validator** checks every figure in that sentence
+   against the rows it claims to describe (AD-7). A figure that is not in the rows means the
+   sentence is not shown, and the product says it cannot answer instead.
+
+Everything asked, and which entry answered it, is readable at `/access-log`.
+
 ## The gate
 
-Five commands. **None of them run automatically.**
+Six commands. **None of them run automatically.**
 
 ```bash
 npm run lint                   # ESLint 9, flat config
 npm run build                  # Next.js production build
 npm test                       # Vitest — the unit suite
 npm run test:db                # Vitest — the suites that need a database
-npx --no-install tsc --noEmit  # type-check; compare against a baseline of 8 pre-existing errors
+npm run test:py                # pytest, on the agent service's pinned 3.13 interpreter
+npx --no-install tsc --noEmit  # type-check; compare against a baseline of 1 pre-existing error
 ```
 
 **There is no CI.** The GitLab pipeline was removed on 2026-08-07 — the account bills per minute —
@@ -171,13 +267,14 @@ is on the list separately.
 ```text
 app/          Next.js routes, server actions and UI
 core/         Pure domain logic — depends on nothing outward, performs no I/O
-adapters/     The outside world: auth, db, extraction, storage
+adapters/     The outside world: auth, db, extraction, storage, mail, the agent client
 catalog/      The versioned query catalog — reviewed SQL and typed parameters, no I/O
 agent/        The Python reasoning service — holds the model key, never a data credential (AD-3)
 migrations/   27 SQL migrations, applied in order by `npm run migrate`
 scripts/      Operational entry points (migrate, add-board-member, build-samples, smoke, verify-*)
 samples/      One example upload per accepted format
-docs/         The upload contract and the as-built system description
+public/       Static assets served from the site root — the wordmark above is the whole of it
+docs/         The upload contract, the as-built description, and the tests that keep both honest
 ```
 
 `core/` importing anything outward is a test failure, not a convention —
@@ -220,3 +317,21 @@ Two things follow, and both are deliberate:
 
 The system does write to its own database — uploaded documents, extracted records, alerts and the
 provenance log. NFR-2 constrains outbound writes to third-party systems of record, nothing else.
+
+## The other invariants the gate holds
+
+Tests, not conventions. Each fails the gate rather than being noticed in review.
+
+| Invariant | Enforced by |
+| --- | --- |
+| `core/` imports nothing outward | `core/ports/boundary.test.ts` |
+| The reader database role is `SELECT`-only (AD-4) | `npm run test:db` |
+| The two model providers stay separate (AD-10) | `core/security/dual-llm-boundary.test.ts` |
+| A catalog query cannot run without first writing provenance (AD-12) | `adapters/db/catalog-executor-postgres.test.ts` |
+| A published catalog entry version cannot be edited (AD-14) | `catalog/published-versions.test.ts` |
+| The tool endpoint is the catalog's only door, and refuses any other caller (AD-15) | `core/tools/sole-data-path.test.ts`, `core/tools/service-token.test.ts` |
+| No model is in the alerting path (FR-8) | `core/security/no-model-in-alerts.test.ts` |
+| Nothing outside the product creates an association | `core/security/no-association-creation.test.ts` |
+| No component defines a colour or type value outside the token set | `core/design/no-raw-values.test.ts` |
+| The written upload contract matches the code | `docs/upload-contract.test.ts` |
+| This README matches this tree | `docs/readme.test.ts` |

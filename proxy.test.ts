@@ -63,10 +63,29 @@ describe('config.matcher', () => {
   it.each([
     '/_next/static/chunks/main.js',
     '/favicon.ico',
+    // The wordmark on the sign-in page. Sign-in is reached without a session, so
+    // guarding this answered the image request with a 307 to /sign-in and the
+    // page rendered a broken image — including through the optimizer, which
+    // fetches the original back through this gate.
+    '/hoa-watchdog-logo.png',
     '/robots.txt',
     '/.well-known/security.txt',
   ])('does not run for %s', (pathname) => {
     expect(matches(pathname)).toBe(false)
+  })
+
+  /**
+   * The same anchoring the tool-endpoint exclusion gets. The exclusion is a
+   * whole filename at the root, so a *route* whose path merely ends in it — a
+   * document preview named after the logo, say — is still guarded.
+   */
+  it.each([
+    '/findings/hoa-watchdog-logo.png',
+    '/api/documents/42/hoa-watchdog-logo.png',
+    '/hoa-watchdog-logo.png.txt',
+    '/x-hoa-watchdog-logo.png',
+  ])('still guards %s', (pathname) => {
+    expect(matches(pathname)).toBe(true)
   })
 
   /**
