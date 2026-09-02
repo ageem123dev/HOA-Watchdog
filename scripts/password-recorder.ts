@@ -20,11 +20,51 @@
  * the precedent — the decision lives here, the file system lives there.
  */
 
-/** What `migrate.mjs` observed about `.env.local`, so this stays pure. */
+import { accessSync, constants, existsSync, statSync } from 'node:fs'
+
+/** What was observed about `.env.local`, kept separate so the decision stays pure. */
 export interface EnvFileState {
   readonly exists: boolean
-  /** Only meaningful when `exists`; a missing file is not "unwritable" here. */
-  readonly writable: boolean
+
+  /**
+   * Whether the recording write will actually succeed — **not** merely whether
+   * the path is writable.
+   *
+   * It was `writable`, checked with `accessSync(W_OK)` alone, and that was the
+   * wrong predicate: `setEnvValue` reads the file before it writes it, so a path
+   * that is writable but unreadable passes the probe and throws on the read —
+   * *after* `ALTER ROLE`, which is the one ordering this module exists to
+   * prevent. A directory named `.env.local` does it on every platform (`W_OK`
+   * passes, the read fails `EISDIR`); a write-only file does it on POSIX.
+   * Raised by CodeRabbit on !91 and reproduced before being believed.
+   *
+   * Only meaningful when `exists`; a missing file is not "unrecordable" here,
+   * it is a different answer entirely.
+   */
+  readonly recordable: boolean
+}
+
+/**
+ * Observe `.env.local`. The only impure thing here, and it lives beside the
+ * decision rather than in `migrate.mjs` because the defect above was in the
+ * *probe*, not in the decision — a probe nothing can reach from a test is a
+ * probe whose predicate goes unchecked.
+ */
+export function probeEnvFile(path: string): EnvFileState {
+  if (!existsSync(path)) return { exists: false, recordable: false }
+
+  try {
+    // A regular file, first. `accessSync` is perfectly happy with a directory,
+    // and a directory is the reproducible case.
+    if (!statSync(path).isFile()) return { exists: true, recordable: false }
+
+    // Both modes. Read because `setEnvValue` reads before it writes; write
+    // because it then writes.
+    accessSync(path, constants.R_OK | constants.W_OK)
+    return { exists: true, recordable: true }
+  } catch {
+    return { exists: true, recordable: false }
+  }
 }
 
 export class PasswordUnrecordableError extends Error {
@@ -47,8 +87,8 @@ export class PasswordUnrecordableError extends Error {
 
   constructor(path: string) {
     super(
-      `${path} exists but is not writable, so a new role password could not be recorded; ` +
-        'refusing to change one that would then exist only in the database',
+      `${path} exists but is not a readable, writable file, so a new role password ` +
+        'could not be recorded; refusing to change one that would then exist only in the database',
     )
     this.path = path
   }
@@ -57,10 +97,10 @@ export class PasswordUnrecordableError extends Error {
 /**
  * `'file'` on a workstation, `'stdout'` in a container, and a throw in between.
  *
- * **Absence and unwritability are deliberately not the same answer.** An absent
+ * **Absence and unrecordability are deliberately not the same answer.** An absent
  * file says "this is not a workstation" — there is no local configuration to
  * keep in step, so printing is the whole of the record and is correct. A file
- * that exists and cannot be written says something is wrong with *this*
+ * that exists and cannot be recorded into says something is wrong with *this*
  * checkout: the operator is expecting `.env.local` to be updated, and quietly
  * printing instead would leave them with a stale file they still believe in.
  * That case keeps the original refusal.
@@ -70,6 +110,6 @@ export class PasswordUnrecordableError extends Error {
  */
 export function recordingTarget(state: EnvFileState, path: string): 'file' | 'stdout' {
   if (!state.exists) return 'stdout'
-  if (!state.writable) throw new PasswordUnrecordableError(path)
+  if (!state.recordable) throw new PasswordUnrecordableError(path)
   return 'file'
 }
